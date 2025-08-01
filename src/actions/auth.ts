@@ -23,6 +23,8 @@ export async function authenticate(
     }
     throw error;
   }
+  // Adicionado para garantir o redirecionamento após o login
+  redirect('/');
 }
 
 export async function register(

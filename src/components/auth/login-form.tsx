@@ -28,7 +28,6 @@ export function LoginForm() {
               type="email"
               placeholder="agent@connectisp.com"
               required
-              defaultValue="agent@connectisp.com"
             />
           </div>
           <div className="space-y-2">
@@ -38,7 +37,6 @@ export function LoginForm() {
               name="password"
               type="password"
               required
-              defaultValue="password"
             />
           </div>
           {errorMessage && (
