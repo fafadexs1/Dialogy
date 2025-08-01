@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { type User, type Contract } from '@/lib/types';
-import { Mail, Phone, FileContract, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog, AlertCircle } from 'lucide-react';
+import { Mail, Phone, FileContract, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
