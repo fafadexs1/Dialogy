@@ -17,7 +17,7 @@ export function MainLayout({ user }: MainLayoutProps) {
   return (
     <div className="flex h-screen w-full bg-background">
       <Sidebar user={user} activeView={activeView} setActiveView={setActiveView} />
-      {activeView === 'customer' ? <CustomerChatLayout /> : <InternalChatLayout user={user}/>}
+      {activeView === 'customer' ? <CustomerChatLayout /> : <InternalChatLayout user={user} />}
     </div>
   );
 }
