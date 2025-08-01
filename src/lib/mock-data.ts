@@ -8,10 +8,72 @@ export const agents: User[] = [
 ];
 
 const contacts: User[] = [
-    { id: 'contact-1', name: 'Carlos Silva', avatar: 'https://placehold.co/40x40.png', email: 'carlos.silva@example.com', phone: '+55 11 98765-4321', lastSeen: '2 hours ago' },
-    { id: 'contact-2', name: 'Beatriz Costa', avatar: 'https://placehold.co/40x40.png', email: 'beatriz.costa@example.com', phone: '+55 21 91234-5678', lastSeen: 'Online' },
-    { id: 'contact-3', name: 'Juliana Almeida', avatar: 'https://placehold.co/40x40.png', email: 'juliana.almeida@example.com', phone: '+55 31 99999-8888', lastSeen: 'Yesterday' },
-    { id: 'contact-4', name: 'Ricardo Pereira', avatar: 'https://placehold.co/40x40.png', email: 'ricardo.pereira@example.com', phone: '+55 41 98888-7777', lastSeen: '5 minutes ago' },
+    { 
+      id: 'contact-1', 
+      name: 'Carlos Silva', 
+      avatar: 'https://placehold.co/40x40.png', 
+      email: 'carlos.silva@example.com', 
+      phone: '+55 11 98765-4321', 
+      lastSeen: '2 hours ago',
+      customerInfo: {
+        contracts: [
+          { contractId: 'CTR001', address: 'Residencial - Rua das Flores, 123', connectionStatus: 'Instável', currentPlan: 'Fibra Óptica 300 Mbps', dataUsage: { used: 280, total: 500, unit: 'GB' } },
+          { contractId: 'CTR002', address: 'Comercial - Av. Principal, 456', connectionStatus: 'Online', currentPlan: 'Link Dedicado 100 Mbps', dataUsage: { used: 150, total: 1000, unit: 'GB' } }
+        ],
+        openInvoices: [ { id: 'FAT202500128', dueDate: '28/05/2025', amount: 'R$ 129,90', status: 'Vencida', url: '#' } ],
+        technicalTickets: [ { id: 'TIC00789', date: '02/05/2025', subject: 'Sem conexão bairro X (Residencial)', status: 'Resolvido' } ]
+      }
+    },
+    { 
+      id: 'contact-2', 
+      name: 'Beatriz Costa', 
+      avatar: 'https://placehold.co/40x40.png', 
+      email: 'beatriz.costa@example.com', 
+      phone: '+55 21 91234-5678', 
+      lastSeen: 'Online',
+      customerInfo: {
+        contracts: [
+            { contractId: 'CTR003', address: 'Casa de Praia - Rua da Areia, 77', connectionStatus: 'Online', currentPlan: 'Fibra Óptica 100 Mbps', dataUsage: { used: 50, total: 200, unit: 'GB' } }
+        ],
+        openInvoices: [],
+        technicalTickets: []
+      }
+    },
+    { 
+      id: 'contact-3', 
+      name: 'Juliana Almeida', 
+      avatar: 'https://placehold.co/40x40.png', 
+      email: 'juliana.almeida@example.com', 
+      phone: '+55 31 99999-8888', 
+      lastSeen: 'Yesterday',
+       customerInfo: {
+        contracts: [
+            { contractId: 'CTR004', address: 'Escritório Centro', connectionStatus: 'Offline', currentPlan: 'Fibra Óptica 500 Mbps', dataUsage: { used: 950, total: 1000, unit: 'GB' } }
+        ],
+        openInvoices: [
+             { id: 'FAT202500130', dueDate: '20/06/2025', amount: 'R$ 249,90', status: 'Pendente', url: '#' },
+             { id: 'FAT202500131', dueDate: '20/05/2025', amount: 'R$ 249,90', status: 'Vencida', url: '#' }
+        ],
+        technicalTickets: [
+            { id: 'TIC00812', date: '15/05/2025', subject: 'Lentidão em horários de pico', status: 'Em análise' }
+        ]
+      }
+    },
+    { 
+      id: 'contact-4', 
+      name: 'Ricardo Pereira', 
+      avatar: 'https://placehold.co/40x40.png', 
+      email: 'ricardo.pereira@example.com', 
+      phone: '+55 41 98888-7777', 
+      lastSeen: '5 minutes ago',
+      customerInfo: {
+        contracts: [
+            { contractId: 'CTR005', address: 'Apartamento', connectionStatus: 'Online', currentPlan: 'Fibra Óptica 200 Mbps', dataUsage: { used: 180, total: 200, unit: 'GB' } }
+        ],
+        openInvoices: [],
+        technicalTickets: []
+      }
+    },
 ];
 
 export const chats: Chat[] = [
