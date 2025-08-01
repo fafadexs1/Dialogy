@@ -3,6 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import { type User, type Contract } from '@/lib/types';
 import { Mail, Phone, FileText, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Button } from '../ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+
 
 interface ContactPanelProps {
   contact: User;
@@ -51,14 +63,23 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
   const getStatusBadgeVariant = (status: 'Paga' | 'Vencida' | 'Pendente') => {
     switch (status) {
         case 'Vencida':
-            return 'border-transparent bg-red-600 text-white';
+            return 'destructive';
         default:
-            return 'border-transparent bg-blue-600 text-white';
+            return 'default';
     }
   }
 
-  const getTicketBadgeVariant = (status: 'Resolvido' | 'Aberto' | 'Em análise') => {
-    return 'border-transparent bg-gray-200 text-gray-800';
+  const getTicketBadgeVariant = (status: 'Resolvido' | 'Aberto' | 'Em análise') : "default" | "secondary" | "destructive" | "outline" | null | undefined => {
+    switch (status) {
+        case 'Resolvido':
+            return 'secondary';
+        case 'Aberto':
+            return 'default';
+        case 'Em análise':
+            return 'outline';
+        default:
+            return 'secondary';
+    }
   }
 
 
@@ -71,10 +92,10 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
         <div className="p-4">
             {/* Customer Info */}
             <div className="flex items-center">
-                <div className="relative flex h-14 w-14 shrink-0 overflow-hidden rounded-full border">
-                    <img src={contact.avatar} alt={contact.name} className="aspect-square h-full w-full" data-ai-hint="person" />
-                    <span className="flex h-full w-full items-center justify-center rounded-full bg-muted">{contact.name.charAt(0)}</span>
-                </div>
+                <Avatar className="h-14 w-14 shrink-0 border">
+                    <AvatarImage src={contact.avatar} alt={contact.name} data-ai-hint="person" />
+                    <AvatarFallback>{contact.name.charAt(0)}</AvatarFallback>
+                </Avatar>
                 <div className="ml-4">
                     <h2 className="font-bold text-lg">{contact.name}</h2>
                     <p className="text-xs text-muted-foreground">ID: {contact.id}</p>
@@ -102,19 +123,22 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
             <label htmlFor="contract-selector" className="flex items-center text-sm font-semibold mb-2">
                 <FileText className="h-4 w-4 mr-2" /> Contrato/Serviço
             </label>
-            <select
-                id="contract-selector"
-                className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            <Select
                 value={selectedContract?.contractId}
-                onChange={(e) => setSelectedContract(customerInfo.contracts.find(c => c.contractId === e.target.value))}
+                onValueChange={(value) => setSelectedContract(customerInfo.contracts.find(c => c.contractId === value))}
                 disabled={customerInfo.contracts.length <= 1}
             >
-                {customerInfo.contracts.map(contract => (
-                    <option key={contract.contractId} value={contract.contractId}>
-                        {contract.address}
-                    </option>
-                ))}
-            </select>
+                <SelectTrigger>
+                    <SelectValue placeholder="Selecione um contrato" />
+                </SelectTrigger>
+                <SelectContent>
+                    {customerInfo.contracts.map(contract => (
+                        <SelectItem key={contract.contractId} value={contract.contractId}>
+                            {contract.address}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
         </div>
 
         {selectedContract && (
@@ -137,16 +161,14 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                             <span>{selectedContract.dataUsage.used}{selectedContract.dataUsage.unit}</span>
                             <span>{selectedContract.dataUsage.total}{selectedContract.dataUsage.unit}</span>
                         </div>
-                         <div className="relative h-2 w-full overflow-hidden rounded-full bg-gray-200">
-                            <div className="h-full w-full flex-1 bg-blue-600 transition-all" style={{ transform: `translateX(-${100 - (dataUsagePercentage || 0)}%)` }} />
-                         </div>
+                         <Progress value={dataUsagePercentage} className="h-2" />
                     </div>
                 </div>
                  {/* Invoices */}
                 <div>
                     <h4 className="flex items-center text-sm font-semibold mb-2">
                         <FileInvoiceDollar className="h-4 w-4 mr-2"/> Faturas Pendentes
-                        {customerInfo.openInvoices.length > 0 && <span className={`ml-auto inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${getStatusBadgeVariant('Vencida')}`}>{customerInfo.openInvoices.length}</span>}
+                        {customerInfo.openInvoices.length > 0 && <Badge variant="destructive" className="ml-auto">{customerInfo.openInvoices.length}</Badge>}
                     </h4>
                      <div className="space-y-2">
                         {customerInfo.openInvoices.length > 0 ? (
@@ -154,7 +176,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                                 <div key={invoice.id} className="rounded-md border p-2 text-sm bg-gray-100">
                                     <div className="flex justify-between items-center">
                                         <p className="font-semibold">{invoice.id}</p>
-                                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${getStatusBadgeVariant(invoice.status)}`}>{invoice.status}</span>
+                                        <Badge variant={getStatusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
                                     </div>
                                     <p className="text-xs text-muted-foreground">Venc.: {invoice.dueDate} - {invoice.amount}</p>
                                 </div>
@@ -172,7 +194,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                         <div key={ticket.id} className="rounded-md border p-2 text-sm bg-gray-100">
                             <div className="flex justify-between items-center">
                                 <p className="font-semibold truncate pr-2">{ticket.subject}</p>
-                                 <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${getTicketBadgeVariant(ticket.status)}`}>{ticket.status}</span>
+                                 <Badge variant={getTicketBadgeVariant(ticket.status)}>{ticket.status}</Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">{ticket.id} - {ticket.date}</p>
                         </div>
@@ -185,7 +207,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
         )}
       </div>
       <div className="p-4 border-t mt-auto">
-        <button className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-gray-300 bg-white hover:bg-gray-100 hover:text-gray-900 h-10 px-4 py-2 w-full">Ver Perfil Completo</button>
+        <Button variant="outline" className="w-full">Ver Perfil Completo</Button>
       </div>
     </div>
   );
