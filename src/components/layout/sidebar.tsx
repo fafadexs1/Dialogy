@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
-import { signOut } from '@/auth';
+import { signOutAction } from '@/actions/auth';
 
 interface SidebarProps {
   user: User;
@@ -49,10 +49,7 @@ const otherNavItems = [
 function SignOut() {
     return (
       <form
-        action={async () => {
-          'use server';
-          await signOut();
-        }}
+        action={signOutAction}
         className="w-full"
       >
         <button type="submit" className="w-full">

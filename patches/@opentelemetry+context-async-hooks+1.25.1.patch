@@ -1,0 +1,18 @@
+diff --git a/node_modules/@opentelemetry/context-async-hooks/build/src/AsyncHooksContextManager.js b/node_modules/@opentelemetry/context-async-hooks/build/src/AsyncHooksContextManager.js
+index 7751d8f..449553f 100644
+--- a/node_modules/@opentelemetry/context-async-hooks/build/src/AsyncHooksContextManager.js
++++ b/node_modules/@opentelemetry/context-async-hooks/build/src/AsyncHooksContextManager.js
+@@ -17,7 +17,12 @@
+  */
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.AsyncHooksContextManager = void 0;
+-const asyncHooks = require("async_hooks");
++let asyncHooks;
++try {
++    asyncHooks = require("async_hooks");
++} catch (e) {
++    // ignore, this is expected in browser environments
++}
+ const AbstractAsyncHooksContextManager_1 = require("./AbstractAsyncHooksContextManager");
+ class AsyncHooksContextManager extends AbstractAsyncHooksContextManager_1.AbstractAsyncHooksContextManager {
+     constructor() {
