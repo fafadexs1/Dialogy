@@ -18,9 +18,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config, {isServer}) => {
     if (!isServer) {
-      // Resolve 'async_hooks' to a an empty module on the client side.
+      // Resolve 'async_hooks' to an empty module on the client side.
       // This is needed to prevent the "Module not found: Can't resolve 'async_hooks'" error.
       config.resolve.fallback = {
         ...config.resolve.fallback,
