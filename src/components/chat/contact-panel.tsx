@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { type User, type Contract } from '@/lib/types';
-import { Mail, Phone, FileContract, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog } from 'lucide-react';
+import { Mail, Phone, FileText, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
@@ -94,7 +94,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
         {/* Contract Info */}
         <div className="p-4">
             <label htmlFor="contract-selector" className="flex items-center text-sm font-semibold mb-2">
-                <FileContract className="h-4 w-4 mr-2" /> Contrato/Serviço
+                <FileText className="h-4 w-4 mr-2" /> Contrato/Serviço
             </label>
             <Select
                 value={selectedContract?.contractId}
