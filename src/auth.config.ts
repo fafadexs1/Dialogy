@@ -8,17 +8,17 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
-      const protectedRoutes = ['/'];
-      const isProtectedRoute = protectedRoutes.some((route) =>
-        nextUrl.pathname.startsWith(route)
-      );
+      const isOnLoginPage = nextUrl.pathname.startsWith('/login');
+      const isOnRegisterPage = nextUrl.pathname.startsWith('/register');
 
-      if (isProtectedRoute && !isLoggedIn) {
-        return Response.redirect(new URL('/login', nextUrl));
+      // Se estiver logado, não pode acessar login/register, redireciona para a home
+      if (isLoggedIn && (isOnLoginPage || isOnRegisterPage)) {
+        return Response.redirect(new URL('/', nextUrl));
       }
 
-      if (isLoggedIn && nextUrl.pathname.startsWith('/login')) {
-        return Response.redirect(new URL('/', nextUrl));
+      // Se não estiver logado e tentar acessar uma rota protegida (que não seja login/register)
+      if (!isLoggedIn && !isOnLoginPage && !isOnRegisterPage) {
+        return Response.redirect(new URL('/login', nextUrl));
       }
 
       return true;
