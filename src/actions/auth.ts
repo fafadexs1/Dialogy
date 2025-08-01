@@ -1,8 +1,10 @@
 'use server';
 
 import { signIn, signOut } from '@/auth';
+import prisma from '@/lib/db';
 import { AuthError } from 'next-auth';
 import { redirect } from 'next/navigation';
+import bcrypt from 'bcrypt';
 
 export async function authenticate(
   prevState: string | undefined,
@@ -16,7 +18,7 @@ export async function authenticate(
         case 'CredentialsSignin':
           return 'Credenciais inválidas.';
         default:
-          return 'Algo deu errado.';
+          return 'Algo deu errado. Tente novamente.';
       }
     }
     throw error;
@@ -27,22 +29,39 @@ export async function register(
   prevState: string | undefined,
   formData: FormData
 ) {
-  // Por enquanto, esta é uma simulação.
-  // Em um aplicativo real, você adicionaria o usuário a um banco de dados aqui.
-  const name = formData.get('name');
-  const email = formData.get('email');
-  const password = formData.get('password');
+  try {
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
-  if (!name || !email || !password) {
-    return 'Por favor, preencha todos os campos.';
+    if (!name || !email || !password) {
+      return 'Por favor, preencha todos os campos.';
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      return 'Este e-mail já está em uso.';
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return 'Não foi possível concluir o registro. Tente novamente.';
   }
 
-  console.log('Novo registro:', { name, email });
-
-  // Redireciona para a página de login após o registro "bem-sucedido"
   redirect('/login?registered=true');
 }
-
 
 export async function signOutAction() {
   await signOut();
