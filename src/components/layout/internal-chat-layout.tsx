@@ -14,6 +14,9 @@ interface InternalChatLayoutProps {
 export default function InternalChatLayout({ user }: InternalChatLayoutProps) {
     const [selectedChannel, setSelectedChannel] = React.useState<InternalChannel>(internalChannels[0]);
     
+    // Garantir que a lista de membros esteja sempre disponível e correta
+    const teamMembers = selectedChannel.members || (selectedChannel.recipient ? [user, selectedChannel.recipient] : [user]);
+
     return (
         <>
             <ChannelList 
@@ -27,7 +30,7 @@ export default function InternalChatLayout({ user }: InternalChatLayoutProps) {
                 channel={selectedChannel}
                 currentUser={user}
             />
-            <TeamPanel members={selectedChannel.type === 'channel' ? selectedChannel.members : [user, selectedChannel.recipient!].filter(Boolean) as User[]} />
+            <TeamPanel members={teamMembers} />
         </>
     );
 }

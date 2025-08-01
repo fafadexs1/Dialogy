@@ -136,12 +136,14 @@ export const internalChannels: InternalChannel[] = [
       type: 'dm',
       recipient: agents[1],
       unreadCount: 1,
+      members: [agents[0], agents[1]],
     },
     {
         id: 'dm-2',
         name: 'David Smith',
         type: 'dm',
         recipient: agents[2],
+        members: [agents[0], agents[2]],
     },
 ];
 
