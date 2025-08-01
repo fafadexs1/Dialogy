@@ -1,4 +1,4 @@
-// use server'
+'use server';
 
 /**
  * @fileOverview This file contains the Genkit flow for generating smart replies based on customer message content.
