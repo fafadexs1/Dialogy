@@ -9,6 +9,8 @@ import { type User, type Contract } from '@/lib/types';
 import { Mail, Phone, FileContract, Wifi, ChartPie, FileInvoiceDollar, Headset, UserCog } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
+
 
 interface ContactPanelProps {
   contact: User;
@@ -132,12 +134,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                             <span>{selectedContract.dataUsage.used}{selectedContract.dataUsage.unit}</span>
                             <span>{selectedContract.dataUsage.total}{selectedContract.dataUsage.unit}</span>
                         </div>
-                        <div className="relative h-2 w-full overflow-hidden rounded-full bg-background">
-                            <div 
-                                className="h-full transition-all" 
-                                style={{ width: `${dataUsagePercentage}%`, backgroundColor: dataUsagePercentage > 90 ? 'hsl(var(--destructive))' : dataUsagePercentage > 70 ? 'hsl(var(--primary))' : 'hsl(var(--primary))'  }}
-                            />
-                        </div>
+                         <Progress value={dataUsagePercentage} className="h-2" />
                     </div>
                 </div>
                  {/* Invoices */}
