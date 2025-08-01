@@ -2,6 +2,9 @@ import { LoginForm } from '@/components/auth/login-form';
 import { LifeBuoy, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
+// Força a renderização dinâmica para evitar o erro de searchParams
+export const dynamic = 'force-dynamic';
+
 export default function LoginPage({
   searchParams,
 }: {
