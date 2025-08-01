@@ -51,19 +51,19 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
   const getStatusBadgeVariant = (status: 'Paga' | 'Vencida' | 'Pendente') => {
     switch (status) {
         case 'Vencida':
-            return 'border-transparent bg-destructive text-destructive-foreground';
+            return 'border-transparent bg-red-600 text-white';
         default:
-            return 'border-transparent bg-primary text-primary-foreground';
+            return 'border-transparent bg-blue-600 text-white';
     }
   }
 
   const getTicketBadgeVariant = (status: 'Resolvido' | 'Aberto' | 'Em análise') => {
-    return 'border-transparent bg-secondary text-secondary-foreground';
+    return 'border-transparent bg-gray-200 text-gray-800';
   }
 
 
   return (
-    <div className="hidden w-full max-w-xs flex-col border-l bg-card lg:flex">
+    <div className="hidden w-full max-w-xs flex-col border-l bg-white lg:flex">
       <div className="flex h-16 items-center border-b px-4">
         <h3 className="font-semibold">Detalhes do Cliente</h3>
       </div>
@@ -95,7 +95,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                 )}
             </div>
         </div>
-        <hr className="shrink-0 bg-border h-[1px] w-full"/>
+        <hr className="shrink-0 bg-gray-200 h-[1px] w-full"/>
 
         {/* Contract Info */}
         <div className="p-4">
@@ -104,7 +104,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
             </label>
             <select
                 id="contract-selector"
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={selectedContract?.contractId}
                 onChange={(e) => setSelectedContract(customerInfo.contracts.find(c => c.contractId === e.target.value))}
                 disabled={customerInfo.contracts.length <= 1}
@@ -119,12 +119,12 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
 
         {selectedContract && (
             <>
-            <hr className="shrink-0 bg-border h-[1px] w-full"/>
+            <hr className="shrink-0 bg-gray-200 h-[1px] w-full"/>
             <div className="p-4 space-y-4">
                 {/* Connection Status */}
                 <div>
                     <h4 className="flex items-center text-sm font-semibold mb-2"><Wifi className="h-4 w-4 mr-2"/>Status da Conexão</h4>
-                    <div className="flex items-center gap-2 rounded-md border p-2 bg-secondary/50">
+                    <div className="flex items-center gap-2 rounded-md border p-2 bg-gray-100">
                         {getStatusIcon(selectedContract.connectionStatus)}
                         <span className="text-sm font-medium">{selectedContract.connectionStatus}</span>
                     </div>
@@ -132,13 +132,13 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                 {/* Data Usage */}
                 <div>
                     <h4 className="flex items-center text-sm font-semibold mb-2"><ChartPie className="h-4 w-4 mr-2"/>Consumo de Dados</h4>
-                    <div className="rounded-md border p-2 bg-secondary/50">
+                    <div className="rounded-md border p-2 bg-gray-100">
                         <div className="flex justify-between text-xs font-medium mb-1">
                             <span>{selectedContract.dataUsage.used}{selectedContract.dataUsage.unit}</span>
                             <span>{selectedContract.dataUsage.total}{selectedContract.dataUsage.unit}</span>
                         </div>
-                         <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
-                            <div className="h-full w-full flex-1 bg-primary transition-all" style={{ transform: `translateX(-${100 - (dataUsagePercentage || 0)}%)` }} />
+                         <div className="relative h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div className="h-full w-full flex-1 bg-blue-600 transition-all" style={{ transform: `translateX(-${100 - (dataUsagePercentage || 0)}%)` }} />
                          </div>
                     </div>
                 </div>
@@ -151,7 +151,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                      <div className="space-y-2">
                         {customerInfo.openInvoices.length > 0 ? (
                             customerInfo.openInvoices.map(invoice => (
-                                <div key={invoice.id} className="rounded-md border p-2 text-sm bg-secondary/50">
+                                <div key={invoice.id} className="rounded-md border p-2 text-sm bg-gray-100">
                                     <div className="flex justify-between items-center">
                                         <p className="font-semibold">{invoice.id}</p>
                                         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${getStatusBadgeVariant(invoice.status)}`}>{invoice.status}</span>
@@ -169,7 +169,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                     <div className="space-y-2">
                     {customerInfo.technicalTickets.length > 0 ? (
                         customerInfo.technicalTickets.map(ticket => (
-                        <div key={ticket.id} className="rounded-md border p-2 text-sm bg-secondary/50">
+                        <div key={ticket.id} className="rounded-md border p-2 text-sm bg-gray-100">
                             <div className="flex justify-between items-center">
                                 <p className="font-semibold truncate pr-2">{ticket.subject}</p>
                                  <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${getTicketBadgeVariant(ticket.status)}`}>{ticket.status}</span>
@@ -185,7 +185,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
         )}
       </div>
       <div className="p-4 border-t mt-auto">
-        <button className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full">Ver Perfil Completo</button>
+        <button className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-gray-300 bg-white hover:bg-gray-100 hover:text-gray-900 h-10 px-4 py-2 w-full">Ver Perfil Completo</button>
       </div>
     </div>
   );
