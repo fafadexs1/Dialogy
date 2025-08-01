@@ -4,7 +4,7 @@ import React from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat } from '@/lib/types';
+import { type Chat, type User } from '@/lib/types';
 import { chats, agents } from '@/lib/mock-data';
 
 export default function CustomerChatLayout() {
