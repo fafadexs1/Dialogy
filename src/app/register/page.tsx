@@ -1,8 +1,8 @@
-import { LoginForm } from '@/components/auth/login-form';
+import { RegisterForm } from '@/components/auth/register-form';
 import { LifeBuoy } from 'lucide-react';
 import Link from 'next/link';
 
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-secondary p-4">
       <div className="w-full max-w-sm">
@@ -11,13 +11,13 @@ export default function LoginPage() {
             <LifeBuoy className="h-8 w-8" />
           </div>
           <h1 className="text-3xl font-bold">ConnectISP</h1>
-          <p className="text-muted-foreground">Bem-vindo de volta</p>
+          <p className="text-muted-foreground">Crie sua conta</p>
         </div>
-        <LoginForm />
+        <RegisterForm />
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          Não tem uma conta?{' '}
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Registre-se
+          Já tem uma conta?{' '}
+          <Link href="/login" className="font-medium text-primary hover:underline">
+            Login
           </Link>
         </p>
       </div>
