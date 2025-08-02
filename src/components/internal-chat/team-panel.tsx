@@ -3,12 +3,19 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type User } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useOnlineStatus } from '@/hooks/use-online-status';
+import { agents as allAgents } from '@/lib/mock-data';
 
-interface TeamPanelProps {
-  members?: User[];
-}
+export default function TeamPanel() {
+  const onlineAgents = useOnlineStatus();
+  const onlineAgentIds = new Set(onlineAgents.map(a => a.id));
 
-export default function TeamPanel({ members = [] }: TeamPanelProps) {
+  const members = allAgents.map(agent => ({
+    ...agent,
+    online: onlineAgentIds.has(agent.id)
+  }));
+
+
   return (
     <div className="hidden w-full max-w-xs flex-col border-l bg-card lg:flex">
       <div className="flex h-16 items-center border-b px-4">

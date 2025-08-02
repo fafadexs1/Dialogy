@@ -7,16 +7,18 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type User } from '@/lib/types';
+import { type Chat } from '@/lib/types';
+import { useOnlineStatus } from '@/hooks/use-online-status';
 
 interface ChatListProps {
   chats: Chat[];
-  agents: User[];
   selectedChat: Chat;
   setSelectedChat: (chat: Chat) => void;
 }
 
-export default function ChatList({ chats, agents, selectedChat, setSelectedChat }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
+  const onlineAgents = useOnlineStatus();
+
   const renderChatList = (status: Chat['status']) => (
     chats
       .filter((chat) => chat.status === status)
@@ -64,7 +66,7 @@ export default function ChatList({ chats, agents, selectedChat, setSelectedChat 
       <div className="px-4">
           <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
           <div className="flex items-center space-x-2">
-              {agents.filter(a => a.online).map(agent => (
+              {onlineAgents.map(agent => (
                   <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500">
                       <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
                       <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
