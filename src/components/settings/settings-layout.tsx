@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState } from 'react';
@@ -6,26 +7,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PlusCircle, Trash2, Clock } from 'lucide-react';
+import { PlusCircle, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+
+interface BusinessHour {
+  day: string;
+  enabled: boolean;
+  startTime: string;
+  endTime: string;
+}
 
 interface Team {
   id: string;
   name: string;
+  businessHours: BusinessHour[];
 }
-
-const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico' },
-  { id: 'team-2', name: 'Vendas' },
-  { id: 'team-3', name: 'Financeiro' },
-];
 
 const daysOfWeek = [
   { id: 'seg', label: 'Segunda-feira' },
@@ -37,6 +34,21 @@ const daysOfWeek = [
   { id: 'dom', label: 'Domingo' },
 ];
 
+const defaultBusinessHours = daysOfWeek.map(day => ({
+    day: day.label,
+    enabled: day.id !== 'sab' && day.id !== 'dom',
+    startTime: '09:00',
+    endTime: '18:00',
+}));
+
+
+const initialTeams: Team[] = [
+  { id: 'team-1', name: 'Suporte Técnico', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-2', name: 'Vendas', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-3', name: 'Financeiro', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+];
+
+
 export function SettingsLayout() {
   const [teams, setTeams] = useState<Team[]>(initialTeams);
   const [newTeamName, setNewTeamName] = useState('');
@@ -47,6 +59,7 @@ export function SettingsLayout() {
     const newTeam = {
       id: `team-${Date.now()}`,
       name: newTeamName,
+      businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)), // Create a deep copy
     };
     setTeams([...teams, newTeam]);
     setNewTeamName('');
@@ -54,6 +67,20 @@ export function SettingsLayout() {
 
   const handleRemoveTeam = (id: string) => {
     setTeams(teams.filter(team => team.id !== id));
+  };
+  
+  const handleBusinessHoursChange = (teamId: string, dayLabel: string, field: keyof BusinessHour, value: any) => {
+    setTeams(teams.map(team => {
+        if (team.id === teamId) {
+            return {
+                ...team,
+                businessHours: team.businessHours.map(bh => 
+                    bh.day === dayLabel ? { ...bh, [field]: value } : bh
+                )
+            };
+        }
+        return team;
+    }));
   };
 
   return (
@@ -65,75 +92,90 @@ export function SettingsLayout() {
             </header>
 
             <Tabs defaultValue="teams-hours" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-4 mb-6">
                     <TabsTrigger value="teams-hours">Equipes e Horários</TabsTrigger>
                     <TabsTrigger value="channels">Canais</TabsTrigger>
                     <TabsTrigger value="automation">Automação</TabsTrigger>
                     <TabsTrigger value="integrations">Integrações</TabsTrigger>
                 </TabsList>
                 
-                <TabsContent value="teams-hours" className="mt-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {/* Teams Management */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Gerenciar Equipes</CardTitle>
-                                <CardDescription>Crie e organize as equipes que usarão o Dialogy.</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <form onSubmit={handleAddTeam} className="flex items-end gap-2 mb-6">
-                                    <div className="flex-1 space-y-1">
-                                        <Label htmlFor="team-name">Nome da Equipe</Label>
-                                        <Input 
-                                            id="team-name"
-                                            placeholder="Ex: Sucesso do Cliente"
-                                            value={newTeamName}
-                                            onChange={(e) => setNewTeamName(e.target.value)}
-                                        />
-                                    </div>
-                                    <Button type="submit" size="sm">
-                                        <PlusCircle className="mr-2 h-4 w-4" />
-                                        Adicionar
-                                    </Button>
-                                </form>
-                                <div className="space-y-2">
-                                    <h4 className="font-medium text-sm text-muted-foreground">Equipes existentes</h4>
-                                    {teams.map(team => (
-                                        <div key={team.id} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
-                                            <span>{team.name}</span>
-                                            <Button variant="ghost" size="icon" onClick={() => handleRemoveTeam(team.id)}>
-                                                <Trash2 className="h-4 w-4 text-destructive" />
-                                                <span className="sr-only">Remover</span>
-                                            </Button>
-                                        </div>
-                                    ))}
+                <TabsContent value="teams-hours" className="mt-0">
+                   <Card>
+                        <CardHeader>
+                            <CardTitle>Gerenciar Equipes e Horários de Atendimento</CardTitle>
+                            <CardDescription>Crie equipes e defina horários de trabalho específicos para cada uma delas.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <form onSubmit={handleAddTeam} className="flex items-end gap-2 mb-6 p-4 border rounded-lg bg-secondary/30">
+                                <div className="flex-1 space-y-1">
+                                    <Label htmlFor="team-name">Nome da Nova Equipe</Label>
+                                    <Input 
+                                        id="team-name"
+                                        placeholder="Ex: Sucesso do Cliente"
+                                        value={newTeamName}
+                                        onChange={(e) => setNewTeamName(e.target.value)}
+                                    />
                                 </div>
-                            </CardContent>
-                        </Card>
+                                <Button type="submit">
+                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                    Adicionar Equipe
+                                </Button>
+                            </form>
 
-                        {/* Business Hours */}
-                        <Card>
-                             <CardHeader>
-                                <CardTitle>Horário de Atendimento</CardTitle>
-                                <CardDescription>Defina os horários em que sua equipe estará disponível para atendimento.</CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                {daysOfWeek.map(day => (
-                                    <div key={day.id} className="flex items-center justify-between p-3 border rounded-md bg-background">
-                                        <div className='flex items-center gap-4'>
-                                           <Switch id={`switch-${day.id}`} defaultChecked={day.id !== 'sab' && day.id !== 'dom'} />
-                                           <Label htmlFor={`switch-${day.id}`} className='font-medium min-w-[100px]'>{day.label}</Label>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <Input type="time" defaultValue="09:00" className="w-[100px]" />
-                                            <span>até</span>
-                                            <Input type="time" defaultValue="18:00" className="w-[100px]" />
-                                        </div>
-                                    </div>
+                            <Accordion type="single" collapsible className="w-full">
+                                {teams.map((team) => (
+                                    <AccordionItem value={team.id} key={team.id}>
+                                        <AccordionTrigger className='text-base font-medium px-2 hover:bg-accent rounded-md'>
+                                            <div className='flex items-center justify-between w-full'>
+                                                <span>{team.name}</span>
+                                                <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10'>
+                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                    <span className="sr-only">Remover Equipe</span>
+                                                </Button>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent>
+                                            <div className="p-4 border rounded-md m-2 mt-0 bg-background">
+                                                <h4 className="font-semibold mb-4">Horário de Atendimento de {team.name}</h4>
+                                                <div className="space-y-3">
+                                                    {team.businessHours.map(bh => (
+                                                        <div key={bh.day} className="flex items-center justify-between">
+                                                            <div className='flex items-center gap-4'>
+                                                                <Switch 
+                                                                    id={`switch-${team.id}-${bh.day}`} 
+                                                                    checked={bh.enabled}
+                                                                    onCheckedChange={(checked) => handleBusinessHoursChange(team.id, bh.day, 'enabled', checked)}
+                                                                />
+                                                                <Label htmlFor={`switch-${team.id}-${bh.day}`} className='font-medium min-w-[100px]'>{bh.day}</Label>
+                                                            </div>
+                                                            <div className={`flex items-center gap-2 transition-opacity ${bh.enabled ? 'opacity-100' : 'opacity-50'}`}>
+                                                                <Input 
+                                                                    type="time" 
+                                                                    value={bh.startTime}
+                                                                    onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'startTime', e.target.value)}
+                                                                    className="w-[100px]" 
+                                                                    disabled={!bh.enabled} 
+                                                                />
+                                                                <span>até</span>
+                                                                <Input 
+                                                                    type="time" 
+                                                                    value={bh.endTime}
+                                                                    onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'endTime', e.target.value)}
+                                                                    className="w-[100px]" 
+                                                                    disabled={!bh.enabled}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </AccordionContent>
+                                    </AccordionItem>
                                 ))}
-                            </CardContent>
-                        </Card>
-                    </div>
+                            </Accordion>
+
+                        </CardContent>
+                    </Card>
                 </TabsContent>
                 
                 <TabsContent value="channels">
