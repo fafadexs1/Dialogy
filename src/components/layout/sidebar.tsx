@@ -39,9 +39,8 @@ interface SidebarProps {
 const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
-  { href: '/team', icon: Slack, label: 'Equipe' },
+  { href: '/team', icon: Slack, label: 'Equipes' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
-  { href: '/settings', icon: Settings, label: 'Configurações' },
 ];
 
 function SignOut() {
