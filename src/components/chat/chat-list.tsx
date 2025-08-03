@@ -20,37 +20,39 @@ interface ChatListProps {
 export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
   const onlineAgents = useOnlineStatus();
 
-  const renderChatList = (status: Chat['status']) => (
-    chats
-      .filter((chat) => chat.status === status)
-      .map((chat) => (
-        <div
-          key={chat.id}
-          className={`flex cursor-pointer items-start gap-4 rounded-lg p-3 transition-colors ${
-            selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
-          }`}
-          onClick={() => setSelectedChat(chat)}
-        >
-          <Avatar className="h-10 w-10 border">
-            <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
-            <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 overflow-hidden min-w-0">
-            <div className="flex items-center justify-between">
-              <p className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
-                {chat.contact.name}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {chat.messages[chat.messages.length - 1].timestamp}
-              </p>
-            </div>
-            <p className="text-sm text-muted-foreground truncate">
-              {chat.messages[chat.messages.length - 1].content}
+  const renderChatList = (chatList: Chat[]) => (
+    chatList.map((chat) => (
+      <div
+        key={chat.id}
+        className={`flex cursor-pointer items-start gap-4 rounded-lg p-3 transition-colors ${
+          selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
+        }`}
+        onClick={() => setSelectedChat(chat)}
+      >
+        <Avatar className="h-10 w-10 border">
+          <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+          <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+        </Avatar>
+        <div className="flex-1 overflow-hidden min-w-0">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+              {chat.contact.name}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {chat.messages[chat.messages.length - 1].timestamp}
             </p>
           </div>
+          <p className="text-sm text-muted-foreground truncate">
+            {chat.messages[chat.messages.length - 1].content}
+          </p>
         </div>
-      ))
+      </div>
+    ))
   );
+
+  const atendimentos = chats.filter(c => c.status === 'atendimentos');
+  const gerais = chats.filter(c => c.status === 'gerais');
+  const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
     <div className="flex w-full max-w-sm flex-col border-r bg-card">
@@ -87,9 +89,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
         <ScrollArea className="h-0 flex-1">
           <div className="p-4 space-y-2">
-            <TabsContent value="atendimentos" className="mt-0">{renderChatList('atendimentos')}</TabsContent>
-            <TabsContent value="gerais" className="mt-0">{renderChatList('gerais')}</TabsContent>
-            <TabsContent value="encerrados" className="mt-0">{renderChatList('encerrados')}</TabsContent>
+            <TabsContent value="atendimentos" className="mt-0">
+                <div className="space-y-2">{renderChatList(atendimentos)}</div>
+            </TabsContent>
+            <TabsContent value="gerais" className="mt-0">
+                <div className="space-y-2">{renderChatList(gerais)}</div>
+            </TabsContent>
+            <TabsContent value="encerrados" className="mt-0">
+                <div className="space-y-2">{renderChatList(encerrados)}</div>
+            </TabsContent>
           </div>
         </ScrollArea>
       </Tabs>
