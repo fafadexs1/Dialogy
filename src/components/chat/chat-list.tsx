@@ -36,7 +36,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
           </Avatar>
           <div className="flex-1 overflow-hidden">
             <div className="flex items-center justify-between">
-              <p className="font-semibold">{chat.contact.name}</p>
+              <p className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+                {chat.contact.name}
+              </p>
               <p className="text-xs text-muted-foreground">
                 {chat.messages[chat.messages.length - 1].timestamp}
               </p>
