@@ -23,11 +23,16 @@ import {
 import { Plus } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
 import { mockCustomFieldDefinitions, agents } from '@/lib/mock-data';
+import type { CustomFieldDefinition } from '@/lib/types';
 
-export function AddContactForm() {
+interface AddContactFormProps {
+  // In the future, this will be fetched from a global state or context
+  customFieldDefinitions?: CustomFieldDefinition[];
+}
+
+export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinitions }: AddContactFormProps) {
   // In a real app, this would come from a user query or a global state management
   const owners = agents;
-  const customFieldDefinitions = mockCustomFieldDefinitions;
 
   return (
     <Dialog>

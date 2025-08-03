@@ -27,7 +27,7 @@ export default function SettingsLayout() {
     if (!newFieldLabel.trim()) return;
 
     const newField: CustomFieldDefinition = {
-      id: newFieldLabel.toLowerCase().replace(/\s+/g, '_'),
+      id: `custom_${newFieldLabel.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`,
       label: newFieldLabel,
       type: newFieldType,
       placeholder: `Insira ${newFieldLabel}...`,
@@ -84,7 +84,7 @@ export default function SettingsLayout() {
                         </Select>
                     </div>
                     <Button type="submit">
-                        <PlusCircle className="mr-2" />
+                        <PlusCircle className="mr-2 h-4 w-4" />
                         Adicionar Campo
                     </Button>
                 </form>
