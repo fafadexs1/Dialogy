@@ -11,7 +11,7 @@ export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = React.useState<Chat>(chats[0]);
 
   return (
-    <>
+    <div className="flex h-full w-full">
       <ChatList
         chats={chats}
         selectedChat={selectedChat}
@@ -19,6 +19,6 @@ export default function CustomerChatLayout() {
       />
       <ChatPanel key={selectedChat.id} chat={selectedChat} />
       <ContactPanel contact={selectedChat.contact} />
-    </>
+    </div>
   );
 }

@@ -55,7 +55,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
 
   return (
     <div className="flex w-full max-w-sm flex-col border-r bg-card">
-      {/* Header fixo */}
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -69,7 +68,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
       
-      {/* Agentes Online */}
       <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
         <div className="min-h-[48px] flex flex-wrap items-center gap-2 py-1">
@@ -82,34 +80,29 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
 
-      {/* Abas e Lista com Rolagem */}
-      <div className="flex-1 flex flex-col min-h-0">
-        <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col">
-          <div className="p-4 flex-shrink-0">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
-              <TabsTrigger value="gerais">Gerais</TabsTrigger>
-              <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
-            </TabsList>
-          </div>
-          
-          <div className="flex-1 relative">
-            <div className="absolute inset-0">
-              <ScrollArea className="h-full w-full">
-                <TabsContent value="atendimentos" className="m-0">
-                  {renderChatList(atendimentos)}
-                </TabsContent>
-                <TabsContent value="gerais" className="m-0">
-                  {renderChatList(gerais)}
-                </TabsContent>
-                <TabsContent value="encerrados" className="m-0">
-                  {renderChatList(encerrados)}
-                </TabsContent>
-              </ScrollArea>
-            </div>
-          </div>
-        </Tabs>
-      </div>
+      <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col min-h-0">
+        <div className="p-4 flex-shrink-0">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
+            <TabsTrigger value="gerais">Gerais</TabsTrigger>
+            <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
+          </TabsList>
+        </div>
+        
+        <div className="flex-1 relative">
+          <ScrollArea className="absolute inset-0 h-full w-full">
+            <TabsContent value="atendimentos" className="m-0">
+              {renderChatList(atendimentos)}
+            </TabsContent>
+            <TabsContent value="gerais" className="m-0">
+              {renderChatList(gerais)}
+            </TabsContent>
+            <TabsContent value="encerrados" className="m-0">
+              {renderChatList(encerrados)}
+            </TabsContent>
+          </ScrollArea>
+        </div>
+      </Tabs>
     </div>
   );
 }

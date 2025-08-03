@@ -11,11 +11,11 @@ interface MainLayoutProps {
 
 export function MainLayout({ user, children }: MainLayoutProps) {
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-full w-full">
       <Sidebar user={user} />
-      <div className="flex flex-1 overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-y-auto">
         {children}
-      </div>
+      </main>
     </div>
   );
 }

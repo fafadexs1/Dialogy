@@ -10,21 +10,19 @@ export default function CrmLayout() {
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
 
   useEffect(() => {
-    // Define o primeiro cliente como selecionado após a montagem inicial
-    // para garantir que os dados de 'contacts' estejam disponíveis.
     if (contacts && contacts.length > 0) {
       setSelectedCustomer(contacts[0]);
     }
   }, []);
 
   return (
-    <>
+    <div className="flex h-full w-full">
       <CustomerList
         customers={contacts}
         selectedCustomer={selectedCustomer}
         onSelectCustomer={setSelectedCustomer}
       />
       <CustomerProfile customer={selectedCustomer} />
-    </>
+    </div>
   );
 }

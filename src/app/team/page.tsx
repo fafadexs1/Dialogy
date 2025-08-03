@@ -113,7 +113,7 @@ function TeamSettingsLayout() {
   };
 
   return (
-    <main className="p-6">
+    <div className="p-6">
         <div className="mx-auto w-full max-w-6xl">
             <header className="mb-8">
                 <h1 className="text-3xl font-bold">Gestão de Equipes</h1>
@@ -295,19 +295,17 @@ function TeamSettingsLayout() {
                 </CardContent>
             </Card>
         </div>
-    </main>
+    </div>
   );
 }
 
 
 export default function TeamPage() {
-  // In a real app, you would fetch user data from your database
-  // For now, we'll use the first agent from our mock data
   const user = agents[0];
 
   return (
     <MainLayout user={user}>
-      <div className="flex flex-col flex-1 h-screen">
+      <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0">
           <h1 className="text-2xl font-bold">Equipes</h1>
           <p className="text-muted-foreground">Comunicação interna e gestão de equipes.</p>
