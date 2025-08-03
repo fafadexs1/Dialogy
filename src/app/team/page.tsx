@@ -9,11 +9,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PlusCircle, Trash2, Palette } from 'lucide-react';
+import { PlusCircle, Trash2, Palette, UserPlus, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalChatLayout from '@/components/layout/internal-chat-layout';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const daysOfWeek = [
   { id: 'seg', label: 'Segunda-feira' },
@@ -34,15 +36,16 @@ const defaultBusinessHours: BusinessHour[] = daysOfWeek.map(day => ({
 
 
 const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-2', name: 'Vendas', color: '#10b981', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-3', name: 'Financeiro', color: '#f97316', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [agents[0], agents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-2', name: 'Vendas', color: '#10b981', members: [agents[1], agents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [agents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
 ];
 
 function TeamSettingsLayout() {
   const [teams, setTeams] = useState<Team[]>(initialTeams);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamColor, setNewTeamColor] = useState('#cccccc');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
 
 
   const handleAddTeam = (e: React.FormEvent) => {
@@ -52,7 +55,8 @@ function TeamSettingsLayout() {
       id: `team-${Date.now()}`,
       name: newTeamName,
       color: newTeamColor,
-      businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)), // Create a deep copy
+      members: [],
+      businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)),
     };
     setTeams([...teams, newTeam]);
     setNewTeamName('');
@@ -67,6 +71,31 @@ function TeamSettingsLayout() {
      setTeams(teams.map(team => 
         team.id === teamId ? { ...team, [field]: value } : team
     ));
+  }
+
+  const handleAddMember = (teamId: string) => {
+    const agentToAdd = agents.find(agent => agent.id === selectedAgentId);
+    if (!agentToAdd) return;
+
+    setTeams(teams.map(team => {
+        if (team.id === teamId) {
+            const isAlreadyMember = team.members.some(member => member.id === agentToAdd.id);
+            if (!isAlreadyMember) {
+                return { ...team, members: [...team.members, agentToAdd] };
+            }
+        }
+        return team;
+    }));
+    setSelectedAgentId('');
+  }
+
+  const handleRemoveMember = (teamId: string, memberId: string) => {
+     setTeams(teams.map(team => {
+        if (team.id === teamId) {
+           return { ...team, members: team.members.filter(member => member.id !== memberId) };
+        }
+        return team;
+    }));
   }
 
   const handleBusinessHoursChange = (teamId: string, dayLabel: string, field: keyof BusinessHour, value: any) => {
@@ -133,6 +162,19 @@ function TeamSettingsLayout() {
                                         <div className="flex items-center gap-3">
                                            <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
                                            {team.name}
+                                           <div className="flex items-center -space-x-2">
+                                                {team.members.slice(0, 3).map(member => (
+                                                    <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
+                                                        <AvatarImage src={member.avatar} alt={member.name} />
+                                                        <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                                                    </Avatar>
+                                                ))}
+                                                {team.members.length > 3 && (
+                                                    <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
+                                                        +{team.members.length - 3}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                         <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10'>
                                             <Trash2 className="h-4 w-4 text-destructive" />
@@ -141,34 +183,78 @@ function TeamSettingsLayout() {
                                     </div>
                                 </AccordionTrigger>
                                 <AccordionContent>
-                                    <div className="p-4 border rounded-md m-2 mt-0 bg-background space-y-6">
-                                        <div>
-                                            <h4 className="font-semibold mb-4">Configurações Gerais de {team.name}</h4>
-                                            <div className="flex items-end gap-4">
-                                                <div className="flex-1 space-y-1">
-                                                    <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
-                                                    <Input 
-                                                        id={`team-name-${team.id}`} 
-                                                        value={team.name}
-                                                        onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
-                                                    />
-                                                </div>
-                                                 <div className="space-y-1">
-                                                    <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
-                                                    <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
-                                                        <input
-                                                            id={`team-color-${team.id}`}
-                                                            type="color"
-                                                            value={team.color}
-                                                            onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
-                                                            className="w-6 h-6 p-0 border-none bg-transparent"
+                                    <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        
+                                        <div className="space-y-6">
+                                            <div>
+                                                <h4 className="font-semibold mb-4">Configurações Gerais</h4>
+                                                <div className="flex items-end gap-4">
+                                                    <div className="flex-1 space-y-1">
+                                                        <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
+                                                        <Input 
+                                                            id={`team-name-${team.id}`} 
+                                                            value={team.name}
+                                                            onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
                                                         />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
+                                                        <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
+                                                            <input
+                                                                id={`team-color-${team.id}`}
+                                                                type="color"
+                                                                value={team.color}
+                                                                onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
+                                                                className="w-6 h-6 p-0 border-none bg-transparent"
+                                                            />
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div>
+                                                <h4 className="font-semibold mb-4">Membros da Equipe ({team.members.length})</h4>
+                                                <div className="space-y-2 mb-4">
+                                                    {team.members.map(member => (
+                                                        <div key={member.id} className="flex items-center justify-between p-2 rounded-md bg-secondary/30">
+                                                            <div className="flex items-center gap-2">
+                                                                <Avatar className="h-8 w-8">
+                                                                    <AvatarImage src={member.avatar} alt={member.name} />
+                                                                    <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                                                                </Avatar>
+                                                                <span className="text-sm font-medium">{member.name}</span>
+                                                            </div>
+                                                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleRemoveMember(team.id, member.id)}>
+                                                                <X className="h-4 w-4 text-muted-foreground" />
+                                                            </Button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex items-end gap-2">
+                                                    <div className="flex-1 space-y-1">
+                                                         <Label>Adicionar Membro</Label>
+                                                        <Select onValueChange={setSelectedAgentId}>
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="Selecione um agente" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {agents
+                                                                    .filter(agent => !team.members.some(m => m.id === agent.id))
+                                                                    .map(agent => (
+                                                                    <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <Button onClick={() => handleAddMember(team.id)}>
+                                                        <UserPlus className="mr-2 h-4 w-4"/>
+                                                        Adicionar
+                                                    </Button>
+                                                </div>
+                                            </div>
                                         </div>
+                                        
                                         <div>
-                                            <h4 className="font-semibold mb-4">Horário de Atendimento de {team.name}</h4>
+                                            <h4 className="font-semibold mb-4">Horário de Atendimento</h4>
                                             <div className="space-y-3">
                                                 {team.businessHours.map(bh => (
                                                     <div key={bh.day} className="flex items-center justify-between">

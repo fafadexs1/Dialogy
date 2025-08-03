@@ -102,6 +102,7 @@ export interface Team {
   name: string;
   color: string;
   businessHours: BusinessHour[];
+  members: User[];
 }
 
 export interface BusinessHour {
