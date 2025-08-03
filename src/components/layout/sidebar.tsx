@@ -41,6 +41,7 @@ const mainNavItems = [
   { href: '/crm', icon: Users, label: 'CRM 360º' },
   { href: '/team', icon: Slack, label: 'Equipe' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { href: '/settings', icon: Settings, label: 'Configurações' },
 ];
 
 function SignOut() {
@@ -128,7 +129,7 @@ export function Sidebar({ user }: SidebarProps) {
             </DropdownMenuItem>
             <DropdownMenuItem>
                 <Settings className="mr-2 h-4 w-4" />
-                <span>Configurações</span>
+                <span>Configurações da Conta</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <SignOut />
