@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -21,7 +20,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const onlineAgents = useOnlineStatus();
 
   const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-1">
+    <div className="space-y-1 p-2">
       {chatList.map((chat) => (
         <div
           key={chat.id}
@@ -30,14 +29,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
           }`}
           onClick={() => setSelectedChat(chat)}
         >
-          <Avatar className="h-10 w-10 border">
+          <Avatar className="h-10 w-10 border flex-shrink-0">
             <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
-              <p className="font-semibold truncate">{chat.contact.name}</p>
-              <p className="text-xs text-muted-foreground whitespace-nowrap">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-semibold truncate flex-1">{chat.contact.name}</p>
+              <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                 {chat.messages[chat.messages.length - 1].timestamp}
               </p>
             </div>
@@ -55,8 +54,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
-    <div className="flex w-full max-w-sm flex-col border-r bg-card">
-      <div className="p-4">
+    <div className="flex w-full max-w-sm flex-col border-r bg-card h-full">
+      <div className="p-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
           <Button variant="ghost" size="icon">
@@ -68,41 +67,44 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
           <Input placeholder="Pesquisar..." className="pl-9" />
         </div>
       </div>
-      <div className="px-4">
+      
+      <div className="px-4 pb-4 flex-shrink-0">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
-        <div className="min-h-[48px]">
-          <div className="flex flex-wrap items-center gap-2 py-1">
-            {onlineAgents.map(agent => (
-              <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500">
-                <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
-                <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
-              </Avatar>
-            ))}
-          </div>
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {onlineAgents.map(agent => (
+            <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
+              <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
+              <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
+            </Avatar>
+          ))}
         </div>
       </div>
-      <Tabs defaultValue="atendimentos" className="flex-1 mt-4 flex flex-col">
-        <div className='px-4'>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
-            <TabsTrigger value="gerais">Gerais</TabsTrigger>
-            <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
-          </TabsList>
-        </div>
-        <ScrollArea className="h-0 flex-1">
-          <div className="p-2">
-            <TabsContent value="atendimentos" className="m-0">
-              {renderChatList(atendimentos)}
-            </TabsContent>
-            <TabsContent value="gerais" className="m-0">
-              {renderChatList(gerais)}
-            </TabsContent>
-            <TabsContent value="encerrados" className="m-0">
-              {renderChatList(encerrados)}
-            </TabsContent>
+
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col">
+          <div className="px-4 flex-shrink-0">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
+              <TabsTrigger value="gerais">Gerais</TabsTrigger>
+              <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
+            </TabsList>
           </div>
-        </ScrollArea>
-      </Tabs>
+          
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
+              <TabsContent value="atendimentos" className="m-0 h-full">
+                {renderChatList(atendimentos)}
+              </TabsContent>
+              <TabsContent value="gerais" className="m-0 h-full">
+                {renderChatList(gerais)}
+              </TabsContent>
+              <TabsContent value="encerrados" className="m-0 h-full">
+                {renderChatList(encerrados)}
+              </TabsContent>
+            </ScrollArea>
+          </div>
+        </Tabs>
+      </div>
     </div>
   );
 }
