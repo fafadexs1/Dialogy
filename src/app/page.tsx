@@ -11,7 +11,9 @@ export default async function Home() {
 
   return (
     <MainLayout user={user}>
-      <CustomerChatLayout />
+      <div className="flex-1 flex flex-col h-full">
+        <CustomerChatLayout />
+      </div>
     </MainLayout>
   );
 }

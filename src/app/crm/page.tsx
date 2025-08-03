@@ -11,7 +11,9 @@ export default async function CrmPage() {
 
   return (
     <MainLayout user={user}>
-      <CrmLayout />
+       <div className="flex-1 flex flex-col h-full">
+            <CrmLayout />
+       </div>
     </MainLayout>
   );
 }

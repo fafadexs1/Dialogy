@@ -11,7 +11,7 @@ export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = React.useState<Chat>(chats[0]);
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex flex-1 w-full min-h-0">
       <ChatList
         chats={chats}
         selectedChat={selectedChat}

@@ -16,7 +16,7 @@ export default function CrmLayout() {
   }, []);
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex flex-1 w-full min-h-0">
       <CustomerList
         customers={contacts}
         selectedCustomer={selectedCustomer}
