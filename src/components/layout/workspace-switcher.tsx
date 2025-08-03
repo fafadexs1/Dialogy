@@ -37,6 +37,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { User, Workspace } from '@/lib/types';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -59,37 +60,43 @@ export function WorkspaceSwitcher({
 
   const activeWorkspace = user.workspaces?.find(ws => ws.id === activeWorkspaceId);
 
+  if (!activeWorkspace) {
+    return null;
+  }
+
   return (
     <Dialog open={showNewTeamDialog} onOpenChange={setShowNewTeamDialog}>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            aria-label="Select a workspace"
-            className={cn('w-[200px] justify-start', className)}
-          >
-            {activeWorkspace && (
-              <>
-                <Avatar className="mr-2 h-5 w-5">
-                  <AvatarImage
-                    src={activeWorkspace.avatar}
-                    alt={activeWorkspace.name}
-                    data-ai-hint="logo"
-                  />
-                  <AvatarFallback>
-                    {activeWorkspace.name.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="font-semibold text-sm">
-                  {activeWorkspace.name}
-                </span>
-              </>
-            )}
-            <CaretSortIcon className="ml-auto h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
+        <TooltipProvider>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        role="combobox"
+                        aria-expanded={open}
+                        aria-label="Select a workspace"
+                        className={cn('h-10 w-10 p-0', className)}
+                    >
+                        <Avatar className="h-8 w-8">
+                            <AvatarImage
+                                src={activeWorkspace.avatar}
+                                alt={activeWorkspace.name}
+                                data-ai-hint="logo"
+                            />
+                            <AvatarFallback>
+                                {activeWorkspace.name.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                        </Avatar>
+                    </Button>
+                    </PopoverTrigger>
+                </TooltipTrigger>
+                 <TooltipContent side="right">
+                  <p>{activeWorkspace.name}</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+
         <PopoverContent className="w-[200px] p-0">
           <Command>
             <CommandList>

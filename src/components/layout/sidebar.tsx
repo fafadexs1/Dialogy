@@ -70,7 +70,7 @@ export function Sidebar({ user }: SidebarProps) {
   }
 
   return (
-    <aside className="flex h-full w-auto flex-col items-center justify-between border-r bg-card p-2">
+    <aside className="flex h-full w-auto flex-col justify-between border-r bg-card p-2">
       <div className="flex flex-col items-center gap-4">
         <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <LifeBuoy className="h-6 w-6" />
