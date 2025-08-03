@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -20,11 +21,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const onlineAgents = useOnlineStatus();
 
   const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-1 p-2">
+    <div className="space-y-1 p-2 w-full">
       {chatList.map((chat) => (
         <div
           key={chat.id}
-          className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
+          className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors w-full max-w-full ${
             selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
           }`}
           onClick={() => setSelectedChat(chat)}
@@ -33,14 +34,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden max-w-full">
             <div className="flex items-center justify-between gap-2">
-              <p className="font-semibold truncate flex-1">{chat.contact.name}</p>
+              <p className="font-semibold truncate flex-1 min-w-0">{chat.contact.name}</p>
               <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                 {chat.messages[chat.messages.length - 1].timestamp}
               </p>
             </div>
-            <p className="text-sm text-muted-foreground truncate">
+            <p className="text-sm text-muted-foreground truncate max-w-full">
               {chat.messages[chat.messages.length - 1].content}
             </p>
           </div>
@@ -54,7 +55,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
-    <div className="flex w-full max-w-sm flex-col border-r bg-card h-full">
+    <div className="flex w-full max-w-sm flex-col border-r bg-card h-screen overflow-hidden">
       <div className="p-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -80,8 +81,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0">
-        <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col">
+      <div className="flex-1">
+        <Tabs defaultValue="atendimentos" className="flex flex-col">
           <div className="px-4 flex-shrink-0">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
@@ -90,20 +91,20 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </TabsList>
           </div>
           
-          <TabsContent value="atendimentos" className="flex-1 m-0 overflow-hidden">
-            <ScrollArea className="h-full">
+          <TabsContent value="atendimentos" className="m-0 w-full overflow-hidden">
+            <ScrollArea className="h-[calc(100vh-280px)] w-full">
               {renderChatList(atendimentos)}
             </ScrollArea>
           </TabsContent>
           
-          <TabsContent value="gerais" className="flex-1 m-0 overflow-hidden">
-            <ScrollArea className="h-full">
+          <TabsContent value="gerais" className="m-0 w-full overflow-hidden">
+            <ScrollArea className="h-[calc(100vh-280px)] w-full">
               {renderChatList(gerais)}
             </ScrollArea>
           </TabsContent>
           
-          <TabsContent value="encerrados" className="flex-1 m-0 overflow-hidden">
-            <ScrollArea className="h-full">
+          <TabsContent value="encerrados" className="m-0 w-full overflow-hidden">
+            <ScrollArea className="h-[calc(100vh-280px)] w-full">
               {renderChatList(encerrados)}
             </ScrollArea>
           </TabsContent>
