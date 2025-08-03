@@ -10,19 +10,25 @@ export const authConfig = {
       const isLoggedIn = !!auth?.user;
       const isOnLoginPage = nextUrl.pathname.startsWith('/login');
       const isOnRegisterPage = nextUrl.pathname.startsWith('/register');
+      console.log('Callback authorized:', { isLoggedIn, isOnLoginPage, isOnRegisterPage });
 
       // Se estiver logado, não pode acessar login/register, redireciona para a home
       if (isLoggedIn && (isOnLoginPage || isOnRegisterPage)) {
+        console.log('Usuário logado tentando acessar login/register. Redirecionando para home.');
         return Response.redirect(new URL('/', nextUrl));
       }
 
       // Se não estiver logado e tentar acessar uma rota protegida (que não seja login/register)
       if (!isLoggedIn && !isOnLoginPage && !isOnRegisterPage) {
+        console.log('Usuário não logado tentando acessar rota protegida. Redirecionando para login.');
         return Response.redirect(new URL('/login', nextUrl));
       }
 
+      console.log('Acesso permitido.');
       return true;
     },
+
+
     jwt({ token, user }) {
         if (user) {
           token.id = user.id;

@@ -1,17 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  password     String
+  avatar       String?
+  online       Boolean?      @default(false)
+  phone        String?
+  lastSeen     String?
+  customerInfo CustomerInfo?
+  messages     Message[]
+  imessages    InternalMessage[]
+  channels     InternalChannel[] @relation("ChannelMembers")
+
+  @@map("users")
+}
+
+model CustomerInfo {
+  id               String     @id @default(cuid())
+  user             User       @relation(fields: [userId], references: [id])
+  userId           String     @unique
+  contracts        Contract[]
+  openInvoices     Invoice[]
+  technicalTickets Ticket[]
+
+  @@map("customer_infos")
+}
+
+model Contract {
+  id               String        @id @default(cuid())
+  contractId       String        @unique
+  address          String
+  connectionStatus String
+  currentPlan      String
+  dataUsageUsed    Float
+  dataUsageTotal   Float
+  dataUsageUnit    String
+  customerInfo     CustomerInfo? @relation(fields: [customerInfoId], references: [id])
+  customerInfoId   String?
+
+  @@map("contracts")
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  dueDate        String
+  amount         String
+  status         String
+  url            String
+  customerInfo   CustomerInfo? @relation(fields: [customerInfoId], references: [id])
+  customerInfoId String?
+
+  @@map("invoices")
+}
+
+model Ticket {
+  id             String        @id @default(cuid())
+  date           String
+  subject        String
+  status         String
+  customerInfo   CustomerInfo? @relation(fields: [customerInfoId], references: [id])
+  customerInfoId String?
+
+  @@map("tickets")
+}
+
+model Message {
   id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  content   String
+  timestamp DateTime @default(now())
+  sender    User     @relation(fields: [senderId], references: [id])
+  senderId  String
+  chat      Chat     @relation(fields: [chatId], references: [id])
+  chatId    String
+
+  @@map("messages")
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  contactId String
+  status    String
+  messages  Message[]
+
+  @@map("chats")
+}
+
+model InternalChannel {
+  id          String            @id @default(cuid())
+  name        String
+  type        String // 'channel' or 'dm'
+  members     User[]            @relation("ChannelMembers")
+  messages    InternalMessage[]
+  unreadCount Int?
+
+  @@map("internal_channels")
+}
+
+model InternalMessage {
+  id        String   @id @default(cuid())
+  content   String
+  timestamp DateTime @default(now())
+  sender    User     @relation(fields: [senderId], references: [id])
+  senderId  String
+  channel   InternalChannel @relation(fields: [channelId], references: [id])
+  channelId String
+
+  @@map("internal_messages")
 }
