@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -34,7 +35,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden min-w-0">
             <div className="flex items-center justify-between">
               <p className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
                 {chat.contact.name}
