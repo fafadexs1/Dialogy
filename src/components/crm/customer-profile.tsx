@@ -3,7 +3,7 @@
 import React from 'react';
 import type { User } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Mail, Phone, Building, Briefcase, CheckSquare, Tag, Paperclip, Send, Calendar, Users } from 'lucide-react';
+import { Mail, Phone, Building, Briefcase, CheckSquare, Tag, Paperclip, Send, Calendar, Users, TrendingUp, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -21,13 +21,25 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
         <div className="text-center">
           <Users className="h-16 w-16 mx-auto text-muted-foreground/50" />
           <h2 className="mt-4 text-2xl font-semibold">Selecione um Contato</h2>
-          <p className="mt-1 text-muted-foreground">Escolha um contato na lista à esquerda para ver seus detalhes.</p>
+          <p className="mt-1 text-muted-foreground">Escolha um diálogo na lista para ver os detalhes e o histórico.</p>
         </div>
       </main>
     );
   }
   
   const { businessProfile } = customer;
+
+  const getPriorityColor = (score: number) => {
+    if (score > 70) return "text-red-500";
+    if (score > 40) return "text-amber-500";
+    return "text-green-500";
+  }
+
+  const getRiskColor = (score: number) => {
+    if (score > 75) return "text-red-500";
+    if (score > 50) return "text-amber-500";
+    return "text-green-500";
+  }
 
   return (
     <main className="flex flex-1 flex-col bg-secondary/10">
@@ -42,6 +54,22 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
             <div>
               <h1 className="text-3xl font-bold">{customer.name}</h1>
               <p className="text-lg text-muted-foreground">{businessProfile?.companyName}</p>
+              <div className="flex items-center gap-6 mt-2">
+                  <div className='flex items-center gap-2'>
+                    <TrendingUp className={`h-5 w-5 ${getPriorityColor(businessProfile?.dialogPriorityScore ?? 0)}`} />
+                    <div className='text-sm'>
+                        <span className='font-semibold'>SPD</span>
+                        <p className={`${getPriorityColor(businessProfile?.dialogPriorityScore ?? 0)}`}>{businessProfile?.dialogPriorityScore ?? 'N/A'}</p>
+                    </div>
+                  </div>
+                  <div className='flex items-center gap-2'>
+                    <AlertTriangle className={`h-5 w-5 ${getRiskColor(businessProfile?.financialRiskScore ?? 0)}`} />
+                    <div className='text-sm'>
+                        <span className='font-semibold'>SRI</span>
+                        <p className={`${getRiskColor(businessProfile?.financialRiskScore ?? 0)}`}>{businessProfile?.financialRiskScore ?? 'N/A'}</p>
+                    </div>
+                  </div>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">

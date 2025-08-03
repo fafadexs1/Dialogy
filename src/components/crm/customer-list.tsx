@@ -9,6 +9,8 @@ import { type User } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '../ui/badge';
 
 interface CustomerListProps {
   customers: User[];
@@ -25,12 +27,41 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
       (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (customer.businessProfile?.companyName && customer.businessProfile.companyName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  
+  const priorityCustomers = [...filteredCustomers].sort((a, b) => (b.businessProfile?.dialogPriorityScore ?? 0) - (a.businessProfile?.dialogPriorityScore ?? 0));
+  const riskCustomers = [...filteredCustomers].sort((a, b) => (b.businessProfile?.financialRiskScore ?? 0) - (a.businessProfile?.financialRiskScore ?? 0));
+
+
+  const renderCustomerItem = (customer: User) => (
+     <div
+        key={customer.id}
+        className={`flex cursor-pointer items-center gap-4 rounded-lg p-3 transition-colors ${
+        selectedCustomer?.id === customer.id ? 'bg-primary/10' : 'hover:bg-accent'
+        }`}
+        onClick={() => onSelectCustomer(customer)}
+    >
+        <Avatar className="h-10 w-10 border">
+        <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
+        <AvatarFallback>{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
+        </Avatar>
+        <div className="flex-1 overflow-hidden">
+        <p className="font-semibold truncate">{customer.name}</p>
+        <p className="text-sm text-muted-foreground truncate">{customer.businessProfile?.companyName}</p>
+        </div>
+        {customer.businessProfile?.dialogPriorityScore && (
+             <Badge variant={customer.businessProfile.dialogPriorityScore > 70 ? "destructive" : "secondary"}>
+                {customer.businessProfile.dialogPriorityScore}
+            </Badge>
+        )}
+    </div>
+  )
+
 
   return (
     <div className="flex w-full max-w-sm flex-col border-r bg-card">
       <div className="p-4 border-b">
         <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold">Relacionamentos</h2>
+            <h2 className="text-2xl font-bold">Diálogos</h2>
             <CrmSettings>
                 <Button variant="ghost" size="icon">
                     <Settings className="h-5 w-5" />
@@ -51,28 +82,26 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
             <Button variant="outline" className="w-full">Adicionar Empresa</Button>
         </div>
       </div>
-      <ScrollArea className="h-0 flex-1">
-        <div className="p-2 space-y-1">
-          {filteredCustomers.map((customer) => (
-            <div
-              key={customer.id}
-              className={`flex cursor-pointer items-center gap-4 rounded-lg p-3 transition-colors ${
-                selectedCustomer?.id === customer.id ? 'bg-primary/10' : 'hover:bg-accent'
-              }`}
-              onClick={() => onSelectCustomer(customer)}
-            >
-              <Avatar className="h-10 w-10 border">
-                <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-                <AvatarFallback>{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 overflow-hidden">
-                <p className="font-semibold truncate">{customer.name}</p>
-                <p className="text-sm text-muted-foreground truncate">{customer.businessProfile?.companyName}</p>
-              </div>
-            </div>
-          ))}
+      <Tabs defaultValue="priority" className="flex-1 flex flex-col">
+        <div className='px-4 mt-2'>
+            <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="priority">Prioritários</TabsTrigger>
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="risk">Risco Financeiro</TabsTrigger>
+            </TabsList>
         </div>
-      </ScrollArea>
+        <ScrollArea className="h-0 flex-1">
+            <TabsContent value="priority" className="p-2 space-y-1 m-0">
+                {priorityCustomers.map(renderCustomerItem)}
+            </TabsContent>
+            <TabsContent value="all" className="p-2 space-y-1 m-0">
+                {filteredCustomers.map(renderCustomerItem)}
+            </TabsContent>
+             <TabsContent value="risk" className="p-2 space-y-1 m-0">
+                {riskCustomers.map(renderCustomerItem)}
+            </TabsContent>
+        </ScrollArea>
+      </Tabs>
     </div>
   );
 }

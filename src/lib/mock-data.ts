@@ -33,6 +33,8 @@ export const contacts: User[] = [
         website: 'innovatetech.com',
         industry: 'Software',
         employees: 50,
+        dialogPriorityScore: 95,
+        financialRiskScore: 10,
         deals: [
             { id: 'deal-1', name: 'Projeto Alpha', value: 'R$ 25.000', stage: 'Proposta Apresentada', closeDate: '30/08/2025' }
         ],
@@ -61,6 +63,8 @@ export const contacts: User[] = [
         website: 'solucoes.com',
         industry: 'Marketing',
         employees: 20,
+        dialogPriorityScore: 30,
+        financialRiskScore: 80,
         deals: [],
         tasks: [
              { id: 'task-3', description: 'Preparar apresentação de resultados', dueDate: 'Vence Amanhã', completed: false }
@@ -82,6 +86,8 @@ export const contacts: User[] = [
         companyName: 'Logística Global',
         industry: 'Transporte',
         employees: 250,
+        dialogPriorityScore: 65,
+        financialRiskScore: 40,
         deals: [
              { id: 'deal-2', name: 'Expansão de Frota', value: 'R$ 150.000', stage: 'Negociação', closeDate: '15/09/2025' }
         ],
@@ -103,6 +109,8 @@ export const contacts: User[] = [
         companyName: 'RP Consultoria',
         industry: 'Consultoria',
         employees: 5,
+        dialogPriorityScore: 80,
+        financialRiskScore: 25,
         deals: [],
         tasks: [],
         tags: ['#Consultoria', '#SMB'],

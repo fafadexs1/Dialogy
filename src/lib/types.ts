@@ -22,6 +22,8 @@ export type BusinessProfile = {
   tasks: Task[];
   tags: string[];
   customFields?: { [key: string]: any };
+  dialogPriorityScore?: number;
+  financialRiskScore?: number;
 };
 
 export type Deal = {
