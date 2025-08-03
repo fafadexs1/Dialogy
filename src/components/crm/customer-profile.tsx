@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import type { User } from '@/lib/types';
+import type { User, Tag } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Mail, Phone, Building, Briefcase, CheckSquare, Tag, Paperclip, Send, Calendar, Users, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Mail, Phone, Building, Briefcase, CheckSquare, Paperclip, Send, Calendar, Users, TrendingUp, AlertTriangle, Palette, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -105,13 +105,17 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
             </Card>
              <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-lg"><Tag className="h-5 w-5" /> Etiquetas (Tags)</CardTitle>
+                    <CardTitle className="flex items-center gap-2 text-lg"><Palette className="h-5 w-5" /> Etiquetas (Tags)</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
-                   {businessProfile?.tags.map(tag => (
-                     <Badge key={tag} variant="secondary">{tag}</Badge>
+                   {businessProfile?.tags.map((tag: Tag) => (
+                     <Badge key={tag.id} style={{ backgroundColor: tag.color, color: '#fff' }} className="border-transparent">
+                        {tag.label}
+                    </Badge>
                    ))}
-                   <Input placeholder="+ Adicionar tag" className="h-8 mt-2" />
+                   <Button variant="ghost" size="sm" className="h-auto p-1 text-xs mt-2">
+                        <Plus className="mr-1 h-3 w-3" /> Adicionar tag
+                   </Button>
                 </CardContent>
             </Card>
         </div>

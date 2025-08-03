@@ -1,8 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import type { CustomFieldDefinition } from '@/lib/types';
-import { mockCustomFieldDefinitions, leadSources as mockLeadSources, contactChannels as mockContactChannels, jobTitles as mockJobTitles } from '@/lib/mock-data';
+import type { CustomFieldDefinition, SelectableOption, Tag } from '@/lib/types';
+import { 
+    mockCustomFieldDefinitions, 
+    leadSources as mockLeadSources, 
+    contactChannels as mockContactChannels, 
+    jobTitles as mockJobTitles,
+    mockTags 
+} from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Trash2 } from 'lucide-react';
+import { PlusCircle, Trash2, Palette } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -27,18 +33,37 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HTMLInputTypeAttribute } from 'react';
 
-function OptionsManager({ title, options, setOptions }: { title: string, options: string[], setOptions: React.Dispatch<React.SetStateAction<string[]>> }) {
-    const [newItem, setNewItem] = useState('');
+// A generic manager for lists of selectable options (like lead sources, job titles, etc.)
+function OptionsManager({ 
+    title, 
+    options, 
+    setOptions 
+}: { 
+    title: string, 
+    options: (SelectableOption | Tag)[], 
+    setOptions: React.Dispatch<React.SetStateAction<(SelectableOption | Tag)[]>> 
+}) {
+    const [newItemLabel, setNewItemLabel] = useState('');
+    const [newItemColor, setNewItemColor] = useState('#cccccc');
 
     const handleAddItem = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newItem.trim() || options.includes(newItem.trim())) return;
-        setOptions([...options, newItem.trim()]);
-        setNewItem('');
+        if (!newItemLabel.trim()) return;
+        
+        const newItem = {
+            id: newItemLabel.toLowerCase().replace(/\s+/g, '_') + Date.now(),
+            value: newItemLabel.toLowerCase().replace(/\s+/g, '_'),
+            label: newItemLabel,
+            color: newItemColor,
+        };
+        
+        setOptions([...options, newItem]);
+        setNewItemLabel('');
+        setNewItemColor('#cccccc');
     };
 
-    const handleRemoveItem = (itemToRemove: string) => {
-        setOptions(options.filter(item => item !== itemToRemove));
+    const handleRemoveItem = (itemToRemove: SelectableOption | Tag) => {
+        setOptions(options.filter(item => item.id !== itemToRemove.id));
     };
 
     return (
@@ -47,18 +72,38 @@ function OptionsManager({ title, options, setOptions }: { title: string, options
                 <CardTitle className="text-lg">{title}</CardTitle>
             </CardHeader>
             <CardContent>
-                <form onSubmit={handleAddItem} className="flex items-center gap-2 mb-4">
-                    <Input 
-                        placeholder={`Nova opção para ${title}...`}
-                        value={newItem}
-                        onChange={(e) => setNewItem(e.target.value)}
-                    />
+                <form onSubmit={handleAddItem} className="flex items-end gap-2 mb-4">
+                    <div className='flex-1'>
+                        <Label htmlFor={`new-option-${title}`} className='text-xs'>Nome da Opção</Label>
+                        <Input
+                            id={`new-option-${title}`} 
+                            placeholder={`Nova opção para ${title}...`}
+                            value={newItemLabel}
+                            onChange={(e) => setNewItemLabel(e.target.value)}
+                        />
+                    </div>
+                     <div>
+                        <Label htmlFor={`new-color-${title}`} className='text-xs'>Cor</Label>
+                        <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
+                            <Palette className="h-4 w-4 text-muted-foreground"/>
+                            <input
+                                id={`new-color-${title}`}
+                                type="color"
+                                value={newItemColor}
+                                onChange={(e) => setNewItemColor(e.target.value)}
+                                className="w-6 h-6 p-0 border-none bg-transparent"
+                            />
+                        </div>
+                    </div>
                     <Button type="submit" size="sm">Adicionar</Button>
                 </form>
                 <div className="space-y-2">
                     {options.map(option => (
-                        <div key={option} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
-                            <span>{option}</span>
+                        <div key={option.id} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
+                            <div className='flex items-center gap-2'>
+                                <span className='h-4 w-4 rounded-full' style={{backgroundColor: option.color}}></span>
+                                <span>{option.label}</span>
+                            </div>
                              <Button variant="ghost" size="icon" onClick={() => handleRemoveItem(option)}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
                                 <span className="sr-only">Remover</span>
@@ -77,9 +122,11 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<HTMLInputTypeAttribute>('text');
 
-  const [leadSources, setLeadSources] = useState<string[]>(mockLeadSources);
-  const [contactChannels, setContactChannels] = useState<string[]>(mockContactChannels);
-  const [jobTitles, setJobTitles] = useState<string[]>(mockJobTitles);
+  const [leadSources, setLeadSources] = useState<SelectableOption[]>(mockLeadSources);
+  const [contactChannels, setContactChannels] = useState<SelectableOption[]>(mockContactChannels);
+  const [jobTitles, setJobTitles] = useState<SelectableOption[]>(mockJobTitles);
+  const [tags, setTags] = useState<Tag[]>(mockTags);
+
 
   const handleAddField = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,12 +165,12 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
             <Tabs defaultValue="fields">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="fields">Campos Personalizados</TabsTrigger>
-                    <TabsTrigger value="options">Opções de Seleção</TabsTrigger>
+                    <TabsTrigger value="options">Etiquetas e Opções</TabsTrigger>
                 </TabsList>
                 <TabsContent value="fields">
                     <Card className='border-0 shadow-none'>
                     <CardHeader>
-                        <CardTitle>Gerenciador de Campos Personalizados</CardTitle>
+                        <CardTitle>Gerenciador de Campos</CardTitle>
                          <CardDescription>Crie campos únicos para capturar informações essenciais para o seu negócio.</CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -187,13 +234,14 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                  <TabsContent value="options">
                      <Card className='border-0 shadow-none'>
                         <CardHeader>
-                            <CardTitle>Gerenciador de Opções</CardTitle>
-                            <CardDescription>Personalize as opções disponíveis nos campos de seleção do CRM.</CardDescription>
+                            <CardTitle>Gerenciador de Etiquetas e Opções</CardTitle>
+                            <CardDescription>Personalize as etiquetas e as opções disponíveis nos campos de seleção do CRM.</CardDescription>
                         </CardHeader>
                         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <OptionsManager title="Origem do Lead" options={leadSources} setOptions={setLeadSources} />
-                            <OptionsManager title="Cargos" options={jobTitles} setOptions={setJobTitles} />
-                            <OptionsManager title="Canais de Contato" options={contactChannels} setOptions={setContactChannels} />
+                            <OptionsManager title="Etiquetas (Tags)" options={tags} setOptions={setTags as any} />
+                            <OptionsManager title="Cargos" options={jobTitles} setOptions={setJobTitles as any} />
+                            <OptionsManager title="Origem do Lead" options={leadSources} setOptions={setLeadSources as any} />
+                            <OptionsManager title="Canais de Contato" options={contactChannels} setOptions={setContactChannels as any} />
                         </CardContent>
                      </Card>
                 </TabsContent>

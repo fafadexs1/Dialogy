@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Plus } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
-import { mockCustomFieldDefinitions, agents, leadSources, contactChannels } from '@/lib/mock-data';
+import { mockCustomFieldDefinitions, agents, leadSources, contactChannels, jobTitles } from '@/lib/mock-data';
 import type { CustomFieldDefinition } from '@/lib/types';
 
 interface AddContactFormProps {
@@ -95,7 +95,21 @@ export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinit
             <h3 className="text-lg font-semibold">Informações de Contexto</h3>
             <div className="space-y-2">
               <Label htmlFor="title">Cargo</Label>
-              <Input id="title" placeholder="Diretor de Vendas" />
+               <Select>
+                    <SelectTrigger id="title">
+                        <SelectValue placeholder="Selecione um cargo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {jobTitles.map(title => (
+                            <SelectItem key={title.value} value={title.value}>
+                               <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: title.color }}></span>
+                                <span>{title.label}</span>
+                               </div>
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             </div>
             <div className="space-y-2">
                 <Label htmlFor="owner">Proprietário do Contato</Label>
@@ -118,7 +132,12 @@ export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinit
                     </SelectTrigger>
                     <SelectContent>
                         {leadSources.map(source => (
-                            <SelectItem key={source} value={source.toLowerCase().replace(/\s+/g, '_')}>{source}</SelectItem>
+                             <SelectItem key={source.value} value={source.value}>
+                               <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: source.color }}></span>
+                                <span>{source.label}</span>
+                               </div>
+                            </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
@@ -131,7 +150,12 @@ export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinit
                     </SelectTrigger>
                     <SelectContent>
                         {contactChannels.map(channel => (
-                             <SelectItem key={channel} value={channel.toLowerCase().replace(/\s+/g, '_')}>{channel}</SelectItem>
+                             <SelectItem key={channel.value} value={channel.value}>
+                               <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: channel.color }}></span>
+                                <span>{channel.label}</span>
+                               </div>
+                            </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>

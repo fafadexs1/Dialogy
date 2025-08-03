@@ -20,7 +20,7 @@ export type BusinessProfile = {
   employees?: number;
   deals: Deal[];
   tasks: Task[];
-  tags: string[];
+  tags: Tag[];
   customFields?: { [key: string]: any };
   dialogPriorityScore?: number;
   financialRiskScore?: number;
@@ -78,3 +78,12 @@ export type CustomFieldDefinition = {
     type: HTMLInputTypeAttribute;
     placeholder?: string;
 };
+
+export interface SelectableOption {
+    id: string;
+    value: string;
+    label: string;
+    color: string;
+}
+
+export interface Tag extends SelectableOption {}

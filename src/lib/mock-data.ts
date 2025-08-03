@@ -1,4 +1,4 @@
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag } from './types';
 
 export const agents: User[] = [
   { id: 'agent-1', firstName: 'Alex', lastName: 'Johnson', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png', online: true, email: 'agent@dialogy.com' },
@@ -7,9 +7,32 @@ export const agents: User[] = [
   { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
 ];
 
-export const leadSources: string[] = ['Site', 'Indicação', 'Evento', 'Prospecção Ativa'];
-export const contactChannels: string[] = ['WhatsApp', 'Chat no Site', 'Ligação Telefônica', 'E-mail', 'Formulário de Contato'];
-export const jobTitles: string[] = ['Diretor de Vendas', 'Gerente de Marketing', 'Analista de TI', 'CEO'];
+export const mockTags: Tag[] = [
+  { id: 'tag-1', value: 'hot-lead', label: 'Hot Lead', color: '#ef4444' },
+  { id: 'tag-2', value: 'saas-customer', label: 'SaaS Customer', color: '#3b82f6' },
+  { id: 'tag-3', value: 'needs-follow-up', label: 'Needs Follow-Up', color: '#eab308' },
+  { id: 'tag-4', value: 'enterprise', label: 'Enterprise', color: '#8b5cf6' },
+];
+
+export const leadSources: SelectableOption[] = [
+    { id: 'ls-1', value: 'website', label: 'Site', color: '#10b981' },
+    { id: 'ls-2', value: 'referral', label: 'Indicação', color: '#3b82f6' },
+    { id: 'ls-3', value: 'event', label: 'Evento', color: '#8b5cf6' },
+    { id: 'ls-4', value: 'outbound', label: 'Prospecção Ativa', color: '#f97316' },
+];
+export const contactChannels: SelectableOption[] = [
+    { id: 'cc-1', value: 'whatsapp', label: 'WhatsApp', color: '#25D366' },
+    { id: 'cc-2', value: 'website-chat', label: 'Chat no Site', color: '#3b82f6' },
+    { id: 'cc-3', value: 'phone', label: 'Ligação Telefônica', color: '#6366f1' },
+    { id: 'cc-4', value: 'email', label: 'E-mail', color: '#ea580c' },
+    { id: 'cc-5', value: 'form', label: 'Formulário de Contato', color: '#9333ea' },
+];
+export const jobTitles: SelectableOption[] = [
+    { id: 'jt-1', value: 'sales-director', label: 'Diretor de Vendas', color: '#ef4444' },
+    { id: 'jt-2', value: 'marketing-manager', label: 'Gerente de Marketing', color: '#f97316' },
+    { id: 'jt-3', value: 'it-analyst', label: 'Analista de TI', color: '#3b82f6' },
+    { id: 'jt-4', value: 'ceo', label: 'CEO', color: '#1f2937' },
+];
 
 export const mockCustomFieldDefinitions: CustomFieldDefinition[] = [
     { id: 'budget', label: 'Orçamento Anual', type: 'text', placeholder: 'R$ 50.000' },
@@ -42,7 +65,7 @@ export const contacts: User[] = [
             { id: 'task-1', description: 'Enviar contrato para João', dueDate: 'Vence Hoje', completed: false },
             { id: 'task-2', description: 'Ligar para o Sr. Roberto', dueDate: 'Agendado para 05/08', completed: false }
         ],
-        tags: ['#HotLead', '#SaaS', '#PrecisaDeFollowUp'],
+        tags: [mockTags[0], mockTags[1], mockTags[2]],
         customFields: {
             budget: 'R$ 50.000',
             product_interest: 'Software de Gestão',
@@ -69,7 +92,7 @@ export const contacts: User[] = [
         tasks: [
              { id: 'task-3', description: 'Preparar apresentação de resultados', dueDate: 'Vence Amanhã', completed: false }
         ],
-        tags: ['#ClienteAtivo', '#MarketingDigital'],
+        tags: [],
         customFields: {}
       }
     },
@@ -92,7 +115,7 @@ export const contacts: User[] = [
              { id: 'deal-2', name: 'Expansão de Frota', value: 'R$ 150.000', stage: 'Negociação', closeDate: '15/09/2025' }
         ],
         tasks: [],
-        tags: ['#Enterprise', '#Logística'],
+        tags: [mockTags[3]],
         customFields: {}
       }
     },
@@ -113,7 +136,7 @@ export const contacts: User[] = [
         financialRiskScore: 25,
         deals: [],
         tasks: [],
-        tags: ['#Consultoria', '#SMB'],
+        tags: [],
         customFields: {}
       }
     },
