@@ -113,7 +113,7 @@ function TeamSettingsLayout() {
   };
 
   return (
-    <main className="flex-1 bg-secondary/10 p-6">
+    <main className="p-6">
         <div className="mx-auto w-full max-w-6xl">
             <header className="mb-8">
                 <h1 className="text-3xl font-bold">Gestão de Equipes</h1>
@@ -307,22 +307,22 @@ export default function TeamPage() {
 
   return (
     <MainLayout user={user}>
-      <div className="flex flex-col flex-1 h-full">
-        <header className="p-4 border-b">
+      <div className="flex flex-col flex-1 h-screen">
+        <header className="p-4 border-b flex-shrink-0">
           <h1 className="text-2xl font-bold">Equipes</h1>
           <p className="text-muted-foreground">Comunicação interna e gestão de equipes.</p>
         </header>
-        <Tabs defaultValue="communication" className="flex-1 flex flex-col">
-          <div className="p-4 border-b">
+        <Tabs defaultValue="communication" className="flex-1 flex flex-col min-h-0">
+          <div className="p-4 border-b flex-shrink-0">
             <TabsList>
               <TabsTrigger value="communication">Comunicação</TabsTrigger>
               <TabsTrigger value="management">Gestão de Equipes</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="communication" className="m-0 p-0 flex-1 flex">
+          <TabsContent value="communication" className="m-0 p-0 flex-1 flex min-h-0">
             <InternalChatLayout user={user} />
           </TabsContent>
-          <TabsContent value="management" className="m-0 p-0 flex-1 overflow-y-auto">
+          <TabsContent value="management" className="m-0 p-0 flex-1 overflow-y-auto min-h-0">
              <TeamSettingsLayout />
           </TabsContent>
         </Tabs>
@@ -330,5 +330,3 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
-
-    
