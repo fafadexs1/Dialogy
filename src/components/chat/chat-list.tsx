@@ -20,11 +20,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const onlineAgents = useOnlineStatus();
 
   const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-1 p-2 w-full">
+    <div className="space-y-1 p-2">
       {chatList.map((chat) => (
         <div
           key={chat.id}
-          className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors w-full max-w-full ${
+          className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
             selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
           }`}
           onClick={() => setSelectedChat(chat)}
@@ -33,14 +33,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
-          <div className="flex-1 min-w-0 overflow-hidden max-w-full">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <p className="font-semibold truncate flex-1 min-w-0">{chat.contact.name}</p>
+              <p className="font-semibold truncate">{chat.contact.name}</p>
               <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                 {chat.messages[chat.messages.length - 1].timestamp}
               </p>
             </div>
-            <p className="text-sm text-muted-foreground truncate max-w-full">
+            <p className="text-sm text-muted-foreground truncate">
               {chat.messages[chat.messages.length - 1].content}
             </p>
           </div>
@@ -72,7 +72,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
       {/* Agentes Online */}
       <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
-        <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="min-h-[48px] flex flex-wrap items-center gap-2 py-1">
           {onlineAgents.map(agent => (
             <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
               <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
