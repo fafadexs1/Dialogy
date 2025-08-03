@@ -29,6 +29,8 @@ import {
 import type { User } from '@/lib/types';
 import { signOutAction } from '@/actions/auth';
 import { usePathname } from 'next/navigation';
+import { WorkspaceSwitcher } from './workspace-switcher';
+import { useState } from 'react';
 
 interface SidebarProps {
   user: User;
@@ -59,6 +61,13 @@ function SignOut() {
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(user.activeWorkspaceId);
+
+  // This would in a real app be a server call or context update
+  const handleWorkspaceChange = (workspaceId: string) => {
+    setActiveWorkspaceId(workspaceId);
+    console.log("Switched to workspace:", workspaceId);
+  }
 
   return (
     <aside className="flex h-full flex-col items-center justify-between border-r bg-card p-2">
@@ -67,6 +76,14 @@ export function Sidebar({ user }: SidebarProps) {
           <LifeBuoy className="h-6 w-6" />
           <span className="sr-only">Dialogy</span>
         </Link>
+        
+        <WorkspaceSwitcher 
+            user={user} 
+            activeWorkspaceId={activeWorkspaceId}
+            onWorkspaceChange={handleWorkspaceChange}
+        />
+        <Separator />
+
         <nav className="flex flex-col items-center gap-2">
           <TooltipProvider>
             {mainNavItems.map((item) => (
@@ -120,4 +137,8 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
     </aside>
   );
+}
+
+function Separator() {
+    return <div className="w-full h-px bg-border my-2" />
 }

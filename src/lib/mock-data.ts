@@ -1,7 +1,23 @@
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace } from './types';
+
+export const workspaces: Workspace[] = [
+    { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
+    { id: 'ws-2', name: 'InnovateTech', avatar: 'https://placehold.co/40x40.png' },
+    { id: 'ws-3', name: 'Alex\'s Freelance', avatar: 'https://placehold.co/40x40.png' },
+]
 
 export const agents: User[] = [
-  { id: 'agent-1', firstName: 'Alex', lastName: 'Johnson', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png', online: true, email: 'agent@dialogy.com' },
+  { 
+    id: 'agent-1', 
+    firstName: 'Alex', 
+    lastName: 'Johnson', 
+    name: 'Alex Johnson', 
+    avatar: 'https://placehold.co/40x40.png', 
+    online: true, 
+    email: 'agent@dialogy.com',
+    workspaces: workspaces,
+    activeWorkspaceId: 'ws-1',
+  },
   { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com' },
   { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com' },
   { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },

@@ -1,9 +1,15 @@
 import { HTMLInputTypeAttribute } from "react";
 
+export type Workspace = {
+    id: string;
+    name: string;
+    avatar: string;
+}
+
 export type User = {
   id: string;
   firstName: string;
-  lastName: string;
+  lastName:string;
   name: string; // Will be generated from firstName + lastName
   avatar: string;
   online?: boolean;
@@ -11,6 +17,8 @@ export type User = {
   phone?: string;
   lastSeen?: string;
   businessProfile?: BusinessProfile;
+  workspaces?: Workspace[];
+  activeWorkspaceId?: string;
 };
 
 export type BusinessProfile = {
