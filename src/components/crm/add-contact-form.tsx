@@ -22,16 +22,14 @@ import {
 } from '@/components/ui/select';
 import { Plus } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
-import { mockCustomFieldDefinitions, agents } from '@/lib/mock-data';
+import { mockCustomFieldDefinitions, agents, leadSources, contactChannels } from '@/lib/mock-data';
 import type { CustomFieldDefinition } from '@/lib/types';
 
 interface AddContactFormProps {
-  // In the future, this will be fetched from a global state or context
   customFieldDefinitions?: CustomFieldDefinition[];
 }
 
 export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinitions }: AddContactFormProps) {
-  // In a real app, this would come from a user query or a global state management
   const owners = agents;
 
   return (
@@ -119,10 +117,9 @@ export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinit
                         <SelectValue placeholder="Selecione a origem" />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="site">Site</SelectItem>
-                        <SelectItem value="indication">Indicação</SelectItem>
-                        <SelectItem value="event">Evento</SelectItem>
-                        <SelectItem value="prospecting">Prospecção Ativa</SelectItem>
+                        {leadSources.map(source => (
+                            <SelectItem key={source} value={source.toLowerCase().replace(/\s+/g, '_')}>{source}</SelectItem>
+                        ))}
                     </SelectContent>
                 </Select>
             </div>
@@ -133,11 +130,9 @@ export function AddContactForm({ customFieldDefinitions = mockCustomFieldDefinit
                         <SelectValue placeholder="Selecione o canal" />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                        <SelectItem value="site-chat">Chat no Site</SelectItem>
-                        <SelectItem value="phone-call">Ligação Telefônica</SelectItem>
-                        <SelectItem value="email">E-mail</SelectItem>
-                        <SelectItem value="form">Formulário de Contato</SelectItem>
+                        {contactChannels.map(channel => (
+                             <SelectItem key={channel} value={channel.toLowerCase().replace(/\s+/g, '_')}>{channel}</SelectItem>
+                        ))}
                     </SelectContent>
                 </Select>
             </div>

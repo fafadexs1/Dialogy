@@ -7,6 +7,10 @@ export const agents: User[] = [
   { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
 ];
 
+export const leadSources: string[] = ['Site', 'Indicação', 'Evento', 'Prospecção Ativa'];
+export const contactChannels: string[] = ['WhatsApp', 'Chat no Site', 'Ligação Telefônica', 'E-mail', 'Formulário de Contato'];
+export const jobTitles: string[] = ['Diretor de Vendas', 'Gerente de Marketing', 'Analista de TI', 'CEO'];
+
 export const mockCustomFieldDefinitions: CustomFieldDefinition[] = [
     { id: 'budget', label: 'Orçamento Anual', type: 'text', placeholder: 'R$ 50.000' },
     { id: 'product_interest', label: 'Produto de Interesse', type: 'text', placeholder: 'Software de Gestão' },
