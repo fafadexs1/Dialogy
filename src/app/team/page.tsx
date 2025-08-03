@@ -113,7 +113,7 @@ function TeamSettingsLayout() {
   };
 
   return (
-    <main className="flex-1 flex-col bg-secondary/10 p-6 flex">
+    <main className="flex-1 flex-col bg-secondary/10 p-6 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl">
             <header className="mb-8">
                 <h1 className="text-3xl font-bold">Gestão de Equipes</h1>
