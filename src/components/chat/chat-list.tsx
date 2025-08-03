@@ -80,7 +80,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0">
         <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col">
           <div className="px-4 flex-shrink-0">
             <TabsList className="grid w-full grid-cols-3">
@@ -90,19 +90,23 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </TabsList>
           </div>
           
-          <div className="flex-1 overflow-hidden">
+          <TabsContent value="atendimentos" className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <TabsContent value="atendimentos" className="m-0 h-full">
-                {renderChatList(atendimentos)}
-              </TabsContent>
-              <TabsContent value="gerais" className="m-0 h-full">
-                {renderChatList(gerais)}
-              </TabsContent>
-              <TabsContent value="encerrados" className="m-0 h-full">
-                {renderChatList(encerrados)}
-              </TabsContent>
+              {renderChatList(atendimentos)}
             </ScrollArea>
-          </div>
+          </TabsContent>
+          
+          <TabsContent value="gerais" className="flex-1 m-0 overflow-hidden">
+            <ScrollArea className="h-full">
+              {renderChatList(gerais)}
+            </ScrollArea>
+          </TabsContent>
+          
+          <TabsContent value="encerrados" className="flex-1 m-0 overflow-hidden">
+            <ScrollArea className="h-full">
+              {renderChatList(encerrados)}
+            </ScrollArea>
+          </TabsContent>
         </Tabs>
       </div>
     </div>
