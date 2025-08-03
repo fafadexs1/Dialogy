@@ -3,21 +3,17 @@
 import React from 'react';
 import type { User } from '@/lib/types';
 import { Sidebar } from './sidebar';
-import CustomerChatLayout from './customer-chat-layout';
-import InternalChatLayout from './internal-chat-layout';
-
 
 interface MainLayoutProps {
   user: User;
+  children: React.ReactNode;
 }
 
-export function MainLayout({ user }: MainLayoutProps) {
-  const [activeView, setActiveView] = React.useState<'customer' | 'internal'>('customer');
-
+export function MainLayout({ user, children }: MainLayoutProps) {
   return (
     <div className="flex h-screen w-full bg-background">
-      <Sidebar user={user} activeView={activeView} setActiveView={setActiveView} />
-      {activeView === 'customer' ? <CustomerChatLayout /> : <InternalChatLayout user={user} />}
+      <Sidebar user={user} />
+      {children}
     </div>
   );
 }

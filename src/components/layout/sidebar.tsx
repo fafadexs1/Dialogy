@@ -6,10 +6,10 @@ import {
   Users,
   Settings,
   BarChart2,
-  LayoutDashboard,
   LifeBuoy,
   LogOut,
   User as UserIcon,
+  Slack,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -28,22 +28,18 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
 import { signOutAction } from '@/actions/auth';
+import { usePathname } from 'next/navigation';
 
 interface SidebarProps {
   user: User;
-  activeView: 'customer' | 'internal';
-  setActiveView: (view: 'customer' | 'internal') => void;
 }
 
 const mainNavItems = [
-  { id: 'customer', icon: MessageSquare, label: 'Conversas' },
-  { id: 'internal', icon: Users, label: 'Equipe' },
-];
-
-const otherNavItems = [
-    { href: '#', icon: LayoutDashboard, label: 'Dashboard' },
-    { href: '#', icon: BarChart2, label: 'Relatórios' },
-    { href: '#', icon: Settings, label: 'Configurações' },
+  { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
+  { href: '/crm', icon: Users, label: 'CRM 360º' },
+  { href: '/team', icon: Slack, label: 'Equipe' },
+  { href: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { href: '/settings', icon: Settings, label: 'Configurações' },
 ];
 
 function SignOut() {
@@ -62,7 +58,9 @@ function SignOut() {
     );
   }
 
-export function Sidebar({ user, activeView, setActiveView }: SidebarProps) {
+export function Sidebar({ user }: SidebarProps) {
+  const pathname = usePathname();
+
   return (
     <aside className="flex h-full flex-col items-center justify-between border-r bg-card p-2">
       <div className="flex flex-col items-center gap-4">
@@ -75,30 +73,14 @@ export function Sidebar({ user, activeView, setActiveView }: SidebarProps) {
             {mainNavItems.map((item) => (
               <Tooltip key={item.label}>
                 <TooltipTrigger asChild>
-                  <button
-                    onClick={() => setActiveView(item.id as 'customer' | 'internal')}
+                  <Link
+                    href={item.href}
                     className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
                       ${
-                        activeView === item.id
+                        pathname === item.href
                           ? 'bg-primary/10 text-primary'
                           : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                       }`}
-                  >
-                    <item.icon className="h-5 w-5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>{item.label}</p>
-                </TooltipContent>
-              </Tooltip>
-            ))}
-            <hr className="my-2 w-full border-t border-border" />
-            {otherNavItems.map((item) => (
-              <Tooltip key={item.label}>
-                <TooltipTrigger asChild>
-                  <Link
-                    href={item.href}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                   >
                     <item.icon className="h-5 w-5" />
                   </Link>
