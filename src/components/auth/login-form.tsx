@@ -26,7 +26,7 @@ export function LoginForm() {
               id="email"
               name="email"
               type="email"
-              placeholder="agent@connectisp.com"
+              placeholder="agent@dialogy.com"
               required
             />
           </div>

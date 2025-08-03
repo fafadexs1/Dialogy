@@ -68,7 +68,7 @@ export function Sidebar({ user, activeView, setActiveView }: SidebarProps) {
       <div className="flex flex-col items-center gap-4">
         <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <LifeBuoy className="h-6 w-6" />
-          <span className="sr-only">ConnectISP</span>
+          <span className="sr-only">Dialogy</span>
         </Link>
         <nav className="flex flex-col items-center gap-2">
           <TooltipProvider>

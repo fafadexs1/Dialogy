@@ -10,7 +10,7 @@ export default function RegisterPage() {
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
             <LifeBuoy className="h-8 w-8" />
           </div>
-          <h1 className="text-3xl font-bold">ConnectISP</h1>
+          <h1 className="text-3xl font-bold">Dialogy</h1>
           <p className="text-muted-foreground">Crie sua conta</p>
         </div>
         <RegisterForm />

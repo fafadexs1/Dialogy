@@ -44,7 +44,7 @@ export function RegisterForm() {
               id="email"
               name="email"
               type="email"
-              placeholder="agente@connectisp.com"
+              placeholder="agente@dialogy.com"
               required
             />
           </div>
