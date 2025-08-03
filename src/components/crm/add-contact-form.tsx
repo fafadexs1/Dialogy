@@ -22,14 +22,11 @@ import {
 } from '@/components/ui/select';
 import { Plus } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
+import { customFieldDefinitions, agents } from '@/lib/mock-data';
 
 export function AddContactForm() {
   // In a real app, this would come from a user query
-  const owners = [
-    { id: 'agent-1', name: 'Alex Johnson' },
-    { id: 'agent-2', name: 'Maria Garcia' },
-    { id: 'agent-3', name: 'David Smith' },
-  ];
+  const owners = agents;
 
   return (
     <Dialog>
@@ -146,8 +143,13 @@ export function AddContactForm() {
              <hr className="my-4"/>
 
             <h3 className="text-lg font-semibold">Campos Personalizados</h3>
-            <div className='p-4 text-center bg-secondary/50 rounded-lg'>
-                <p className='text-sm text-muted-foreground'>Em breve: Crie campos personalizados nas configurações para adaptar o CRM ao seu negócio.</p>
+            <div className='space-y-4 p-4 border bg-secondary/30 rounded-lg'>
+                {customFieldDefinitions.map(field => (
+                  <div key={field.id} className="space-y-2">
+                    <Label htmlFor={field.id}>{field.label}</Label>
+                    <Input id={field.id} placeholder={field.placeholder} type={field.type} />
+                  </div>
+                ))}
             </div>
           </div>
         </div>

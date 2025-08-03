@@ -1,3 +1,5 @@
+import { HTMLInputTypeAttribute } from "react";
+
 export type User = {
   id: string;
   firstName: string;
@@ -19,6 +21,7 @@ export type BusinessProfile = {
   deals: Deal[];
   tasks: Task[];
   tags: string[];
+  customFields?: { [key: string]: any };
 };
 
 export type Deal = {
@@ -65,4 +68,11 @@ export type InternalMessage = {
   content: string;
   timestamp: string;
   channelId: string;
+};
+
+export type CustomFieldDefinition = {
+    id: string;
+    label: string;
+    type: HTMLInputTypeAttribute;
+    placeholder?: string;
 };

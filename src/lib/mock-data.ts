@@ -1,10 +1,17 @@
-import type { Chat, User, InternalChannel, InternalMessage } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition } from './types';
 
 export const agents: User[] = [
   { id: 'agent-1', firstName: 'Alex', lastName: 'Johnson', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png', online: true, email: 'agent@dialogy.com' },
   { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com' },
   { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com' },
   { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
+];
+
+export const customFieldDefinitions: CustomFieldDefinition[] = [
+    { id: 'budget', label: 'Orçamento Anual', type: 'text', placeholder: 'R$ 50.000' },
+    { id: 'product_interest', label: 'Produto de Interesse', type: 'text', placeholder: 'Software de Gestão' },
+    { id: 'birthday', label: 'Data de Aniversário', type: 'date', placeholder: '' },
+    { id: 'legacy_id', label: 'ID do Cliente no Sistema Antigo', type: 'text', placeholder: 'XYZ-123' },
 ];
 
 export const contacts: User[] = [
@@ -29,7 +36,11 @@ export const contacts: User[] = [
             { id: 'task-1', description: 'Enviar contrato para João', dueDate: 'Vence Hoje', completed: false },
             { id: 'task-2', description: 'Ligar para o Sr. Roberto', dueDate: 'Agendado para 05/08', completed: false }
         ],
-        tags: ['#HotLead', '#SaaS', '#PrecisaDeFollowUp']
+        tags: ['#HotLead', '#SaaS', '#PrecisaDeFollowUp'],
+        customFields: {
+            budget: 'R$ 50.000',
+            product_interest: 'Software de Gestão',
+        }
       }
     },
     { 
@@ -50,7 +61,8 @@ export const contacts: User[] = [
         tasks: [
              { id: 'task-3', description: 'Preparar apresentação de resultados', dueDate: 'Vence Amanhã', completed: false }
         ],
-        tags: ['#ClienteAtivo', '#MarketingDigital']
+        tags: ['#ClienteAtivo', '#MarketingDigital'],
+        customFields: {}
       }
     },
     { 
@@ -70,7 +82,8 @@ export const contacts: User[] = [
              { id: 'deal-2', name: 'Expansão de Frota', value: 'R$ 150.000', stage: 'Negociação', closeDate: '15/09/2025' }
         ],
         tasks: [],
-        tags: ['#Enterprise', '#Logística']
+        tags: ['#Enterprise', '#Logística'],
+        customFields: {}
       }
     },
     { 
@@ -88,7 +101,8 @@ export const contacts: User[] = [
         employees: 5,
         deals: [],
         tasks: [],
-        tags: ['#Consultoria', '#SMB']
+        tags: ['#Consultoria', '#SMB'],
+        customFields: {}
       }
     },
 ];
