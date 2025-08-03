@@ -1,110 +1,55 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { type User, type Contract } from '@/lib/types';
+import { type User } from '@/lib/types';
 import {
   Mail,
   Phone,
-  FileText,
-  Wifi,
-  ChartPie,
-  Receipt,
-  Headset,
-  UserCog,
+  Briefcase,
+  CheckSquare,
+  Building,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import Link from 'next/link';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 
 interface ContactPanelProps {
   contact: User;
 }
 
 export default function ContactPanel({ contact }: ContactPanelProps) {
-  const [selectedContract, setSelectedContract] = useState<Contract | undefined>(
-    contact.customerInfo?.contracts?.[0]
-  );
 
-  useEffect(() => {
-    setSelectedContract(contact.customerInfo?.contracts?.[0]);
-  }, [contact]);
-
-  if (!contact.customerInfo) {
+  if (!contact.businessProfile) {
     return (
       <div className="hidden w-full max-w-xs flex-col border-l bg-card lg:flex">
         <div className="flex h-16 items-center border-b px-4">
           <h3 className="font-semibold">Informações do Contato</h3>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-          <UserCog className="h-16 w-16 text-muted-foreground/50 mb-4" />
+          <Building className="h-16 w-16 text-muted-foreground/50 mb-4" />
           <h4 className="font-medium">Detalhes do Contato</h4>
           <p className="text-sm text-muted-foreground">
-            Selecione uma conversa com cliente para ver os detalhes.
+            Selecione um cliente para ver os detalhes.
           </p>
         </div>
       </div>
     );
   }
 
-  const { customerInfo } = contact;
-  const dataUsagePercentage = selectedContract
-    ? (selectedContract.dataUsage.used / selectedContract.dataUsage.total) * 100
-    : 0;
-
-  const getStatusIcon = (status: Contract['connectionStatus']) => {
-    switch (status) {
-      case 'Online':
-        return <Wifi className="h-4 w-4 text-green-500" />;
-      case 'Offline':
-        return <Wifi className="h-4 w-4 text-red-500" />;
-      case 'Instável':
-        return <Wifi className="h-4 w-4 text-yellow-500" />;
-      default:
-        return <Wifi className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
-
-  const getStatusBadgeVariant = (
-    status: 'Paga' | 'Vencida' | 'Pendente'
-  ) => {
-    switch (status) {
-      case 'Vencida':
-        return 'destructive';
-      default:
-        return 'default';
-    }
-  };
-
-  const getTicketBadgeVariant = (
-    status: 'Resolvido' | 'Aberto' | 'Em análise'
-  ): 'default' | 'secondary' | 'destructive' | 'outline' | null | undefined => {
-    switch (status) {
-      case 'Resolvido':
-        return 'secondary';
-      case 'Aberto':
-        return 'default';
-      case 'Em análise':
-        return 'outline';
-      default:
-        return 'secondary';
-    }
-  };
+  const { businessProfile } = contact;
 
   return (
-    <div className="hidden w-full max-w-xs flex-col border-l bg-white lg:flex">
-      <div className="flex h-16 items-center border-b px-4">
-        <h3 className="font-semibold">Detalhes do Cliente</h3>
+    <div className="hidden w-full max-w-xs flex-col border-l bg-card lg:flex">
+      <div className="flex h-16 items-center justify-between border-b px-4">
+        <h3 className="font-semibold">Detalhes do Contato</h3>
+        <Link href="/crm">
+            <Button variant="outline" size="sm">Ver Perfil 360º</Button>
+        </Link>
       </div>
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
+      <div className="flex-1 overflow-y-auto p-4">
+        
           {/* Customer Info */}
           <div className="flex items-center">
             <Avatar className="h-14 w-14 shrink-0 border">
@@ -113,7 +58,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
             </Avatar>
             <div className="ml-4">
               <h2 className="font-bold text-lg">{contact.name}</h2>
-              <p className="text-xs text-muted-foreground">ID: {contact.id}</p>
+              <p className="text-sm text-muted-foreground">{businessProfile.companyName}</p>
             </div>
           </div>
           <div className="mt-4 space-y-2 text-sm">
@@ -132,156 +77,58 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
               </div>
             )}
           </div>
-        </div>
-        <hr className="shrink-0 bg-gray-200 h-[1px] w-full" />
+        
+        <hr className="my-4" />
 
-        {/* Contract Info */}
-        <div className="p-4">
-          <label
-            htmlFor="contract-selector"
-            className="flex items-center text-sm font-semibold mb-2"
-          >
-            <FileText className="h-4 w-4 mr-2" /> Contrato/Serviço
-          </label>
-          <Select
-            value={selectedContract?.contractId}
-            onValueChange={(value) =>
-              setSelectedContract(
-                customerInfo.contracts.find((c) => c.contractId === value)
-              )
-            }
-            disabled={customerInfo.contracts.length <= 1}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecione um contrato" />
-            </SelectTrigger>
-            <SelectContent>
-              {customerInfo.contracts.map((contract) => (
-                <SelectItem key={contract.contractId} value={contract.contractId}>
-                  {contract.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {selectedContract && (
-          <>
-            <hr className="shrink-0 bg-gray-200 h-[1px] w-full" />
-            <div className="p-4 space-y-4">
-              {/* Connection Status */}
-              <div>
-                <h4 className="flex items-center text-sm font-semibold mb-2">
-                  <Wifi className="h-4 w-4 mr-2" />
-                  Status da Conexão
-                </h4>
-                <div className="flex items-center gap-2 rounded-md border p-2 bg-gray-100">
-                  {getStatusIcon(selectedContract.connectionStatus)}
-                  <span className="text-sm font-medium">
-                    {selectedContract.connectionStatus}
-                  </span>
-                </div>
-              </div>
-
-              {/* Data Usage */}
-              <div>
-                <h4 className="flex items-center text-sm font-semibold mb-2">
-                  <ChartPie className="h-4 w-4 mr-2" />
-                  Consumo de Dados
-                </h4>
-                <div className="rounded-md border p-2 bg-gray-100">
-                  <div className="flex justify-between text-xs font-medium mb-1">
-                    <span>
-                      {selectedContract.dataUsage.used}
-                      {selectedContract.dataUsage.unit}
-                    </span>
-                    <span>
-                      {selectedContract.dataUsage.total}
-                      {selectedContract.dataUsage.unit}
-                    </span>
-                  </div>
-                  <Progress value={dataUsagePercentage} className="h-2" />
-                </div>
-              </div>
-
-              {/* Invoices */}
-              <div>
-                <h4 className="flex items-center text-sm font-semibold mb-2">
-                  <Receipt className="h-4 w-4 mr-2" />
-                  Faturas Pendentes
-                  {customerInfo.openInvoices.length > 0 && (
-                    <Badge variant="destructive" className="ml-auto">
-                      {customerInfo.openInvoices.length}
-                    </Badge>
-                  )}
-                </h4>
-                <div className="space-y-2">
-                  {customerInfo.openInvoices.length > 0 ? (
-                    customerInfo.openInvoices.map((invoice) => (
-                      <div
-                        key={invoice.id}
-                        className="rounded-md border p-2 text-sm bg-gray-100"
-                      >
-                        <div className="flex justify-between items-center">
-                          <p className="font-semibold">{invoice.id}</p>
-                          <Badge variant={getStatusBadgeVariant(invoice.status)}>
-                            {invoice.status}
-                          </Badge>
+        {/* Deals */}
+        <Card className="bg-transparent border-0 shadow-none">
+            <CardHeader className="p-0 mb-2">
+                <CardTitle className="flex items-center justify-between text-base">
+                    <span className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Negócios</span>
+                    <Badge variant="default" className="text-xs">{businessProfile.deals.length}</Badge>
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 space-y-2">
+                {businessProfile.deals.length > 0 ? (
+                    businessProfile.deals.map(deal => (
+                        <div key={deal.id} className="p-2 border rounded-md bg-background">
+                            <p className="font-semibold text-sm">{deal.name}</p>
+                            <div className="flex justify-between items-center text-xs">
+                                <span className="text-green-600 font-medium">{deal.value}</span>
+                                <Badge variant="secondary" className="text-xs">{deal.stage}</Badge>
+                            </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Venc.: {invoice.dueDate} - {invoice.amount}
-                        </p>
-                      </div>
                     ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground p-2 text-center">
-                      Nenhuma fatura pendente.
-                    </p>
-                  )}
-                </div>
-              </div>
+                ) : (
+                     <p className="text-sm text-muted-foreground p-2 text-center">Nenhum negócio ativo.</p>
+                )}
+            </CardContent>
+        </Card>
+        
+        <hr className="my-4" />
 
-              {/* Tickets */}
-              <div>
-                <h4 className="flex items-center text-sm font-semibold mb-2">
-                  <Headset className="h-4 w-4 mr-2" />
-                  Chamados Técnicos
-                </h4>
-                <div className="space-y-2">
-                  {customerInfo.technicalTickets.length > 0 ? (
-                    customerInfo.technicalTickets.map((ticket) => (
-                      <div
-                        key={ticket.id}
-                        className="rounded-md border p-2 text-sm bg-gray-100"
-                      >
-                        <div className="flex justify-between items-center">
-                          <p className="font-semibold truncate pr-2">
-                            {ticket.subject}
-                          </p>
-                          <Badge variant={getTicketBadgeVariant(ticket.status)}>
-                            {ticket.status}
-                          </Badge>
+        {/* Tasks */}
+         <Card className="bg-transparent border-0 shadow-none">
+            <CardHeader className="p-0 mb-2">
+                <CardTitle className="flex items-center justify-between text-base">
+                   <span className="flex items-center gap-2"><CheckSquare className="h-4 w-4" /> Tarefas</span>
+                    <Badge variant="default" className="text-xs">{businessProfile.tasks.length}</Badge>
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 space-y-2">
+                {businessProfile.tasks.length > 0 ? (
+                    businessProfile.tasks.map(task => (
+                        <div key={task.id} className="flex items-start gap-2 p-2 border rounded-md bg-background text-sm">
+                           <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 ${task.completed ? 'text-primary' : 'text-muted-foreground'}`}/>
+                           <p className={`font-medium ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.description}</p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {ticket.id} - {ticket.date}
-                        </p>
-                      </div>
                     ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground p-2 text-center">
-                      Nenhum chamado recente.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-      <div className="p-4 border-t mt-auto">
-        <Button variant="outline" className="w-full">
-          Ver Perfil Completo
-        </Button>
+                ) : (
+                     <p className="text-sm text-muted-foreground p-2 text-center">Nenhuma tarefa pendente.</p>
+                )}
+            </CardContent>
+        </Card>
+
       </div>
     </div>
   );

@@ -6,40 +6,32 @@ export type User = {
   email?: string;
   phone?: string;
   lastSeen?: string;
-  customerInfo?: CustomerInfo;
+  businessProfile?: BusinessProfile;
 };
 
-export type CustomerInfo = {
-  contracts: Contract[];
-  openInvoices: Invoice[];
-  technicalTickets: Ticket[];
+export type BusinessProfile = {
+  companyName: string;
+  website?: string;
+  industry?: string;
+  employees?: number;
+  deals: Deal[];
+  tasks: Task[];
+  tags: string[];
 };
 
-export type Contract = {
-  contractId: string;
-  address: string;
-  connectionStatus: 'Online' | 'Offline' | 'Instável' | 'Desconhecido';
-  currentPlan: string;
-  dataUsage: {
-    used: number;
-    total: number;
-    unit: 'GB' | 'MB';
-  };
+export type Deal = {
+  id: string;
+  name: string;
+  value: string;
+  stage: 'Qualificação' | 'Proposta Apresentada' | 'Negociação' | 'Fechado';
+  closeDate: string;
 };
 
-export type Invoice = {
-    id: string;
-    dueDate: string;
-    amount: string;
-    status: 'Paga' | 'Vencida' | 'Pendente';
-    url: string;
-};
-
-export type Ticket = {
-    id: string;
-    date: string;
-    subject: string;
-    status: 'Resolvido' | 'Aberto' | 'Em análise';
+export type Task = {
+  id: string;
+  description: string;
+  dueDate: string;
+  completed: boolean;
 };
 
 export type Message = {

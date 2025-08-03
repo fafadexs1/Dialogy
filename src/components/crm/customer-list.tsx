@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { type User } from '@/lib/types';
+import { Button } from '../ui/button';
 
 interface CustomerListProps {
   customers: User[];
@@ -19,21 +20,26 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (customer.businessProfile?.companyName && customer.businessProfile.companyName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
     <div className="flex w-full max-w-sm flex-col border-r bg-card">
       <div className="p-4 border-b">
-        <h2 className="text-2xl font-bold">Clientes</h2>
+        <h2 className="text-2xl font-bold">Relacionamentos</h2>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input 
-            placeholder="Pesquisar cliente..." 
+            placeholder="Pesquisar contatos ou empresas..." 
             className="pl-9" 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+        </div>
+        <div className="flex items-center gap-2 mt-4">
+            <Button className="w-full"><Plus className="mr-2 h-4 w-4"/> Adicionar Contato</Button>
+            <Button variant="outline" className="w-full">Adicionar Empresa</Button>
         </div>
       </div>
       <ScrollArea className="h-0 flex-1">
@@ -52,7 +58,7 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
               </Avatar>
               <div className="flex-1 overflow-hidden">
                 <p className="font-semibold truncate">{customer.name}</p>
-                <p className="text-sm text-muted-foreground truncate">{customer.email}</p>
+                <p className="text-sm text-muted-foreground truncate">{customer.businessProfile?.companyName}</p>
               </div>
             </div>
           ))}
