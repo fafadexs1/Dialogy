@@ -25,26 +25,28 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         {chatList.map((chat) => (
         <div
             key={chat.id}
-            className={`flex cursor-pointer items-center gap-3 rounded-lg p-3 transition-colors ${
+            className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
             selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
             }`}
             onClick={() => setSelectedChat(chat)}
         >
             <Avatar className="h-10 w-10 border">
-            <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
-            <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+              <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+              <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-                <p className="font-semibold truncate">
-                {chat.contact.name}
-                </p>
+                <div className="flex items-center justify-between">
+                    <p className="font-semibold truncate">
+                        {chat.contact.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground whitespace-nowrap">
+                        {chat.messages[chat.messages.length - 1].timestamp}
+                    </p>
+                </div>
                 <p className="text-sm text-muted-foreground truncate">
-                {chat.messages[chat.messages.length - 1].content}
+                   {chat.messages[chat.messages.length - 1].content}
                 </p>
             </div>
-             <p className="text-xs text-muted-foreground flex-shrink-0 self-start mt-1">
-                {chat.messages[chat.messages.length - 1].timestamp}
-            </p>
         </div>
         ))}
     </div>
