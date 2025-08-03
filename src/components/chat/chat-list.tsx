@@ -70,13 +70,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
       </div>
       <div className="px-4">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
-        <div className="flex items-center gap-2">
-          {onlineAgents.map(agent => (
-            <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500">
-              <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
-              <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
-            </Avatar>
-          ))}
+        <div className="min-h-[48px]">
+          <div className="flex flex-wrap items-center gap-2 py-1">
+            {onlineAgents.map(agent => (
+              <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500">
+                <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
+                <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
+              </Avatar>
+            ))}
+          </div>
         </div>
       </div>
       <Tabs defaultValue="atendimentos" className="flex-1 mt-4 flex flex-col">
