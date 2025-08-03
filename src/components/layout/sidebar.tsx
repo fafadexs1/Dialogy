@@ -39,7 +39,6 @@ const mainNavItems = [
   { href: '/crm', icon: Users, label: 'CRM 360º' },
   { href: '/team', icon: Slack, label: 'Equipe' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
-  { href: '/settings', icon: Settings, label: 'Configurações' },
 ];
 
 function SignOut() {

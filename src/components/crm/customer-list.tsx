@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { type User } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
+import { CrmSettings } from './crm-settings';
 
 interface CustomerListProps {
   customers: User[];
@@ -28,7 +29,14 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
   return (
     <div className="flex w-full max-w-sm flex-col border-r bg-card">
       <div className="p-4 border-b">
-        <h2 className="text-2xl font-bold">Relacionamentos</h2>
+        <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold">Relacionamentos</h2>
+            <CrmSettings>
+                <Button variant="ghost" size="icon">
+                    <Settings className="h-5 w-5" />
+                </Button>
+            </CrmSettings>
+        </div>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input 
