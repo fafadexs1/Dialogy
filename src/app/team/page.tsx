@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState } from 'react';
@@ -11,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { PlusCircle, Trash2, Palette } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import InternalChatLayout from '@/components/layout/internal-chat-layout';
 
 const daysOfWeek = [
   { id: 'seg', label: 'Segunda-feira' },
@@ -36,7 +39,7 @@ const initialTeams: Team[] = [
   { id: 'team-3', name: 'Financeiro', color: '#f97316', businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
 ];
 
-function TeamsLayout() {
+function TeamSettingsLayout() {
   const [teams, setTeams] = useState<Team[]>(initialTeams);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamColor, setNewTeamColor] = useState('#cccccc');
@@ -218,7 +221,26 @@ export default function TeamPage() {
 
   return (
     <MainLayout user={user}>
-      <TeamsLayout />
+      <div className="flex flex-col flex-1 h-screen">
+        <header className="p-4 border-b">
+          <h1 className="text-2xl font-bold">Equipes</h1>
+          <p className="text-muted-foreground">Comunicação interna e gestão de equipes.</p>
+        </header>
+        <Tabs defaultValue="communication" className="flex-1 flex flex-col">
+          <div className="p-4 border-b">
+            <TabsList>
+              <TabsTrigger value="communication">Comunicação</TabsTrigger>
+              <TabsTrigger value="management">Gestão de Equipes</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="communication" className="m-0 p-0 flex-1 flex">
+            <InternalChatLayout user={user} />
+          </TabsContent>
+          <TabsContent value="management" className="m-0 p-0 flex-1">
+             <TeamSettingsLayout />
+          </TabsContent>
+        </Tabs>
+      </div>
     </MainLayout>
   );
 }

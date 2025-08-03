@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -93,7 +94,7 @@ export function Sidebar({ user }: SidebarProps) {
                     href={item.href}
                     className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
                       ${
-                        pathname === item.href
+                        pathname.startsWith(item.href) && (item.href !== '/' || pathname === '/')
                           ? 'bg-primary/10 text-primary'
                           : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                       }`}
