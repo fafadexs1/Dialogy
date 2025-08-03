@@ -1,0 +1,161 @@
+'use client';
+
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Plus } from 'lucide-react';
+import { Textarea } from '../ui/textarea';
+
+export function AddContactForm() {
+  // In a real app, this would come from a user query
+  const owners = [
+    { id: 'agent-1', name: 'Alex Johnson' },
+    { id: 'agent-2', name: 'Maria Garcia' },
+    { id: 'agent-3', name: 'David Smith' },
+  ];
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button className="w-full">
+          <Plus className="mr-2 h-4 w-4" /> Adicionar Contato
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Criar Novo Contato</DialogTitle>
+          <DialogDescription>
+            Preencha os detalhes abaixo para adicionar um novo contato ao seu CRM.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[60vh] grid-cols-1 gap-8 overflow-y-auto p-1 md:grid-cols-2">
+          {/* Coluna da Esquerda */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Informações Essenciais</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="firstName">Nome</Label>
+                <Input id="firstName" placeholder="João" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lastName">Sobrenome</Label>
+                <Input id="lastName" placeholder="Silva" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="company">Empresa</Label>
+              <Input id="company" placeholder="InnovateTech Soluções" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">E-mail</Label>
+              <Input id="email" type="email" placeholder="joao.silva@innovatetech.com" />
+            </div>
+             <div className="space-y-2">
+              <Label htmlFor="phone">Telefone</Label>
+              <Input id="phone" type="tel" placeholder="+55 11 98765-4321" />
+            </div>
+
+            <hr className="my-4"/>
+
+            <h3 className="text-lg font-semibold">Informações Adicionais</h3>
+             <div className="space-y-2">
+              <Label htmlFor="secondaryPhone">Telefone Secundário</Label>
+              <Input id="secondaryPhone" type="tel" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="website">Website</Label>
+              <Input id="website" placeholder="www.innovatetech.com" />
+            </div>
+             <div className="space-y-2">
+              <Label htmlFor="address">Endereço</Label>
+              <Textarea id="address" placeholder="Rua das Flores, 123, São Paulo, SP, 01234-567" />
+            </div>
+          </div>
+          
+          {/* Coluna da Direita */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Informações de Contexto</h3>
+            <div className="space-y-2">
+              <Label htmlFor="title">Cargo</Label>
+              <Input id="title" placeholder="Diretor de Vendas" />
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="owner">Proprietário do Contato</Label>
+                <Select>
+                    <SelectTrigger id="owner">
+                        <SelectValue placeholder="Selecione um proprietário" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {owners.map(owner => (
+                            <SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="leadSource">Origem do Lead</Label>
+                <Select>
+                    <SelectTrigger id="leadSource">
+                        <SelectValue placeholder="Selecione a origem" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="site">Site</SelectItem>
+                        <SelectItem value="indication">Indicação</SelectItem>
+                        <SelectItem value="event">Evento</SelectItem>
+                        <SelectItem value="prospecting">Prospecção Ativa</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+             <div className="space-y-2">
+                <Label htmlFor="contactChannel">Canal de Contato Inicial</Label>
+                <Select>
+                    <SelectTrigger id="contactChannel">
+                        <SelectValue placeholder="Selecione o canal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                        <SelectItem value="site-chat">Chat no Site</SelectItem>
+                        <SelectItem value="phone-call">Ligação Telefônica</SelectItem>
+                        <SelectItem value="email">E-mail</SelectItem>
+                        <SelectItem value="form">Formulário de Contato</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="description">Descrição / Anotações</Label>
+                <Textarea id="description" placeholder="Anotações importantes sobre o contato..." />
+            </div>
+            
+             <hr className="my-4"/>
+
+            <h3 className="text-lg font-semibold">Campos Personalizados</h3>
+            <div className='p-4 text-center bg-secondary/50 rounded-lg'>
+                <p className='text-sm text-muted-foreground'>Em breve: Crie campos personalizados nas configurações para adaptar o CRM ao seu negócio.</p>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline">Cancelar</Button>
+          <Button type="submit">Salvar Contato</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

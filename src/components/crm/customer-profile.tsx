@@ -5,7 +5,6 @@ import type { User } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Mail, Phone, Building, Briefcase, CheckSquare, Tag, Paperclip, Send, Calendar, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -38,7 +37,7 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
           <div className="flex items-center gap-6">
             <Avatar className="h-20 w-20 border-2">
               <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-              <AvatarFallback className="text-2xl">{customer.name.charAt(0)}</AvatarFallback>
+              <AvatarFallback className="text-2xl">{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
             </Avatar>
             <div>
               <h1 className="text-3xl font-bold">{customer.name}</h1>

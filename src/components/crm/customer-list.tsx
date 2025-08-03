@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Plus } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { type User } from '@/lib/types';
 import { Button } from '../ui/button';
+import { AddContactForm } from './add-contact-form';
 
 interface CustomerListProps {
   customers: User[];
@@ -38,7 +39,7 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
           />
         </div>
         <div className="flex items-center gap-2 mt-4">
-            <Button className="w-full"><Plus className="mr-2 h-4 w-4"/> Adicionar Contato</Button>
+            <AddContactForm />
             <Button variant="outline" className="w-full">Adicionar Empresa</Button>
         </div>
       </div>
@@ -54,7 +55,7 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
             >
               <Avatar className="h-10 w-10 border">
                 <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-                <AvatarFallback>{customer.name.charAt(0)}</AvatarFallback>
+                <AvatarFallback>{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
               </Avatar>
               <div className="flex-1 overflow-hidden">
                 <p className="font-semibold truncate">{customer.name}</p>

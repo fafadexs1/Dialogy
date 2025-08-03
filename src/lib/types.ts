@@ -1,6 +1,8 @@
 export type User = {
   id: string;
-  name: string;
+  firstName: string;
+  lastName: string;
+  name: string; // Will be generated from firstName + lastName
   avatar: string;
   online?: boolean;
   email?: string;
@@ -58,7 +60,7 @@ export type InternalChannel = {
 };
 
 export type InternalMessage = {
-  id: string;
+  id:string;
   sender: User;
   content: string;
   timestamp: string;

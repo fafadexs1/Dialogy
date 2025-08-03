@@ -1,15 +1,17 @@
 import type { Chat, User, InternalChannel, InternalMessage } from './types';
 
 export const agents: User[] = [
-  { id: 'agent-1', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png', online: true, email: 'agent@dialogy.com' },
-  { id: 'agent-2', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com' },
-  { id: 'agent-3', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com' },
-  { id: 'agent-4', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
+  { id: 'agent-1', firstName: 'Alex', lastName: 'Johnson', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png', online: true, email: 'agent@dialogy.com' },
+  { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com' },
+  { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com' },
+  { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
 ];
 
 export const contacts: User[] = [
     { 
       id: 'contact-1', 
+      firstName: 'Carlos',
+      lastName: 'Silva',
       name: 'Carlos Silva', 
       avatar: 'https://placehold.co/40x40.png', 
       email: 'carlos.silva@example.com', 
@@ -32,6 +34,8 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-2', 
+      firstName: 'Beatriz',
+      lastName: 'Costa',
       name: 'Beatriz Costa', 
       avatar: 'https://placehold.co/40x40.png', 
       email: 'beatriz.costa@example.com', 
@@ -51,6 +55,8 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-3', 
+      firstName: 'Juliana',
+      lastName: 'Almeida',
       name: 'Juliana Almeida', 
       avatar: 'https://placehold.co/40x40.png', 
       email: 'juliana.almeida@example.com', 
@@ -69,6 +75,8 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-4', 
+      firstName: 'Ricardo',
+      lastName: 'Pereira',
       name: 'Ricardo Pereira', 
       avatar: 'https://placehold.co/40x40.png', 
       email: 'ricardo.pereira@example.com', 
