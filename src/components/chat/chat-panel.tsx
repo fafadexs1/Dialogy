@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Phone, Send, Smile, Video } from 'lucide-react';
+import { Paperclip, Send, Smile } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
 import { agents } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -59,8 +59,6 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
         </div>
         <div className="flex items-center gap-2">
           <ChatSummary chatHistory={chatHistoryForAI} />
-          <Button variant="ghost" size="icon"><Phone className="h-5 w-5" /></Button>
-          <Button variant="ghost" size="icon"><Video className="h-5 w-5" /></Button>
         </div>
       </header>
 
