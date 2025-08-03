@@ -64,29 +64,29 @@ export function WorkspaceSwitcher({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
-            variant="ghost"
-            size="sm"
+            variant="outline"
             role="combobox"
             aria-expanded={open}
             aria-label="Select a workspace"
-            className={cn('w-full justify-start p-2 h-auto', className)}
+            className={cn('w-[200px] justify-start', className)}
           >
-            <Avatar className="mr-2 h-8 w-8">
-              <AvatarImage
-                src={activeWorkspace?.avatar}
-                alt={activeWorkspace?.name}
-                data-ai-hint="logo"
-              />
-              <AvatarFallback>
-                {activeWorkspace?.name.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex flex-col items-start">
+            {activeWorkspace && (
+              <>
+                <Avatar className="mr-2 h-5 w-5">
+                  <AvatarImage
+                    src={activeWorkspace.avatar}
+                    alt={activeWorkspace.name}
+                    data-ai-hint="logo"
+                  />
+                  <AvatarFallback>
+                    {activeWorkspace.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
                 <span className="font-semibold text-sm">
-                    {activeWorkspace?.name}
+                  {activeWorkspace.name}
                 </span>
-                <span className='text-xs text-muted-foreground'>Plano Business</span>
-            </div>
+              </>
+            )}
             <CaretSortIcon className="ml-auto h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
