@@ -157,31 +157,31 @@ function TeamSettingsLayout() {
                     <Accordion type="single" collapsible className="w-full">
                         {teams.map((team) => (
                             <AccordionItem value={team.id} key={team.id}>
-                                <AccordionTrigger className='text-base font-medium px-2 hover:bg-accent rounded-md'>
-                                    <div className='flex items-center justify-between w-full'>
-                                        <div className="flex items-center gap-3">
-                                           <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
-                                           {team.name}
-                                           <div className="flex items-center -space-x-2">
-                                                {team.members.slice(0, 3).map(member => (
-                                                    <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
-                                                        <AvatarImage src={member.avatar} alt={member.name} />
-                                                        <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
-                                                    </Avatar>
-                                                ))}
-                                                {team.members.length > 3 && (
-                                                    <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
-                                                        +{team.members.length - 3}
-                                                    </div>
-                                                )}
-                                            </div>
+                               <div className="flex items-center w-full px-2 hover:bg-accent rounded-md">
+                                 <AccordionTrigger className="text-base font-medium flex-1">
+                                    <div className="flex items-center gap-3">
+                                        <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
+                                        {team.name}
+                                        <div className="flex items-center -space-x-2">
+                                            {team.members.slice(0, 3).map(member => (
+                                                <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
+                                                    <AvatarImage src={member.avatar} alt={member.name} />
+                                                    <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                            ))}
+                                            {team.members.length > 3 && (
+                                                <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
+                                                    +{team.members.length - 3}
+                                                </div>
+                                            )}
                                         </div>
-                                        <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10'>
-                                            <Trash2 className="h-4 w-4 text-destructive" />
-                                            <span className="sr-only">Remover Equipe</span>
-                                        </Button>
                                     </div>
                                 </AccordionTrigger>
+                                 <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10 shrink-0'>
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                    <span className="sr-only">Remover Equipe</span>
+                                </Button>
+                               </div>
                                 <AccordionContent>
                                     <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
                                         
