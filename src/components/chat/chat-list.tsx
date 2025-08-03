@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -82,7 +81,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
       </div>
 
       <div className="flex-1">
-        <Tabs defaultValue="atendimentos" className="flex flex-col">
+        <Tabs defaultValue="atendimentos" className="flex flex-col h-full">
           <div className="px-4 flex-shrink-0">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
@@ -91,20 +90,20 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </TabsList>
           </div>
           
-          <TabsContent value="atendimentos" className="m-0 w-full overflow-hidden">
-            <ScrollArea className="h-[calc(100vh-280px)] w-full">
+          <TabsContent value="atendimentos" className="m-0 flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
               {renderChatList(atendimentos)}
             </ScrollArea>
           </TabsContent>
           
-          <TabsContent value="gerais" className="m-0 w-full overflow-hidden">
-            <ScrollArea className="h-[calc(100vh-280px)] w-full">
+          <TabsContent value="gerais" className="m-0 flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
               {renderChatList(gerais)}
             </ScrollArea>
           </TabsContent>
           
-          <TabsContent value="encerrados" className="m-0 w-full overflow-hidden">
-            <ScrollArea className="h-[calc(100vh-280px)] w-full">
+          <TabsContent value="encerrados" className="m-0 flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
               {renderChatList(encerrados)}
             </ScrollArea>
           </TabsContent>
