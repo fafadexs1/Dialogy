@@ -13,7 +13,7 @@ interface CustomerListProps {
   onSelectCustomer: (customer: User) => void;
 }
 
-export default function CustomerList({ customers, selectedCustomer, onSelectCustomer }: CustomerListProps) {
+export default function CustomerList({ customers = [], selectedCustomer, onSelectCustomer }: CustomerListProps) {
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredCustomers = customers.filter(
