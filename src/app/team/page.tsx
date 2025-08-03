@@ -115,183 +115,185 @@ function TeamSettingsLayout() {
   return (
     <div className="p-6">
         <div className="mx-auto w-full max-w-6xl">
-            <header className="mb-8">
-                <h1 className="text-3xl font-bold">Gestão de Equipes</h1>
-                <p className="text-muted-foreground">Gerencie suas equipes, horários de atendimento e outras configurações.</p>
-            </header>
             <Card>
                 <CardHeader>
-                    <CardTitle>Gerenciar Equipes e Horários de Atendimento</CardTitle>
-                    <CardDescription>Crie equipes, defina suas cores e configure horários de trabalho específicos para cada uma delas.</CardDescription>
+                    <CardTitle>Gerenciar Equipes</CardTitle>
+                    <CardDescription>Crie equipes, adicione membros e configure seus horários de atendimento.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleAddTeam} className="flex items-end gap-2 mb-6 p-4 border rounded-lg bg-secondary/30">
-                        <div className="flex-1 space-y-1">
-                            <Label htmlFor="team-name">Nome da Nova Equipe</Label>
-                            <Input 
-                                id="team-name"
-                                placeholder="Ex: Sucesso do Cliente"
-                                value={newTeamName}
-                                onChange={(e) => setNewTeamName(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="team-color">Cor</Label>
-                          <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
-                              <Palette className="h-4 w-4 text-muted-foreground"/>
-                              <input
-                                  id="team-color"
-                                  type="color"
-                                  value={newTeamColor}
-                                  onChange={(e) => setNewTeamColor(e.target.value)}
-                                  className="w-6 h-6 p-0 border-none bg-transparent"
-                              />
-                          </div>
-                        </div>
-                        <Button type="submit">
-                            <PlusCircle className="mr-2 h-4 w-4" />
-                            Adicionar Equipe
-                        </Button>
-                    </form>
+                    <div className="p-4 border rounded-lg bg-secondary/30 mb-6">
+                        <h3 className="text-lg font-semibold mb-2">Adicionar Nova Equipe</h3>
+                        <form onSubmit={handleAddTeam} className="flex items-end gap-2">
+                            <div className="flex-1 space-y-1">
+                                <Label htmlFor="team-name">Nome da Equipe</Label>
+                                <Input 
+                                    id="team-name"
+                                    placeholder="Ex: Sucesso do Cliente"
+                                    value={newTeamName}
+                                    onChange={(e) => setNewTeamName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="team-color">Cor</Label>
+                              <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
+                                  <Palette className="h-4 w-4 text-muted-foreground"/>
+                                  <input
+                                      id="team-color"
+                                      type="color"
+                                      value={newTeamColor}
+                                      onChange={(e) => setNewTeamColor(e.target.value)}
+                                      className="w-6 h-6 p-0 border-none bg-transparent"
+                                  />
+                              </div>
+                            </div>
+                            <Button type="submit">
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Adicionar
+                            </Button>
+                        </form>
+                    </div>
 
-                    <Accordion type="single" collapsible className="w-full">
-                        {teams.map((team) => (
-                            <AccordionItem value={team.id} key={team.id}>
-                               <div className="flex items-center w-full px-2 hover:bg-accent rounded-md">
-                                 <AccordionTrigger className="text-base font-medium flex-1">
-                                    <div className="flex items-center gap-3">
-                                        <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
-                                        {team.name}
-                                        <div className="flex items-center -space-x-2">
-                                            {team.members.slice(0, 3).map(member => (
-                                                <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
-                                                    <AvatarImage src={member.avatar} alt={member.name} />
-                                                    <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
-                                                </Avatar>
-                                            ))}
-                                            {team.members.length > 3 && (
-                                                <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
-                                                    +{team.members.length - 3}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </AccordionTrigger>
-                                 <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10 shrink-0'>
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                    <span className="sr-only">Remover Equipe</span>
-                                </Button>
-                               </div>
-                                <AccordionContent>
-                                    <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
-                                        
-                                        <div className="space-y-6">
-                                            <div>
-                                                <h4 className="font-semibold mb-4">Configurações Gerais</h4>
-                                                <div className="flex items-end gap-4">
-                                                    <div className="flex-1 space-y-1">
-                                                        <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
-                                                        <Input 
-                                                            id={`team-name-${team.id}`} 
-                                                            value={team.name}
-                                                            onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
-                                                        />
+                    <div>
+                        <h3 className="text-lg font-semibold mb-4">Equipes Atuais ({teams.length})</h3>
+                        <Accordion type="single" collapsible className="w-full">
+                            {teams.map((team) => (
+                                <AccordionItem value={team.id} key={team.id}>
+                                   <div className="flex items-center w-full px-2 hover:bg-accent rounded-md">
+                                     <AccordionTrigger className="text-base font-medium flex-1">
+                                        <div className="flex items-center gap-3">
+                                            <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
+                                            {team.name}
+                                            <div className="flex items-center -space-x-2">
+                                                {team.members.slice(0, 3).map(member => (
+                                                    <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
+                                                        <AvatarImage src={member.avatar} alt={member.name} />
+                                                        <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                                                    </Avatar>
+                                                ))}
+                                                {team.members.length > 3 && (
+                                                    <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
+                                                        +{team.members.length - 3}
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
-                                                        <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
-                                                            <input
-                                                                id={`team-color-${team.id}`}
-                                                                type="color"
-                                                                value={team.color}
-                                                                onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
-                                                                className="w-6 h-6 p-0 border-none bg-transparent"
+                                                )}
+                                            </div>
+                                        </div>
+                                    </AccordionTrigger>
+                                     <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleRemoveTeam(team.id); }} className='mr-2 hover:bg-destructive/10 shrink-0'>
+                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                        <span className="sr-only">Remover Equipe</span>
+                                    </Button>
+                                   </div>
+                                    <AccordionContent>
+                                        <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
+                                            
+                                            <div className="space-y-6">
+                                                <div>
+                                                    <h4 className="font-semibold mb-4">Configurações Gerais</h4>
+                                                    <div className="flex items-end gap-4">
+                                                        <div className="flex-1 space-y-1">
+                                                            <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
+                                                            <Input 
+                                                                id={`team-name-${team.id}`} 
+                                                                value={team.name}
+                                                                onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
                                                             />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
+                                                            <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
+                                                                <input
+                                                                    id={`team-color-${team.id}`}
+                                                                    type="color"
+                                                                    value={team.color}
+                                                                    onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
+                                                                    className="w-6 h-6 p-0 border-none bg-transparent"
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                            <div>
-                                                <h4 className="font-semibold mb-4">Membros da Equipe ({team.members.length})</h4>
-                                                <div className="space-y-2 mb-4">
-                                                    {team.members.map(member => (
-                                                        <div key={member.id} className="flex items-center justify-between p-2 rounded-md bg-secondary/30">
-                                                            <div className="flex items-center gap-2">
-                                                                <Avatar className="h-8 w-8">
-                                                                    <AvatarImage src={member.avatar} alt={member.name} />
-                                                                    <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
-                                                                </Avatar>
-                                                                <span className="text-sm font-medium">{member.name}</span>
+                                                <div>
+                                                    <h4 className="font-semibold mb-4">Membros da Equipe ({team.members.length})</h4>
+                                                    <div className="space-y-2 mb-4">
+                                                        {team.members.map(member => (
+                                                            <div key={member.id} className="flex items-center justify-between p-2 rounded-md bg-secondary/30">
+                                                                <div className="flex items-center gap-2">
+                                                                    <Avatar className="h-8 w-8">
+                                                                        <AvatarImage src={member.avatar} alt={member.name} />
+                                                                        <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                                                                    </Avatar>
+                                                                    <span className="text-sm font-medium">{member.name}</span>
+                                                                </div>
+                                                                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleRemoveMember(team.id, member.id)}>
+                                                                    <X className="h-4 w-4 text-muted-foreground" />
+                                                                </Button>
                                                             </div>
-                                                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleRemoveMember(team.id, member.id)}>
-                                                                <X className="h-4 w-4 text-muted-foreground" />
-                                                            </Button>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-end gap-2">
+                                                        <div className="flex-1 space-y-1">
+                                                             <Label>Adicionar Membro</Label>
+                                                            <Select onValueChange={setSelectedAgentId}>
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Selecione um agente" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {agents
+                                                                        .filter(agent => !team.members.some(m => m.id === agent.id))
+                                                                        .map(agent => (
+                                                                        <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <Button onClick={() => handleAddMember(team.id)}>
+                                                            <UserPlus className="mr-2 h-4 w-4"/>
+                                                            Adicionar
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div>
+                                                <h4 className="font-semibold mb-4">Horário de Atendimento</h4>
+                                                <div className="space-y-3">
+                                                    {team.businessHours.map(bh => (
+                                                        <div key={bh.day} className="flex items-center justify-between">
+                                                            <div className='flex items-center gap-4'>
+                                                                <Switch 
+                                                                    id={`switch-${team.id}-${bh.day}`} 
+                                                                    checked={bh.enabled}
+                                                                    onCheckedChange={(checked) => handleBusinessHoursChange(team.id, bh.day, 'enabled', checked)}
+                                                                />
+                                                                <Label htmlFor={`switch-${team.id}-${bh.day}`} className='font-medium min-w-[100px]'>{bh.day}</Label>
+                                                            </div>
+                                                            <div className={`flex items-center gap-2 transition-opacity ${bh.enabled ? 'opacity-100' : 'opacity-50'}`}>
+                                                                <Input 
+                                                                    type="time" 
+                                                                    value={bh.startTime}
+                                                                    onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'startTime', e.target.value)}
+                                                                    className="w-[100px]" 
+                                                                    disabled={!bh.enabled} 
+                                                                />
+                                                                <span>até</span>
+                                                                <Input 
+                                                                    type="time" 
+                                                                    value={bh.endTime}
+                                                                    onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'endTime', e.target.value)}
+                                                                    className="w-[100px]" 
+                                                                    disabled={!bh.enabled}
+                                                                />
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
-                                                <div className="flex items-end gap-2">
-                                                    <div className="flex-1 space-y-1">
-                                                         <Label>Adicionar Membro</Label>
-                                                        <Select onValueChange={setSelectedAgentId}>
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="Selecione um agente" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {agents
-                                                                    .filter(agent => !team.members.some(m => m.id === agent.id))
-                                                                    .map(agent => (
-                                                                    <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <Button onClick={() => handleAddMember(team.id)}>
-                                                        <UserPlus className="mr-2 h-4 w-4"/>
-                                                        Adicionar
-                                                    </Button>
-                                                </div>
                                             </div>
                                         </div>
-                                        
-                                        <div>
-                                            <h4 className="font-semibold mb-4">Horário de Atendimento</h4>
-                                            <div className="space-y-3">
-                                                {team.businessHours.map(bh => (
-                                                    <div key={bh.day} className="flex items-center justify-between">
-                                                        <div className='flex items-center gap-4'>
-                                                            <Switch 
-                                                                id={`switch-${team.id}-${bh.day}`} 
-                                                                checked={bh.enabled}
-                                                                onCheckedChange={(checked) => handleBusinessHoursChange(team.id, bh.day, 'enabled', checked)}
-                                                            />
-                                                            <Label htmlFor={`switch-${team.id}-${bh.day}`} className='font-medium min-w-[100px]'>{bh.day}</Label>
-                                                        </div>
-                                                        <div className={`flex items-center gap-2 transition-opacity ${bh.enabled ? 'opacity-100' : 'opacity-50'}`}>
-                                                            <Input 
-                                                                type="time" 
-                                                                value={bh.startTime}
-                                                                onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'startTime', e.target.value)}
-                                                                className="w-[100px]" 
-                                                                disabled={!bh.enabled} 
-                                                            />
-                                                            <span>até</span>
-                                                            <Input 
-                                                                type="time" 
-                                                                value={bh.endTime}
-                                                                onChange={(e) => handleBusinessHoursChange(team.id, bh.day, 'endTime', e.target.value)}
-                                                                className="w-[100px]" 
-                                                                disabled={!bh.enabled}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </AccordionContent>
-                            </AccordionItem>
-                        ))}
-                    </Accordion>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            ))}
+                        </Accordion>
+                    </div>
                 </CardContent>
             </Card>
         </div>
