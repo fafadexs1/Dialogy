@@ -54,8 +54,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
-    <div className="flex w-full max-w-sm flex-col border-r bg-card h-screen overflow-hidden">
-      <div className="p-4 flex-shrink-0">
+    <div className="flex w-full max-w-sm flex-col border-r bg-card">
+      {/* Header fixo */}
+      <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
           <Button variant="ghost" size="icon">
@@ -68,7 +69,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
       
-      <div className="px-4 pb-4 flex-shrink-0">
+      {/* Agentes Online */}
+      <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online</h3>
         <div className="flex items-center gap-2 overflow-x-auto">
           {onlineAgents.map(agent => (
@@ -80,9 +82,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </div>
       </div>
 
-      <div className="flex-1">
-        <Tabs defaultValue="atendimentos" className="flex flex-col h-full">
-          <div className="px-4 flex-shrink-0">
+      {/* Abas e Lista com Rolagem */}
+      <div className="flex-1 flex flex-col min-h-0">
+        <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col">
+          <div className="p-4 flex-shrink-0">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
               <TabsTrigger value="gerais">Gerais</TabsTrigger>
@@ -90,23 +93,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </TabsList>
           </div>
           
-          <TabsContent value="atendimentos" className="m-0 flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              {renderChatList(atendimentos)}
-            </ScrollArea>
-          </TabsContent>
-          
-          <TabsContent value="gerais" className="m-0 flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              {renderChatList(gerais)}
-            </ScrollArea>
-          </TabsContent>
-          
-          <TabsContent value="encerrados" className="m-0 flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              {renderChatList(encerrados)}
-            </ScrollArea>
-          </TabsContent>
+          <div className="flex-1 relative">
+            <div className="absolute inset-0">
+              <ScrollArea className="h-full w-full">
+                <TabsContent value="atendimentos" className="m-0">
+                  {renderChatList(atendimentos)}
+                </TabsContent>
+                <TabsContent value="gerais" className="m-0">
+                  {renderChatList(gerais)}
+                </TabsContent>
+                <TabsContent value="encerrados" className="m-0">
+                  {renderChatList(encerrados)}
+                </TabsContent>
+              </ScrollArea>
+            </div>
+          </div>
         </Tabs>
       </div>
     </div>
