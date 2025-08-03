@@ -95,3 +95,18 @@ export interface SelectableOption {
 }
 
 export interface Tag extends SelectableOption {}
+
+
+export interface Team {
+  id: string;
+  name: string;
+  color: string;
+  businessHours: BusinessHour[];
+}
+
+export interface BusinessHour {
+  day: string;
+  enabled: boolean;
+  startTime: string;
+  endTime: string;
+}
