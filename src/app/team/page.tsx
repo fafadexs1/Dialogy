@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState } from 'react';
@@ -312,7 +311,7 @@ export default function TeamPage() {
           <h1 className="text-2xl font-bold">Equipes</h1>
           <p className="text-muted-foreground">Comunicação interna e gestão de equipes.</p>
         </header>
-        <Tabs defaultValue="communication" className="flex-1 flex flex-col min-h-0">
+        <Tabs defaultValue="management" className="flex-1 flex flex-col min-h-0">
           <div className="p-4 border-b flex-shrink-0">
             <TabsList>
               <TabsTrigger value="communication">Comunicação</TabsTrigger>
@@ -330,5 +329,3 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
-
-    
