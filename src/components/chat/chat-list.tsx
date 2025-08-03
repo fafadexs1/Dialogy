@@ -21,11 +21,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   const onlineAgents = useOnlineStatus();
 
   const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-2">
+    <div className="space-y-1">
         {chatList.map((chat) => (
         <div
             key={chat.id}
-            className={`flex cursor-pointer items-start gap-4 rounded-lg p-3 transition-colors ${
+            className={`flex cursor-pointer items-center gap-3 rounded-lg p-3 transition-colors ${
             selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
             }`}
             onClick={() => setSelectedChat(chat)}
@@ -35,18 +35,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
                 <p className="font-semibold truncate">
                 {chat.contact.name}
                 </p>
-                <p className="text-xs text-muted-foreground flex-shrink-0 ml-2">
-                {chat.messages[chat.messages.length - 1].timestamp}
+                <p className="text-sm text-muted-foreground truncate">
+                {chat.messages[chat.messages.length - 1].content}
                 </p>
             </div>
-            <p className="text-sm text-muted-foreground truncate">
-                {chat.messages[chat.messages.length - 1].content}
+             <p className="text-xs text-muted-foreground flex-shrink-0 self-start mt-1">
+                {chat.messages[chat.messages.length - 1].timestamp}
             </p>
-            </div>
         </div>
         ))}
     </div>
@@ -90,14 +88,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </TabsList>
         </div>
         <ScrollArea className="h-0 flex-1">
-          <div className="p-4 space-y-0">
-            <TabsContent value="atendimentos" className="mt-0">
+          <div className="p-2">
+            <TabsContent value="atendimentos" className="m-0">
                 {renderChatList(atendimentos)}
             </TabsContent>
-            <TabsContent value="gerais" className="mt-0">
+            <TabsContent value="gerais" className="m-0">
                 {renderChatList(gerais)}
             </TabsContent>
-            <TabsContent value="encerrados" className="mt-0">
+            <TabsContent value="encerrados" className="m-0">
                 {renderChatList(encerrados)}
             </TabsContent>
           </div>
