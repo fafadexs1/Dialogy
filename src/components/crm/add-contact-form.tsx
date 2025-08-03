@@ -22,11 +22,12 @@ import {
 } from '@/components/ui/select';
 import { Plus } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
-import { customFieldDefinitions, agents } from '@/lib/mock-data';
+import { mockCustomFieldDefinitions, agents } from '@/lib/mock-data';
 
 export function AddContactForm() {
-  // In a real app, this would come from a user query
+  // In a real app, this would come from a user query or a global state management
   const owners = agents;
+  const customFieldDefinitions = mockCustomFieldDefinitions;
 
   return (
     <Dialog>
