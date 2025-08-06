@@ -1,13 +1,9 @@
-import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { req, res }
-  )
+  const supabase = createMiddlewareClient({ req, res })
 
   const {
     data: { session },
@@ -21,7 +17,13 @@ export async function middleware(req: NextRequest) {
     }
   } else {
     if (!session) {
-      return NextResponse.redirect(new URL('/login', req.url))
+      // Se não houver sessão e a página não for de autenticação, redireciona para o login
+      let redirectUrl = new URL('/login', req.url)
+      // Adiciona a URL de retorno para que o usuário seja redirecionado após o login
+      if (req.nextUrl.pathname !== '/') {
+        redirectUrl.searchParams.set('redirect_to', req.nextUrl.pathname)
+      }
+      return NextResponse.redirect(redirectUrl)
     }
   }
 
