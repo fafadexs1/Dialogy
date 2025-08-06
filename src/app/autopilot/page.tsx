@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState } from 'react';
@@ -10,7 +11,7 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, Token } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -162,7 +163,7 @@ export default function AutopilotPage() {
                                                 </div>
                                              </div>
                                              <div className="p-2 border rounded-lg text-center">
-                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><Token className='text-purple-500'/> Janela de Contexto</p>
+                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className='text-purple-500'/> Janela de Contexto</p>
                                                 <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
                                              </div>
                                             <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
