@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 const initialIntegrations: Integration[] = [
     {
@@ -29,15 +30,15 @@ const initialIntegrations: Integration[] = [
     }
 ];
 
-function IntegrationCard({ integration, onUpdate }: { integration: Integration, onUpdate: (id: string, settings: any) => void }) {
+function IntegrationCard({ integration, onUpdate }: { integration: Integration, onUpdate: (id: string, enabled: boolean, settings: any) => void }) {
     const Icon = integration.icon;
 
     const handleSettingChange = (key: string, value: any) => {
-        onUpdate(integration.id, { ...integration.settings, [key]: value });
+        onUpdate(integration.id, integration.enabled, { ...integration.settings, [key]: value });
     };
 
     const handleEnabledChange = (enabled: boolean) => {
-        onUpdate(integration.id, { ...integration.settings, enabled });
+        onUpdate(integration.id, enabled, integration.settings);
     };
     
     return (
@@ -60,7 +61,10 @@ function IntegrationCard({ integration, onUpdate }: { integration: Integration, 
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className={`space-y-4 pt-4 border-t transition-all ${integration.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+            <CardContent className={cn("space-y-4 pt-4 border-t transition-all duration-300", {
+                "opacity-100": integration.enabled,
+                "opacity-0 h-0 p-0 m-0 border-none": !integration.enabled,
+            })}>
                  <div className="space-y-2">
                     <Label htmlFor={`agent-name-${integration.id}`} className="flex items-center gap-2 text-muted-foreground"><UserIcon className="w-4 h-4"/> Nome do Agente</Label>
                     <Input
@@ -68,6 +72,7 @@ function IntegrationCard({ integration, onUpdate }: { integration: Integration, 
                         placeholder="Ex: Robô de Vendas"
                         value={integration.settings.agentName || ''}
                         onChange={(e) => handleSettingChange('agentName', e.target.value)}
+                        disabled={!integration.enabled}
                     />
                 </div>
                 <div className="space-y-2">
@@ -77,10 +82,11 @@ function IntegrationCard({ integration, onUpdate }: { integration: Integration, 
                         placeholder="https://sua-api.com/webhook"
                         value={integration.settings.webhookUrl || ''}
                         onChange={(e) => handleSettingChange('webhookUrl', e.target.value)}
+                        disabled={!integration.enabled}
                     />
                 </div>
                  <div className="flex justify-end">
-                    <Button>Salvar</Button>
+                    <Button disabled={!integration.enabled}>Salvar</Button>
                 </div>
             </CardContent>
         </Card>
@@ -110,9 +116,9 @@ export default function IntegrationsPage() {
         fetchUser();
     }, [supabase.auth]);
 
-    const handleUpdateIntegration = (id: string, settings: any) => {
+    const handleUpdateIntegration = (id: string, enabled: boolean, settings: any) => {
         setIntegrations(integrations.map(int => 
-            int.id === id ? { ...int, settings: { ...int.settings, ...settings }, enabled: settings.enabled ?? int.enabled } : int
+            int.id === id ? { ...int, enabled, settings } : int
         ));
     };
 
