@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -7,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2 } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
-import { agents, nexusFlowInstances } from '@/lib/mock-data';
+import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -19,6 +20,7 @@ import { createClient } from '@/lib/supabase/client';
 interface ChatPanelProps {
   chat: Chat;
   messages: Message[];
+  currentUser: User;
 }
 
 const mockKnowledgeBase = `
@@ -27,7 +29,7 @@ Política de Devolução: Nossa política de devolução permite que os clientes
 FAQ - Horário de Funcionamento: Nosso horário de atendimento padrão é de segunda a sexta-feira, das 9h às 18h (horário de Brasília). Não funcionamos em feriados nacionais.
 `;
 
-export default function ChatPanel({ chat, messages }: ChatPanelProps) {
+export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProps) {
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
   const [isAiThinking, setIsAiThinking] = React.useState(false);
@@ -36,15 +38,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const supabase = createClient();
-  const [currentUser, setCurrentUser] = React.useState<any>(null);
-
-  React.useEffect(() => {
-    const fetchUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        setCurrentUser(user);
-    }
-    fetchUser();
-  }, [supabase.auth]);
+  
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();

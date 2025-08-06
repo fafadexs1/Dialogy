@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -5,33 +6,55 @@ import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User } from '@/lib/types';
-import { agents, contacts } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { Skeleton } from '../ui/skeleton';
+import { useAuth } from '@/hooks/use-auth';
 
-// This is a helper function to map sender IDs to user objects.
+// This is a helper function to map profile IDs to user objects.
 // In a real app, you might fetch this from a user management system or have it in a global state.
-const allUsers = [...agents, ...contacts];
-const getUserById = (id: string): User => {
-  return allUsers.find(u => u.id === id) || { 
-    id: 'unknown', 
-    name: 'Unknown', 
-    firstName: 'Unknown', 
-    lastName: '', 
-    avatar: 'https://placehold.co/40x40.png' 
-  };
+const fetchProfiles = async (supabase: any): Promise<User[]> => {
+    const { data, error } = await supabase.from('profiles').select('*');
+    if (error) {
+        console.error("Error fetching profiles:", error);
+        return [];
+    }
+    // Map Supabase profile to App User type
+    return data.map((profile: any) => ({
+        id: profile.id,
+        name: profile.full_name,
+        firstName: profile.full_name?.split(' ')[0] || '',
+        lastName: profile.full_name?.split(' ')[1] || '',
+        avatar: profile.avatar_url || 'https://placehold.co/40x40.png',
+        email: profile.email, // Assuming email is on profile for simplicity
+    }));
 }
+
 
 export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const supabase = createClient();
+  const currentUser = useAuth();
+
+  const getUserById = (id: string): User => {
+    return allUsers.find(u => u.id === id) || { 
+      id: 'unknown', 
+      name: 'Unknown', 
+      firstName: 'Unknown', 
+      lastName: '', 
+      avatar: 'https://placehold.co/40x40.png' 
+    };
+  }
 
   useEffect(() => {
-    const fetchChats = async () => {
+    const initializeData = async () => {
         setLoading(true);
+        const profiles = await fetchProfiles(supabase);
+        setAllUsers(profiles);
+
         const { data: chatsData, error: chatsError } = await supabase
             .from('chats')
             .select('*')
@@ -43,12 +66,13 @@ export default function CustomerChatLayout() {
             return;
         }
 
-        // Map Supabase data to Chat[] type
         const formattedChats: Chat[] = chatsData.map(chat => {
+            const contact = profiles.find(p => p.id === chat.contact_id);
+            const agent = profiles.find(p => p.id === chat.agent_id);
             return {
                 id: chat.id,
-                contact: getUserById(chat.contact_id),
-                agent: getUserById(chat.agent_id),
+                contact: contact || getUserById(chat.contact_id),
+                agent: agent || getUserById(chat.agent_id),
                 messages: [], 
                 status: chat.status as Chat['status'],
             };
@@ -61,12 +85,12 @@ export default function CustomerChatLayout() {
         setLoading(false);
     };
 
-    fetchChats();
+    initializeData();
   }, [supabase]);
 
 
   useEffect(() => {
-    if (!selectedChat) return;
+    if (!selectedChat || allUsers.length === 0) return;
 
     // Fetch initial messages for the selected chat
     const fetchMessages = async () => {
@@ -91,7 +115,7 @@ export default function CustomerChatLayout() {
     };
 
     fetchMessages();
-  }, [selectedChat, supabase]);
+  }, [selectedChat, supabase, allUsers]);
 
   useEffect(() => {
     if (!selectedChat) return;
@@ -117,10 +141,10 @@ export default function CustomerChatLayout() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, selectedChat]);
+  }, [supabase, selectedChat, allUsers]);
 
 
-  if (loading) {
+  if (loading || !currentUser) {
       return (
           <div className="flex flex-1 w-full min-h-0">
             <div className="flex w-full max-w-sm flex-col border-r bg-card p-4 gap-4">
@@ -160,7 +184,7 @@ export default function CustomerChatLayout() {
         selectedChat={selectedChat}
         setSelectedChat={setSelectedChat}
       />
-      <ChatPanel key={selectedChat.id} chat={selectedChat} messages={messages} />
+      <ChatPanel key={selectedChat.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
       <ContactPanel contact={selectedChat.contact} />
     </div>
   );

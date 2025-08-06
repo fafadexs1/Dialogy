@@ -1,37 +1,69 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import type { User } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
+import { agents } from '@/lib/mock-data'; // Usaremos para obter os dados estáticos do agente
 
-// This hook simulates a WebSocket connection for real-time online status.
-export function useOnlineStatus() {
-  // Initialize with a random subset of agents being online.
-  const [onlineAgents, setOnlineAgents] = useState<User[]>(() => 
-    agents.filter(() => Math.random() > 0.5)
-  );
+// This hook uses Supabase's Realtime Presence feature for real-time online status.
+export function useOnlineStatus(currentUser: User) {
+  const supabase = createClient();
+  const [onlineAgents, setOnlineAgents] = useState<User[]>([]);
 
   useEffect(() => {
-    // Simulate receiving WebSocket messages every 5 seconds.
-    const interval = setInterval(() => {
-      // Create a new list of online agents based on random status.
-      // In a real WebSocket implementation, this would be the list from the server.
-      const updatedOnlineAgents = agents.filter(agent => {
-        // If an agent is currently online, they have a 70% chance of staying online.
-        const isCurrentlyOnline = onlineAgents.some(onlineAgent => onlineAgent.id === agent.id);
-        if (isCurrentlyOnline) {
-          return Math.random() > 0.3; 
-        }
-        // If an agent is offline, they have a 20% chance of coming online.
-        return Math.random() > 0.8; 
-      });
-      
-      setOnlineAgents(updatedOnlineAgents);
-    }, 5000); // Update every 5 seconds
+    if (!currentUser?.id) return;
 
-    // Clean up the interval when the component unmounts.
-    return () => clearInterval(interval);
-  }, [onlineAgents]); // Re-run effect when onlineAgents changes to have the latest state in the closure
+    // Um canal único para rastrear todos os agentes online
+    const channel = supabase.channel('online-agents');
+
+    // Função para atualizar a lista de agentes online com base no estado de presença
+    const updateOnlineStatus = (presenceState: any) => {
+        const uniqueUserIds = new Set<string>();
+        const presenceUsers: User[] = [];
+
+        for (const id in presenceState) {
+            const presences = presenceState[id] as unknown as { user: User }[];
+            presences.forEach(p => {
+                if (p.user && !uniqueUserIds.has(p.user.id)) {
+                    uniqueUserIds.add(p.user.id);
+                    // Adiciona a propriedade 'online' para consistência
+                    presenceUsers.push({ ...p.user, online: true });
+                }
+            });
+        }
+        setOnlineAgents(presenceUsers);
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const presenceState = channel.presenceState();
+        updateOnlineStatus(presenceState);
+      })
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // Para simplificar, ressincronizamos em vez de adicionar incrementalmente
+        const presenceState = channel.presenceState();
+        updateOnlineStatus(presenceState);
+      })
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        // Para simplificar, ressincronizamos em vez de remover incrementalmente
+        const presenceState = channel.presenceState();
+        updateOnlineStatus(presenceState);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Quando o usuário se conecta, ele rastreia seu próprio status
+          await channel.track({ user: currentUser });
+        }
+      });
+
+    // Limpa a inscrição e o rastreamento quando o componente desmonta
+    return () => {
+      channel.untrack();
+      supabase.removeChannel(channel);
+    };
+  // Adicionamos currentUser como dependência para garantir que temos os dados do usuário
+  }, [supabase, currentUser?.id]); 
 
   return onlineAgents;
 }
