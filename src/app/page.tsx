@@ -1,38 +1,30 @@
 import { MainLayout } from '@/components/layout/main-layout';
-import { createServerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { User } from '@/lib/types';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { agents } from '@/lib/mock-data';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 export default async function Home() {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: () => cookieStore }
-  );
+  const supabase = createClient();
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect('/login');
   }
 
   // In a real app, you would fetch user data from your database or Supabase
   // For now, we'll use a mock agent.
-  const user = agents.find(a => a.email === session.user.email) || {
+  const appUser = agents.find(a => a.email === user.email) || {
       ...agents[0],
-      name: session.user.user_metadata.full_name || session.user.email,
-      email: session.user.email
+      name: user.user_metadata.full_name || user.email,
+      email: user.email
   };
 
   return (
-    <MainLayout user={user}>
-      <div className="flex-1 flex flex-col h-[calc(100vh_-_1rem)]">
-        <CustomerChatLayout />
-      </div>
+    <MainLayout user={appUser}>
+      <CustomerChatLayout />
     </MainLayout>
   );
 }

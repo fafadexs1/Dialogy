@@ -1,9 +1,8 @@
 'use server';
 
-import { createServerClient } from '@supabase/auth-helpers-nextjs';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabase/server';
 
 export async function authenticate(
   prevState: string | undefined,
@@ -11,13 +10,7 @@ export async function authenticate(
 ) {
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
-  const cookieStore = cookies();
-  
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: () => cookieStore }
-  );
+  const supabase = createClient();
 
   const { error } = await supabase.auth.signInWithPassword({
     email,
@@ -28,7 +21,7 @@ export async function authenticate(
     return 'Credenciais inválidas.';
   }
 
-  revalidatePath('/');
+  revalidatePath('/', 'layout');
   redirect('/');
 }
 
@@ -39,13 +32,7 @@ export async function register(
   const name = formData.get('name') as string;
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
-  const cookieStore = cookies();
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: () => cookieStore }
-  );
+  const supabase = createClient();
 
   const { error } = await supabase.auth.signUp({
     email,
@@ -68,13 +55,7 @@ export async function register(
 }
 
 export async function signOutAction() {
-    const cookieStore = cookies();
-    const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        { cookies: () => cookieStore }
-    );
-
+    const supabase = createClient();
     await supabase.auth.signOut();
     redirect('/login');
 }
