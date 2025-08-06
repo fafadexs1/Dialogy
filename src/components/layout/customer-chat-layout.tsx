@@ -134,7 +134,7 @@ export default function CustomerChatLayout() {
                     <Skeleton className="h-8 w-full" />
                 </div>
             </div>
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-w-0">
                 <Skeleton className="h-16 w-full" />
                 <div className="flex-1 p-6 space-y-4">
                     <Skeleton className="h-10 w-1/2 ml-auto" />
@@ -149,7 +149,7 @@ export default function CustomerChatLayout() {
 
   if (!selectedChat) {
       // TODO: Improve this empty state
-      return <div>Nenhuma conversa encontrada.</div>
+      return <div className="flex-1 flex items-center justify-center text-muted-foreground">Nenhuma conversa encontrada. Crie uma para começar.</div>
   }
 
 

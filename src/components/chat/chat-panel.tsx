@@ -36,13 +36,19 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const supabase = createClient();
+  const [currentUser, setCurrentUser] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    const fetchUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
+    }
+    fetchUser();
+  }, [supabase.auth]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newMessage.trim() === '') return;
-
-    // In a real app, you'd get the current authenticated user's ID
-    const senderId = chat.agent?.id || agents[0].id; 
+    if (newMessage.trim() === '' || !currentUser) return;
     
     const { error } = await supabase
       .from('messages')
@@ -50,8 +56,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
         { 
           content: newMessage,
           chat_id: chat.id,
-          sender_id: senderId,
-          sender_type: 'agent' // Assuming the user of this panel is always an agent
+          sender_id: currentUser.id,
         }
       ]);
       
@@ -76,11 +81,12 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
   }, [messages]);
 
   const chatHistoryForAI = messages.map(m => `${m.sender.name}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender.id.startsWith('contact')).pop();
+  const lastCustomerMessage = messages.filter(m => m.sender.id !== chat.agent?.id).pop();
+
 
   React.useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && lastCustomerMessage.sender.id.startsWith('contact')) {
+        if (isAiAgentActive && lastCustomerMessage && lastCustomerMessage.sender.id !== chat.agent?.id) {
             const lastMessageInState = messages[messages.length - 1];
             if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
                 setIsAiThinking(true);
@@ -96,17 +102,14 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
                         model: selectedAiModel,
                     });
                     
-                    // Only respond if the AI returned a response (meaning a rule was triggered)
-                    if (result && result.response) {
-                        const senderId = chat.agent?.id || agents[0].id;
+                    if (result && result.response && chat.agent?.id) {
                         const { error } = await supabase
                           .from('messages')
                           .insert([
                             { 
                               content: result.response,
                               chat_id: chat.id,
-                              sender_id: senderId, // AI responds as the agent
-                              sender_type: 'agent'
+                              sender_id: chat.agent.id, // AI responds as the agent
                             }
                           ]);
                         if(error) throw error;
@@ -126,7 +129,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat.id, chat.agent?.id, supabase]);
 
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
@@ -153,7 +156,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
               <div
                 key={message.id}
                 className={`flex items-end gap-3 animate-in fade-in ${
-                  message.sender.id.startsWith('agent') ? 'flex-row-reverse' : 'flex-row'
+                  message.sender.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
                 <Avatar className="h-8 w-8">
@@ -162,7 +165,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
                 </Avatar>
                 <div
                   className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
-                    message.sender.id.startsWith('agent')
+                    message.sender.id === currentUser?.id
                       ? 'rounded-br-none bg-primary text-primary-foreground'
                       : 'rounded-bl-none bg-card'
                   }`}
