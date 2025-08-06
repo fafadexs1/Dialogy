@@ -20,6 +20,12 @@ interface ChatPanelProps {
   chat: Chat;
 }
 
+const mockKnowledgeBase = `
+Política de Devolução: Nossa política de devolução permite que os clientes retornem produtos em até 30 dias após a compra, desde que o produto esteja em sua embalagem original e sem sinais de uso. O cliente deve apresentar o recibo original. Para produtos com defeito, a troca é garantida em até 90 dias.
+
+FAQ - Horário de Funcionamento: Nosso horário de atendimento padrão é de segunda a sexta-feira, das 9h às 18h (horário de Brasília). Não funcionamos em feriados nacionais.
+`;
+
 export default function ChatPanel({ chat }: ChatPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>(chat.messages);
   const [newMessage, setNewMessage] = React.useState('');
@@ -68,7 +74,8 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                     const result = await generateAgentResponse({
                         customerMessage: lastCustomerMessage.content,
                         chatHistory: chatHistoryForAI,
-                        rules: activeRules
+                        rules: activeRules,
+                        knowledgeBase: mockKnowledgeBase, // Pass the knowledge base to the AI
                     });
                     
                     // Only respond if the AI returned a response (meaning a rule was triggered)

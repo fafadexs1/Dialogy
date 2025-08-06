@@ -11,7 +11,7 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, FileText, Globe, Upload } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+
+
+const mockKnowledgeBase = [
+    { id: 'kb-1', type: 'text', title: 'Política de Devolução', content: 'Nossa política de devolução permite que os clientes retornem produtos em até 30 dias após a compra, desde que o produto esteja em sua embalagem original e sem sinais de uso. O cliente deve apresentar o recibo original. Para produtos com defeito, a troca é garantida em até 90 dias.'},
+    { id: 'kb-2', type: 'url', title: 'Perguntas Frequentes (FAQ)', content: 'https://dialogy.com/faq' },
+];
 
 
 export default function AutopilotPage() {
@@ -103,6 +110,50 @@ export default function AutopilotPage() {
                     </Card>
 
                     <Separator className="my-6" />
+
+                     <Card className="mb-6">
+                        <CardHeader>
+                            <CardTitle>Base de Conhecimento do Piloto Automático</CardTitle>
+                            <CardDescription>Forneça documentos, textos e links para que a IA entenda o contexto do seu negócio e responda de forma mais precisa.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                     <h3 className="font-semibold text-muted-foreground">Fontes de Conhecimento Atuais</h3>
+                                     <div className="space-y-3">
+                                        {mockKnowledgeBase.map(item => (
+                                            <div key={item.id} className="flex items-start justify-between p-3 border rounded-md bg-background">
+                                               <div className="flex items-start gap-3">
+                                                 {item.type === 'text' ? <FileText className="h-5 w-5 text-primary mt-1" /> : <Globe className="h-5 w-5 text-primary mt-1" />}
+                                                 <div>
+                                                     <p className="font-medium">{item.title}</p>
+                                                     <p className="text-sm text-muted-foreground truncate max-w-sm">{item.content}</p>
+                                                 </div>
+                                               </div>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                     </div>
+                                </div>
+                                 <div className="space-y-4 p-4 rounded-lg bg-secondary/50">
+                                     <h3 className="font-semibold text-muted-foreground">Adicionar Novo Conhecimento</h3>
+                                    <Button className="w-full justify-start">
+                                        <Upload className="mr-2 h-4 w-4" /> Fazer Upload de Arquivo
+                                    </Button>
+                                    <div className="space-y-2">
+                                        <Textarea placeholder="Ou cole um texto aqui para a IA aprender..." rows={5} />
+                                         <Button size="sm">Adicionar Texto</Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Separator className="my-6" />
+
+                    <h2 className="text-xl font-bold mb-4">Regras de Automação Ativas</h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {instances.map(instance => (

@@ -28,6 +28,10 @@ const AgentResponseInputSchema = z.object({
     .optional()
     .describe('The history of the chat between the agent and customer.'),
   rules: z.array(AutomationRuleSchema).describe('A list of active automation rules to evaluate against.'),
+   knowledgeBase: z
+    .string()
+    .optional()
+    .describe('A collection of texts, examples, and instructions that the AI should use as a knowledge base to formulate its answers.'),
 });
 export type AgentResponseInput = z.infer<typeof AgentResponseInputSchema>;
 
@@ -50,6 +54,7 @@ interface AutoResponderFlowInput {
     customerMessage: string;
     chatHistory?: string;
     rules: NexusFlowInstance[];
+    knowledgeBase?: string;
 }
 
 export async function generateAgentResponse(input: AutoResponderFlowInput): Promise<AgentResponseOutput> {
@@ -65,16 +70,21 @@ const prompt = ai.definePrompt({
   name: 'autoResponderPrompt',
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `You are an AI assistant that evaluates a customer support conversation against a set of automation rules.
-  Your task is to determine if the customer's latest message triggers any of the provided rules.
+  prompt: `You are an AI assistant that evaluates a customer support conversation against a set of automation rules and a knowledge base.
+  Your task is to determine if the customer's latest message triggers any of the provided rules OR can be answered using the knowledge base.
 
-  - Carefully analyze the "Customer's Latest Message" in the context of the "Chat History".
-  - Compare the message against each rule's "trigger" description.
-  - If you find a clear match, your output must be the exact "action" text from the matched rule.
-  - If a rule is triggered, set the 'triggeredRule' field to the name of the rule.
-  - If NO rule is triggered, you MUST return an empty 'response' field. Do not try to answer the customer's question yourself.
+  DECISION HIERARCHY:
+  1.  **Analyze Knowledge Base First:** Before checking rules, determine if you can answer the customer's question directly and confidently using ONLY the provided "Knowledge Base". If you can, formulate a helpful response based on that knowledge and provide it in the 'response' field.
+  2.  **Evaluate Rules:** If the Knowledge Base does not provide a direct answer, then proceed to evaluate the "Automation Rules". Compare the customer's message against each rule's "trigger" description.
+  3.  **Rule Triggered:** If you find a clear match for a rule, your output MUST be the exact "action" text from the matched rule, and you must set the 'triggeredRule' field to the name of that rule.
+  4.  **No Match:** If NO rule is triggered and the Knowledge Base is insufficient, you MUST return an empty 'response' field. Do not try to answer the customer's question yourself outside of the provided context.
 
-  Rules to evaluate:
+  Knowledge Base:
+  ---
+  {{{knowledgeBase}}}
+  ---
+
+  Automation Rules to evaluate:
   {{#each rules}}
   - Rule Name: "{{name}}"
     - Trigger: "{{trigger}}"
@@ -87,7 +97,7 @@ const prompt = ai.definePrompt({
   Customer's Latest Message:
   {{{customerMessage}}}
   
-  Now, evaluate and generate the response if a rule is triggered.`,
+  Now, evaluate and generate the response if a condition is met.`,
 });
 
 
@@ -99,7 +109,7 @@ const autoResponderFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await prompt(input);
-    // Only return a response if the AI decided a rule was triggered.
+    // Only return a response if the AI decided a rule was triggered or it could answer from the knowledge base.
     if (output?.response && output.response.trim() !== '') {
         return output;
     }
