@@ -50,14 +50,18 @@ export default function CustomerChatLayout() {
   }
 
   useEffect(() => {
+    if (!currentUser) return;
+
     const initializeData = async () => {
         setLoading(true);
         const profiles = await fetchProfiles(supabase);
         setAllUsers(profiles);
 
+        // Fetch chats assigned to the current agent OR chats in the 'gerais' queue
         const { data: chatsData, error: chatsError } = await supabase
             .from('chats')
             .select('*')
+            .or(`agent_id.eq.${currentUser.id},status.eq.gerais`)
             .order('created_at', { ascending: false });
 
         if (chatsError) {
@@ -86,7 +90,7 @@ export default function CustomerChatLayout() {
     };
 
     initializeData();
-  }, [supabase]);
+  }, [supabase, currentUser]);
 
 
   useEffect(() => {
