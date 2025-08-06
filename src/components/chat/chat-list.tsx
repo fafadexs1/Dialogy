@@ -12,7 +12,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status';
 
 interface ChatListProps {
   chats: Chat[];
-  selectedChat: Chat;
+  selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
 }
 
@@ -25,7 +25,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         <div
           key={chat.id}
           className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
-            selectedChat.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
+            selectedChat?.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
           }`}
           onClick={() => setSelectedChat(chat)}
         >
@@ -36,13 +36,17 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <p className="font-semibold truncate">{chat.contact.name}</p>
-              <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
-                {chat.messages[chat.messages.length - 1].timestamp}
-              </p>
+              {chat.messages.length > 0 && (
+                <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                  {chat.messages[chat.messages.length - 1].timestamp}
+                </p>
+              )}
             </div>
-            <p className="text-sm text-muted-foreground truncate">
-              {chat.messages[chat.messages.length - 1].content}
-            </p>
+            {chat.messages.length > 0 && (
+                <p className="text-sm text-muted-foreground truncate">
+                    {chat.messages[chat.messages.length - 1].content}
+                </p>
+            )}
           </div>
         </div>
       )) : (
