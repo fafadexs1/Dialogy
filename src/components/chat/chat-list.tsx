@@ -8,9 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type User, type OnlineAgent } from '@/lib/types';
-import { useOnlineStatus } from '@/hooks/use-online-status';
-import { useAuth } from '@/hooks/use-auth';
+import { type Chat, type OnlineAgent } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -19,6 +17,7 @@ interface ChatListProps {
   chats: Chat[];
   selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
+  onlineAgents: OnlineAgent[];
 }
 
 const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
@@ -48,9 +47,7 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
-  const currentUser = useAuth();
-  const onlineAgents = useOnlineStatus(currentUser as User);
+export default function ChatList({ chats, selectedChat, setSelectedChat, onlineAgents }: ChatListProps) {
 
   const renderChatList = (chatList: Chat[]) => (
     <div className="space-y-1 p-2">

@@ -1,3 +1,4 @@
+
 import { MainLayout } from '@/components/layout/main-layout';
 import { createClient } from '@/lib/supabase/server';
 import type { User } from '@/lib/types';
@@ -19,12 +20,13 @@ export default async function Home() {
   const appUser = agents.find(a => a.email === user.email) || {
       ...agents[0],
       name: user.user_metadata.full_name || user.email,
-      email: user.email
+      email: user.email,
+      id: user.id, // Add the user id to the appUser object
   };
 
   return (
     <MainLayout user={appUser}>
-      <CustomerChatLayout />
+      <CustomerChatLayout onlineAgents={[]} />
     </MainLayout>
   );
 }
