@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -18,14 +19,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Separator } from '../ui/separator';
 
 interface ContactPanelProps {
-  contact: User;
+  contact: User | null;
 }
 
 export default function ContactPanel({ contact }: ContactPanelProps) {
 
-  if (!contact.businessProfile) {
+  if (!contact) {
     return (
-      <div className="hidden w-full max-w-sm flex-col border-l bg-card lg:flex">
+      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
         <div className="flex h-16 items-center border-b px-4">
           <h3 className="font-semibold">Informações do Contato</h3>
         </div>
@@ -55,7 +56,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
-            <p className="text-sm text-muted-foreground">{businessProfile.companyName}</p>
+            <p className="text-sm text-muted-foreground">{businessProfile?.companyName}</p>
             <div className="mt-4 flex items-center gap-2">
                 <Button variant="outline" size="sm">
                     <Mail className="mr-2 h-4 w-4"/>
@@ -86,7 +87,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                 <span>{contact.phone}</span>
               </div>
             )}
-             {businessProfile.companyName && (
+             {businessProfile?.companyName && (
               <div className="flex items-center gap-3">
                 <Building className="h-4 w-4 text-muted-foreground" />
                 <span>{businessProfile.companyName}</span>
@@ -101,11 +102,11 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                         <span className="flex items-center gap-2 font-semibold"><Briefcase className="h-4 w-4" /> Negócios</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile.deals.length}</Badge>
+                        <Badge variant="secondary" className="text-xs">{businessProfile?.deals.length}</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">
-                    {businessProfile.deals.length > 0 ? (
+                    {businessProfile?.deals && businessProfile.deals.length > 0 ? (
                         businessProfile.deals.map(deal => (
                             <div key={deal.id} className="p-3 border rounded-lg bg-background">
                                 <p className="font-semibold text-sm">{deal.name}</p>
@@ -125,11 +126,11 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                     <span className="flex items-center gap-2 font-semibold"><CheckSquare className="h-4 w-4" /> Tarefas</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile.tasks.length}</Badge>
+                        <Badge variant="secondary" className="text-xs">{businessProfile?.tasks.length}</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">
-                    {businessProfile.tasks.length > 0 ? (
+                    {businessProfile?.tasks && businessProfile.tasks.length > 0 ? (
                         businessProfile.tasks.map(task => (
                             <div key={task.id} className="flex items-start gap-2 p-3 border rounded-lg bg-background text-sm">
                             <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 ${task.completed ? 'text-primary' : 'text-muted-foreground'}`}/>

@@ -21,10 +21,10 @@ const fetchProfiles = async (supabase: any): Promise<User[]> => {
     // Map Supabase profile to App User type
     return data.map((profile: any) => ({
         id: profile.id,
-        name: profile.full_name,
+        name: profile.full_name || 'Usuário sem nome',
         firstName: profile.full_name?.split(' ')[0] || '',
         lastName: profile.full_name?.split(' ')[1] || '',
-        avatar: profile.avatar_url || 'https://placehold.co/40x40.png',
+        avatar: profile.avatar_url || `https://placehold.co/40x40.png?text=${(profile.full_name || 'U').charAt(0)}`,
         email: profile.email, // Assuming email is on profile for simplicity
     }));
 }
@@ -72,7 +72,7 @@ export default function CustomerChatLayout() {
             return {
                 id: chat.id,
                 contact: contact || getUserById(chat.contact_id),
-                agent: agent || getUserById(chat.agent_id),
+                agent: agent || (chat.agent_id ? getUserById(chat.agent_id) : undefined),
                 messages: [], 
                 status: chat.status as Chat['status'],
             };
@@ -90,7 +90,10 @@ export default function CustomerChatLayout() {
 
 
   useEffect(() => {
-    if (!selectedChat || allUsers.length === 0) return;
+    if (!selectedChat || allUsers.length === 0) {
+        setMessages([]); // Clear messages when no chat is selected
+        return;
+    };
 
     // Fetch initial messages for the selected chat
     const fetchMessages = async () => {
@@ -171,12 +174,6 @@ export default function CustomerChatLayout() {
       )
   }
 
-  if (!selectedChat) {
-      // TODO: Improve this empty state
-      return <div className="flex-1 flex items-center justify-center text-muted-foreground">Nenhuma conversa encontrada. Crie uma para começar.</div>
-  }
-
-
   return (
     <div className="flex flex-1 w-full min-h-0">
       <ChatList
@@ -184,8 +181,8 @@ export default function CustomerChatLayout() {
         selectedChat={selectedChat}
         setSelectedChat={setSelectedChat}
       />
-      <ChatPanel key={selectedChat.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
-      <ContactPanel contact={selectedChat.contact} />
+      <ChatPanel key={selectedChat?.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
+      <ContactPanel contact={selectedChat?.contact || null} />
     </div>
   );
 }

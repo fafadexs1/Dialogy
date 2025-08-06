@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2 } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -18,7 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 
 interface ChatPanelProps {
-  chat: Chat;
+  chat: Chat | null;
   messages: Message[];
   currentUser: User;
 }
@@ -42,7 +42,7 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newMessage.trim() === '' || !currentUser) return;
+    if (newMessage.trim() === '' || !currentUser || !chat) return;
     
     const { error } = await supabase
       .from('messages')
@@ -75,12 +75,12 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
   }, [messages]);
 
   const chatHistoryForAI = messages.map(m => `${m.sender.name}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender.id !== chat.agent?.id).pop();
+  const lastCustomerMessage = messages.filter(m => m.sender.id !== chat?.agent?.id).pop();
 
 
   React.useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && lastCustomerMessage.sender.id !== chat.agent?.id) {
+        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender.id !== chat.agent?.id) {
             const lastMessageInState = messages[messages.length - 1];
             if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
                 setIsAiThinking(true);
@@ -123,7 +123,19 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat.id, chat.agent?.id, supabase]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase]);
+
+  if (!chat) {
+    return (
+        <main className="flex-1 flex flex-col items-center justify-center bg-muted/20 min-w-0 p-6">
+            <div className="text-center">
+                <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
+                <h2 className="text-2xl font-semibold">Selecione uma conversa</h2>
+                <p className="mt-1 text-muted-foreground">Escolha uma conversa da lista para ver as mensagens aqui.</p>
+            </div>
+        </main>
+    )
+  }
 
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
