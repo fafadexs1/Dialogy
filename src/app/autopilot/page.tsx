@@ -11,7 +11,7 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { Input } from '@/components/ui/input';
 
 
 type ModelInfo = {
@@ -121,8 +122,8 @@ export default function AutopilotPage() {
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
                     
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                        <Card className="lg:col-span-2">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+                        <Card className="lg:col-span-8">
                             <CardHeader>
                                 <CardTitle>Visão Geral de Custos e Uso</CardTitle>
                                 <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
@@ -183,46 +184,64 @@ export default function AutopilotPage() {
                                 </div>
                             </CardContent>
                         </Card>
-                         <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Modelo</CardTitle>
-                                <CardDescription>Selecione o modelo de IA que potencializa as automações.</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-2">
-                                    <Label htmlFor="ai-model">Modelo de IA</Label>
-                                    <Select value={aiModel} onValueChange={setAiModel}>
-                                        <SelectTrigger id="ai-model">
-                                            <SelectValue placeholder="Selecione um modelo" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
-                                            <SelectItem value="googleai/gemini-2.0-pro">Gemini 2.0 Pro (Avançado)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                     {selectedModelInfo && (
-                                        <div className="pt-2 space-y-3 animate-in fade-in-50">
-                                             <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
-                                             <div className="grid grid-cols-2 gap-3 text-center">
-                                                <div className="p-2 border rounded-lg">
-                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className='text-green-500'/> Entrada</p>
-                                                    <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                        <div className="lg:col-span-4 space-y-6">
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Modelo</CardTitle>
+                                    <CardDescription>Selecione o modelo de IA que potencializa as automações.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ai-model">Modelo de IA</Label>
+                                        <Select value={aiModel} onValueChange={setAiModel}>
+                                            <SelectTrigger id="ai-model">
+                                                <SelectValue placeholder="Selecione um modelo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
+                                                <SelectItem value="googleai/gemini-2.0-pro">Gemini 2.0 Pro (Avançado)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        {selectedModelInfo && (
+                                            <div className="pt-2 space-y-3 animate-in fade-in-50">
+                                                <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
+                                                <div className="grid grid-cols-2 gap-3 text-center">
+                                                    <div className="p-2 border rounded-lg">
+                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className='text-green-500'/> Entrada</p>
+                                                        <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                                                    </div>
+                                                    <div className="p-2 border rounded-lg">
+                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className='text-blue-500'/> Saída</p>
+                                                        <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                    </div>
                                                 </div>
-                                                 <div className="p-2 border rounded-lg">
-                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className='text-blue-500'/> Saída</p>
-                                                    <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                <div className="p-2 border rounded-lg text-center">
+                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className='text-purple-500'/> Janela de Contexto</p>
+                                                    <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
                                                 </div>
-                                             </div>
-                                             <div className="p-2 border rounded-lg text-center">
-                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className='text-purple-500'/> Janela de Contexto</p>
-                                                <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
-                                             </div>
-                                            <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
+                                                <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                             <Card>
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2"><KeyRound/> Credenciais da API Gemini</CardTitle>
+                                    <CardDescription>Insira sua chave de API para habilitar as funcionalidades do Piloto Automático.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="gemini-api-key">Sua Chave de API</Label>
+                                        <Input id="gemini-api-key" type="password" placeholder="••••••••••••••••••••••••••" />
+                                        <p className='text-xs text-muted-foreground pt-1'>Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
+                                    </div>
+                                </CardContent>
+                                <CardFooter>
+                                    <Button>Salvar</Button>
+                                </CardFooter>
+                            </Card>
+                        </div>
                     </div>
 
                     <Separator className="my-8" />
@@ -288,4 +307,3 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
-
