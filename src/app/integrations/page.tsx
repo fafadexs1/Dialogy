@@ -42,6 +42,8 @@ export default function IntegrationsPage() {
     const renderCard = (integration: Integration) => {
         const card = <IntegrationCard integration={integration} />;
         if (integration.id === 'nexusflow') {
+            // The functionality for NexusFlow is now on the Autopilot page.
+            // This can be adjusted if NexusFlow has its own distinct configuration page again.
             return <Link href="/autopilot" key={integration.id}>{card}</Link>;
         }
         return card;
