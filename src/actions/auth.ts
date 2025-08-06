@@ -1,29 +1,34 @@
 'use server';
 
-import { signIn, signOut } from '@/auth';
-import prisma from '@/lib/db';
-import { AuthError } from 'next-auth';
+import { createServerClient } from '@supabase/auth-helpers-nextjs';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import bcrypt from 'bcrypt';
+import { cookies } from 'next/headers';
 
 export async function authenticate(
   prevState: string | undefined,
   formData: FormData
 ) {
-  try {
-    await signIn('credentials', formData);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case 'CredentialsSignin':
-          return 'Credenciais inválidas.';
-        default:
-          return 'Algo deu errado. Tente novamente.';
-      }
-    }
-    throw error;
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  const cookieStore = cookies();
+  
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: () => cookieStore }
+  );
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    return 'Credenciais inválidas.';
   }
-  // Adicionado para garantir o redirecionamento após o login
+
+  revalidatePath('/');
   redirect('/');
 }
 
@@ -31,40 +36,45 @@ export async function register(
   prevState: string | undefined,
   formData: FormData
 ) {
-  try {
-    const name = formData.get('name') as string;
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
+  const name = formData.get('name') as string;
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  const cookieStore = cookies();
 
-    if (!name || !email || !password) {
-      return 'Por favor, preencha todos os campos.';
-    }
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: () => cookieStore }
+  );
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (existingUser) {
-      return 'Este e-mail já está em uso.';
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    await prisma.user.create({
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
       data: {
-        name,
-        email,
-        password: hashedPassword,
+        full_name: name,
       },
-    });
-  } catch (error) {
-    console.error(error);
-    return 'Não foi possível concluir o registro. Tente novamente.';
+    },
+  });
+
+  if (error) {
+    if (error.message.includes('User already registered')) {
+        return 'Este e-mail já está em uso.';
+    }
+    return 'Não foi possível concluir o registro. Verifique os dados e tente novamente.';
   }
 
   redirect('/login?registered=true');
 }
 
 export async function signOutAction() {
-  await signOut();
+    const cookieStore = cookies();
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { cookies: () => cookieStore }
+    );
+
+    await supabase.auth.signOut();
+    redirect('/login');
 }

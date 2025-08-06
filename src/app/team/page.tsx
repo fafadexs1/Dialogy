@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, Team, BusinessHour } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
+import { agents as mockAgents } from '@/lib/mock-data'; // Renamed to avoid conflict
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,9 +35,9 @@ const defaultBusinessHours: BusinessHour[] = daysOfWeek.map(day => ({
 
 
 const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [agents[0], agents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-2', name: 'Vendas', color: '#10b981', members: [agents[1], agents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [agents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-2', name: 'Vendas', color: '#10b981', members: [mockAgents[1], mockAgents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [mockAgents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
 ];
 
 function TeamSettingsLayout() {
@@ -45,6 +45,7 @@ function TeamSettingsLayout() {
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamColor, setNewTeamColor] = useState('#cccccc');
   const [selectedAgentId, setSelectedAgentId] = useState('');
+  const agents = mockAgents;
 
 
   const handleAddTeam = (e: React.FormEvent) => {
@@ -157,8 +158,8 @@ function TeamSettingsLayout() {
                         <Accordion type="single" collapsible className="w-full">
                             {teams.map((team) => (
                                 <AccordionItem value={team.id} key={team.id}>
-                                   <div className="flex items-center w-full px-2 hover:bg-accent rounded-md">
-                                     <AccordionTrigger className="text-base font-medium flex-1">
+                                   <div className="flex items-center w-full hover:bg-accent rounded-md">
+                                     <AccordionTrigger className="text-base font-medium flex-1 px-2">
                                         <div className="flex items-center gap-3">
                                             <span className="h-4 w-4 rounded-full" style={{ backgroundColor: team.color }}></span>
                                             {team.name}
@@ -302,7 +303,9 @@ function TeamSettingsLayout() {
 
 
 export default function TeamPage() {
-  const user = agents[0];
+  // In a real app with Supabase, you would fetch the current user session
+  // For now, we'll use a mock user, but this component is now client-side
+  const user = mockAgents[0];
 
   return (
     <MainLayout user={user}>
@@ -321,7 +324,7 @@ export default function TeamPage() {
           <TabsContent value="communication" className="m-0 p-0 flex-1 flex min-h-0">
             <InternalChatLayout user={user} />
           </TabsContent>
-          <TabsContent value="management" className="m-0 p-0 flex-1 overflow-y-auto min-h-0">
+          <TabsContent value="management" className="m-0 flex-1 overflow-y-auto min-h-0">
              <TeamSettingsLayout />
           </TabsContent>
         </Tabs>

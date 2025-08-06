@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import Link from 'next/link';
@@ -50,7 +51,7 @@ function SignOut() {
         action={signOutAction}
         className="w-full"
       >
-        <button type="submit" className="w-full">
+        <button type="submit" className="w-full text-left">
           <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
             <LogOut className="mr-2 h-4 w-4" />
             <span>Sair</span>
