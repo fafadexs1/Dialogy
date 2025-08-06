@@ -14,10 +14,11 @@ import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
-
+import { createClient } from '@/lib/supabase/client';
 
 interface ChatPanelProps {
   chat: Chat;
+  messages: Message[];
 }
 
 const mockKnowledgeBase = `
@@ -26,8 +27,7 @@ Política de Devolução: Nossa política de devolução permite que os clientes
 FAQ - Horário de Funcionamento: Nosso horário de atendimento padrão é de segunda a sexta-feira, das 9h às 18h (horário de Brasília). Não funcionamos em feriados nacionais.
 `;
 
-export default function ChatPanel({ chat }: ChatPanelProps) {
-  const [messages, setMessages] = React.useState<Message[]>(chat.messages);
+export default function ChatPanel({ chat, messages }: ChatPanelProps) {
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
   const [isAiThinking, setIsAiThinking] = React.useState(false);
@@ -35,20 +35,35 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
   const [selectedAiModel, setSelectedAiModel] = React.useState('googleai/gemini-2.0-flash');
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const supabase = createClient();
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newMessage.trim() === '') return;
 
-    const message: Message = {
-      id: `msg-${Date.now()}`,
-      sender: agents[0] as User,
-      content: newMessage,
-      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages([...messages, message]);
-    setNewMessage('');
+    // In a real app, you'd get the current authenticated user's ID
+    const senderId = agents[0].id; 
+    
+    const { error } = await supabase
+      .from('messages')
+      .insert([
+        { 
+          content: newMessage,
+          chat_id: chat.id,
+          sender_id: senderId,
+          sender_type: 'agent' // Assuming the user of this panel is always an agent
+        }
+      ]);
+      
+    if (error) {
+        toast({
+            title: 'Erro ao enviar mensagem',
+            description: 'Não foi possível enviar sua mensagem. Tente novamente.',
+            variant: 'destructive',
+        });
+    } else {
+        setNewMessage('');
+    }
   };
 
   React.useEffect(() => {
@@ -83,13 +98,17 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                     
                     // Only respond if the AI returned a response (meaning a rule was triggered)
                     if (result && result.response) {
-                        const aiMessage: Message = {
-                            id: `msg-${Date.now()}`,
-                            sender: agents[0] as User, // AI responds as the agent
-                            content: result.response,
-                            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                        };
-                        setMessages(prev => [...prev, aiMessage]);
+                        const { error } = await supabase
+                          .from('messages')
+                          .insert([
+                            { 
+                              content: result.response,
+                              chat_id: chat.id,
+                              sender_id: agents[0].id, // AI responds as the agent
+                              sender_type: 'agent'
+                            }
+                          ]);
+                        if(error) throw error;
                     }
 
                 } catch (error) {
@@ -106,7 +125,7 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat.id, supabase]);
 
   return (
     <main className="flex flex-1 flex-col bg-muted/20">
