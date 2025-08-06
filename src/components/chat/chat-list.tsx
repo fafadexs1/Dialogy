@@ -8,15 +8,49 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type User } from '@/lib/types';
+import { type Chat, type User, type OnlineAgent } from '@/lib/types';
 import { useOnlineStatus } from '@/hooks/use-online-status';
 import { useAuth } from '@/hooks/use-auth';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { zonedTimeToUtc } from 'date-fns-tz';
 
 interface ChatListProps {
   chats: Chat[];
   selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
 }
+
+const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
+  const [onlineSince, setOnlineSince] = React.useState('');
+
+  React.useEffect(() => {
+    if (agent.joined_at) {
+       const updateOnlineTime = () => {
+        const timeZone = 'America/Sao_Paulo'; // Exemplo de fuso horário
+        const utcDate = zonedTimeToUtc(agent.joined_at, timeZone);
+
+        const distance = formatDistanceToNow(new Date(agent.joined_at), {
+            addSuffix: true,
+            locale: ptBR,
+        });
+        setOnlineSince(distance);
+      }
+      updateOnlineTime();
+      const interval = setInterval(updateOnlineTime, 60000); // Atualiza a cada minuto
+      return () => clearInterval(interval);
+    }
+  }, [agent.joined_at]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="font-semibold">{agent.user.name}</p>
+      {onlineSince && <p className="text-xs text-muted-foreground">Online {onlineSince}</p>}
+    </div>
+  );
+};
+
 
 export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
   const currentUser = useAuth();
@@ -81,14 +115,23 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
       
       <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Agentes Online ({onlineAgents.length})</h3>
-        <div className="min-h-[48px] flex flex-wrap items-center gap-2 py-1">
-          {onlineAgents.map(agent => (
-            <Avatar key={agent.id} className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
-              <AvatarImage src={agent.avatar} alt={agent.name} data-ai-hint="person" />
-              <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
-            </Avatar>
-          ))}
-        </div>
+        <TooltipProvider>
+            <div className="min-h-[48px] flex flex-wrap items-center gap-2 py-1">
+            {onlineAgents.map(agent => (
+                <Tooltip key={agent.user.id}>
+                    <TooltipTrigger>
+                        <Avatar className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
+                            <AvatarImage src={agent.user.avatar} alt={agent.user.name} data-ai-hint="person" />
+                            <AvatarFallback>{agent.user.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <AgentTooltipContent agent={agent} />
+                    </TooltipContent>
+                </Tooltip>
+            ))}
+            </div>
+        </TooltipProvider>
       </div>
 
       <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col min-h-0">

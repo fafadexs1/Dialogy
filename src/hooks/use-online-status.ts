@@ -3,32 +3,29 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { User } from '@/lib/types';
+import type { User, OnlineAgent } from '@/lib/types';
 import { agents } from '@/lib/mock-data'; // Usaremos para obter os dados estáticos do agente
 
 // This hook uses Supabase's Realtime Presence feature for real-time online status.
-export function useOnlineStatus(currentUser: User) {
+export function useOnlineStatus(currentUser: User): OnlineAgent[] {
   const supabase = createClient();
-  const [onlineAgents, setOnlineAgents] = useState<User[]>([]);
+  const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
 
-    // Um canal único para rastrear todos os agentes online
     const channel = supabase.channel('online-agents');
 
-    // Função para atualizar a lista de agentes online com base no estado de presença
     const updateOnlineStatus = (presenceState: any) => {
         const uniqueUserIds = new Set<string>();
-        const presenceUsers: User[] = [];
+        const presenceUsers: OnlineAgent[] = [];
 
         for (const id in presenceState) {
-            const presences = presenceState[id] as unknown as { user: User }[];
+            const presences = presenceState[id] as unknown as { user: User, joined_at: string }[];
             presences.forEach(p => {
                 if (p.user && !uniqueUserIds.has(p.user.id)) {
                     uniqueUserIds.add(p.user.id);
-                    // Adiciona a propriedade 'online' para consistência
-                    presenceUsers.push({ ...p.user, online: true });
+                    presenceUsers.push({ user: p.user, joined_at: p.joined_at });
                 }
             });
         }
@@ -41,28 +38,23 @@ export function useOnlineStatus(currentUser: User) {
         updateOnlineStatus(presenceState);
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
-        // Para simplificar, ressincronizamos em vez de adicionar incrementalmente
         const presenceState = channel.presenceState();
         updateOnlineStatus(presenceState);
       })
       .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-        // Para simplificar, ressincronizamos em vez de remover incrementalmente
         const presenceState = channel.presenceState();
         updateOnlineStatus(presenceState);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // Quando o usuário se conecta, ele rastreia seu próprio status
-          await channel.track({ user: currentUser });
+          await channel.track({ user: currentUser, joined_at: new Date().toISOString() });
         }
       });
 
-    // Limpa a inscrição e o rastreamento quando o componente desmonta
     return () => {
       channel.untrack();
       supabase.removeChannel(channel);
     };
-  // Adicionamos currentUser como dependência para garantir que temos os dados do usuário
   }, [supabase, currentUser?.id]); 
 
   return onlineAgents;

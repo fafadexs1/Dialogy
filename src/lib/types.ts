@@ -21,6 +21,11 @@ export type User = {
   activeWorkspaceId?: string;
 };
 
+export type OnlineAgent = {
+  user: User;
+  joined_at: string;
+}
+
 export type BusinessProfile = {
   companyName: string;
   website?: string;
