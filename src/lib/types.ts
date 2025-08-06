@@ -125,7 +125,8 @@ export interface Integration {
 
 export interface NexusFlowInstance {
   id: string;
-  agentName: string;
-  webhookUrl: string;
+  name: string;
+  trigger: string;
+  action: string;
   enabled: boolean;
 }

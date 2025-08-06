@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState } from 'react';
@@ -9,11 +8,9 @@ import { agents, nexusFlowInstances as mockInstances } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,20 +52,23 @@ export default function NexusFlowPage() {
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                     <div>
                         <h1 className="text-2xl font-bold">Automações NexusFlow</h1>
-                        <p className="text-muted-foreground">Gerencie seus webhooks para conectar agentes de automação.</p>
+                        <p className="text-muted-foreground">Crie regras para que o piloto automático responda a situações específicas.</p>
                     </div>
                     <Button>
                         <Plus className="mr-2 h-4 w-4" />
-                        Adicionar Webhook
+                        Adicionar Automação
                     </Button>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {instances.map(instance => (
-                            <Card key={instance.id}>
+                            <Card key={instance.id} className="flex flex-col">
                                 <CardHeader>
                                     <div className="flex justify-between items-start">
-                                        <CardTitle className="max-w-[80%] break-words">{instance.agentName}</CardTitle>
+                                        <CardTitle className="max-w-[80%] break-words flex items-center gap-2">
+                                            <Zap className="h-5 w-5 text-primary"/>
+                                            {instance.name}
+                                        </CardTitle>
                                          <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
                                                 <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -89,27 +89,24 @@ export default function NexusFlowPage() {
                                     </div>
                                      <CardDescription>ID: {instance.id}</CardDescription>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
-                                     <div className="space-y-1">
-                                        <Label htmlFor={`webhook-url-${instance.id}`}>URL do Webhook</Label>
-                                        <Input id={`webhook-url-${instance.id}`} value={instance.webhookUrl} readOnly />
+                                <CardContent className="space-y-4 flex-grow">
+                                     <div className="space-y-2">
+                                        <p className="text-sm font-medium text-muted-foreground">Gatilho (Quando)</p>
+                                        <p className="p-3 rounded-md bg-secondary/50 border text-sm">{instance.trigger}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-sm font-medium text-muted-foreground">Ação (Então)</p>
+                                        <p className="p-3 rounded-md bg-secondary/50 border text-sm">{instance.action}</p>
                                     </div>
                                 </CardContent>
-                                <CardFooter>
-                                     <div className="flex items-center justify-between w-full">
-                                        <Label htmlFor={`status-${instance.id}`} className="flex items-center gap-2 text-sm font-normal text-muted-foreground cursor-pointer">
-                                            Status
-                                        </Label>
-                                        <div className="flex items-center gap-2">
-                                            <Switch
-                                                id={`status-${instance.id}`}
-                                                checked={instance.enabled}
-                                                // onCheckedChange={(checked) => handleToggle(instance.id, checked)}
-                                            />
-                                            <span className="text-sm font-medium">{instance.enabled ? 'Ativo' : 'Inativo'}</span>
-                                        </div>
-                                    </div>
-                                </CardFooter>
+                                <div className="p-4 border-t flex items-center justify-between">
+                                     <span className="text-sm font-medium">{instance.enabled ? 'Ativa' : 'Inativa'}</span>
+                                      <Switch
+                                        id={`status-${instance.id}`}
+                                        checked={instance.enabled}
+                                        // onCheckedChange={(checked) => handleToggle(instance.id, checked)}
+                                    />
+                                </div>
                             </Card>
                         ))}
                     </div>

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2 } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
+import { agents, nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -58,30 +58,35 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
   React.useEffect(() => {
     const runAiAgent = async () => {
         if (isAiAgentActive && lastCustomerMessage && lastCustomerMessage.sender.id.startsWith('contact')) {
-            // Check if the last message in the state is from the customer
             const lastMessageInState = messages[messages.length - 1];
             if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
                 setIsAiThinking(true);
                 try {
+                    // Fetch active automation rules
+                    const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+
                     const result = await generateAgentResponse({
                         customerMessage: lastCustomerMessage.content,
-                        chatHistory: chatHistoryForAI
+                        chatHistory: chatHistoryForAI,
+                        rules: activeRules
                     });
                     
-                    const aiMessage: Message = {
-                        id: `msg-${Date.now()}`,
-                        sender: agents[0] as User, // AI responds as the agent
-                        content: result.response,
-                        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                    };
-
-                    setMessages(prev => [...prev, aiMessage]);
+                    // Only respond if the AI returned a response (meaning a rule was triggered)
+                    if (result && result.response) {
+                        const aiMessage: Message = {
+                            id: `msg-${Date.now()}`,
+                            sender: agents[0] as User, // AI responds as the agent
+                            content: result.response,
+                            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                        };
+                        setMessages(prev => [...prev, aiMessage]);
+                    }
 
                 } catch (error) {
                      console.error('Error generating AI agent response:', error);
                      toast({
                         title: 'Erro do Agente IA',
-                        description: 'Não foi possível gerar a resposta. Tente novamente.',
+                        description: 'Não foi possível avaliar as regras de automação. Tente novamente.',
                         variant: 'destructive',
                     });
                 } finally {
@@ -145,7 +150,7 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                     <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
                         <div className="flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Digitando...</span>
+                            <span>Avaliando regras...</span>
                         </div>
                     </div>
                 </div>
