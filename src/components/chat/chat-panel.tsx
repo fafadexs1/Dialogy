@@ -5,11 +5,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2 } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
 import { agents } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
+import { generateAgentResponse } from '@/ai/flows/auto-responder';
+import { Switch } from '../ui/switch';
+import { Label } from '../ui/label';
+import { useToast } from '@/hooks/use-toast';
+
 
 interface ChatPanelProps {
   chat: Chat;
@@ -18,7 +23,10 @@ interface ChatPanelProps {
 export default function ChatPanel({ chat }: ChatPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>(chat.messages);
   const [newMessage, setNewMessage] = React.useState('');
+  const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
+  const [isAiThinking, setIsAiThinking] = React.useState(false);
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,7 +53,45 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
   }, [messages]);
 
   const chatHistoryForAI = messages.map(m => `${m.sender.name}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender.id.startsWith('contact')).pop()?.content || '';
+  const lastCustomerMessage = messages.filter(m => m.sender.id.startsWith('contact')).pop();
+
+  React.useEffect(() => {
+    const runAiAgent = async () => {
+        if (isAiAgentActive && lastCustomerMessage && lastCustomerMessage.sender.id.startsWith('contact')) {
+            // Check if the last message in the state is from the customer
+            const lastMessageInState = messages[messages.length - 1];
+            if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
+                setIsAiThinking(true);
+                try {
+                    const result = await generateAgentResponse({
+                        customerMessage: lastCustomerMessage.content,
+                        chatHistory: chatHistoryForAI
+                    });
+                    
+                    const aiMessage: Message = {
+                        id: `msg-${Date.now()}`,
+                        sender: agents[0] as User, // AI responds as the agent
+                        content: result.response,
+                        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                    };
+
+                    setMessages(prev => [...prev, aiMessage]);
+
+                } catch (error) {
+                     console.error('Error generating AI agent response:', error);
+                     toast({
+                        title: 'Erro do Agente IA',
+                        description: 'Não foi possível gerar a resposta. Tente novamente.',
+                        variant: 'destructive',
+                    });
+                } finally {
+                    setIsAiThinking(false);
+                }
+            }
+        }
+    };
+    runAiAgent();
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast]);
 
   return (
     <main className="flex flex-1 flex-col bg-muted/20">
@@ -90,31 +136,59 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                 </div>
               </div>
             ))}
+             {isAiThinking && (
+                <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={agents[0].avatar} alt={agents[0].name} data-ai-hint="person" />
+                      <AvatarFallback>{agents[0].name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
+                        <div className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Digitando...</span>
+                        </div>
+                    </div>
+                </div>
+            )}
           </div>
         </ScrollArea>
       </div>
 
       <footer className="border-t bg-card p-4">
-        <SmartReplies 
-          customerMessage={lastCustomerMessage}
-          chatHistory={chatHistoryForAI}
-          onSelectReply={(reply) => setNewMessage(reply)}
-        />
-        <form onSubmit={handleSendMessage} className="relative mt-2">
-          <Input
-            placeholder="Digite sua mensagem..."
-            className="pr-24"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-          />
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
-            <Button type="button" variant="ghost" size="icon"><Smile className="h-5 w-5" /></Button>
-            <Button type="button" variant="ghost" size="icon"><Paperclip className="h-5 w-5" /></Button>
-            <Button type="submit" size="sm" className='h-8'>
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-        </form>
+        {!isAiAgentActive && (
+            <SmartReplies 
+                customerMessage={lastCustomerMessage?.content || ''}
+                chatHistory={chatHistoryForAI}
+                onSelectReply={(reply) => setNewMessage(reply)}
+            />
+        )}
+        <div className="flex items-center gap-4 mt-2">
+            <form onSubmit={handleSendMessage} className="relative flex-1">
+                <Input
+                    placeholder="Digite sua mensagem..."
+                    className="pr-24"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    disabled={isAiAgentActive}
+                />
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Paperclip className="h-5 w-5" /></Button>
+                    <Button type="submit" size="sm" className='h-8' disabled={isAiAgentActive}>
+                    <Send className="h-4 w-4" />
+                    </Button>
+                </div>
+            </form>
+            <div className="flex items-center space-x-2">
+                <Bot className="h-5 w-5 text-muted-foreground" />
+                <Switch
+                    id="ai-agent-switch"
+                    checked={isAiAgentActive}
+                    onCheckedChange={setIsAiAgentActive}
+                />
+                <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
+            </div>
+        </div>
       </footer>
     </main>
   );
