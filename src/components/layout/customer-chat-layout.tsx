@@ -11,8 +11,8 @@ import { Skeleton } from '../ui/skeleton';
 
 // This is a helper function to map sender IDs to user objects.
 // In a real app, you might fetch this from a user management system or have it in a global state.
+const allUsers = [...agents, ...contacts];
 const getUserById = (id: string): User => {
-  const allUsers = [...agents, ...contacts];
   return allUsers.find(u => u.id === id) || { 
     id: 'unknown', 
     name: 'Unknown', 
@@ -20,10 +20,6 @@ const getUserById = (id: string): User => {
     lastName: '', 
     avatar: 'https://placehold.co/40x40.png' 
   };
-}
-
-const getContactById = (id: string): User | undefined => {
-    return contacts.find(c => c.id === id);
 }
 
 export default function CustomerChatLayout() {
@@ -49,11 +45,10 @@ export default function CustomerChatLayout() {
 
         // Map Supabase data to Chat[] type
         const formattedChats: Chat[] = chatsData.map(chat => {
-            const contact = getContactById(chat.contact_id);
             return {
                 id: chat.id,
-                contact: contact || getUserById(chat.contact_id), // Fallback to a generic user
-                // Messages will be fetched when a chat is selected
+                contact: getUserById(chat.contact_id),
+                agent: getUserById(chat.agent_id),
                 messages: [], 
                 status: chat.status as Chat['status'],
             };

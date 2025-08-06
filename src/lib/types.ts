@@ -59,6 +59,7 @@ export type Message = {
 export type Chat = {
   id:string;
   contact: User;
+  agent?: User;
   messages: Message[];
   status: 'atendimentos' | 'gerais' | 'encerrados';
 };

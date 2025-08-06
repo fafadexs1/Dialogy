@@ -42,7 +42,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
     if (newMessage.trim() === '') return;
 
     // In a real app, you'd get the current authenticated user's ID
-    const senderId = agents[0].id; 
+    const senderId = chat.agent?.id || agents[0].id; 
     
     const { error } = await supabase
       .from('messages')
@@ -98,13 +98,14 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
                     
                     // Only respond if the AI returned a response (meaning a rule was triggered)
                     if (result && result.response) {
+                        const senderId = chat.agent?.id || agents[0].id;
                         const { error } = await supabase
                           .from('messages')
                           .insert([
                             { 
                               content: result.response,
                               chat_id: chat.id,
-                              sender_id: agents[0].id, // AI responds as the agent
+                              sender_id: senderId, // AI responds as the agent
                               sender_type: 'agent'
                             }
                           ]);
@@ -125,7 +126,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat.id, supabase]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase]);
 
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
@@ -173,8 +174,8 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
              {isAiThinking && (
                 <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={agents[0].avatar} alt={agents[0].name} data-ai-hint="person" />
-                      <AvatarFallback>{agents[0].name.charAt(0)}</AvatarFallback>
+                      <AvatarImage src={chat.agent?.avatar} alt={chat.agent?.name} data-ai-hint="person" />
+                      <AvatarFallback>{chat.agent?.name.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
                         <div className="flex items-center gap-2">
