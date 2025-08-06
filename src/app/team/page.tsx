@@ -5,11 +5,11 @@ import React, { useState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, Team, BusinessHour } from '@/lib/types';
 import { agents as mockAgents } from '@/lib/mock-data';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Palette, UserPlus, X, Bot, Search } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -36,7 +36,7 @@ const defaultBusinessHours: BusinessHour[] = daysOfWeek.map(day => ({
 
 
 const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)), webhookUrl: 'https://api.example.com/suporte-tecnico' },
+  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
   { id: 'team-2', name: 'Vendas', color: '#10b981', members: [mockAgents[1], mockAgents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
   { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [mockAgents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
 ];
@@ -76,7 +76,7 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
               <CardTitle className="text-2xl">{team.name}</CardTitle>
               <CardDescription>Gerencie as configurações gerais e membros da equipe.</CardDescription>
             </div>
-             <Button variant="destructive_outline" size="sm" onClick={() => onRemoveTeam(team.id)}>
+             <Button variant="destructive" size="sm" onClick={() => onRemoveTeam(team.id)}>
                 <Trash2 className="mr-2 h-4 w-4"/>
                 Remover Equipe
             </Button>
@@ -181,27 +181,6 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                 </div>
               </div>
             ))}
-        </CardContent>
-      </Card>
-      
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Bot /> Webhooks de Automação</CardTitle>
-          <CardDescription>As mensagens recebidas por esta equipe serão enviadas para a URL configurada.</CardDescription>
-        </CardHeader>
-        <CardContent>
-            <div className="flex items-end gap-2">
-                <div className="flex-1 space-y-1">
-                <Label htmlFor={`webhook-url-${team.id}`}>URL do Webhook</Label>
-                <Input
-                    id={`webhook-url-${team.id}`}
-                    placeholder="https://sua-api.com/webhook"
-                    value={team.webhookUrl || ''}
-                    onChange={(e) => onTeamUpdate(team.id, 'webhookUrl', e.target.value)}
-                />
-                </div>
-                <Button variant="outline">Salvar URL</Button>
-            </div>
         </CardContent>
       </Card>
     </div>

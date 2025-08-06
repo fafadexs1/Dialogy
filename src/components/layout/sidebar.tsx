@@ -12,6 +12,7 @@ import {
   LogOut,
   User as UserIcon,
   Slack,
+  Puzzle,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -43,6 +44,7 @@ const mainNavItems = [
   { href: '/crm', icon: Users, label: 'CRM 360º' },
   { href: '/team', icon: Slack, label: 'Equipes' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
 
 function SignOut() {

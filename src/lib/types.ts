@@ -103,7 +103,6 @@ export interface Team {
   color: string;
   businessHours: BusinessHour[];
   members: User[];
-  webhookUrl?: string;
 }
 
 export interface BusinessHour {
@@ -111,4 +110,15 @@ export interface BusinessHour {
   enabled: boolean;
   startTime: string;
   endTime: string;
+}
+
+export interface Integration {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  enabled: boolean;
+  settings: {
+    [key: string]: any;
+  };
 }
