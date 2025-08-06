@@ -7,9 +7,11 @@ import type { User, OnlineAgent } from '@/lib/types';
 import { agents } from '@/lib/mock-data'; // Usaremos para obter os dados estáticos do agente
 
 // This hook uses Supabase's Realtime Presence feature for real-time online status.
-export function useOnlineStatus(currentUser: User): OnlineAgent[] {
+export function useOnlineStatus(currentUser: User | null): OnlineAgent[] {
   const supabase = createClient();
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
+  // Use a state with an initializer to ensure the timestamp is set only once per component lifecycle.
+  const [joinedAt] = useState(() => new Date().toISOString());
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -38,16 +40,19 @@ export function useOnlineStatus(currentUser: User): OnlineAgent[] {
         updateOnlineStatus(presenceState);
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // This can be simplified to just re-syncing the state
         const presenceState = channel.presenceState();
         updateOnlineStatus(presenceState);
       })
       .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+         // This can be simplified to just re-syncing the state
         const presenceState = channel.presenceState();
         updateOnlineStatus(presenceState);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({ user: currentUser, joined_at: new Date().toISOString() });
+          // Track the user with the persistent joined_at timestamp
+          await channel.track({ user: currentUser, joined_at: joinedAt });
         }
       });
 
@@ -55,7 +60,8 @@ export function useOnlineStatus(currentUser: User): OnlineAgent[] {
       channel.untrack();
       supabase.removeChannel(channel);
     };
-  }, [supabase, currentUser?.id]); 
+  // We add joinedAt to dependency array, though it's stable and won't cause re-runs.
+  }, [supabase, currentUser, joinedAt]); 
 
   return onlineAgents;
 }

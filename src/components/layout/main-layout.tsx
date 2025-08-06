@@ -5,6 +5,7 @@ import React from 'react';
 import type { User, OnlineAgent } from '@/lib/types';
 import { Sidebar } from './sidebar';
 import { useOnlineStatus } from '@/hooks/use-online-status';
+import { useAuth } from '@/hooks/use-auth';
 
 interface MainLayoutProps {
   user: User;
