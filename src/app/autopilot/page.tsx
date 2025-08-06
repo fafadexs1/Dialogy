@@ -23,6 +23,9 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+
 
 type ModelInfo = {
     name: string;
@@ -49,6 +52,23 @@ const modelInfo: Record<string, ModelInfo> = {
     }
 }
 
+const chartData = [
+  { month: "Jan", executions: 186 },
+  { month: "Fev", executions: 305 },
+  { month: "Mar", executions: 237 },
+  { month: "Abr", executions: 73 },
+  { month: "Mai", executions: 209 },
+  { month: "Jun", executions: 214 },
+]
+
+const chartConfig = {
+  executions: {
+    label: "Execuções",
+    color: "hsl(var(--primary))",
+  },
+}
+
+
 export default function AutopilotPage() {
     const [user, setUser] = React.useState<User | null>(null);
     const [instances, setInstances] = useState<NexusFlowInstance[]>(mockInstances);
@@ -59,6 +79,7 @@ export default function AutopilotPage() {
     const estimatedMonthlyCost = 12.50;
     const currentMonthCost = 4.75;
     const executionsThisMonth = 950;
+    const tokensThisMonth = 254000;
 
 
     React.useEffect(() => {
@@ -106,30 +127,60 @@ export default function AutopilotPage() {
                                 <CardTitle>Visão Geral de Custos e Uso</CardTitle>
                                 <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
                             </CardHeader>
-                            <CardContent>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                                    <div className='p-4 rounded-lg bg-secondary/50'>
-                                        <p className="text-sm text-muted-foreground font-semibold">Execuções este Mês</p>
-                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                            <BrainCircuit className="h-6 w-6 text-primary"/>
-                                            {executionsThisMonth.toLocaleString('pt-BR')}
-                                        </p>
+                            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-muted-foreground">Métricas do Mês Atual</h3>
+                                    <div className="grid grid-cols-2 gap-4 text-center">
+                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                            <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <BrainCircuit className="h-6 w-6 text-primary"/>
+                                                {executionsThisMonth.toLocaleString('pt-BR')}
+                                            </p>
+                                        </div>
+                                         <div className='p-4 rounded-lg bg-secondary/50'>
+                                            <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <BrainCircuit className="h-6 w-6 text-purple-500"/>
+                                                {Math.round(tokensThisMonth / 1000)}k
+                                            </p>
+                                        </div>
+                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                            <p className="text-sm text-muted-foreground font-semibold">Custo Atual</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <DollarSign className="h-6 w-6 text-green-500"/>
+                                                {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </p>
+                                        </div>
+                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                            <p className="text-sm text-muted-foreground font-semibold">Custo Estimado</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <DollarSign className="h-6 w-6 text-amber-500"/>
+                                                {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className='p-4 rounded-lg bg-secondary/50'>
-                                        <p className="text-sm text-muted-foreground font-semibold">Custo do Mês Atual</p>
-                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                            <DollarSign className="h-6 w-6 text-green-500"/>
-                                            {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                        </p>
-                                    </div>
-                                    <div className='p-4 rounded-lg bg-secondary/50'>
-                                        <p className="text-sm text-muted-foreground font-semibold">Custo Mensal Estimado</p>
-                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                            <DollarSign className="h-6 w-6 text-amber-500"/>
-                                            {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                        </p>
-                                    </div>
-                            </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-muted-foreground">Execuções nos Últimos 6 Meses</h3>
+                                     <ChartContainer config={chartConfig} className="h-[200px] w-full">
+                                        <BarChart accessibilityLayer data={chartData}>
+                                            <XAxis
+                                            dataKey="month"
+                                            tickLine={false}
+                                            tickMargin={10}
+                                            axisLine={false}
+                                            tickFormatter={(value) => value.slice(0, 3)}
+                                            />
+                                            <YAxis tickLine={false} axisLine={false} />
+                                            <ChartTooltip
+                                            cursor={false}
+                                            content={<ChartTooltipContent indicator="dot" />}
+                                            />
+                                            <Bar dataKey="executions" fill="var(--color-executions)" radius={4} />
+                                        </BarChart>
+                                    </ChartContainer>
+                                </div>
                             </CardContent>
                         </Card>
                          <Card>
@@ -237,3 +288,4 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
+
