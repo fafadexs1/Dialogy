@@ -10,7 +10,7 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, Token } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,32 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+
+type ModelInfo = {
+    name: string;
+    description: string;
+    inputCost: string;
+    outputCost: string;
+    contextWindow: string;
+}
+
+const modelInfo: Record<string, ModelInfo> = {
+    'googleai/gemini-2.0-flash': {
+        name: 'Gemini 2.0 Flash',
+        description: 'Otimizado para velocidade e custo, ideal para respostas rápidas e automações de alto volume.',
+        inputCost: 'R$ 0,94',
+        outputCost: 'R$ 1,87',
+        contextWindow: '1M tokens'
+    },
+    'googleai/gemini-2.0-pro': {
+        name: 'Gemini 2.0 Pro',
+        description: 'Modelo mais poderoso, ideal para tarefas complexas que exigem raciocínio avançado.',
+        inputCost: 'R$ 18,70',
+        outputCost: 'R$ 56,10',
+        contextWindow: '1M tokens'
+    }
+}
 
 export default function AutopilotPage() {
     const [user, setUser] = React.useState<User | null>(null);
@@ -51,6 +77,8 @@ export default function AutopilotPage() {
         };
         fetchUser();
     }, [supabase.auth]);
+    
+    const selectedModelInfo = modelInfo[aiModel];
 
     if (!user) {
         return null; // Or a loading spinner
@@ -120,9 +148,26 @@ export default function AutopilotPage() {
                                             <SelectItem value="googleai/gemini-2.0-pro">Gemini 2.0 Pro (Avançado)</SelectItem>
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-muted-foreground pt-1">
-                                        Modelos mais avançados podem gerar respostas melhores, mas têm um custo maior.
-                                    </p>
+                                     {selectedModelInfo && (
+                                        <div className="pt-2 space-y-3 animate-in fade-in-50">
+                                             <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
+                                             <div className="grid grid-cols-2 gap-3 text-center">
+                                                <div className="p-2 border rounded-lg">
+                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className='text-green-500'/> Entrada</p>
+                                                    <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                                                </div>
+                                                 <div className="p-2 border rounded-lg">
+                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className='text-blue-500'/> Saída</p>
+                                                    <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                </div>
+                                             </div>
+                                             <div className="p-2 border rounded-lg text-center">
+                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><Token className='text-purple-500'/> Janela de Contexto</p>
+                                                <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
+                                             </div>
+                                            <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
+                                        </div>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
