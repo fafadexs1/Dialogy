@@ -121,6 +121,7 @@ export interface Integration {
   tagType: 'default' | 'primary' | 'secondary' | 'beta';
   status?: 'active' | 'coming_soon';
   additionalInfo?: string;
+  href?: string;
 }
 
 export interface NexusFlowInstance {

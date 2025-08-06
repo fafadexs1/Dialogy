@@ -247,7 +247,8 @@ export const integrations: Integration[] = [
     iconUrl: 'https://placehold.co/48x48.png', 
     tag: 'Automação', 
     tagType: 'primary', 
-    status: 'active' 
+    status: 'active',
+    href: '/integrations/nexusflow'
   },
 ];
 
