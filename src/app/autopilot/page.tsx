@@ -10,7 +10,7 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,11 +19,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 
 export default function AutopilotPage() {
     const [user, setUser] = React.useState<User | null>(null);
     const [instances, setInstances] = useState<NexusFlowInstance[]>(mockInstances);
+    const [aiModel, setAiModel] = useState<string>('googleai/gemini-2.0-flash');
     const supabase = createClient();
 
     // These would come from a billing service or usage metrics
@@ -69,37 +71,62 @@ export default function AutopilotPage() {
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
                     
-                    <Card className="mb-6">
-                        <CardHeader>
-                            <CardTitle>Visão Geral de Custos e Uso</CardTitle>
-                            <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                                <div className='p-4 rounded-lg bg-secondary/50'>
-                                    <p className="text-sm text-muted-foreground font-semibold">Execuções este Mês</p>
-                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                        <BrainCircuit className="h-6 w-6 text-primary"/>
-                                        {executionsThisMonth.toLocaleString('pt-BR')}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <Card className="lg:col-span-2">
+                            <CardHeader>
+                                <CardTitle>Visão Geral de Custos e Uso</CardTitle>
+                                <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                    <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <p className="text-sm text-muted-foreground font-semibold">Execuções este Mês</p>
+                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                            <BrainCircuit className="h-6 w-6 text-primary"/>
+                                            {executionsThisMonth.toLocaleString('pt-BR')}
+                                        </p>
+                                    </div>
+                                    <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <p className="text-sm text-muted-foreground font-semibold">Custo do Mês Atual</p>
+                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                            <DollarSign className="h-6 w-6 text-green-500"/>
+                                            {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </p>
+                                    </div>
+                                    <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <p className="text-sm text-muted-foreground font-semibold">Custo Mensal Estimado</p>
+                                        <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                            <DollarSign className="h-6 w-6 text-amber-500"/>
+                                            {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </p>
+                                    </div>
+                            </div>
+                            </CardContent>
+                        </Card>
+                         <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Modelo</CardTitle>
+                                <CardDescription>Selecione o modelo de IA que potencializa as automações.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-2">
+                                    <Label htmlFor="ai-model">Modelo de IA</Label>
+                                    <Select value={aiModel} onValueChange={setAiModel}>
+                                        <SelectTrigger id="ai-model">
+                                            <SelectValue placeholder="Selecione um modelo" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
+                                            <SelectItem value="googleai/gemini-2.0-pro">Gemini 2.0 Pro (Avançado)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground pt-1">
+                                        Modelos mais avançados podem gerar respostas melhores, mas têm um custo maior.
                                     </p>
                                 </div>
-                                <div className='p-4 rounded-lg bg-secondary/50'>
-                                    <p className="text-sm text-muted-foreground font-semibold">Custo do Mês Atual</p>
-                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                         <DollarSign className="h-6 w-6 text-green-500"/>
-                                        {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </p>
-                                </div>
-                                 <div className='p-4 rounded-lg bg-secondary/50'>
-                                    <p className="text-sm text-muted-foreground font-semibold">Custo Mensal Estimado</p>
-                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                         <DollarSign className="h-6 w-6 text-amber-500"/>
-                                        {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </p>
-                                </div>
-                           </div>
-                        </CardContent>
-                    </Card>
+                            </CardContent>
+                        </Card>
+                    </div>
 
                     <Separator className="my-8" />
 

@@ -57,7 +57,7 @@ export type Message = {
 };
 
 export type Chat = {
-  id: string;
+  id:string;
   contact: User;
   messages: Message[];
   status: 'atendimentos' | 'gerais' | 'encerrados';
@@ -130,4 +130,5 @@ export interface NexusFlowInstance {
   trigger: string;
   action: string;
   enabled: boolean;
+  model?: string;
 }

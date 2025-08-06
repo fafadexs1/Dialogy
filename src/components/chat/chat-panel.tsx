@@ -31,6 +31,8 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
   const [isAiThinking, setIsAiThinking] = React.useState(false);
+  // This would typically come from a global state or settings context
+  const [selectedAiModel, setSelectedAiModel] = React.useState('googleai/gemini-2.0-flash');
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -75,7 +77,8 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                         customerMessage: lastCustomerMessage.content,
                         chatHistory: chatHistoryForAI,
                         rules: activeRules,
-                        knowledgeBase: mockKnowledgeBase, // Pass the knowledge base to the AI
+                        knowledgeBase: mockKnowledgeBase,
+                        model: selectedAiModel,
                     });
                     
                     // Only respond if the AI returned a response (meaning a rule was triggered)
@@ -103,7 +106,7 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel]);
 
   return (
     <main className="flex flex-1 flex-col bg-muted/20">

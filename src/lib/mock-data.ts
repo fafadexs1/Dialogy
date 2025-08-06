@@ -259,20 +259,23 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
     name: 'Aviso de Instabilidade', 
     trigger: 'Cliente menciona que o sistema está "fora do ar", "lento" ou "instável".',
     action: 'Peço desculpas pelo transtorno. Estamos cientes de uma instabilidade temporária em nossos servidores e a equipe de engenharia já está trabalhando para normalizar o serviço o mais rápido possível.',
-    enabled: true 
+    enabled: true,
+    model: 'googleai/gemini-2.0-flash',
   },
   { 
     id: 'nfi-2', 
     name: 'Dúvida sobre Fatura', 
     trigger: 'Cliente pergunta sobre a "fatura", "boleto" ou "pagamento".',
     action: 'Entendi. Para que eu possa ajudar com sua dúvida financeira, estou transferindo seu atendimento para um especialista do nosso time financeiro, ok?',
-    enabled: true 
+    enabled: true,
+    model: 'googleai/gemini-2.0-flash',
   },
   { 
     id: 'nfi-3', 
     name: 'Cancelamento de Conta', 
     trigger: 'Cliente expressa o desejo de "cancelar a conta" ou "encerrar o serviço".',
     action: 'Lamento ouvir que você deseja cancelar. Antes de prosseguir, poderia me dizer o motivo? Seu feedback é muito importante para nós. Se preferir, posso transferir para um especialista que pode cuidar do processo de cancelamento para você.',
-    enabled: false 
+    enabled: false,
+    model: 'googleai/gemini-2.0-flash',
   },
 ];

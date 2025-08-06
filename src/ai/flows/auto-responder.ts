@@ -32,6 +32,7 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('A collection of texts, examples, and instructions that the AI should use as a knowledge base to formulate its answers.'),
+  model: z.string().optional().describe('The AI model to use for the response.'),
 });
 export type AgentResponseInput = z.infer<typeof AgentResponseInputSchema>;
 
@@ -55,6 +56,7 @@ interface AutoResponderFlowInput {
     chatHistory?: string;
     rules: NexusFlowInstance[];
     knowledgeBase?: string;
+    model?: string;
 }
 
 export async function generateAgentResponse(input: AutoResponderFlowInput): Promise<AgentResponseOutput> {
@@ -108,7 +110,11 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    const { output } = await prompt(input);
+    // Use the model specified in the input, or default to the globally configured one.
+    const model = input.model ? ai.model(input.model) : undefined;
+    
+    const { output } = await prompt(input, { model });
+
     // Only return a response if the AI decided a rule was triggered or it could answer from the knowledge base.
     if (output?.response && output.response.trim() !== '') {
         return output;
