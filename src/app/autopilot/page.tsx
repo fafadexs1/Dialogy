@@ -8,21 +8,29 @@ import { agents, nexusFlowInstances as mockInstances } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 
 
-export default function NexusFlowPage() {
+export default function AutopilotPage() {
     const [user, setUser] = React.useState<User | null>(null);
     const [instances, setInstances] = useState<NexusFlowInstance[]>(mockInstances);
     const supabase = createClient();
+
+    // These would come from a billing service or usage metrics
+    const estimatedMonthlyCost = 12.50;
+    const currentMonthCost = 4.75;
+    const executionsThisMonth = 950;
+
 
     React.useEffect(() => {
         const fetchUser = async () => {
@@ -51,8 +59,8 @@ export default function NexusFlowPage() {
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl font-bold">Automações NexusFlow</h1>
-                        <p className="text-muted-foreground">Crie regras para que o piloto automático responda a situações específicas.</p>
+                        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Piloto Automático</h1>
+                        <p className="text-muted-foreground">Crie regras e automações para que o Dialogy responda por você.</p>
                     </div>
                     <Button>
                         <Plus className="mr-2 h-4 w-4" />
@@ -60,6 +68,41 @@ export default function NexusFlowPage() {
                     </Button>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
+                    
+                    <Card className="mb-6">
+                        <CardHeader>
+                            <CardTitle>Visão Geral de Custos e Uso</CardTitle>
+                            <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                <div className='p-4 rounded-lg bg-secondary/50'>
+                                    <p className="text-sm text-muted-foreground font-semibold">Execuções este Mês</p>
+                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                        <BrainCircuit className="h-6 w-6 text-primary"/>
+                                        {executionsThisMonth.toLocaleString('pt-BR')}
+                                    </p>
+                                </div>
+                                <div className='p-4 rounded-lg bg-secondary/50'>
+                                    <p className="text-sm text-muted-foreground font-semibold">Custo do Mês Atual</p>
+                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                         <DollarSign className="h-6 w-6 text-green-500"/>
+                                        {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </p>
+                                </div>
+                                 <div className='p-4 rounded-lg bg-secondary/50'>
+                                    <p className="text-sm text-muted-foreground font-semibold">Custo Mensal Estimado</p>
+                                    <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                         <DollarSign className="h-6 w-6 text-amber-500"/>
+                                        {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </p>
+                                </div>
+                           </div>
+                        </CardContent>
+                    </Card>
+
+                    <Separator className="my-6" />
+
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {instances.map(instance => (
                             <Card key={instance.id} className="flex flex-col">
@@ -87,7 +130,11 @@ export default function NexusFlowPage() {
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     </div>
-                                     <CardDescription>ID: {instance.id}</CardDescription>
+                                     <CardDescription>
+                                        <Badge variant={instance.enabled ? "default" : "secondary"}>
+                                            {instance.enabled ? 'Ativa' : 'Inativa'}
+                                        </Badge>
+                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4 flex-grow">
                                      <div className="space-y-2">
@@ -99,14 +146,14 @@ export default function NexusFlowPage() {
                                         <p className="p-3 rounded-md bg-secondary/50 border text-sm">{instance.action}</p>
                                     </div>
                                 </CardContent>
-                                <div className="p-4 border-t flex items-center justify-between">
-                                     <span className="text-sm font-medium">{instance.enabled ? 'Ativa' : 'Inativa'}</span>
+                                <CardFooter className="p-4 border-t flex items-center justify-between">
+                                     <span className="text-sm font-medium">Habilitar automação</span>
                                       <Switch
                                         id={`status-${instance.id}`}
                                         checked={instance.enabled}
                                         // onCheckedChange={(checked) => handleToggle(instance.id, checked)}
                                     />
-                                </div>
+                                </CardFooter>
                             </Card>
                         ))}
                     </div>

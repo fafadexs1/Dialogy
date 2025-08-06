@@ -39,6 +39,15 @@ export default function IntegrationsPage() {
         return null; // Or a loading spinner
     }
 
+    const renderCard = (integration: Integration) => {
+        const card = <IntegrationCard integration={integration} />;
+        if (integration.id === 'nexusflow') {
+            return <Link href="/autopilot" key={integration.id}>{card}</Link>;
+        }
+        return card;
+    }
+
+
     return (
         <MainLayout user={user}>
             <div className="flex flex-col flex-1 h-full">
@@ -48,11 +57,7 @@ export default function IntegrationsPage() {
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                       {integrations.map(integration => (
-                            <Link href={`/integrations/${integration.id}`} key={integration.id}>
-                                <IntegrationCard integration={integration} />
-                            </Link>
-                       ))}
+                       {integrations.map(integration => renderCard(integration))}
                     </div>
                 </main>
             </div>
