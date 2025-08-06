@@ -1,101 +1,19 @@
 
+
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, Integration } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Bot, Link, User as UserIcon } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+import { agents, integrations as mockIntegrations } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { IntegrationCard } from '@/components/integrations/integration-card';
 
-const initialIntegrations: Integration[] = [
-    {
-        id: 'nexusflow-1',
-        name: 'NexusFlow',
-        description: 'Conecte o Dialogy ao seu sistema para automação de agentes via Webhooks.',
-        icon: Bot,
-        enabled: true,
-        settings: {
-            webhookUrl: '',
-            agentName: 'Agente NexusFlow',
-        }
-    }
-];
-
-function IntegrationCard({ integration, onUpdate }: { integration: Integration, onUpdate: (id: string, enabled: boolean, settings: any) => void }) {
-    const Icon = integration.icon;
-
-    const handleSettingChange = (key: string, value: any) => {
-        onUpdate(integration.id, integration.enabled, { ...integration.settings, [key]: value });
-    };
-
-    const handleEnabledChange = (enabled: boolean) => {
-        onUpdate(integration.id, enabled, integration.settings);
-    };
-    
-    return (
-        <Card>
-            <CardHeader>
-                <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-4">
-                        <Icon className="w-10 h-10 text-primary" />
-                        <div>
-                            <CardTitle>{integration.name}</CardTitle>
-                            <CardDescription>{integration.description}</CardDescription>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                         <span className='text-sm font-medium'>{integration.enabled ? 'Ativo' : 'Inativo'}</span>
-                        <Switch
-                            checked={integration.enabled}
-                            onCheckedChange={handleEnabledChange}
-                        />
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent className={cn("space-y-4 pt-4 border-t transition-all duration-300", {
-                "opacity-100": integration.enabled,
-                "opacity-0 h-0 p-0 m-0 border-none": !integration.enabled,
-            })}>
-                 <div className="space-y-2">
-                    <Label htmlFor={`agent-name-${integration.id}`} className="flex items-center gap-2 text-muted-foreground"><UserIcon className="w-4 h-4"/> Nome do Agente</Label>
-                    <Input
-                        id={`agent-name-${integration.id}`}
-                        placeholder="Ex: Robô de Vendas"
-                        value={integration.settings.agentName || ''}
-                        onChange={(e) => handleSettingChange('agentName', e.target.value)}
-                        disabled={!integration.enabled}
-                    />
-                </div>
-                <div className="space-y-2">
-                    <Label htmlFor={`webhook-url-${integration.id}`} className="flex items-center gap-2 text-muted-foreground"><Link className="w-4 h-4"/> URL do Webhook</Label>
-                    <Input
-                        id={`webhook-url-${integration.id}`}
-                        placeholder="https://sua-api.com/webhook"
-                        value={integration.settings.webhookUrl || ''}
-                        onChange={(e) => handleSettingChange('webhookUrl', e.target.value)}
-                        disabled={!integration.enabled}
-                    />
-                </div>
-                 <div className="flex justify-end">
-                    <Button disabled={!integration.enabled}>Salvar</Button>
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
 
 export default function IntegrationsPage() {
-    const [user, setUser] = useState<User | null>(null);
-    const [integrations, setIntegrations] = useState(initialIntegrations);
+    const [user, setUser] = React.useState<User | null>(null);
+    const [integrations] = React.useState<Integration[]>(mockIntegrations);
     const supabase = createClient();
 
     React.useEffect(() => {
@@ -116,12 +34,6 @@ export default function IntegrationsPage() {
         fetchUser();
     }, [supabase.auth]);
 
-    const handleUpdateIntegration = (id: string, enabled: boolean, settings: any) => {
-        setIntegrations(integrations.map(int => 
-            int.id === id ? { ...int, enabled, settings } : int
-        ));
-    };
-
     if (!user) {
         return null; // Or a loading spinner
     }
@@ -129,17 +41,16 @@ export default function IntegrationsPage() {
     return (
         <MainLayout user={user}>
             <div className="flex flex-col flex-1 h-full">
-                <header className="p-4 border-b flex-shrink-0 bg-card">
-                    <h1 className="text-2xl font-bold">Integrações</h1>
+                <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                    <h1 className="text-2xl font-bold">Extensões</h1>
                     <p className="text-muted-foreground">Conecte o Dialogy a outras ferramentas para automatizar e aprimorar seus fluxos de trabalho.</p>
                 </header>
-                <main className="flex-1 overflow-y-auto bg-muted/40 p-6">
-                    <div className="max-w-4xl mx-auto space-y-6">
+                <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                        {integrations.map(integration => (
                             <IntegrationCard 
                                 key={integration.id} 
                                 integration={integration}
-                                onUpdate={handleUpdateIntegration} 
                             />
                        ))}
                     </div>

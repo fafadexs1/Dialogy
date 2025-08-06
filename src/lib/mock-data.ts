@@ -1,4 +1,4 @@
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration } from './types';
 
 export const workspaces: Workspace[] = [
     { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
@@ -237,3 +237,27 @@ export const internalMessages: InternalMessage[] = [
 ];
 
 export const getContactById = (id: string) => contacts.find(c => c.id === id);
+
+
+export const integrations: Integration[] = [
+  { id: 'dify', name: 'Dify', description: 'Habilite a IA para atender seus clientes.', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'pipedrive', name: 'Pipedrive', description: 'Crie Leads no Pipedrive a partir de conversas no WhatsApp, Instagram ou qualquer outro canal de atendimento.', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'slack', name: 'Slack', description: 'Integre o sistema de atendimento ao Slack para facilitar a criação de cards/alertas nos canais da sua empresa.', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'hubspot-leads', name: 'Hubspot', description: 'Crie Leads no Hubspot a partir de conversas no WhatsApp, Instagram ou qualquer outro canal de atendimento.', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'jira', name: 'Jira', description: 'Crie e gerencie chamados no Jira a partir de conversas no WhatsApp ou qualquer outro canal da Talqui.', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'messenger', name: 'Messenger', description: 'Responda a mensagens de suas páginas do Facebook (Messenger) diretamente através do nosso painel de atendimento, simplificando o processo e...', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'active' },
+  { id: 'instagram', name: 'Instagram', description: 'A Talqui permite que você responda a mensagens diretas do Instagram diretamente através do nosso painel de atendimento, simplificando o pro...', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'active' },
+  { id: 'whatsapp-business', name: 'WhatsApp Business', description: 'Receba direto no painel de atendimento qualquer mensagem enviada para o WhatsApp da sua empresa.', iconUrl: 'https://placehold.co/48x48.png', tag: 'R$ 89/mês', tagType: 'secondary' },
+  { id: 'whatsapp-api', name: 'WhatsApp API Oficial', description: 'Integração com API Oficial para enviar e receber mensagens por meio do WhatsApp.', iconUrl: 'https://placehold.co/48x48.png', tag: 'R$ 199/mês', tagType: 'secondary', additionalInfo: 'Custo adicional por utilização' },
+  { id: 'agent-ia', name: 'Agente Virtual com IA', description: 'Inteligência artificial (ChatGPT) para realizar atendimentos automáticos sem parecer um robô.', iconUrl: 'https://placehold.co/48x48.png', tag: 'R$ 39/mês', tagType: 'secondary', additionalInfo: 'Custo adicional por utilização' },
+  { id: 'ntfy', name: 'Ntfy (Notificações)', description: 'Receba notificações no seu celular sobre processos de atendimento do agente virtual.', iconUrl: 'https://placehold.co/48x48.png', tag: 'R$ 9/mês', tagType: 'secondary' },
+  { id: 'sgp', name: 'SGP', description: 'Integração fácil com sistema de gestão de provedores SGP.', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'active' },
+  { id: 'ixc', name: 'IXC', description: 'O sistema de gestão de provedores mais popular do Brasil agora conectado a Talqui.', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary' },
+  { id: 'hubsoft', name: 'Hubsoft', description: 'Conecte o Hubsoft sincronizado ao seu painel de atendimento.', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary' },
+  { id: 'chatbot', name: 'Chatbot', description: 'Transforme seu atendimento ao cliente no WhatsApp e em todos os canais de comunicação com o poderoso Plugin de Chatbot Personalizável da Tal...', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'active' },
+  { id: 'asaas', name: 'Asaas', description: 'Coming Soon', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'coming_soon' },
+  { id: 'pagbank', name: 'PagBank', description: 'Coming Soon', iconUrl: 'https://placehold.co/48x48.png', tag: 'BETA', tagType: 'beta', status: 'coming_soon' },
+  { id: 'slack-2', name: 'Slack', description: 'Coming Soon', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'coming_soon' },
+  { id: 'ifood', name: 'iFood', description: 'Coming Soon', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'coming_soon' },
+  { id: 'mercado-livre', name: 'Mercado Livre', description: 'Coming Soon', iconUrl: 'https://placehold.co/48x48.png', tag: 'Grátis', tagType: 'primary', status: 'coming_soon' },
+];

@@ -116,9 +116,9 @@ export interface Integration {
   id: string;
   name: string;
   description: string;
-  icon: React.ElementType;
-  enabled: boolean;
-  settings: {
-    [key: string]: any;
-  };
+  iconUrl: string;
+  tag: string;
+  tagType: 'default' | 'primary' | 'secondary' | 'beta';
+  status?: 'active' | 'coming_soon';
+  additionalInfo?: string;
 }
