@@ -43,7 +43,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
   const { businessProfile } = contact;
 
   return (
-    <div className="hidden w-full max-w-sm flex-col border-l bg-card lg:flex">
+    <div className="hidden w-full lg:w-1/4 flex-shrink-0 flex-col border-l bg-card lg:flex">
       <div className="flex h-16 items-center justify-between border-b px-6">
         <h3 className="font-semibold text-lg">Detalhes do Contato</h3>
       </div>
