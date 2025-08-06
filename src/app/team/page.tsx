@@ -8,13 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PlusCircle, Trash2, Palette, UserPlus, X } from 'lucide-react';
+import { PlusCircle, Trash2, Palette, UserPlus, X, Bot } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InternalChatLayout from '@/components/layout/internal-chat-layout';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { createClient } from '@/lib/supabase/client';
+import { redirect } from 'next/navigation';
 
 const daysOfWeek = [
   { id: 'seg', label: 'Segunda-feira' },
@@ -35,7 +37,7 @@ const defaultBusinessHours: BusinessHour[] = daysOfWeek.map(day => ({
 
 
 const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
+  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)), webhookUrl: 'https://api.example.com/suporte-tecnico' },
   { id: 'team-2', name: 'Vendas', color: '#10b981', members: [mockAgents[1], mockAgents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
   { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [mockAgents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
 ];
@@ -118,7 +120,7 @@ function TeamSettingsLayout() {
         <Card>
           <CardHeader>
             <CardTitle>Gerenciar Equipes</CardTitle>
-            <CardDescription>Crie equipes, adicione membros e configure seus horários de atendimento.</CardDescription>
+            <CardDescription>Crie equipes, adicione membros, configure horários e webhooks de automação.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="p-4 border rounded-lg bg-secondary/30 mb-6">
@@ -187,27 +189,48 @@ function TeamSettingsLayout() {
                       <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-6">
                           <div>
-                            <h4 className="font-semibold mb-4">Configurações Gerais</h4>
-                            <div className="flex items-end gap-4">
-                              <div className="flex-1 space-y-1">
-                                <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
-                                <Input 
-                                  id={`team-name-${team.id}`} 
-                                  value={team.name}
-                                  onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
-                                <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
-                                  <input
-                                    id={`team-color-${team.id}`}
-                                    type="color"
-                                    value={team.color}
-                                    onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
-                                    className="w-6 h-6 p-0 border-none bg-transparent"
+                            <h4 className="font-semibold mb-2">Configurações Gerais</h4>
+                            <div className="space-y-4">
+                              <div className="flex items-end gap-4">
+                                <div className="flex-1 space-y-1">
+                                  <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
+                                  <Input 
+                                    id={`team-name-${team.id}`} 
+                                    value={team.name}
+                                    onChange={(e) => handleTeamUpdate(team.id, 'name', e.target.value)}
                                   />
                                 </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
+                                  <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
+                                    <input
+                                      id={`team-color-${team.id}`}
+                                      type="color"
+                                      value={team.color}
+                                      onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
+                                      className="w-6 h-6 p-0 border-none bg-transparent"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                               
+                               <div>
+                                <h4 className="font-semibold mb-2 mt-4 flex items-center gap-2"><Bot className="h-4 w-4" /> Webhooks de Automação</h4>
+                                <div className="flex items-end gap-2">
+                                  <div className="flex-1 space-y-1">
+                                    <Label htmlFor={`webhook-url-${team.id}`}>URL do Webhook</Label>
+                                    <Input
+                                      id={`webhook-url-${team.id}`}
+                                      placeholder="https://sua-api.com/webhook"
+                                      value={team.webhookUrl || ''}
+                                      onChange={(e) => handleTeamUpdate(team.id, 'webhookUrl', e.target.value)}
+                                    />
+                                  </div>
+                                  <Button variant="outline">Salvar</Button>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  As mensagens recebidas por esta equipe serão enviadas para a URL acima.
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -301,9 +324,30 @@ function TeamSettingsLayout() {
 }
 
 export default function TeamPage() {
-  // In a real app with Supabase, you would fetch the current user session
-  // For now, we'll use a mock user, but this component is now client-side
-  const user = mockAgents[0];
+    const [user, setUser] = useState<User | null>(null);
+    const supabase = createClient();
+
+    React.useEffect(() => {
+        const fetchUser = async () => {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser) {
+                 const appUser = mockAgents.find(a => a.email === authUser.email) || {
+                    ...mockAgents[0],
+                    name: authUser.user_metadata.full_name || authUser.email,
+                    email: authUser.email,
+                    id: authUser.id
+                };
+                setUser(appUser);
+            } else {
+                redirect('/login');
+            }
+        };
+        fetchUser();
+    }, []);
+
+    if (!user) {
+        return null; // or a loading spinner
+    }
 
   return (
     <MainLayout user={user}>

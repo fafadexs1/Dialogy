@@ -103,6 +103,7 @@ export interface Team {
   color: string;
   businessHours: BusinessHour[];
   members: User[];
+  webhookUrl?: string;
 }
 
 export interface BusinessHour {
