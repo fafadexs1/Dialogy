@@ -188,11 +188,11 @@ function TeamSettingsLayout() {
                     <AccordionContent>
                       <div className="p-4 border rounded-md m-2 mt-0 bg-background grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-6">
-                          <div>
+                           <div>
                             <h4 className="font-semibold mb-2">Configurações Gerais</h4>
                             <div className="space-y-4">
-                              <div className="flex items-end gap-4">
-                                <div className="flex-1 space-y-1">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                <div className="space-y-1 col-span-2">
                                   <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
                                   <Input 
                                     id={`team-name-${team.id}`} 
@@ -202,20 +202,20 @@ function TeamSettingsLayout() {
                                 </div>
                                 <div className="space-y-1">
                                   <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
-                                  <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white">
+                                  <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-white w-full">
                                     <input
                                       id={`team-color-${team.id}`}
                                       type="color"
                                       value={team.color}
                                       onChange={(e) => handleTeamUpdate(team.id, 'color', e.target.value)}
-                                      className="w-6 h-6 p-0 border-none bg-transparent"
+                                      className="w-full h-6 p-0 border-none bg-transparent"
                                     />
                                   </div>
                                 </div>
                               </div>
                                
-                               <div>
-                                <h4 className="font-semibold mb-2 mt-4 flex items-center gap-2"><Bot className="h-4 w-4" /> Webhooks de Automação</h4>
+                               <div className="mt-6">
+                                <h4 className="font-semibold mb-2 flex items-center gap-2"><Bot className="h-4 w-4" /> Webhooks de Automação</h4>
                                 <div className="flex items-end gap-2">
                                   <div className="flex-1 space-y-1">
                                     <Label htmlFor={`webhook-url-${team.id}`}>URL do Webhook</Label>
