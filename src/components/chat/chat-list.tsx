@@ -14,7 +14,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { zonedTimeToUtc } from 'date-fns-tz';
 
 interface ChatListProps {
   chats: Chat[];
@@ -28,9 +27,6 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
   React.useEffect(() => {
     if (agent.joined_at) {
        const updateOnlineTime = () => {
-        const timeZone = 'America/Sao_Paulo'; // Exemplo de fuso horário
-        const utcDate = zonedTimeToUtc(agent.joined_at, timeZone);
-
         const distance = formatDistanceToNow(new Date(agent.joined_at), {
             addSuffix: true,
             locale: ptBR,
