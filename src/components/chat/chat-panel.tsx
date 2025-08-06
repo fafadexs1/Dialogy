@@ -128,8 +128,8 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
   }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat.id, supabase]);
 
   return (
-    <main className="flex flex-1 flex-col bg-muted/20">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-6">
+    <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
+      <header className="flex h-16 items-center justify-between border-b bg-card px-6 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9 border">
             <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
@@ -188,7 +188,7 @@ export default function ChatPanel({ chat, messages }: ChatPanelProps) {
         </ScrollArea>
       </div>
 
-      <footer className="border-t bg-card p-4">
+      <footer className="border-t bg-card p-4 flex-shrink-0">
         {!isAiAgentActive && (
             <SmartReplies 
                 customerMessage={lastCustomerMessage?.content || ''}
