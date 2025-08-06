@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical } from 'lucide-react';
 import { type Chat, type Message, type User } from '@/lib/types';
 import { agents } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -48,7 +48,7 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
   const lastCustomerMessage = messages.filter(m => m.sender.id.startsWith('contact')).pop()?.content || '';
 
   return (
-    <main className="flex flex-1 flex-col">
+    <main className="flex flex-1 flex-col bg-muted/20">
       <header className="flex h-16 items-center justify-between border-b bg-card px-6">
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9 border">
@@ -59,6 +59,9 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
         </div>
         <div className="flex items-center gap-2">
           <ChatSummary chatHistory={chatHistoryForAI} />
+          <Button variant="ghost" size="icon">
+              <MoreVertical className="h-5 w-5"/>
+          </Button>
         </div>
       </header>
 
@@ -77,7 +80,7 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
                   <AvatarFallback>{message.sender.name.charAt(0)}</AvatarFallback>
                 </Avatar>
                 <div
-                  className={`max-w-md rounded-xl px-4 py-3 text-sm shadow-md ${
+                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
                     message.sender.id.startsWith('agent')
                       ? 'rounded-br-none bg-primary text-primary-foreground'
                       : 'rounded-bl-none bg-card'
@@ -100,15 +103,15 @@ export default function ChatPanel({ chat }: ChatPanelProps) {
         <form onSubmit={handleSendMessage} className="relative mt-2">
           <Input
             placeholder="Digite sua mensagem..."
-            className="pr-36"
+            className="pr-24"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
             <Button type="button" variant="ghost" size="icon"><Smile className="h-5 w-5" /></Button>
             <Button type="button" variant="ghost" size="icon"><Paperclip className="h-5 w-5" /></Button>
-            <Button type="submit" size="sm">
-              Enviar <Send className="ml-2 h-4 w-4" />
+            <Button type="submit" size="sm" className='h-8'>
+              <Send className="h-4 w-4" />
             </Button>
           </div>
         </form>

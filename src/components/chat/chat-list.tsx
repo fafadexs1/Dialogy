@@ -21,7 +21,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
 
   const renderChatList = (chatList: Chat[]) => (
     <div className="space-y-1 p-2">
-      {chatList.map((chat) => (
+      {chatList.length > 0 ? chatList.map((chat) => (
         <div
           key={chat.id}
           className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
@@ -45,7 +45,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
             </p>
           </div>
         </div>
-      ))}
+      )) : (
+        <div className="text-center py-10">
+          <p className="text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
+        </div>
+      )}
     </div>
   );
 
@@ -81,7 +85,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
       </div>
 
       <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col min-h-0">
-        <div className="p-4 flex-shrink-0">
+        <div className="p-2 flex-shrink-0">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
