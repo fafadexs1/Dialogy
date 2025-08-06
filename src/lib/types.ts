@@ -122,3 +122,10 @@ export interface Integration {
   status?: 'active' | 'coming_soon';
   additionalInfo?: string;
 }
+
+export interface NexusFlowInstance {
+  id: string;
+  agentName: string;
+  webhookUrl: string;
+  enabled: boolean;
+}

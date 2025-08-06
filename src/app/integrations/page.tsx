@@ -9,6 +9,7 @@ import { agents, integrations as mockIntegrations } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
 import { IntegrationCard } from '@/components/integrations/integration-card';
+import Link from 'next/link';
 
 
 export default function IntegrationsPage() {
@@ -48,10 +49,9 @@ export default function IntegrationsPage() {
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                        {integrations.map(integration => (
-                            <IntegrationCard 
-                                key={integration.id} 
-                                integration={integration}
-                            />
+                            <Link href={`/integrations/${integration.id}`} key={integration.id}>
+                                <IntegrationCard integration={integration} />
+                            </Link>
                        ))}
                     </div>
                 </main>

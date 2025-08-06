@@ -1,4 +1,4 @@
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance } from './types';
 
 export const workspaces: Workspace[] = [
     { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
@@ -249,4 +249,11 @@ export const integrations: Integration[] = [
     tagType: 'primary', 
     status: 'active' 
   },
+];
+
+
+export const nexusFlowInstances: NexusFlowInstance[] = [
+  { id: 'nfi-1', agentName: 'Agente de Vendas', webhookUrl: 'https://api.example.com/webhook/sales', enabled: true },
+  { id: 'nfi-2', agentName: 'Agente de Suporte N1', webhookUrl: 'https://api.example.com/webhook/support-n1', enabled: true },
+  { id: 'nfi-3', agentName: 'Agente Financeiro', webhookUrl: 'https://api.example.com/webhook/billing', enabled: false },
 ];
