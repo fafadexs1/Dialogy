@@ -24,15 +24,18 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (customer.businessProfile?.companyName && customer.businessProfile.companyName.toLowerCase().includes(searchTerm.toLowerCase()))
+      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
   );
   
   const priorityCustomers = [...filteredCustomers].sort((a, b) => (b.businessProfile?.dialogPriorityScore ?? 0) - (a.businessProfile?.dialogPriorityScore ?? 0));
   const riskCustomers = [...filteredCustomers].sort((a, b) => (b.businessProfile?.financialRiskScore ?? 0) - (a.businessProfile?.financialRiskScore ?? 0));
 
 
-  const renderCustomerItem = (customer: User) => (
+  const renderCustomerItem = (customer: User) => {
+    const firstName = customer.name.split(' ')[0] || '';
+    const lastName = customer.name.split(' ').slice(1).join(' ') || '';
+
+    return (
      <div
         key={customer.id}
         className={`flex cursor-pointer items-center gap-4 rounded-lg p-3 transition-colors ${
@@ -42,7 +45,7 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
     >
         <Avatar className="h-10 w-10 border">
         <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-        <AvatarFallback>{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
+        <AvatarFallback>{firstName.charAt(0)}{lastName.charAt(0)}</AvatarFallback>
         </Avatar>
         <div className="flex-1 overflow-hidden">
         <p className="font-semibold truncate">{customer.name}</p>
@@ -54,7 +57,7 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
             </Badge>
         )}
     </div>
-  )
+  )}
 
 
   return (

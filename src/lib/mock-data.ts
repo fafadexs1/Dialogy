@@ -1,4 +1,4 @@
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance, Contact } from './types';
 
 export const workspaces: Workspace[] = [
     { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
@@ -57,9 +57,10 @@ export const mockCustomFieldDefinitions: CustomFieldDefinition[] = [
     { id: 'legacy_id', label: 'ID do Cliente no Sistema Antigo', type: 'text', placeholder: 'XYZ-123' },
 ];
 
-export const contacts: User[] = [
+export const contacts: Contact[] = [
     { 
       id: 'contact-1', 
+      workspace_id: 'ws-1',
       firstName: 'Carlos',
       lastName: 'Silva',
       name: 'Carlos Silva', 
@@ -90,6 +91,7 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-2', 
+      workspace_id: 'ws-1',
       firstName: 'Beatriz',
       lastName: 'Costa',
       name: 'Beatriz Costa', 
@@ -114,6 +116,7 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-3', 
+      workspace_id: 'ws-1',
       firstName: 'Juliana',
       lastName: 'Almeida',
       name: 'Juliana Almeida', 
@@ -137,6 +140,7 @@ export const contacts: User[] = [
     },
     { 
       id: 'contact-4', 
+      workspace_id: 'ws-1',
       firstName: 'Ricardo',
       lastName: 'Pereira',
       name: 'Ricardo Pereira', 
@@ -161,38 +165,34 @@ export const contacts: User[] = [
 export const chats: Chat[] = [
   {
     id: 'chat-1',
+    workspace_id: 'ws-1',
     contact: contacts[0],
     status: 'atendimentos',
     messages: [
-      { id: 'msg-1-1', sender: contacts[0], content: "Olá, estou com uma dúvida sobre a proposta que recebi.", timestamp: '10:30 AM' },
-      { id: 'msg-1-2', sender: agents[0], content: "Olá, Carlos. Claro, posso ajudar. Qual é a sua dúvida?", timestamp: '10:31 AM' },
     ],
   },
   {
     id: 'chat-2',
+    workspace_id: 'ws-1',
     contact: contacts[1],
     status: 'atendimentos',
     messages: [
-      { id: 'msg-2-1', sender: contacts[1], content: "Gostaria de agendar a apresentação dos resultados da campanha.", timestamp: '11:05 AM' },
-      { id: 'msg-2-2', sender: agents[1], content: "Com certeza, Beatriz. Qual o melhor dia e horário para você?", timestamp: '11:06 AM' },
     ],
   },
   {
     id: 'chat-3',
+    workspace_id: 'ws-1',
     contact: contacts[2],
     status: 'gerais',
     messages: [
-      { id: 'msg-3-1', sender: contacts[2], content: "Preciso de um contato do departamento financeiro.", timestamp: '11:15 AM' },
     ],
   },
   {
     id: 'chat-4',
+    workspace_id: 'ws-1',
     contact: contacts[3],
     status: 'encerrados',
     messages: [
-      { id: 'msg-4-1', sender: contacts[3], content: "Gostaria de agradecer pelo serviço.", timestamp: '09:00 AM' },
-      { id: 'msg-4-2', sender: agents[0], content: "Nós que agradecemos, Ricardo! Estamos à disposição.", timestamp: '09:01 AM' },
-      { id: 'msg-4-3', sender: contacts[3], content: "Obrigado!", timestamp: '09:02 AM' },
     ],
   },
 ];
@@ -259,6 +259,16 @@ export const integrations: Integration[] = [
     tagType: 'primary',
     status: 'active',
     href: '/integrations/evolution-api'
+  },
+  {
+    id: 'outras-integracoes',
+    name: 'Outras Integrações',
+    description: 'Em breve: conecte-se com outras ferramentas como RD Station, PipeDrive e muito mais.',
+    iconUrl: 'https://placehold.co/48x48.png',
+    tag: 'Em Breve',
+    tagType: 'beta',
+    status: 'coming_soon',
+    additionalInfo: 'Planejado'
   }
 ];
 

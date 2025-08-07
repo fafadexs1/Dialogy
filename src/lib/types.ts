@@ -15,8 +15,11 @@ export type User = {
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
   last_active_workspace_id?: string;
-  firstName: string; // Adicionado para consistência com o businessProfile
-  lastName: string;  // Adicionado para consistência com o businessProfile
+  firstName: string;
+  lastName: string;
+  businessProfile?: BusinessProfile; // Para consistência, um User também pode ter um perfil de negócios
+  phone?: string;
+  online?: boolean;
 };
 
 // Representa um cliente/contato (não autenticado)
@@ -39,8 +42,8 @@ export type OnlineAgent = {
 }
 
 export type BusinessProfile = {
-  workspaceId: string; // A business profile belongs to a workspace
-  companyName: string;
+  workspaceId?: string; // A business profile belongs to a workspace
+  companyName?: string;
   website?: string;
   industry?: string;
   employees?: number;
@@ -145,6 +148,7 @@ export interface Integration {
   tag: string;
   tagType: 'default' | 'primary' | 'secondary' | 'beta';
   status?: 'active' | 'coming_soon';
+  additionalInfo?: string;
   href?: string;
 }
 

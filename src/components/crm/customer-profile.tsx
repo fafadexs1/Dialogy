@@ -29,6 +29,8 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
   }
   
   const { businessProfile } = customer;
+  const firstName = customer.name.split(' ')[0] || '';
+  const lastName = customer.name.split(' ').slice(1).join(' ') || '';
 
   const getPriorityColor = (score: number) => {
     if (score > 70) return "text-red-500";
@@ -49,7 +51,7 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
           <div className="flex items-center gap-6">
             <Avatar className="h-20 w-20 border-2">
               <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-              <AvatarFallback className="text-2xl">{customer.firstName.charAt(0)}{customer.lastName.charAt(0)}</AvatarFallback>
+              <AvatarFallback className="text-2xl">{firstName.charAt(0)}{lastName.charAt(0)}</AvatarFallback>
             </Avatar>
             <div>
               <h1 className="text-3xl font-bold">{customer.name}</h1>

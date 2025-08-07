@@ -94,6 +94,9 @@ export function useAuth(): AppUser | null {
                 avatar: userData.avatar_url || `https://placehold.co/40x40.png?text=${(userData.full_name || 'U').charAt(0)}`,
                 workspaces,
                 activeWorkspaceId,
+                 // Adicionando firstName e lastName para consistência com o tipo User
+                firstName: (userData?.full_name || '').split(' ')[0],
+                lastName: (userData?.full_name || '').split(' ').slice(1).join(' '),
             });
         } else {
             setAppUser(null);

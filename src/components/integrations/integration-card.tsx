@@ -26,17 +26,21 @@ export function IntegrationCard({ integration }: IntegrationCardProps) {
     }
   }
 
-  const CardContentWrapper = ({ children }: { children: React.ReactNode }) => {
+  const CardWrapper = ({ children }: { children: React.ReactNode }) => {
     if (integration.href) {
-        return <Link href={integration.href} className="flex flex-col flex-grow h-full">{children}</Link>;
+      return (
+        <Link href={integration.href} className="flex flex-col flex-grow h-full no-underline text-current">
+          {children}
+        </Link>
+      );
     }
-    return <>{children}</>;
-  }
+    return <div className="flex flex-col flex-grow h-full">{children}</div>;
+  };
 
 
   return (
     <Card className="flex flex-col h-full hover:shadow-lg transition-shadow">
-        <CardContentWrapper>
+        <CardWrapper>
             <CardHeader className="flex-row items-start justify-between gap-4">
                 <Avatar className="w-12 h-12 rounded-lg border">
                 <AvatarImage src={integration.iconUrl} alt={integration.name} data-ai-hint="logo" />
@@ -64,12 +68,19 @@ export function IntegrationCard({ integration }: IntegrationCardProps) {
                     <p className="text-xs font-semibold text-blue-600 mt-1">{integration.additionalInfo}</p>
                 )}
             </CardContent>
-            <CardFooter>
-                <Button variant="outline" size="sm" className="w-full" asChild={!!integration.href}>
-                    {integration.href ? <Link href={integration.href}>Gerenciar</Link> : (integration.status === 'active' ? 'Gerenciar' : 'Habilitar')}
+            <CardFooter className='mt-auto'>
+                <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full"
+                    disabled={!integration.href}
+                    // O Link em CardWrapper já cuida da navegação, o botão é só visual
+                    onClick={(e) => { if(integration.href) e.preventDefault(); }}
+                >
+                    {integration.status === 'active' ? 'Gerenciar' : (integration.status === 'coming_soon' ? 'Em Breve' : 'Habilitar')}
                 </Button>
             </CardFooter>
-        </CardContentWrapper>
+        </CardWrapper>
     </Card>
   );
 }
