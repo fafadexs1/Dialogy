@@ -1,3 +1,4 @@
+
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
@@ -6,9 +7,11 @@ const nextConfig: NextConfig = {
     serverActions: true,
   },
   typescript: {
+    // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
     ignoreBuildErrors: true,
   },
   eslint: {
+    // Permite que o build continue mesmo com avisos do ESLint.
     ignoreDuringBuilds: true,
   },
   images: {
@@ -22,12 +25,15 @@ const nextConfig: NextConfig = {
     ],
   },
   webpack: (config, { isServer }) => {
+    // Esta configuração é crucial. Ela instrui o Webpack a não tentar empacotar
+    // módulos nativos do Node.js (como 'fs' ou 'async_hooks') no bundle do cliente,
+    // onde eles não funcionariam e causariam erros.
     if (!isServer) {
-      // Resolve 'async_hooks' and 'fs' to an empty module on the client side.
       config.resolve.fallback = {
         ...config.resolve.fallback,
         async_hooks: false,
         fs: false,
+        // Adicione outros módulos nativos do Node.js aqui se encontrar mais erros.
       };
     }
     return config;
