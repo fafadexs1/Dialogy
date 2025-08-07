@@ -250,6 +250,16 @@ export const integrations: Integration[] = [
     status: 'active',
     href: '/integrations/nexusflow'
   },
+  {
+    id: 'evolution-api',
+    name: 'Evolution API',
+    description: 'Conecte seu número de WhatsApp para atendimento através da API não-oficial da Evolution.',
+    iconUrl: 'https://placehold.co/48x48.png',
+    tag: 'WhatsApp',
+    tagType: 'primary',
+    status: 'active',
+    href: '/integrations/evolution-api',
+  },
 ];
 
 
