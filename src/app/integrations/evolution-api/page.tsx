@@ -111,9 +111,8 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                 <Input id="msgCall" name="msgCall" placeholder="No momento não podemos atender ligações." />
                             </div>
                             <div className="flex flex-wrap gap-x-6 gap-y-4 pt-2">
-                                <div className="flex items-center space-x-2">
-                                    <Switch id="qrcode" name="qrcode" defaultChecked/>
-                                    <Label htmlFor="qrcode">Gerar QR Code no Console</Label>
+                                 <div className="flex items-center space-x-2">
+                                    <p className="text-sm font-medium text-muted-foreground">Gerar QR Code no Console está sempre ativo por padrão.</p>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <Switch id="rejectCall" name="rejectCall" />
@@ -282,6 +281,7 @@ export default function EvolutionApiPage() {
         } catch (error) {
             console.error("Failed to fetch evolution api data", error);
             toast({ title: "Erro ao buscar dados", description: "Não foi possível carregar as configurações e instâncias.", variant: "destructive" });
+            setInstances([]);
         } finally {
             setIsLoading(false);
         }
@@ -321,13 +321,17 @@ export default function EvolutionApiPage() {
 
     const handleRemoveInstance = async (instanceId: string) => {
         try {
-            await deleteEvolutionApiInstance(instanceId);
-            toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
-            if (activeWorkspace) {
-                fetchData(activeWorkspace.id);
-            }
-        } catch (error) {
-            toast({ title: 'Erro ao remover', description: 'Não foi possível remover a instância.', variant: 'destructive' });
+            const result = await deleteEvolutionApiInstance(instanceId);
+             if (result.error) {
+                 toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive' });
+             } else {
+                toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
+                if (activeWorkspace) {
+                    fetchData(activeWorkspace.id);
+                }
+             }
+        } catch (error: any) {
+            toast({ title: 'Erro ao remover', description: error.message || 'Não foi possível remover a instância.', variant: 'destructive' });
         }
     }
 
@@ -345,14 +349,12 @@ export default function EvolutionApiPage() {
                 result = await connectInstance(instance.name, config);
             }
 
-            // Immediately update the specific instance
             setInstances(prevInstances =>
                 prevInstances.map(i =>
                     i.id === instance.id ? { ...i, status: result.status, qrCode: result.qrCode } : i
                 )
             );
              
-            // Poll for status updates after a delay
             setTimeout(() => {
                 if (activeWorkspace) {
                    fetchData(activeWorkspace.id);
@@ -361,6 +363,7 @@ export default function EvolutionApiPage() {
 
         } catch (error) {
             toast({ title: 'Erro de Conexão', description: 'Falha ao se comunicar com a API Evolution.', variant: 'destructive' });
+        } finally {
             setInstanceStates(prev => ({ ...prev, [instance.id]: { loading: false } }));
         }
     };
@@ -378,9 +381,9 @@ export default function EvolutionApiPage() {
         }
     };
 
-    if (!user || isLoading) {
+    if (!user) {
         return (
-            <MainLayout user={user}>
+            <MainLayout>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
@@ -393,10 +396,17 @@ export default function EvolutionApiPage() {
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold flex items-center gap-2"><Zap /> Conexões com a Evolution API</h1>
-                    <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name}</span></p>
+                    <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name || '...'}</span></p>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
-                   <form action={saveAction}>
+                   { isLoading ? (
+                        <Card>
+                            <CardHeader><Skeleton className="h-8 w-1/2" /></CardHeader>
+                            <CardContent><Skeleton className="h-10 w-full" /></CardContent>
+                            <CardFooter><Skeleton className="h-10 w-32" /></CardFooter>
+                        </Card>
+                   ) : (
+                    <form action={saveAction}>
                         <input type="hidden" name="workspaceId" value={activeWorkspace?.id || ''} />
                         <input type="hidden" name="configId" value={config?.id || ''} />
                         <Card>
@@ -419,13 +429,14 @@ export default function EvolutionApiPage() {
                             </CardFooter>
                         </Card>
                    </form>
+                   )}
 
                     <div>
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold">Minhas Instâncias</h2>
                              <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
                                 <DialogTrigger asChild>
-                                    <Button disabled={!config?.api_url || !config?.api_key}>
+                                    <Button disabled={!config?.api_url || !config?.api_key || isLoading}>
                                         <Plus className="mr-2 h-4 w-4" />
                                         Adicionar Instância
                                     </Button>

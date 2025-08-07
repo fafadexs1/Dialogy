@@ -143,71 +143,88 @@ export async function createEvolutionApiInstance(
         return { error: 'Configuração global da API não encontrada.' };
     }
     const apiConfig = configRes.rows[0];
+    
+    const instanceName = formData.get('instanceName') as string;
+    if (!instanceName) {
+        return { error: 'O nome da instância é obrigatório.'}
+    }
 
-    // 2. Construir o payload para a API da Evolution
+    // 2. Construir o payload para a API da Evolution dinamicamente
     const payload: EvolutionInstanceCreationPayload = {
-        instanceName: formData.get('instanceName') as string,
-        token: formData.get('token') as string | undefined,
-        qrcode: formData.get('qrcode') === 'on',
-        number: formData.get('number') as string | undefined,
-        integration: formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined,
-
-        // General Settings
-        rejectCall: formData.get('rejectCall') === 'on',
-        msgCall: formData.get('msgCall') as string | undefined,
-        groupsIgnore: formData.get('groupsIgnore') === 'on',
-        alwaysOnline: formData.get('alwaysOnline') === 'on',
-        readMessages: formData.get('readMessages') === 'on',
-        readStatus: formData.get('readStatus') === 'on',
-        syncFullHistory: formData.get('syncFullHistory') === 'on',
-        
-        // Proxy
-        proxyHost: formData.get('proxyHost') as string | undefined,
-        proxyPort: Number(formData.get('proxyPort')) || undefined,
-        proxyUsername: formData.get('proxyUsername') as string | undefined,
-        proxyPassword: formData.get('proxyPassword') as string | undefined,
-
-        // Webhook
-        webhook: {
-            url: formData.get('webhook.url') as string | undefined,
-            byEvents: formData.get('webhook.byEvents') === 'on',
-            base64: formData.get('webhook.base64') === 'on',
-            events: (formData.get('webhook.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
-        },
-        // RabbitMQ
-        rabbitmq: {
-            enabled: formData.get('rabbitmq.enabled') === 'on',
-            events: (formData.get('rabbitmq.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
-        },
-        // SQS
-        sqs: {
-            enabled: formData.get('sqs.enabled') === 'on',
-            events: (formData.get('sqs.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
-        },
+        instanceName,
+        qrcode: true // Sempre true, conforme solicitado.
     };
+    
+    // Funções auxiliares para manter o código limpo
+    const addIfPresent = (key: keyof EvolutionInstanceCreationPayload, value: string | undefined | null) => {
+        if (value) (payload as any)[key] = value;
+    };
+    const addIfOn = (key: keyof EvolutionInstanceCreationPayload, value: FormDataEntryValue | null) => {
+        if (value === 'on') (payload as any)[key] = true;
+    };
+    const getEvents = (value: FormDataEntryValue | null) => {
+        const str = value as string;
+        if (!str) return undefined;
+        const events = str.split('\n').map(e => e.trim()).filter(Boolean);
+        return events.length > 0 ? events : undefined;
+    }
 
-    // Remove chaves undefined, nulas ou vazias para um payload limpo
-    Object.keys(payload).forEach(key => {
-        const typedKey = key as keyof typeof payload;
-        const value = payload[typedKey];
-        
-        if (value === undefined || value === '' || value === null) {
-            delete payload[typedKey];
-        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            // Limpa o sub-objeto
-            Object.keys(value).forEach(subKey => {
-                const subObject = value as any;
-                if (subObject[subKey] === undefined || subObject[subKey] === '' || subObject[subKey] === null || (Array.isArray(subObject[subKey]) && subObject[subKey].length === 0)) {
-                    delete subObject[subKey];
-                }
-            });
-            // Se o sub-objeto ficou vazio, remove ele também
-            if (Object.keys(value).length === 0) {
-                delete payload[typedKey];
-            }
+    addIfPresent('token', formData.get('token') as string);
+    addIfPresent('number', formData.get('number') as string);
+    addIfPresent('integration', formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined);
+
+    // General Settings
+    addIfOn('rejectCall', formData.get('rejectCall'));
+    addIfPresent('msgCall', formData.get('msgCall') as string);
+    addIfOn('groupsIgnore', formData.get('groupsIgnore'));
+    addIfOn('alwaysOnline', formData.get('alwaysOnline'));
+    addIfOn('readMessages', formData.get('readMessages'));
+    addIfOn('readStatus', formData.get('readStatus'));
+    addIfOn('syncFullHistory', formData.get('syncFullHistory'));
+    
+    // Proxy
+    const proxyHost = formData.get('proxyHost') as string;
+    const proxyPort = formData.get('proxyPort') as string;
+    const proxyUsername = formData.get('proxyUsername') as string;
+    const proxyPassword = formData.get('proxyPassword') as string;
+    if (proxyHost && proxyPort) {
+        payload.proxyHost = proxyHost;
+        payload.proxyPort = Number(proxyPort);
+        addIfPresent('proxyUsername', proxyUsername);
+        addIfPresent('proxyPassword', proxyPassword);
+    }
+    
+    // Webhook
+    const webhookUrl = formData.get('webhook.url') as string;
+    if(webhookUrl) {
+        payload.webhook = {
+            url: webhookUrl,
+            byEvents: formData.get('webhook.byEvents') === 'on',
+            base64: formData.get('webhook.base64') === 'on'
+        };
+        const webhookEvents = getEvents(formData.get('webhook.events'));
+        if (webhookEvents) {
+            payload.webhook.events = webhookEvents;
         }
-    });
+    }
 
+    // RabbitMQ
+    if (formData.get('rabbitmq.enabled') === 'on') {
+        payload.rabbitmq = { enabled: true };
+        const rabbitEvents = getEvents(formData.get('rabbitmq.events'));
+        if (rabbitEvents) {
+            payload.rabbitmq.events = rabbitEvents;
+        }
+    }
+    
+    // SQS
+    if (formData.get('sqs.enabled') === 'on') {
+        payload.sqs = { enabled: true };
+        const sqsEvents = getEvents(formData.get('sqs.events'));
+        if (sqsEvents) {
+            payload.sqs.events = sqsEvents;
+        }
+    }
 
     try {
         // 3. Chamar a API da Evolution para criar a instância
@@ -218,7 +235,7 @@ export async function createEvolutionApiInstance(
         });
 
         // 4. Se a criação na API for bem-sucedida, salvar no DB local
-        const instanceType = payload.integration === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud';
+        const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
         await db.query(
             'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
             [payload.instanceName, instanceType, config_id]
@@ -242,10 +259,35 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     }
 
     try {
+        // Primeiro, precisamos do nome da instância para a chamada da API
+        const instanceRes = await db.query('SELECT name, config_id FROM evolution_api_instances WHERE id = $1', [instanceId]);
+        if (instanceRes.rows.length === 0) {
+            return { error: 'Instância não encontrada no banco de dados local.' };
+        }
+        const { name: instanceName, config_id } = instanceRes.rows[0];
+
+        // Obter a configuração da API para a chave
+        const configRes = await db.query('SELECT api_url, api_key FROM evolution_api_configs WHERE id = $1', [config_id]);
+        if (configRes.rows.length === 0) {
+            return { error: 'Configuração da API não encontrada.' };
+        }
+        const apiConfig = configRes.rows[0];
+
+        // Chamar a API para deletar
+        await fetchEvolutionAPI(`/instance/delete/${instanceName}`, apiConfig, { method: 'DELETE' });
+        
+        // Se a chamada da API for bem-sucedida, delete do DB local
         await db.query('DELETE FROM evolution_api_instances WHERE id = $1', [instanceId]);
-    } catch (error) {
+
+    } catch (error: any) {
         console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting instance:', error);
-        return { error: 'Failed to delete instance.' };
+        // Mesmo se a API falhar (ex: instância já deletada lá), tentamos remover do nosso DB
+        try {
+            await db.query('DELETE FROM evolution_api_instances WHERE id = $1', [instanceId]);
+        } catch (dbError) {
+             console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting from DB after API error:', dbError);
+        }
+        return { error: `Falha ao deletar instância. Ela pode ter sido removida do DB local, mas verifique o servidor da Evolution. Erro: ${error.message}` };
     }
 
     revalidatePath('/integrations/evolution-api');
@@ -291,31 +333,5 @@ export async function disconnectInstance(instanceName: string, config: Evolution
         console.error(`[EVO_ACTION_DISCONNECT] Erro ao desconectar instância ${instanceName}:`, error);
         // Mesmo em caso de erro, assumimos que desconectou ou já estava desconectado.
         return { status: 'disconnected' };
-    }
-}
-
-export async function testEvolutionApiConnection(
-    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>
-): Promise<{ success: boolean; message: string }> {
-    if (!config.api_url || !config.api_key) {
-        return { success: false, message: 'URL da API e Chave da API são obrigatórias.' };
-    }
-    
-    try {
-        // Tenta acessar um endpoint simples que não requer um nome de instância, como o de 'manager'
-        // Se a API estiver no ar e a chave for válida, isso deve funcionar.
-        await fetchEvolutionAPI('/manager/restart', { ...config }, { method: 'POST' });
-        // Nota: Não queremos realmente reiniciar, apenas testar o endpoint.
-        // A API da Evolution V2 não tem um endpoint de "ping" simples, então usamos um que requer autenticação.
-        // Um restart falha se não estiver no modo manager, mas ainda valida a conexão.
-        // Se a chamada acima não lançar um erro, a conexão está ok.
-        return { success: true, message: 'Conexão bem-sucedida.' };
-    } catch (error: any) {
-        // A API pode retornar um erro específico se o modo manager não estiver ativo, o que ainda é um sinal de sucesso na conexão.
-        if (error.message && (error.message.includes('403') || error.message.includes('501'))) {
-            return { success: true, message: 'Conexão bem-sucedida (modo manager não ativo, mas API alcançável).' };
-        }
-        console.error('[EVO_ACTION_TEST_CONNECTION] Erro ao testar a conexão:', error);
-        return { success: false, message: `Falha na conexão: ${error.message}` };
     }
 }
