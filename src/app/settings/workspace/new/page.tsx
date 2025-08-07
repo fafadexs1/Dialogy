@@ -22,31 +22,37 @@ function SubmitButton() {
 }
 
 export default function NewWorkspacePage() {
-  const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
+  const [errorMessage, formAction, isPending] = useActionState(createWorkspaceAction, null);
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const { pending } = useFormStatus();
   
   useEffect(() => {
-    // This effect runs after the form submission is processed.
-    // If there is no error message and the form is not pending, it means the submission was successful.
-    if (!errorMessage && formRef.current?.dataset.submitted === 'true' && !pending) {
-      router.push('/');
-    }
-     if (errorMessage) {
-        // Reset submitted state if there was an error
-        if (formRef.current) {
+    // Este efeito é acionado após a conclusão da ação do formulário.
+    // Se não houver mensagem de erro e a ação não estiver mais pendente,
+    // significa que a submissão foi bem-sucedida.
+    const formSubmitted = formRef.current?.dataset.submitted === 'true';
+
+    if (formSubmitted && !isPending && !errorMessage) {
+        // Redireciona APENAS se a submissão foi bem-sucedida.
+        // O redirecionamento agora é feito na própria server action, mas como fallback:
+        router.push('/');
+    } else if (formSubmitted && !isPending && errorMessage) {
+        // Se houve um erro, reseta o estado de "submetido" para permitir uma nova tentativa.
+        if(formRef.current) {
             formRef.current.dataset.submitted = 'false';
         }
     }
-  }, [errorMessage, pending, router]);
+  }, [isPending, errorMessage, router]);
 
-  const handleFormAction = (formData: FormData) => {
-    if (formRef.current) {
+
+  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if(formRef.current) {
         formRef.current.dataset.submitted = 'true';
     }
+    const formData = new FormData(event.currentTarget);
     formAction(formData);
-  }
+  };
 
   return (
     <div className="max-w-3xl">
@@ -61,7 +67,7 @@ export default function NewWorkspacePage() {
         </header>
 
         <Card className="w-full max-w-lg">
-            <form ref={formRef} action={handleFormAction} data-submitted="false">
+            <form ref={formRef} onSubmit={handleFormSubmit} data-submitted="false">
                 <CardHeader>
                     <CardTitle>Detalhes do Workspace</CardTitle>
                     <CardDescription>

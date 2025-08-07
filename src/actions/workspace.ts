@@ -41,8 +41,8 @@ export async function createWorkspaceAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
-
-  return null;
+  // Redireciona para a página principal para refletir o novo estado
+  redirect('/');
 }
 
 
