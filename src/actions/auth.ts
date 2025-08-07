@@ -37,7 +37,7 @@ export async function register(
 
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    await db.query('INSERT INTO users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, hashedPassword]);
+    await db.query('INSERT INTO public.users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, hashedPassword]);
 
   } catch(error) {
      console.error(error);
