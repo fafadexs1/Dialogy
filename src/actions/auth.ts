@@ -3,7 +3,6 @@
 
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
-import bcrypt from 'bcryptjs';
 
 // A função de login foi removida pois o fluxo agora é gerenciado
 // inteiramente pelo NextAuth e pelo formulário do lado do cliente.
@@ -27,11 +26,9 @@ export async function register(
         return "Este e-mail já está em uso.";
     }
 
-    // A senha é criptografada aqui antes de salvar
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-    await db.query('INSERT INTO public.users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, hashedPassword]);
-    console.log(`[REGISTER_ACTION] Usuário ${email} registrado com sucesso.`);
+    // A senha agora é salva em texto plano, sem criptografia.
+    await db.query('INSERT INTO public.users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, password]);
+    console.log(`[REGISTER_ACTION] Usuário ${email} registrado com sucesso (senha não criptografada).`);
 
   } catch(error) {
      console.error('[REGISTER_ACTION] Erro:', error);

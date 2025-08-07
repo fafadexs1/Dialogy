@@ -3,7 +3,6 @@ import NextAuth from 'next-auth';
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { db } from '@/lib/db';
-import bcrypt from 'bcryptjs';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -14,7 +13,7 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
-        console.log('--- [AUTH] Iniciando processo de autorização ---');
+        console.log('--- [AUTH] Iniciando processo de autorização (sem criptografia) ---');
         if (!credentials?.email || !credentials.password) {
           console.log('[AUTH] Falhou: Email ou senha não fornecidos.');
           return null;
@@ -33,7 +32,8 @@ export const authOptions: NextAuthOptions = {
           const user = result.rows[0];
           console.log(`[AUTH] Usuário encontrado: ${user.full_name} (ID: ${user.id})`);
 
-          const passwordIsValid = await bcrypt.compare(credentials.password, user.password_hash);
+          // Comparação direta de senhas em texto plano.
+          const passwordIsValid = credentials.password === user.password_hash;
           console.log(`[AUTH] Verificação de senha para ${credentials.email}: ${passwordIsValid ? 'VÁLIDA' : 'INVÁLIDA'}`);
 
           if (passwordIsValid) {
