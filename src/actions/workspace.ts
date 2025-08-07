@@ -11,13 +11,17 @@ export async function createWorkspaceAction(
   const supabase = createClient();
 
   const workspaceName = formData.get('workspaceName') as string;
-  const userId = formData.get('userId') as string;
+  
+  // O userId não é mais necessário aqui, pois o gatilho usará auth.uid()
+  // const userId = formData.get('userId') as string;
 
-  if (!workspaceName || !userId) {
-    return 'O nome do workspace e o ID do usuário são obrigatórios.';
+  if (!workspaceName) {
+    return 'O nome do workspace é obrigatório.';
   }
 
-  // Step 1: Create the workspace
+  // A lógica agora é mais simples. Apenas inserimos o workspace.
+  // O gatilho no banco de dados (`link_creator_to_workspace`)
+  // cuidará de adicionar o criador à tabela user_workspaces.
   const { data: workspaceData, error: workspaceError } = await supabase
     .from('workspaces')
     .insert({ name: workspaceName })
@@ -26,26 +30,18 @@ export async function createWorkspaceAction(
 
   if (workspaceError || !workspaceData) {
     console.error('Error creating workspace:', workspaceError);
+    // Fornecer uma mensagem de erro mais clara para o usuário
+    if (workspaceError?.message.includes('violates row-level security policy')) {
+        return 'Erro de permissão. Você não tem autorização para criar um workspace.';
+    }
     return `Não foi possível criar o workspace: ${workspaceError?.message || 'Erro desconhecido.'}`;
   }
 
-  // Step 2: Link the user to the new workspace
-  const { error: userWorkspaceError } = await supabase
-    .from('user_workspaces')
-    .insert({
-      user_id: userId,
-      workspace_id: workspaceData.id,
-    });
+  // A segunda etapa de vincular o usuário foi movida para um gatilho de banco de dados,
+  // tornando esta ação mais simples e segura.
 
-  if (userWorkspaceError) {
-    console.error('Error linking user to workspace:', userWorkspaceError);
-    // Optional: Attempt to clean up the created workspace if linking fails
-    await supabase.from('workspaces').delete().eq('id', workspaceData.id);
-    return `Não foi possível vincular o usuário ao workspace: ${userWorkspaceError.message}`;
-  }
-
-  // Revalidate the home page to reflect the new state
-  revalidatePath('/');
+  // Revalida a home page para refletir o novo estado e acionar o redirecionamento.
+  revalidatePath('/', 'layout');
 
   return null;
 }
