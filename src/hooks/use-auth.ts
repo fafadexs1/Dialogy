@@ -60,7 +60,7 @@ export function useAuth(): AppUser | null {
             setAppUser({
                 id: authUser.id,
                 name: authUser.user_metadata.full_name || authUser.email || 'Usuário',
-                email: authUser.email,
+                email: authUser.email || '',
                 avatar: authUser.user_metadata.avatar_url || `https://placehold.co/40x40.png?text=${(authUser.user_metadata.full_name || 'U').charAt(0)}`,
                 workspaces,
                 activeWorkspaceId,

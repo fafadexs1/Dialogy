@@ -30,7 +30,7 @@ export default async function Home() {
   const workspaces: Workspace[] = userWorkspaces?.map((uw: any) => ({
       id: uw.workspaces.id,
       name: uw.workspaces.name,
-      avatar: uw.workspaces.avatar_url,
+      avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
   })) || [];
   
   const activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
