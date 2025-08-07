@@ -13,18 +13,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     // Teardown em ordem reversa de dependência
     const teardownQueries = [
-        // Remover políticas de segurança - simplificado
-        'DROP POLICY IF EXISTS "Allow individual read access" ON public.users;',
-        'DROP POLICY IF EXISTS "Allow individual update access" ON public.users;',
-        'DROP POLICY IF EXISTS "Allow workspace access for members" ON public.workspaces;',
-
-        // Remover triggers e funções que dependiam do Supabase Auth
-        'DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;',
-        'DROP TRIGGER IF EXISTS add_creator_to_workspace_trigger ON public.workspaces;',
-        'DROP FUNCTION IF EXISTS public.create_user_profile();',
-        'DROP FUNCTION IF EXISTS public.add_creator_to_workspace();',
-        
-        // Remover tabelas
         'DROP TABLE IF EXISTS public.evolution_api_instances CASCADE;',
         'DROP TABLE IF EXISTS public.evolution_api_configs CASCADE;',
         'DROP TABLE IF EXISTS public.messages CASCADE;',
@@ -33,7 +21,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TABLE IF EXISTS public.user_workspaces CASCADE;',
         'DROP TABLE IF EXISTS public.workspaces CASCADE;',
         'DROP TABLE IF EXISTS public.users CASCADE;',
-        // Remover ENUMs
         'DROP TYPE IF EXISTS public.chat_status_enum;'
     ];
     
@@ -42,7 +29,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
             await client.query(query);
         } catch (err: any) {
             // Ignorar erros se o objeto não existir, mas logar outros erros
-            if (err.code !== '42704' && err.code !== '42P01' && err.code !== '3F000' && err.code !== '42710') { // undefined_object, undefined_table, invalid_schema_name, duplicate_object
+            if (err.code !== '42P01' && err.code !== '42704') { // undefined_table, undefined_object
                  console.warn(`Aviso durante a limpeza: ${err.message}`);
             }
         }
@@ -126,7 +113,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     }
     
     console.log('Tabelas criadas com sucesso.');
-    console.log('Configurando automações e segurança...');
+    console.log('Configurando automações...');
     
     // Funções e Triggers
     const functionsAndTriggers = [
