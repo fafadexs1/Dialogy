@@ -125,7 +125,7 @@ export default function EvolutionApiPage() {
                 .eq('workspace_id', activeWorkspace.id)
                 .single();
             
-            if (configError && configError.code !== 'PGRST116') {
+            if (configError && configError.code !== 'PGRST116') { // PGRST116: no rows returned
                 console.error("Error fetching config:", configError);
                 toast({ title: 'Erro ao buscar configurações', variant: 'destructive'});
             } else {
@@ -163,7 +163,7 @@ export default function EvolutionApiPage() {
         const { data, error } = await supabase
             .from('evolution_api_configs')
             .upsert({
-                id: config?.id,
+                id: config?.id, // Supabase uses `id` for upsert to find the row to update
                 workspace_id: activeWorkspace.id,
                 api_url: apiUrlInput,
                 api_key: apiKeyInput,
@@ -185,7 +185,7 @@ export default function EvolutionApiPage() {
             case 'connected':
                 return { text: 'Conectado', color: 'bg-green-500', icon: <ShieldCheck className="h-4 w-4" /> };
             case 'disconnected':
-                return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
+return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
             case 'pending':
                 return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
         }

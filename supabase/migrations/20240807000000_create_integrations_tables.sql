@@ -1,109 +1,132 @@
--- Create Workspaces table
-create table if not exists workspaces (
+-- Criar tabela de workspaces
+create table if not exists public.workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   avatar_url text,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
 
--- Create User_Workspaces join table
-create table if not exists user_workspaces (
-  user_id uuid references auth.users(id) on delete cascade,
-  workspace_id uuid references workspaces(id) on delete cascade,
+-- Criar tabela de junção para usuários e workspaces (muitos-para-muitos)
+create table if not exists public.user_workspaces (
+  user_id uuid references auth.users(id) on delete cascade not null,
+  workspace_id uuid references public.workspaces(id) on delete cascade not null,
   primary key (user_id, workspace_id)
 );
 
--- Add workspace_id to profiles, chats, and messages if they exist
-DO $$
-BEGIN
-   IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'profiles') THEN
-      ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS workspace_id uuid references workspaces(id);
-   END IF;
-   IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'chats') THEN
-      ALTER TABLE public.chats ADD COLUMN IF NOT EXISTS workspace_id uuid references workspaces(id);
-   END IF;
-   IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'messages') THEN
-      ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS workspace_id uuid references workspaces(id);
-   END IF;
-END
-$$;
+-- Adicionar colunas de workspace_id às tabelas existentes
+alter table public.profiles add column if not exists workspace_id uuid references public.workspaces(id);
+alter table public.chats add column if not exists workspace_id uuid references public.workspaces(id) not null;
+alter table public.messages add column if not exists workspace_id uuid references public.workspaces(id) not null;
 
--- Create Evolution API Configs table
-create table if not exists evolution_api_configs (
+-- Tabela para configurações da Evolution API (por workspace)
+create table if not exists public.evolution_api_configs (
   id uuid primary key default gen_random_uuid(),
-  workspace_id uuid references workspaces(id) on delete cascade not null,
+  workspace_id uuid references public.workspaces(id) on delete cascade not null,
   api_url text,
   api_key text,
   created_at timestamptz default timezone('utc'::text, now()) not null,
   unique(workspace_id)
 );
 
--- Create Evolution API Instances table
-create table if not exists evolution_api_instances (
+-- Tabela para instâncias da Evolution API
+create table if not exists public.evolution_api_instances (
   id uuid primary key default gen_random_uuid(),
-  config_id uuid references evolution_api_configs(id) on delete cascade not null,
+  config_id uuid references public.evolution_api_configs(id) on delete cascade not null,
   name text not null,
   type text not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
 
--- Function to check if a user is a member of a workspace
-create or replace function is_member_of_workspace(p_workspace_id uuid, p_user_id uuid)
-returns boolean as $$
-  select exists (
-    select 1
-    from user_workspaces
-    where workspace_id = p_workspace_id and user_id = p_user_id
-  );
-$$ language sql security definer;
+-- Habilitar RLS (Row-Level Security)
+alter table public.workspaces enable row level security;
+alter table public.user_workspaces enable row level security;
+alter table public.profiles enable row level security;
+alter table public.chats enable row level security;
+alter table public.messages enable row level security;
+alter table public.evolution_api_configs enable row level security;
+alter table public.evolution_api_instances enable row level security;
 
+-- Políticas de RLS para WORKSPACES
+drop policy if exists "Users can see workspaces they are part of" on public.workspaces;
+create policy "Users can see workspaces they are part of"
+on public.workspaces for select
+using (
+  auth.uid() in (
+    select user_id from public.user_workspaces where workspace_id = id
+  )
+);
 
--- RLS policies for workspaces
-alter table workspaces enable row level security;
-drop policy if exists "Users can see workspaces they are members of" on workspaces;
-create policy "Users can see workspaces they are members of" on workspaces
-  for select using (is_member_of_workspace(id, auth.uid()));
+-- Políticas de RLS para USER_WORKSPACES
+drop policy if exists "Users can see their own workspace memberships" on public.user_workspaces;
+create policy "Users can see their own workspace memberships"
+on public.user_workspaces for select
+using ( auth.uid() = user_id );
 
--- RLS policies for evolution_api_configs
-alter table evolution_api_configs enable row level security;
-drop policy if exists "Workspace members can manage their own API configs" on evolution_api_configs;
-create policy "Workspace members can manage their own API configs" on evolution_api_configs
-  for all using (is_member_of_workspace(workspace_id, auth.uid()));
+-- Políticas de RLS para PROFILES (contatos/agentes dentro do workspace)
+drop policy if exists "Users can access profiles of workspaces they are part of" on public.profiles;
+create policy "Users can access profiles of workspaces they are part of"
+on public.profiles for select
+using (
+  workspace_id in (
+    select workspace_id from public.user_workspaces where user_id = auth.uid()
+  )
+);
 
--- RLS policies for evolution_api_instances
-alter table evolution_api_instances enable row level security;
-drop policy if exists "Workspace members can manage their own API instances" on evolution_api_instances;
-create policy "Workspace members can manage their own API instances" on evolution_api_instances
-  for all using (
-    exists (
-      select 1 from evolution_api_configs
-      where id = evolution_api_instances.config_id and is_member_of_workspace(evolution_api_configs.workspace_id, auth.uid())
+-- Políticas de RLS para CHATS
+drop policy if exists "Users can access chats of workspaces they are part of" on public.chats;
+create policy "Users can access chats of workspaces they are part of"
+on public.chats for all
+using (
+  workspace_id in (
+    select workspace_id from public.user_workspaces where user_id = auth.uid()
+  )
+);
+
+-- Políticas de RLS para MESSAGES
+drop policy if exists "Users can access messages of workspaces they are part of" on public.messages;
+create policy "Users can access messages of workspaces they are part of"
+on public.messages for all
+using (
+  workspace_id in (
+    select workspace_id from public.user_workspaces where user_id = auth.uid()
+  )
+);
+
+-- Políticas de RLS para EVOLUTION_API_CONFIGS
+drop policy if exists "Users can access API configs of workspaces they are part of" on public.evolution_api_configs;
+create policy "Users can access API configs of workspaces they are part of"
+on public.evolution_api_configs for all
+using (
+  workspace_id in (
+    select workspace_id from public.user_workspaces where user_id = auth.uid()
+  )
+);
+
+-- Políticas de RLS para EVOLUTION_API_INSTANCES
+drop policy if exists "Users can access API instances of workspaces they are part of" on public.evolution_api_instances;
+create policy "Users can access API instances of workspaces they are part of"
+on public.evolution_api_instances for all
+using (
+  config_id in (
+    select id from public.evolution_api_configs where workspace_id in (
+      select workspace_id from public.user_workspaces where user_id = auth.uid()
     )
-  );
+  )
+);
 
--- RLS for profiles, chats, messages
-DO $$
-BEGIN
-    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'profiles') THEN
-        ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-        DROP POLICY IF EXISTS "Users can manage profiles in their workspaces" ON public.profiles;
-        CREATE POLICY "Users can manage profiles in their workspaces" ON public.profiles
-        FOR ALL USING (is_member_of_workspace(workspace_id, auth.uid()));
-    END IF;
+-- Inserts Iniciais para Mock Data (Opcional, mas útil para desenvolvimento)
 
-    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'chats') THEN
-        ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
-        DROP POLICY IF EXISTS "Users can manage chats in their workspaces" ON public.chats;
-        CREATE POLICY "Users can manage chats in their workspaces" ON public.chats
-        FOR ALL USING (is_member_of_workspace(workspace_id, auth.uid()));
-    END IF;
+-- Inserir workspaces se não existirem
+insert into public.workspaces (id, name, avatar_url)
+values
+  ('a1b2c3d4-e5f6-7890-1234-567890abcdef', 'Dialogy Inc.', 'https://placehold.co/40x40.png'),
+  ('b2c3d4e5-f6a7-8901-2345-67890abcdef0', 'InnovateTech', 'https://placehold.co/40x40.png')
+on conflict (id) do nothing;
 
-    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'messages') THEN
-        ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-        DROP POLICY IF EXISTS "Users can manage messages in their workspaces" ON public.messages;
-        CREATE POLICY "Users can manage messages in their workspaces" ON public.messages
-        FOR ALL USING (is_member_of_workspace(workspace_id, auth.uid()));
-    END IF;
-END
-$$;
-
+-- Vincular o usuário de teste (se existir) aos workspaces
+-- Substitua 'uuid-do-usuario-de-teste' pelo ID do seu usuário de teste no Supabase Auth
+-- insert into public.user_workspaces (user_id, workspace_id)
+-- values
+--   ('uuid-do-usuario-de-teste', 'a1b2c3d4-e5f6-7890-1234-567890abcdef'),
+--   ('uuid-do-usuario-de-teste', 'b2c3d4e5-f6a7-8901-2345-67890abcdef0')
+-- on conflict (user_id, workspace_id) do nothing;

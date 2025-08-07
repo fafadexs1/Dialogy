@@ -148,7 +148,7 @@ export interface EvolutionInstance {
     name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
-    config_id?: string;
+    config_id: string;
 }
 
 export interface EvolutionApiConfig {
