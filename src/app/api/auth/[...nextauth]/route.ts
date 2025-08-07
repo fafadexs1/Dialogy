@@ -14,15 +14,29 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        console.log('--- Iniciando processo de autorização ---');
         if (!credentials?.email || !credentials.password) {
+          console.log('Autorização falhou: Email ou senha não fornecidos.');
           return null;
         }
+
+        console.log(`Tentando autorizar usuário com email: ${credentials.email}`);
 
         try {
           const result = await db.query('SELECT id, full_name, email, password_hash, avatar_url FROM users WHERE email = $1', [credentials.email]);
           const user = result.rows[0];
 
-          if (user && bcrypt.compareSync(credentials.password, user.password_hash)) {
+          if (!user) {
+            console.log(`Usuário com email ${credentials.email} não encontrado no banco de dados.`);
+            return null;
+          }
+          console.log(`Usuário encontrado: ${user.full_name}`);
+
+          const passwordIsValid = bcrypt.compareSync(credentials.password, user.password_hash);
+          console.log(`Verificação de senha para ${credentials.email}: ${passwordIsValid ? 'VÁLIDA' : 'INVÁLIDA'}`);
+
+          if (passwordIsValid) {
+            console.log(`Autorização bem-sucedida para ${user.full_name}. Retornando dados do usuário.`);
             // Return the user object without the password hash
             return {
               id: user.id,
@@ -31,10 +45,11 @@ export const authOptions: NextAuthOptions = {
               image: user.avatar_url,
             };
           } else {
+            console.log(`Senha inválida para o usuário ${credentials.email}.`);
             return null; // Invalid credentials
           }
         } catch (error) {
-          console.error('Authorize error:', error);
+          console.error('Erro catastrófico durante a autorização no authorize:', error);
           return null; // Error during authorization
         }
       },
