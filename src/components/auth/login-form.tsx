@@ -27,25 +27,33 @@ export function LoginForm() {
 
     console.log(`--- [LOGIN_FORM] Tentando fazer login para: ${email} ---`);
 
-    const result = await signIn('credentials', {
-      redirect: false,
-      email,
-      password,
-    });
+    try {
+      const result = await signIn('credentials', {
+        redirect: false,
+        email,
+        password,
+      });
 
-    console.log('[LOGIN_FORM] Resultado do signIn:', result);
+      console.log('[LOGIN_FORM] Resultado do signIn:', result);
 
-    if (result?.error) {
-      console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
-      setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
-      setLoading(false);
-    } else if (result?.ok) {
-      console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
-      // On successful login, push the user to the homepage.
-      router.push('/');
-    } else {
-       console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
-       setLoading(false);
+      if (result?.error) {
+        console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
+        setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
+        setLoading(false);
+      } else if (result?.ok) {
+        console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
+        // On successful login, push the user to the homepage.
+        router.push('/');
+        router.refresh(); // Força a atualização dos dados do servidor
+      } else {
+        console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
+        setErrorMessage('Ocorreu um erro inesperado durante o login.');
+        setLoading(false);
+      }
+    } catch (error) {
+        console.error('[LOGIN_FORM] Erro catastrófico na função handleSubmit:', error);
+        setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
+        setLoading(false);
     }
   };
 

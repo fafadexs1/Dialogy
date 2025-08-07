@@ -24,12 +24,13 @@ export const authOptions: NextAuthOptions = {
 
         try {
           const result = await db.query('SELECT id, full_name, email, password_hash, avatar_url FROM users WHERE email = $1', [credentials.email]);
-          const user = result.rows[0];
-
-          if (!user) {
+          
+          if (result.rows.length === 0) {
             console.log(`[AUTH] Usuário com email ${credentials.email} não encontrado.`);
             return null;
           }
+
+          const user = result.rows[0];
           console.log(`[AUTH] Usuário encontrado: ${user.full_name} (ID: ${user.id})`);
 
           const passwordIsValid = await bcrypt.compare(credentials.password, user.password_hash);
@@ -37,6 +38,7 @@ export const authOptions: NextAuthOptions = {
 
           if (passwordIsValid) {
             console.log(`[AUTH] Autorização bem-sucedida para ${user.full_name}.`);
+            // Retorne apenas os dados essenciais para a sessão
             return {
               id: user.id,
               name: user.full_name,
@@ -49,35 +51,40 @@ export const authOptions: NextAuthOptions = {
           }
         } catch (error) {
           console.error('[AUTH] Erro catastrófico durante a autorização:', error);
+          // Retorne null em caso de qualquer erro para evitar vazamento de informações
           return null;
         }
       },
     }),
   ],
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || 'fallback-secret-for-development', // Adicionar um fallback para desenvolvimento
   session: {
     strategy: 'jwt',
   },
   callbacks: {
     async jwt({ token, user }) {
-      console.log('[AUTH_CALLBACK] JWT: Adicionando ID do usuário ao token.');
+      // Este callback é chamado sempre que um JWT é criado ou atualizado.
+      // Se o objeto `user` existir (o que acontece no login), adicione o ID dele ao token.
       if (user) {
+        console.log('[AUTH_CALLBACK] JWT: Adicionando ID do usuário ao token.');
         token.id = user.id;
       }
-      console.log('[AUTH_CALLBACK] JWT: Token final:', token);
       return token;
     },
     async session({ session, token }) {
-      console.log('[AUTH_CALLBACK] Session: Adicionando ID do usuário à sessão.');
-      if (session.user) {
+      // Este callback é chamado sempre que uma sessão é acessada.
+      // O token JWT já contém o ID que adicionamos acima.
+      // Agora, passamos esse ID do token para o objeto da sessão do cliente.
+      if (session.user && token.id) {
+        console.log('[AUTH_CALLBACK] Session: Adicionando ID do usuário à sessão.');
         session.user.id = token.id as string;
       }
-      console.log('[AUTH_CALLBACK] Session: Sessão final:', session);
       return session;
     },
   },
   pages: {
     signIn: '/login',
+    error: '/login', // Redirecionar para a página de login em caso de erro
   }
 };
 
