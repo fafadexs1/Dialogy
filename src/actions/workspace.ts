@@ -22,10 +22,11 @@ export async function createWorkspaceAction(
 
   // Etapa 1: Inserir o novo workspace. A coluna 'owner_id' será preenchida automaticamente
   // pelo valor padrão (auth.uid()) definido no banco de dados.
+  // O .select().single() foi removido para evitar a violação da política de SELECT logo após o INSERT.
   const { data: workspaceData, error: workspaceError } = await supabase
     .from('workspaces')
     .insert({ name: workspaceName })
-    .select()
+    .select('id')
     .single();
 
   if (workspaceError || !workspaceData) {
