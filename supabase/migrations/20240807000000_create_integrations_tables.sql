@@ -1,116 +1,124 @@
+-- supabase/migrations/YYYYMMDDHHMMSS_create_integrations_tables.sql
 
--- Create Workspaces table
-create table workspaces (
+-- Habilitar a extensão pgcrypto se ainda não estiver habilitada
+create extension if not exists pgcrypto with schema extensions;
+
+-- Tabela de Workspaces
+create table if not exists public.workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   avatar_url text,
-  created_at timestamptz default timezone('utc'::text, now()) not null,
-  owner_id uuid references auth.users(id)
+  created_at timestamptz default timezone('utc'::text, now()) not null
 );
+comment on table public.workspaces is 'Stores workspace information.';
 
--- Create User_Workspaces table for many-to-many relationship
-create table user_workspaces (
-  user_id uuid references auth.users(id) on delete cascade,
-  workspace_id uuid references workspaces(id) on delete cascade,
-  role text not null default 'member', -- e.g., 'admin', 'member'
+-- Tabela de junção para usuários e workspaces (muitos-para-muitos)
+create table if not exists public.user_workspaces (
+  user_id uuid references public.users(id) on delete cascade not null,
+  workspace_id uuid references public.workspaces(id) on delete cascade not null,
+  role text default 'member' not null, -- Ex: 'admin', 'member'
   primary key (user_id, workspace_id)
 );
+comment on table public.user_workspaces is 'Links users to workspaces with specific roles.';
 
--- Add workspace_id to profiles and other tables
--- Note: This assumes you want to associate existing entities with workspaces.
--- You might need a more sophisticated data migration strategy for existing data.
-alter table profiles add column workspace_id uuid references workspaces(id);
-alter table chats add column workspace_id uuid references workspaces(id);
-alter table messages add column workspace_id uuid references workspaces(id);
+-- Tabela de Perfis/Contatos (já deve existir, mas vamos adicionar RLS e workspace_id)
+-- Esta é uma alteração conceitual. A tabela `profiles` deve ser adaptada.
+-- Supondo que a tabela `profiles` já existe.
+alter table public.profiles add column if not exists workspace_id uuid references public.workspaces(id);
+-- Limpar políticas antigas se existirem
+drop policy if exists "Users can manage their own profiles." on public.profiles;
+-- RLS para perfis
+-- alter table public.profiles enable row level security;
+-- create policy "Users can view profiles in their workspace." on public.profiles
+--   for select using (
+--     auth.uid() in (
+--       select user_id from user_workspaces where workspace_id = profiles.workspace_id
+--     )
+--   );
 
 
--- Create Evolution API Configs table
-create table evolution_api_configs (
+-- Tabela de Configurações da Evolution API (ligada ao workspace)
+create table if not exists public.evolution_api_configs (
   id uuid primary key default gen_random_uuid(),
-  workspace_id uuid references workspaces(id) on delete cascade not null,
+  workspace_id uuid references public.workspaces(id) on delete cascade not null unique,
   api_url text,
   api_key text,
   created_at timestamptz default timezone('utc'::text, now()) not null,
-  updated_at timestamptz default timezone('utc'::text, now()) not null,
-  unique(workspace_id)
-);
-
--- Create Evolution API Instances table
-create table evolution_api_instances (
-  id uuid primary key default gen_random_uuid(),
-  config_id uuid references evolution_api_configs(id) on delete cascade not null,
-  name text not null,
-  type text not null default 'baileys', -- 'baileys' or 'wa_cloud'
-  created_at timestamptz default timezone('utc'::text, now()) not null,
   updated_at timestamptz default timezone('utc'::text, now()) not null
 );
+comment on table public.evolution_api_configs is 'Stores global Evolution API settings for each workspace.';
 
--- Policies for workspaces
-alter table workspaces enable row level security;
-create policy "Users can see workspaces they are members of" on workspaces for select using (
-  id in (select workspace_id from user_workspaces where user_id = auth.uid())
+-- Tabela de Instâncias da Evolution API (ligada à configuração global)
+create table if not exists public.evolution_api_instances (
+  id uuid primary key default gen_random_uuid(),
+  config_id uuid references public.evolution_api_configs(id) on delete cascade not null,
+  name text not null,
+  type text not null, -- 'baileys' or 'wa_cloud'
+  created_at timestamptz default timezone('utc'::text, now()) not null
 );
-create policy "Workspace owners can update their workspaces" on workspaces for update using (
-    auth.uid() = owner_id
-);
-create policy "Users can create workspaces" on workspaces for insert with check (
-    auth.uid() = owner_id
-);
+comment on table public.evolution_api_instances is 'Stores individual Evolution API instances for a workspace.';
 
--- Policies for user_workspaces
-alter table user_workspaces enable row level security;
-create policy "Users can view their own workspace memberships" on user_workspaces for select using (
-  auth.uid() = user_id
-);
--- Add policies for insert/update/delete as needed, likely restricted to admins
-
--- Policies for profiles
-alter table profiles enable row level security;
-create policy "Users can view profiles in their workspaces" on profiles for select using (
-    workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
-create policy "Users can update their own profile" on profiles for update using (
-    auth.uid() = id
-);
-create policy "Users can insert their own profile" on profiles for insert with check (
-    auth.uid() = id
-);
+-- Adicionar workspace_id às tabelas de comunicação
+alter table public.chats add column if not exists workspace_id uuid references public.workspaces(id) on delete cascade;
+alter table public.messages add column if not exists workspace_id uuid references public.workspaces(id) on delete cascade;
 
 
--- Policies for evolution_api_configs
-alter table evolution_api_configs enable row level security;
-create policy "Users can manage configs for workspaces they are members of" on evolution_api_configs for all using (
-  workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
+-- POLÍTICAS DE SEGURANÇA (RLS) --
 
--- Policies for evolution_api_instances
-alter table evolution_api_instances enable row level security;
-create policy "Users can manage instances for configs in their workspaces" on evolution_api_instances for all using (
-  config_id in (
-    select id from evolution_api_configs where workspace_id in (
-      select workspace_id from user_workspaces where user_id = auth.uid()
+-- Workspaces
+alter table public.workspaces enable row level security;
+drop policy if exists "Authenticated users can view workspaces they belong to." on public.workspaces;
+create policy "Authenticated users can view workspaces they belong to." on public.workspaces
+  for select using (
+    auth.uid() in (
+      select user_id from user_workspaces where workspace_id = id
     )
-  )
-);
+  );
 
--- Policies for chats
-alter table chats enable row level security;
-create policy "Users can view chats in their workspaces" on chats for select using (
-  workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
-create policy "Users can insert chats in their workspaces" on chats for insert with check (
-  workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
-create policy "Users can update chats in their workspaces" on chats for update using (
-  workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
+-- User Workspaces
+alter table public.user_workspaces enable row level security;
+drop policy if exists "Users can view their own workspace associations." on public.user_workspaces;
+create policy "Users can view their own workspace associations." on public.user_workspaces
+  for select using (auth.uid() = user_id);
 
+-- Evolution API Configs
+alter table public.evolution_api_configs enable row level security;
+drop policy if exists "Users can manage configs of their workspaces." on public.evolution_api_configs;
+create policy "Users can manage configs of their workspaces." on public.evolution_api_configs
+  for all using (
+    auth.uid() in (
+      select user_id from user_workspaces where workspace_id = evolution_api_configs.workspace_id
+    )
+  );
 
--- Policies for messages
-alter table messages enable row level security;
-create policy "Users can view messages in their workspaces" on messages for select using (
-  workspace_id in (select workspace_id from user_worke_workspaces where user_id = auth.uid())
-);
-create policy "Users can insert messages in their workspaces" on messages for insert with check (
-  workspace_id in (select workspace_id from user_workspaces where user_id = auth.uid())
-);
+-- Evolution API Instances
+alter table public.evolution_api_instances enable row level security;
+drop policy if exists "Users can manage instances in their workspaces." on public.evolution_api_instances;
+create policy "Users can manage instances in their workspaces." on public.evolution_api_instances
+  for all using (
+    auth.uid() in (
+      select uw.user_id from user_workspaces uw
+      join evolution_api_configs eac on eac.workspace_id = uw.workspace_id
+      where eac.id = evolution_api_instances.config_id
+    )
+  );
+  
+-- Chats
+alter table public.chats enable row level security;
+drop policy if exists "Users can access chats in their workspaces." on public.chats;
+create policy "Users can access chats in their workspaces." on public.chats
+  for all using (
+    auth.uid() in (
+      select user_id from user_workspaces where workspace_id = chats.workspace_id
+    )
+  );
+
+-- Messages
+alter table public.messages enable row level security;
+drop policy if exists "Users can access messages in their workspaces." on public.messages;
+create policy "Users can access messages in their workspaces." on public.messages
+  for all using (
+    auth.uid() in (
+      select user_id from user_workspaces where workspace_id = messages.workspace_id
+    )
+  );
