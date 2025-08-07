@@ -1,13 +1,9 @@
--- Arquivo de migração para configurar a arquitetura multi-workspace
-
--- Remover tabelas existentes na ordem correta para evitar erros de dependência
-drop table if exists public.evolution_api_instances;
-drop table if exists public.evolution_api_configs;
-drop table if exists public.messages;
-drop table if exists public.chats;
-drop table if exists public.user_workspaces;
+-- Remover a política antiga e a tabela 'profiles' se existirem.
+drop policy if exists "Users can access profiles of workspaces they are part of" on public.profiles;
 drop table if exists public.profiles;
-drop table if exists public.workspaces;
+
+-- Remover a tabela 'user_workspaces' se existir, para recriá-la com a referência correta.
+drop table if exists public.user_workspaces;
 
 -- Criar tabela de workspaces
 create table if not exists public.workspaces (
@@ -16,45 +12,51 @@ create table if not exists public.workspaces (
   avatar_url text,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
-comment on table public.workspaces is 'Stores workspace information.';
 
--- Criar tabela de perfis de usuário, que podem ser contatos ou agentes
-create table if not exists public.profiles (
-  id uuid primary key not null references auth.users(id) on delete cascade,
-  full_name text,
-  avatar_url text
-);
-comment on table public.profiles is 'Profile information for users and contacts.';
-
--- Criar tabela de junção para usuários e workspaces (muitos-para-muitos)
+-- Criar tabela de junção para usuários (de auth.users) e workspaces
 create table if not exists public.user_workspaces (
-  user_id uuid references public.profiles(id) on delete cascade not null,
+  user_id uuid references auth.users(id) on delete cascade not null,
   workspace_id uuid references public.workspaces(id) on delete cascade not null,
   primary key (user_id, workspace_id)
 );
-comment on table public.user_workspaces is 'Maps users to their workspaces.';
 
--- Tabela de Chats, agora vinculada a um workspace
+-- Criar a nova tabela de contatos (clientes não autenticados)
+create table if not exists public.contacts (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid references public.workspaces(id) on delete cascade not null,
+    name text not null,
+    email text,
+    phone text,
+    avatar_url text,
+    created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+-- Remover tabelas antigas de chat e mensagens para recriar com as colunas e chaves corretas.
+drop table if exists public.messages;
+drop table if exists public.chats;
+
+-- Alterar a tabela de chats para referenciar 'contacts' e 'auth.users'
 create table if not exists public.chats (
   id uuid primary key default gen_random_uuid(),
-  contact_id uuid references public.profiles(id),
-  agent_id uuid references public.profiles(id),
-  status text not null,
   workspace_id uuid references public.workspaces(id) on delete cascade not null,
+  contact_id uuid references public.contacts(id) on delete cascade,
+  agent_id uuid references auth.users(id) on delete cascade,
+  status text not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
-comment on table public.chats is 'Stores chat conversations within a workspace.';
 
--- Tabela de Mensagens, agora vinculada a um workspace
+-- Alterar a tabela de mensagens para referenciar 'auth.users' ou 'contacts' (requer lógica na aplicação)
+-- Para simplificar a RLS, vamos assumir que o sender_id é sempre um auth.users(id) por enquanto.
+-- A lógica da aplicação pode diferenciar entre agente e contato.
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
-  chat_id uuid references public.chats(id) on delete cascade,
-  sender_id uuid references public.profiles(id),
-  content text not null,
   workspace_id uuid references public.workspaces(id) on delete cascade not null,
+  chat_id uuid references public.chats(id) on delete cascade not null,
+  sender_id uuid references auth.users(id), -- Pode ser o agente. A lógica para o contato será via app.
+  content text not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
-comment on table public.messages is 'Stores individual messages within a chat.';
+
 
 -- Tabela para configurações da Evolution API (por workspace)
 create table if not exists public.evolution_api_configs (
@@ -65,7 +67,6 @@ create table if not exists public.evolution_api_configs (
   created_at timestamptz default timezone('utc'::text, now()) not null,
   unique(workspace_id)
 );
-comment on table public.evolution_api_configs is 'Global Evolution API settings per workspace.';
 
 -- Tabela para instâncias da Evolution API
 create table if not exists public.evolution_api_instances (
@@ -75,79 +76,65 @@ create table if not exists public.evolution_api_instances (
   type text not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
-comment on table public.evolution_api_instances is 'Specific Evolution API instances for a configuration.';
 
 -- Habilitar RLS (Row-Level Security)
 alter table public.workspaces enable row level security;
 alter table public.user_workspaces enable row level security;
-alter table public.profiles enable row level security;
+alter table public.contacts enable row level security;
 alter table public.chats enable row level security;
 alter table public.messages enable row level security;
 alter table public.evolution_api_configs enable row level security;
 alter table public.evolution_api_instances enable row level security;
 
--- Políticas de RLS para WORKSPACES
+-- Função auxiliar para checar pertencimento ao workspace
+create or replace function public.is_member_of_workspace(p_workspace_id uuid)
+returns boolean as $$
+begin
+  return exists (
+    select 1
+    from public.user_workspaces
+    where user_id = auth.uid() and workspace_id = p_workspace_id
+  );
+end;
+$$ language plpgsql security definer;
+
+
+-- Políticas de RLS
+drop policy if exists "Users can see workspaces they are part of" on public.workspaces;
 create policy "Users can see workspaces they are part of"
 on public.workspaces for select
-using (
-  id in (
-    select workspace_id from public.user_workspaces where user_id = auth.uid()
-  )
-);
-create policy "Users can create workspaces"
-on public.workspaces for insert
-with check (true);
+using ( public.is_member_of_workspace(id) );
 
--- Políticas de RLS para USER_WORKSPACES
+drop policy if exists "Users can see their own workspace memberships" on public.user_workspaces;
 create policy "Users can see their own workspace memberships"
 on public.user_workspaces for select
 using ( auth.uid() = user_id );
 
--- Políticas de RLS para PROFILES
-create policy "Users can see profiles of workspaces they are part of"
-on public.profiles for select
-using (
-  id in (
-    select user_id from public.user_workspaces where workspace_id in (
-      select workspace_id from public.user_workspaces where user_id = auth.uid()
-    )
-  )
-);
+drop policy if exists "Users can access contacts of workspaces they are part of" on public.contacts;
+create policy "Users can access contacts of workspaces they are part of"
+on public.contacts for all
+using ( public.is_member_of_workspace(workspace_id) );
 
--- Políticas de RLS para CHATS
+drop policy if exists "Users can access chats of workspaces they are part of" on public.chats;
 create policy "Users can access chats of workspaces they are part of"
 on public.chats for all
-using (
-  workspace_id in (
-    select workspace_id from public.user_workspaces where user_id = auth.uid()
-  )
-);
+using ( public.is_member_of_workspace(workspace_id) );
 
--- Políticas de RLS para MESSAGES
+drop policy if exists "Users can access messages of workspaces they are part of" on public.messages;
 create policy "Users can access messages of workspaces they are part of"
 on public.messages for all
-using (
-  workspace_id in (
-    select workspace_id from public.user_workspaces where user_id = auth.uid()
-  )
-);
+using ( public.is_member_of_workspace(workspace_id) );
 
--- Políticas de RLS para EVOLUTION_API_CONFIGS
+drop policy if exists "Users can access API configs of workspaces they are part of" on public.evolution_api_configs;
 create policy "Users can access API configs of workspaces they are part of"
 on public.evolution_api_configs for all
-using (
-  workspace_id in (
-    select workspace_id from public.user_workspaces where user_id = auth.uid()
-  )
-);
+using ( public.is_member_of_workspace(workspace_id) );
 
--- Políticas de RLS para EVOLUTION_API_INSTANCES
+drop policy if exists "Users can access API instances of workspaces they are part of" on public.evolution_api_instances;
 create policy "Users can access API instances of workspaces they are part of"
 on public.evolution_api_instances for all
 using (
   config_id in (
-    select id from public.evolution_api_configs where workspace_id in (
-      select workspace_id from public.user_workspaces where user_id = auth.uid()
-    )
+    select id from public.evolution_api_configs where public.is_member_of_workspace(workspace_id)
   )
 );

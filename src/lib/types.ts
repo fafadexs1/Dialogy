@@ -6,20 +6,27 @@ export type Workspace = {
     avatar: string;
 }
 
+// Representa um usuário autenticado (agente)
 export type User = {
-  id: string;
-  firstName: string;
-  lastName:string;
-  name: string; // Will be generated from firstName + lastName
+  id: string; // Vem de auth.users.id
+  name: string; 
   avatar: string;
-  online?: boolean;
+  email?: string;
+  workspaces?: Workspace[];
+  activeWorkspaceId?: string;
+};
+
+// Representa um cliente/contato (não autenticado)
+export type Contact = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  avatar: string;
   email?: string;
   phone?: string;
   lastSeen?: string;
   businessProfile?: BusinessProfile;
-  workspaces?: Workspace[];
-  activeWorkspaceId?: string;
-};
+}
 
 export type OnlineAgent = {
   user: User;
@@ -55,9 +62,12 @@ export type Task = {
   completed: boolean;
 };
 
+// O remetente pode ser um agente (User) ou um contato (Contact)
+export type MessageSender = User | Contact;
+
 export type Message = {
   id: string;
-  sender: User;
+  sender: MessageSender;
   content: string;
   timestamp: string;
   chat_id: string;
@@ -66,7 +76,7 @@ export type Message = {
 
 export type Chat = {
   id:string;
-  contact: User;
+  contact: Contact;
   agent?: User;
   messages: Message[];
   status: 'atendimentos' | 'gerais' | 'encerrados';

@@ -4,8 +4,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User as AuthUser } from '@supabase/supabase-js';
-import type { User as AppUser } from '@/lib/types';
-import { agents } from '@/lib/mock-data'; // We'll use this to get mock profile data
+import type { User as AppUser, Workspace } from '@/lib/types';
 
 // This hook centralizes logic for getting the current authenticated user and their app profile.
 export function useAuth(): AppUser | null {
@@ -34,32 +33,44 @@ export function useAuth(): AppUser | null {
 
 
   useEffect(() => {
-      if (authUser) {
-          // In a real app, you would fetch the profile from the `profiles` table.
-          // For now, we find the matching agent from our mock data.
-          const profile = agents.find(a => a.email === authUser.email);
-          if (profile) {
-              setAppUser({
-                  ...profile,
-                  id: authUser.id, // Make sure to use the real UUID from auth
-                  name: authUser.user_metadata.full_name || profile.name,
-                  email: authUser.email
-              });
-          } else {
-              // Fallback for a user that might not be in the mock `agents` array
-              setAppUser({
-                  id: authUser.id,
-                  firstName: authUser.user_metadata.full_name?.split(' ')[0] || 'User',
-                  lastName: authUser.user_metadata.full_name?.split(' ')[1] || '',
-                  name: authUser.user_metadata.full_name || 'Usuário',
-                  email: authUser.email,
-                  avatar: 'https://placehold.co/40x40.png'
-              });
-          }
-      } else {
-          setAppUser(null);
+      const fetchAppUser = async () => {
+        if (authUser) {
+            // Fetch workspaces for the user
+            const { data: userWorkspaces, error } = await supabase
+                .from('user_workspaces')
+                .select('workspaces(*)')
+                .eq('user_id', authUser.id);
+
+            if (error) {
+                console.error("Error fetching user workspaces", error);
+                setAppUser(null);
+                return;
+            }
+
+            const workspaces: Workspace[] = userWorkspaces.map((uw: any) => ({
+                id: uw.workspaces.id,
+                name: uw.workspaces.name,
+                avatar: uw.workspaces.avatar_url,
+            }));
+
+            // Let's assume the first workspace is the active one for now.
+            // A real app would have a mechanism to select and persist the active workspace.
+            const activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
+
+            setAppUser({
+                id: authUser.id,
+                name: authUser.user_metadata.full_name || authUser.email || 'Usuário',
+                email: authUser.email,
+                avatar: authUser.user_metadata.avatar_url || `https://placehold.co/40x40.png?text=${(authUser.user_metadata.full_name || 'U').charAt(0)}`,
+                workspaces,
+                activeWorkspaceId,
+            });
+        } else {
+            setAppUser(null);
+        }
       }
-  }, [authUser]);
+      fetchAppUser();
+  }, [authUser, supabase]);
 
 
   return appUser;
