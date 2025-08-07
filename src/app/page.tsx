@@ -1,5 +1,4 @@
 
-
 import { MainLayout } from '@/components/layout/main-layout';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
@@ -11,19 +10,22 @@ import { auth } from '@/app/api/auth/[...nextauth]/route';
 
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
+    console.log(`--- [PAGE_SERVER] fetchUserAndWorkspaces: Buscando dados para o usuário ID: ${userId} ---`);
     if (!userId) return null;
     try {
         // Fetch user
         const userRes = await db.query('SELECT id, full_name, avatar_url, email, last_active_workspace_id FROM users WHERE id = $1', [userId]);
         if (userRes.rows.length === 0) {
-            console.error('No user found with id:', userId);
+            console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Nenhum usuário encontrado com o ID:', userId);
             return null;
         }
         const dbUser = userRes.rows[0];
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.full_name}`);
 
         // Fetch user_workspaces entries
         const uwRes = await db.query('SELECT workspace_id FROM user_workspaces WHERE user_id = $1', [userId]);
         const workspaceIds = uwRes.rows.map(r => r.workspace_id);
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: IDs dos workspaces do usuário: ${workspaceIds.join(', ')}`);
 
         let workspaces: Workspace[] = [];
         if (workspaceIds.length > 0) {
@@ -31,7 +33,7 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
             workspaces = wsRes.rows.map(r => ({ id: r.id, name: r.name, avatar: r.avatar_url }));
         }
 
-        return {
+        const userObject = {
             id: dbUser.id,
             name: dbUser.full_name,
             firstName: dbUser.full_name.split(' ')[0] || '',
@@ -41,13 +43,16 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
         };
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Objeto de usuário montado:`, userObject);
+        return userObject;
     } catch (error) {
-        console.error('Error fetching user and workspaces:', error);
+        console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Erro ao buscar dados:', error);
         return null;
     }
 }
 
 async function fetchDataForWorkspace(workspaceId: string) {
+    console.log(`--- [PAGE_SERVER] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} ---`);
     if (!workspaceId) return { chats: [], messagesByChat: {} };
 
     // 1. Fetch all users and contacts for the workspace
@@ -99,6 +104,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
         agent: getSenderById(r.agent_id) as User,
         messages: [], // Messages will be populated next
     }));
+    console.log(`[PAGE_SERVER] fetchDataForWorkspace: ${chats.length} chats encontrados.`);
 
     // 3. Fetch messages
     const messageRes = await db.query(`
@@ -129,22 +135,25 @@ async function fetchDataForWorkspace(workspaceId: string) {
       messages: messagesByChat[chat.id] || [],
     }))
 
-
+    console.log(`[PAGE_SERVER] fetchDataForWorkspace: Dados de chats e mensagens combinados.`);
     return { chats: chatsWithMessages };
 }
 
 
 export default async function Home() {
+  console.log("--- [PAGE_SERVER] Renderizando a página Home ---");
   const session = await auth();
 
   if (!session?.user?.id) {
+    console.log("[PAGE_SERVER] Usuário não autenticado. Redirecionando para /login.");
     redirect('/login');
   }
   
+  console.log("[PAGE_SERVER] Sessão encontrada para o usuário ID:", session.user.id);
   const user = await fetchUserAndWorkspaces(session.user.id);
   
   if (!user) {
-    // This could be a loading state or an error page
+    console.error("[PAGE_SERVER] Não foi possível carregar os dados do usuário. Exibindo mensagem de erro.");
     return (
        <MainLayout>
             <div className="flex-1 flex items-center justify-center">
@@ -154,10 +163,10 @@ export default async function Home() {
     )
   }
 
-  // Ensure path is revalidated if needed, for instance after a workspace switch
   revalidatePath('/', 'layout');
 
   if (!user.activeWorkspaceId) {
+    console.log("[PAGE_SERVER] Usuário não possui workspace ativo. Renderizando onboarding.");
     return (
         <MainLayout user={user}>
             <WorkspaceOnboarding user={user} />
@@ -165,8 +174,10 @@ export default async function Home() {
     )
   }
 
+  console.log(`[PAGE_SERVER] Usuário tem um workspace ativo (ID: ${user.activeWorkspaceId}). Buscando dados...`);
   const { chats } = await fetchDataForWorkspace(user.activeWorkspaceId);
 
+  console.log("[PAGE_SERVER] Renderizando layout principal com CustomerChatLayout.");
   return (
     <MainLayout user={user}>
       <CustomerChatLayout initialChats={chats} currentUser={user} />

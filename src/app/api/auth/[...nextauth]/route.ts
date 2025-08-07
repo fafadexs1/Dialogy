@@ -14,30 +14,29 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
-        console.log('--- Iniciando processo de autorização ---');
+        console.log('--- [AUTH] Iniciando processo de autorização ---');
         if (!credentials?.email || !credentials.password) {
-          console.log('Autorização falhou: Email ou senha não fornecidos.');
+          console.log('[AUTH] Falhou: Email ou senha não fornecidos.');
           return null;
         }
 
-        console.log(`Tentando autorizar usuário com email: ${credentials.email}`);
+        console.log(`[AUTH] Tentando autorizar usuário com email: ${credentials.email}`);
 
         try {
           const result = await db.query('SELECT id, full_name, email, password_hash, avatar_url FROM users WHERE email = $1', [credentials.email]);
           const user = result.rows[0];
 
           if (!user) {
-            console.log(`Usuário com email ${credentials.email} não encontrado no banco de dados.`);
+            console.log(`[AUTH] Usuário com email ${credentials.email} não encontrado.`);
             return null;
           }
-          console.log(`Usuário encontrado: ${user.full_name}`);
+          console.log(`[AUTH] Usuário encontrado: ${user.full_name} (ID: ${user.id})`);
 
           const passwordIsValid = await bcrypt.compare(credentials.password, user.password_hash);
-          console.log(`Verificação de senha para ${credentials.email}: ${passwordIsValid ? 'VÁLIDA' : 'INVÁLIDA'}`);
+          console.log(`[AUTH] Verificação de senha para ${credentials.email}: ${passwordIsValid ? 'VÁLIDA' : 'INVÁLIDA'}`);
 
           if (passwordIsValid) {
-            console.log(`Autorização bem-sucedida para ${user.full_name}. Retornando dados do usuário.`);
-            // Return the user object without the password hash
+            console.log(`[AUTH] Autorização bem-sucedida para ${user.full_name}.`);
             return {
               id: user.id,
               name: user.full_name,
@@ -45,12 +44,12 @@ export const authOptions: NextAuthOptions = {
               image: user.avatar_url,
             };
           } else {
-            console.log(`Senha inválida para o usuário ${credentials.email}.`);
-            return null; // Invalid credentials
+            console.log(`[AUTH] Senha inválida para o usuário ${credentials.email}.`);
+            return null;
           }
         } catch (error) {
-          console.error('Erro catastrófico durante a autorização no authorize:', error);
-          return null; // Error during authorization
+          console.error('[AUTH] Erro catastrófico durante a autorização:', error);
+          return null;
         }
       },
     }),
@@ -61,28 +60,24 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async jwt({ token, user }) {
-      // When a user signs in, the `user` object is available.
-      // We add the user ID to the token here.
+      console.log('[AUTH_CALLBACK] JWT: Adicionando ID do usuário ao token.');
       if (user) {
         token.id = user.id;
       }
+      console.log('[AUTH_CALLBACK] JWT: Token final:', token);
       return token;
     },
     async session({ session, token }) {
-      // The session callback receives the token with the user ID.
-      // We add the ID to the session object.
+      console.log('[AUTH_CALLBACK] Session: Adicionando ID do usuário à sessão.');
       if (session.user) {
         session.user.id = token.id as string;
       }
+      console.log('[AUTH_CALLBACK] Session: Sessão final:', session);
       return session;
     },
   },
   pages: {
     signIn: '/login',
-    // signOut: '/auth/signout',
-    // error: '/auth/error', // Error code passed in query string as ?error=
-    // verifyRequest: '/auth/verify-request', // (e.g. for email verification)
-    // newUser: '/auth/new-user' // New users will be directed here on first sign in (leave the property out to disable)
   }
 };
 

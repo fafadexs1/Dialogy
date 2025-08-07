@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -24,18 +25,26 @@ export function LoginForm() {
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
 
+    console.log(`--- [LOGIN_FORM] Tentando fazer login para: ${email} ---`);
+
     const result = await signIn('credentials', {
       redirect: false,
       email,
       password,
     });
 
+    console.log('[LOGIN_FORM] Resultado do signIn:', result);
+
     if (result?.error) {
+      console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
       setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
     } else if (result?.ok) {
+      console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
       // Successful login, NextAuth will handle the session
       // and we can redirect the user.
       router.push('/');
+    } else {
+       console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
     }
 
     setLoading(false);
