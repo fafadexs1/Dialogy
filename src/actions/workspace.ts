@@ -1,4 +1,3 @@
-
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
@@ -41,8 +40,8 @@ export async function createWorkspaceAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
-  // Redireciona para a página principal para refletir o novo estado
-  redirect('/');
+  // O redirecionamento agora é feito no client-side para garantir a atualização do estado
+  return null; 
 }
 
 

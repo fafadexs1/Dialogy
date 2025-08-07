@@ -10,6 +10,7 @@ import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2, PlusCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -25,24 +26,30 @@ export default function NewWorkspacePage() {
   const [errorMessage, formAction, isPending] = useActionState(createWorkspaceAction, null);
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const { toast } = useToast();
   
   useEffect(() => {
-    // Este efeito é acionado após a conclusão da ação do formulário.
-    // Se não houver mensagem de erro e a ação não estiver mais pendente,
-    // significa que a submissão foi bem-sucedida.
+    // This effect is triggered after the form action completes.
+    // If there is no error message and the action is no longer pending,
+    // it means the submission was successful.
     const formSubmitted = formRef.current?.dataset.submitted === 'true';
 
-    if (formSubmitted && !isPending && !errorMessage) {
-        // Redireciona APENAS se a submissão foi bem-sucedida.
-        // O redirecionamento agora é feito na própria server action, mas como fallback:
-        router.push('/');
-    } else if (formSubmitted && !isPending && errorMessage) {
-        // Se houve um erro, reseta o estado de "submetido" para permitir uma nova tentativa.
-        if(formRef.current) {
-            formRef.current.dataset.submitted = 'false';
+    if (formSubmitted && !isPending) {
+        if (!errorMessage) {
+            toast({
+                title: 'Sucesso!',
+                description: 'Workspace criado. Redirecionando...',
+            });
+            // Redirect after successful creation
+            router.push('/');
+        } else {
+             // Reset the 'submitted' state to allow for a new attempt.
+            if(formRef.current) {
+                formRef.current.dataset.submitted = 'false';
+            }
         }
     }
-  }, [isPending, errorMessage, router]);
+  }, [isPending, errorMessage, router, toast]);
 
 
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
