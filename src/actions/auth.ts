@@ -25,6 +25,7 @@ export async function authenticate(
     // If it's not a credentials error, we re-throw it.
     throw error;
   }
+  redirect('/');
 }
 
 
