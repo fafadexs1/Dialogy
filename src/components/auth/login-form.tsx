@@ -46,6 +46,12 @@ export function LoginForm() {
       } else if (result?.ok) {
         console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando...');
         router.push(result.url || callbackUrl);
+      } else {
+        // Este caso pode acontecer se a requisição falhar sem um erro explícito do next-auth
+        // por exemplo, devido a um problema de rede ou uma extensão bloqueando.
+        console.error('[LOGIN_FORM] A requisição de login falhou sem um erro específico do NextAuth.');
+        setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
+        setLoading(false);
       }
     } catch (error) {
         console.error('[LOGIN_FORM] Erro catastrófico na função handleSubmit:', error);
