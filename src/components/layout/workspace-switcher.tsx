@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/popover';
 import type { User } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -45,7 +45,8 @@ export function WorkspaceSwitcher({
   onWorkspaceChange,
 }: WorkspaceSwitcherProps) {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
-  
+  const router = useRouter();
+
   const activeWorkspace = user.workspaces?.find(ws => ws.id === activeWorkspaceId);
 
   if (!activeWorkspace) {
@@ -121,11 +122,14 @@ export function WorkspaceSwitcher({
             </CommandList>
             <CommandSeparator />
             <CommandList>
-                 <CommandItem asChild>
-                    <Link href="/settings/workspace/new" className="w-full">
-                        <PlusCircledIcon className="mr-2 h-5 w-5" />
-                        Criar Workspace
-                    </Link>
+                 <CommandItem
+                    onSelect={() => {
+                        setPopoverOpen(false);
+                        router.push('/settings/workspace/new');
+                    }}
+                 >
+                    <PlusCircledIcon className="mr-2 h-5 w-5" />
+                    Criar Workspace
                  </CommandItem>
             </CommandList>
         </Command>
