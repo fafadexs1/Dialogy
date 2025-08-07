@@ -1,3 +1,6 @@
+
+'use client';
+
 import { RegisterForm } from '@/components/auth/register-form';
 import { LifeBuoy } from 'lucide-react';
 import Link from 'next/link';

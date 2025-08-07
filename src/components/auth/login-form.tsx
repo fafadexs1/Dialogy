@@ -29,7 +29,7 @@ export function LoginForm() {
 
     try {
       const result = await signIn('credentials', {
-        redirect: false,
+        redirect: false, // Nós cuidaremos do redirecionamento
         email,
         password,
       });
@@ -37,15 +37,17 @@ export function LoginForm() {
       console.log('[LOGIN_FORM] Resultado do signIn:', result);
 
       if (result?.error) {
+        // O erro 'CredentialsSignin' é o erro padrão para credenciais inválidas.
         console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
         setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
         setLoading(false);
       } else if (result?.ok) {
         console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
-        // On successful login, push the user to the homepage.
+        // Sucesso! Força o redirecionamento para a página principal.
         router.push('/');
-        router.refresh(); // Força a atualização dos dados do servidor
+        router.refresh(); // Garante que a página seja recarregada com os novos dados da sessão.
       } else {
+        // Caso inesperado
         console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
         setErrorMessage('Ocorreu um erro inesperado durante o login.');
         setLoading(false);
@@ -70,9 +72,10 @@ export function LoginForm() {
               id="email"
               name="email"
               type="email"
-              placeholder="agent@dialogy.com"
+              placeholder="agente@dialogy.com"
               required
               disabled={loading}
+              autoComplete="email"
             />
           </div>
           <div className="space-y-2">
@@ -83,6 +86,7 @@ export function LoginForm() {
               type="password"
               required
               disabled={loading}
+              autoComplete="current-password"
             />
           </div>
           {errorMessage && (

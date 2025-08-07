@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useActionState } from 'react';
@@ -15,13 +16,25 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
-export function RegisterForm() {
-  const [errorMessage, dispatch] = useActionState(register, undefined);
+
+function RegisterButton() {
+  const { pending } = useFormStatus();
 
   return (
-    <form action={dispatch}>
+    <Button type="submit" className="w-full" aria-disabled={pending}>
+      {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {pending ? 'Registrando...' : 'Criar Conta'}
+    </Button>
+  );
+}
+
+export function RegisterForm() {
+  const [errorMessage, formAction] = useActionState(register, undefined);
+
+  return (
+    <form action={formAction}>
       <Card>
         <CardHeader>
           <CardTitle>Registro</CardTitle>
@@ -29,13 +42,14 @@ export function RegisterForm() {
         </CardHeader>
         <CardContent className="space-y-4">
            <div className="space-y-2">
-            <Label htmlFor="name">Nome</Label>
+            <Label htmlFor="name">Nome Completo</Label>
             <Input
               id="name"
               name="name"
               type="text"
-              placeholder="Seu Nome"
+              placeholder="Seu Nome Completo"
               required
+              autoComplete="name"
             />
           </div>
           <div className="space-y-2">
@@ -46,11 +60,18 @@ export function RegisterForm() {
               type="email"
               placeholder="agente@dialogy.com"
               required
+              autoComplete="email"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Senha</Label>
-            <Input id="password" name="password" type="password" required />
+            <Input 
+                id="password" 
+                name="password" 
+                type="password" 
+                required 
+                autoComplete="new-password"
+            />
           </div>
           {errorMessage && (
             <Alert variant="destructive">
@@ -65,15 +86,5 @@ export function RegisterForm() {
         </CardFooter>
       </Card>
     </form>
-  );
-}
-
-function RegisterButton() {
-  const { pending } = useFormStatus();
-
-  return (
-    <Button type="submit" className="w-full" aria-disabled={pending}>
-      {pending ? 'Registrando...' : 'Registrar'}
-    </Button>
   );
 }
