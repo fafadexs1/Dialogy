@@ -8,20 +8,11 @@ import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from '@/components/ui/command';
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { User } from '@/lib/types';
+import type { User, Workspace } from '@/lib/types';
 import {
   Tooltip,
   TooltipContent,
@@ -30,6 +21,7 @@ import {
 } from '../ui/tooltip';
 import { switchWorkspaceAction } from '@/actions/workspace';
 import Link from 'next/link';
+import { Separator } from '../ui/separator';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -51,17 +43,16 @@ export function WorkspaceSwitcher({
   const handleWorkspaceChange = async (workspaceId: string) => {
     await switchWorkspaceAction(workspaceId);
     setPopoverOpen(false);
-    router.refresh(); 
+    // Forçar um recarregamento completo para garantir que todos os dados do novo workspace sejam carregados.
+    window.location.reload();
   };
   
-  const handleCreateClick = () => {
-    setPopoverOpen(false);
-    router.push('/settings/workspace/new');
-  };
-
-  if (!activeWorkspace) {
+  if (!user.workspaces || user.workspaces.length === 0) {
     return null;
   }
+
+  const currentWorkspace = activeWorkspace || user.workspaces[0];
+
 
   return (
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
@@ -78,67 +69,63 @@ export function WorkspaceSwitcher({
               >
                 <Avatar className="h-8 w-8">
                   <AvatarImage
-                    src={activeWorkspace.avatar}
-                    alt={activeWorkspace.name}
+                    src={currentWorkspace.avatar}
+                    alt={currentWorkspace.name}
                     data-ai-hint="logo"
                   />
                   <AvatarFallback>
-                    {activeWorkspace.name.charAt(0).toUpperCase()}
+                    {currentWorkspace.name.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>
           <TooltipContent side="right">
-            <p>{activeWorkspace.name}</p>
+            <p>{currentWorkspace.name}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
 
-      <PopoverContent className="w-[200px] p-0">
-        <Command>
-          <CommandList>
-            <CommandInput placeholder="Buscar workspace..." />
-            <CommandEmpty>Nenhum workspace encontrado.</CommandEmpty>
-            <CommandGroup heading="Workspaces">
-              {user.workspaces?.map((ws) => (
-                <CommandItem
-                  key={ws.id}
-                  onSelect={() => handleWorkspaceChange(ws.id)}
-                  className="text-sm"
-                >
-                  <Avatar className="mr-2 h-5 w-5">
-                    <AvatarImage
-                      src={ws.avatar}
-                      alt={ws.name}
-                    />
-                    <AvatarFallback>{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                  {ws.name}
-                  <CheckIcon
-                    className={cn(
-                      'ml-auto h-4 w-4',
-                      user.activeWorkspaceId === ws.id
-                        ? 'opacity-100'
-                        : 'opacity-0'
-                    )}
-                  />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-          <CommandSeparator />
-          <div className="p-1">
-             <Button
+      <PopoverContent className="w-[250px] p-2" align="start">
+        <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground px-2 py-1.5">Workspaces</p>
+            {user.workspaces.map((ws) => (
+            <Button
+                key={ws.id}
                 variant="ghost"
-                onClick={handleCreateClick}
-                className="w-full justify-start px-2 py-1.5 text-sm font-normal"
+                onClick={() => handleWorkspaceChange(ws.id)}
+                className="w-full justify-start text-sm font-normal"
             >
+                <Avatar className="mr-2 h-5 w-5">
+                <AvatarImage
+                    src={ws.avatar}
+                    alt={ws.name}
+                />
+                <AvatarFallback>{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <span className="truncate">{ws.name}</span>
+                <CheckIcon
+                className={cn(
+                    'ml-auto h-4 w-4',
+                    user.activeWorkspaceId === ws.id
+                    ? 'opacity-100'
+                    : 'opacity-0'
+                )}
+                />
+            </Button>
+            ))}
+        </div>
+        <Separator className="my-2" />
+        <Button
+            asChild
+            variant="ghost"
+            className="w-full justify-start text-sm font-normal"
+        >
+            <Link href="/settings/workspace/new">
                 <PlusCircledIcon className="mr-2 h-5 w-5" />
                 Criar Workspace
-            </Button>
-          </div>
-        </Command>
+            </Link>
+        </Button>
       </PopoverContent>
     </Popover>
   );
