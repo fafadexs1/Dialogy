@@ -3,8 +3,6 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
-import { AuthError } from 'next-auth';
-
 
 // This function is no longer used for login, but we keep it as a reference or for other purposes.
 // The login flow is now handled client-side in login-form.tsx to correctly use next-auth/react.
