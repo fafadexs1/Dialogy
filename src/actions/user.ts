@@ -14,5 +14,6 @@ export async function updateUserOnlineStatus(userId: string, isOnline: boolean) 
   } catch (error) {
     console.error('[UPDATE_USER_STATUS] Erro ao atualizar status do usuário:', error);
   }
-  revalidatePath('/'); 
+  // A revalidação foi removida daqui, pois estava sendo chamada durante a renderização, o que é proibido.
+  // A atualização da lista de usuários online é feita por polling no lado do cliente.
 }
