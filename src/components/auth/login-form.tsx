@@ -1,20 +1,48 @@
 'use client';
 
-import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
-import { authenticate } from '@/actions/auth';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { signIn } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 export function LoginForm() {
-  const [errorMessage, dispatch] = useActionState(authenticate, undefined);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setErrorMessage(null);
+
+    const formData = new FormData(event.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+
+    const result = await signIn('credentials', {
+      redirect: false,
+      email,
+      password,
+    });
+
+    if (result?.error) {
+      setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
+    } else if (result?.ok) {
+      // Successful login, NextAuth will handle the session
+      // and we can redirect the user.
+      router.push('/');
+    }
+
+    setLoading(false);
+  };
 
   return (
-    <form action={dispatch}>
+    <form onSubmit={handleSubmit}>
       <Card>
         <CardHeader>
           <CardTitle>Login</CardTitle>
@@ -28,6 +56,7 @@ export function LoginForm() {
               type="email"
               placeholder="agent@dialogy.com"
               required
+              disabled={loading}
             />
           </div>
           <div className="space-y-2">
@@ -37,6 +66,7 @@ export function LoginForm() {
               name="password"
               type="password"
               required
+              disabled={loading}
             />
           </div>
           {errorMessage && (
@@ -48,19 +78,12 @@ export function LoginForm() {
           )}
         </CardContent>
         <CardFooter>
-          <LoginButton />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {loading ? 'Entrando...' : 'Entrar'}
+          </Button>
         </CardFooter>
       </Card>
     </form>
-  );
-}
-
-function LoginButton() {
-  const { pending } = useFormStatus();
-
-  return (
-    <Button type="submit" className="w-full" aria-disabled={pending}>
-      {pending ? 'Entrando...' : 'Entrar'}
-    </Button>
   );
 }

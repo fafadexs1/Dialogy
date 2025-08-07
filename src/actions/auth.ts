@@ -1,31 +1,21 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { signIn } from 'next-auth/react';
-import { AuthError } from 'next-auth';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
+import { AuthError } from 'next-auth';
 
+
+// This function is no longer used for login, but we keep it as a reference or for other purposes.
+// The login flow is now handled client-side in login-form.tsx to correctly use next-auth/react.
 export async function authenticate(
   prevState: string | undefined,
   formData: FormData
 ) {
- try {
-    await signIn('credentials', {
-      ...Object.fromEntries(formData),
-      redirect: false, 
-    });
-  } catch (error) {
-    // The error object in this case is an instance of AuthError, but because
-    // of a Next.js bug, `instanceof AuthError` will return false.
-    // We can check the error type directly on the object.
-    if ((error as any).type === 'CredentialsSignin') {
-        return 'Credenciais inválidas.';
-    }
-    // If it's not a credentials error, we re-throw it.
-    throw error;
-  }
-  redirect('/');
+  // This is a placeholder. The actual logic is now in the client component.
+  // We keep the shell to avoid breaking anything that might still reference it,
+  // but it should ideally be removed if not used elsewhere.
+  return 'This action is deprecated. Login is handled client-side.';
 }
 
 
