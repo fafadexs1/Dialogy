@@ -11,8 +11,7 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - setup (database setup page)
-     * - chat (allow access to chat pages for debugging)
      */
-    '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup|chat).*)',
+    '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup).*)',
   ],
 }
