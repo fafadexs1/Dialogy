@@ -4,13 +4,10 @@
 import React, { useState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, NexusFlowInstance } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
-import { createClient } from '@/lib/supabase/client';
-import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Webhook } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Webhook, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/hooks/use-auth';
 
 // Mock data for initial instances
 const initialInstances = [
@@ -28,30 +26,15 @@ const initialInstances = [
 ]
 
 export default function NexusFlowPage() {
-    const [user, setUser] = React.useState<User | null>(null);
+    const user = useAuth();
     const [instances, setInstances] = useState(initialInstances);
-    const supabase = createClient();
-
-    React.useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                 const appUser = agents.find(a => a.email === authUser.email) || {
-                    ...agents[0],
-                    name: authUser.user_metadata.full_name || authUser.email,
-                    email: authUser.email,
-                    id: authUser.id
-                };
-                setUser(appUser);
-            } else {
-                redirect('/login');
-            }
-        };
-        fetchUser();
-    }, [supabase.auth]);
 
     if (!user) {
-        return null; // Or a loading spinner
+        return (
+             <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
+        )
     }
 
     return (
