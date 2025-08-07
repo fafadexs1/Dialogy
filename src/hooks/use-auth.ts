@@ -2,8 +2,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { User, Workspace } from '@/lib/types';
-import { db } from '@/lib/db'; // We can't use db directly on client, this needs an API route.
+import type { User } from '@/lib/types';
+import { useSession } from 'next-auth/react';
 
 async function fetchUserFromApi(userId: string): Promise<User | null> {
     // In a real app, this would be an API call to a secure endpoint
@@ -11,27 +11,13 @@ async function fetchUserFromApi(userId: string): Promise<User | null> {
     // because we can't directly query the DB from the client.
     try {
         // This is a placeholder for where you would make an API call
-        // e.g., const response = await fetch('/api/user/me');
-        // Since we don't have API routes set up for this yet, we'll simulate the behavior.
-
-        // MOCK IMPLEMENTATION of the API call's result
-        if (userId === '8f5a948d-9b37-41d3-ac8f-0797282b9e6f') {
-             const user: User = {
-                id: '8f5a948d-9b37-41d3-ac8f-0797282b9e6f',
-                name: 'Alex Johnson',
-                firstName: 'Alex',
-                lastName: 'Johnson',
-                avatar: 'https://placehold.co/40x40.png',
-                email: 'agent@dialogy.com',
-                workspaces: [
-                    { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
-                ],
-                activeWorkspaceId: 'ws-1',
-            };
-            return Promise.resolve(user);
+        // e.g., const response = await fetch(`/api/user/${userId}`);
+        const response = await fetch(`/api/user/${userId}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch user');
         }
-       return Promise.resolve(null);
-
+        const user = await response.json();
+        return user;
     } catch (error) {
         console.error("Error fetching user data:", error);
         return null;
@@ -40,21 +26,23 @@ async function fetchUserFromApi(userId: string): Promise<User | null> {
 
 
 export function useAuth(): User | null {
+  const { data: session, status } = useSession();
   const [appUser, setAppUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // MOCK: Hardcoding user ID for demonstration. In a real app, this would come from an auth session.
-    const mockUserId = '8f5a948d-9b37-41d3-ac8f-0797282b9e6f'; 
-    
     async function loadUser() {
-        if (mockUserId) {
-            const user = await fetchUserFromApi(mockUserId);
+        if (status === 'authenticated' && session?.user?.id) {
+            // NOTE: We could store the full user object in the session token
+            // to avoid this extra fetch, but this approach ensures data is always fresh.
+            const user = await fetchUserFromApi(session.user.id);
             setAppUser(user);
+        } else {
+            setAppUser(null);
         }
     }
     
     loadUser();
-  }, []);
+  }, [session, status]);
 
   return appUser;
 }

@@ -6,8 +6,12 @@ import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { auth } from '@/app/api/auth/[...nextauth]/route';
+
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
+    if (!userId) return null;
     try {
         // Fetch user
         const userRes = await db.query('SELECT id, full_name, avatar_url, email, last_active_workspace_id FROM users WHERE id = $1', [userId]);
@@ -131,10 +135,13 @@ async function fetchDataForWorkspace(workspaceId: string) {
 
 
 export default async function Home() {
-  // MOCK: Replace with actual auth logic to get the logged-in user ID
-  const mockUserId = '8f5a948d-9b37-41d3-ac8f-0797282b9e6f'; // Assuming this is the logged in user
+  const session = await auth();
+
+  if (!session?.user?.id) {
+    redirect('/login');
+  }
   
-  const user = await fetchUserAndWorkspaces(mockUserId);
+  const user = await fetchUserAndWorkspaces(session.user.id);
   
   if (!user) {
     // This could be a loading state or an error page
