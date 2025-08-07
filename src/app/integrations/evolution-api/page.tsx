@@ -45,6 +45,7 @@ import { useRouter } from 'next/navigation';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
