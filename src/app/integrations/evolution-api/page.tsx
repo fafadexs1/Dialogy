@@ -269,6 +269,8 @@ export default function EvolutionApiPage() {
                 const instancesFromDb = await getEvolutionApiInstances(workspaceId);
                 const instancesWithStatus = await Promise.all(
                     instancesFromDb.map(async (inst) => {
+                        // Reset loading state for this instance
+                        setInstanceStates(prev => ({ ...prev, [inst.id]: { loading: false } }));
                         const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
                         return { ...inst, status, qrCode };
                     })
@@ -343,12 +345,14 @@ export default function EvolutionApiPage() {
                 result = await connectInstance(instance.name, config);
             }
 
+            // Immediately update the specific instance
             setInstances(prevInstances =>
                 prevInstances.map(i =>
                     i.id === instance.id ? { ...i, status: result.status, qrCode: result.qrCode } : i
                 )
             );
              
+            // Poll for status updates after a delay
             setTimeout(() => {
                 if (activeWorkspace) {
                    fetchData(activeWorkspace.id);
@@ -357,19 +361,20 @@ export default function EvolutionApiPage() {
 
         } catch (error) {
             toast({ title: 'Erro de Conexão', description: 'Falha ao se comunicar com a API Evolution.', variant: 'destructive' });
+            setInstanceStates(prev => ({ ...prev, [instance.id]: { loading: false } }));
         }
     };
     
     const getStatusInfo = (status: EvolutionInstance['status']) => {
         switch (status) {
             case 'connected':
-                return { text: 'Conectado', color: 'bg-green-500', icon: <ShieldCheck className="h-4 w-4" /> };
+                return { text: 'Conectado', color: 'bg-green-500' };
             case 'disconnected':
-                return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
+                return { text: 'Desconectado', color: 'bg-red-500' };
             case 'pending':
-                return { text: 'Aguardando QR Code', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
+                return { text: 'Aguardando QR Code', color: 'bg-yellow-500' };
             default:
-                return { text: 'Desconhecido', color: 'bg-gray-500', icon: <Loader2 className="h-4 w-4" /> };
+                return { text: 'Desconhecido', color: 'bg-gray-500' };
         }
     };
 
@@ -521,7 +526,7 @@ export default function EvolutionApiPage() {
                                                 ) : (
                                                     <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
                                                         {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
-                                                        {instance.type === 'baileys' ? 'Conectar' : 'Conectar'}
+                                                        Conectar
                                                     </Button>
                                                 )}
                                             </CardFooter>

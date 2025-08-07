@@ -186,20 +186,22 @@ export async function createEvolutionApiInstance(
         },
     };
 
-    // Remove chaves undefined ou vazias para um payload limpo
+    // Remove chaves undefined, nulas ou vazias para um payload limpo
     Object.keys(payload).forEach(key => {
         const typedKey = key as keyof typeof payload;
         const value = payload[typedKey];
+        
         if (value === undefined || value === '' || value === null) {
             delete payload[typedKey];
-        } else if (typeof value === 'object' && !Array.isArray(value)) {
+        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            // Limpa o sub-objeto
             Object.keys(value).forEach(subKey => {
                 const subObject = value as any;
-                const subValue = subObject[subKey];
-                if (subValue === undefined || subValue === '' || subValue === null || (Array.isArray(subValue) && subValue.length === 0)) {
+                if (subObject[subKey] === undefined || subObject[subKey] === '' || subObject[subKey] === null || (Array.isArray(subObject[subKey]) && subObject[subKey].length === 0)) {
                     delete subObject[subKey];
                 }
             });
+            // Se o sub-objeto ficou vazio, remove ele também
             if (Object.keys(value).length === 0) {
                 delete payload[typedKey];
             }
@@ -269,7 +271,7 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
 
 export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'POST' });
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'GET' });
         // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
