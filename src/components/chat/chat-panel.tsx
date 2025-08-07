@@ -15,7 +15,6 @@ import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { createClient } from '@/lib/supabase/client';
 
 interface ChatPanelProps {
   chat: Chat | null;
@@ -29,7 +28,8 @@ Política de Devolução: Nossa política de devolução permite que os clientes
 FAQ - Horário de Funcionamento: Nosso horário de atendimento padrão é de segunda a sexta-feira, das 9h às 18h (horário de Brasília). Não funcionamos em feriados nacionais.
 `;
 
-export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProps) {
+export default function ChatPanel({ chat, messages: initialMessages, currentUser }: ChatPanelProps) {
+  const [messages, setMessages] = React.useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
   const [isAiThinking, setIsAiThinking] = React.useState(false);
@@ -37,33 +37,24 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
   const [selectedAiModel, setSelectedAiModel] = React.useState('googleai/gemini-2.0-flash');
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const supabase = createClient();
   
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newMessage.trim() === '' || !currentUser || !chat) return;
     
-    const { error } = await supabase
-      .from('messages')
-      .insert([
-        { 
-          content: newMessage,
-          chat_id: chat.id,
-          sender_id: currentUser.id,
-          workspace_id: chat.workspace_id,
-        }
-      ]);
-      
-    if (error) {
-        toast({
-            title: 'Erro ao enviar mensagem',
-            description: 'Não foi possível enviar sua mensagem. Tente novamente.',
-            variant: 'destructive',
-        });
-    } else {
-        setNewMessage('');
+    // MOCK: This simulates sending a message.
+    const sentMessage: Message = {
+        id: `msg-${Date.now()}`,
+        content: newMessage,
+        chat_id: chat.id,
+        sender: currentUser,
+        workspace_id: chat.workspace_id,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     }
+    
+    setMessages([...messages, sentMessage]);
+    setNewMessage('');
   };
 
   React.useEffect(() => {
@@ -98,17 +89,16 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
                     });
                     
                     if (result && result.response && chat.agent?.id) {
-                        const { error } = await supabase
-                          .from('messages')
-                          .insert([
-                            { 
-                              content: result.response,
-                              chat_id: chat.id,
-                              sender_id: chat.agent.id, // AI responds as the agent
-                              workspace_id: chat.workspace_id,
-                            }
-                          ]);
-                        if(error) throw error;
+                        // MOCK: Add AI response to messages
+                        const aiMessage: Message = {
+                           id: `msg-ai-${Date.now()}`,
+                           content: result.response,
+                           chat_id: chat.id,
+                           sender: chat.agent, // AI responds as the agent
+                           workspace_id: chat.workspace_id,
+                           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                        };
+                        setMessages(prev => [...prev, aiMessage]);
                     }
 
                 } catch (error) {
@@ -125,7 +115,8 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase, currentUser?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
 
   if (!chat) {
     return (

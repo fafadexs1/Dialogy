@@ -4,7 +4,6 @@
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
-import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2 } from 'lucide-react';
@@ -102,7 +101,6 @@ export default function EvolutionApiPage() {
     const [apiUrlInput, setApiUrlInput] = useState('');
     const [apiKeyInput, setApiKeyInput] = useState('');
     
-    const supabase = createClient();
     const { toast } = useToast();
     
     useEffect(() => {
@@ -117,67 +115,45 @@ export default function EvolutionApiPage() {
 
         const fetchData = async () => {
             setIsLoading(true);
+            // MOCK: In a real app, this would fetch data from your database.
+            console.log(`Fetching config and instances for workspace: ${activeWorkspace.id}`);
+            const mockConfig: EvolutionApiConfig = {
+                id: `config-${activeWorkspace.id}`,
+                workspace_id: activeWorkspace.id,
+                api_url: 'http://localhost:8080',
+                api_key: 'your-api-key',
+            };
+            const mockInstances: EvolutionInstance[] = [
+                { id: 'inst-1', name: 'Vendas SP', status: 'connected', type: 'baileys', config_id: mockConfig.id },
+                { id: 'inst-2', name: 'Suporte Cloud', status: 'disconnected', type: 'wa_cloud', config_id: mockConfig.id },
+            ];
 
-            // Fetch config for the active workspace
-            const { data: configData, error: configError } = await supabase
-                .from('evolution_api_configs')
-                .select('*')
-                .eq('workspace_id', activeWorkspace.id)
-                .single();
-            
-            if (configError && configError.code !== 'PGRST116') { // PGRST116: no rows returned
-                console.error("Error fetching config:", configError);
-                toast({ title: 'Erro ao buscar configurações', variant: 'destructive'});
-            } else {
-                setConfig(configData);
-                setApiUrlInput(configData?.api_url || '');
-                setApiKeyInput(configData?.api_key || '');
-
-                if (configData) {
-                    const { data: instancesData, error: instancesError } = await supabase
-                        .from('evolution_api_instances')
-                        .select('*')
-                        .eq('config_id', configData.id);
-
-                    if (instancesError) {
-                        console.error("Error fetching instances:", instancesError);
-                        toast({ title: 'Erro ao buscar instâncias', variant: 'destructive'});
-                    } else {
-                        const instancesWithStatus = instancesData.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance);
-                        setInstances(instancesWithStatus);
-                    }
-                } else {
-                    setInstances([]);
-                }
-            }
+            setConfig(mockConfig);
+            setApiUrlInput(mockConfig.api_url || '');
+            setApiKeyInput(mockConfig.api_key || '');
+            setInstances(mockInstances.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance));
             setIsLoading(false);
         };
 
         fetchData();
-    }, [activeWorkspace, supabase, toast]);
+    }, [activeWorkspace, toast]);
 
     const handleSaveConfig = async () => {
         if (!activeWorkspace) return;
         setIsSaving(true);
         
-        const { data, error } = await supabase
-            .from('evolution_api_configs')
-            .upsert({
-                id: config?.id, // Supabase uses `id` for upsert to find the row to update
+        console.log("Mock: Saving config", { workspaceId: activeWorkspace.id, apiUrl: apiUrlInput, apiKey: apiKeyInput });
+        
+        setTimeout(() => {
+            setConfig({
+                id: config?.id || `config-${activeWorkspace.id}`,
                 workspace_id: activeWorkspace.id,
                 api_url: apiUrlInput,
                 api_key: apiKeyInput,
-            }, { onConflict: 'workspace_id' })
-            .select()
-            .single();
-
-        if (error) {
-            toast({ title: 'Erro ao salvar configurações', description: error.message, variant: 'destructive'});
-        } else {
-            setConfig(data);
+            });
             toast({ title: 'Configurações salvas com sucesso!' });
-        }
-        setIsSaving(false);
+            setIsSaving(false);
+        }, 1000);
     }
     
     const getStatusInfo = (status: EvolutionInstance['status']) => {
@@ -185,7 +161,7 @@ export default function EvolutionApiPage() {
             case 'connected':
                 return { text: 'Conectado', color: 'bg-green-500', icon: <ShieldCheck className="h-4 w-4" /> };
             case 'disconnected':
-return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
+                return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
             case 'pending':
                 return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
         }
@@ -198,32 +174,25 @@ return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="
         }
         setIsAdding(true);
 
-        const { data, error } = await supabase
-            .from('evolution_api_instances')
-            .insert({ ...newInstanceData, config_id: config.id })
-            .select()
-            .single();
-
-        if (error) {
-            toast({ title: 'Erro ao criar instância', description: error.message, variant: 'destructive'});
-        } else {
-            const newInstance: EvolutionInstance = {...data, status: 'disconnected'};
+        console.log("Mock: Adding instance", newInstanceData);
+        setTimeout(() => {
+            const newInstance: EvolutionInstance = {
+                id: `inst-${Date.now()}`,
+                status: 'disconnected',
+                ...newInstanceData,
+                config_id: config.id
+            };
             setInstances([...instances, newInstance]);
             setIsAddModalOpen(false);
             toast({ title: 'Sucesso!', description: `A instância "${newInstance.name}" foi criada.` });
-        }
-        setIsAdding(false);
+            setIsAdding(false);
+        }, 1000);
     };
 
     const handleRemoveInstance = async (instanceId: string) => {
-        const { error } = await supabase.from('evolution_api_instances').delete().eq('id', instanceId);
-
-        if (error) {
-             toast({ title: 'Erro ao remover instância', description: error.message, variant: 'destructive' });
-        } else {
-            setInstances(instances.filter(inst => inst.id !== instanceId));
-            toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
-        }
+        console.log("Mock: Removing instance", instanceId);
+        setInstances(instances.filter(inst => inst.id !== instanceId));
+        toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
     }
 
     const handleToggleConnection = (instanceId: string) => {

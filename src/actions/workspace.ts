@@ -1,47 +1,33 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+
+// Mock implementation, in a real scenario this would interact with your database.
 
 export async function createWorkspaceAction(
   prevState: string | null,
   formData: FormData
 ): Promise<string | null> {
-  const supabase = createClient();
-
   const workspaceName = formData.get('workspaceName') as string;
 
   if (!workspaceName) {
     return 'O nome do workspace é obrigatório.';
   }
 
-  // A lógica de owner_id e de associação do usuário agora é tratada por triggers no banco de dados.
-  // Basta inserir o nome do workspace.
-  const { data: workspaceData, error } = await supabase
-    .from('workspaces')
-    .insert({ name: workspaceName })
-    .select()
-    .single();
-    
-  if (error) {
-    console.error('Error creating workspace:', error);
-    if (error.code === '42501') { 
-        // 42501 é RLS violation
-        return 'Erro de permissão. Você não tem autorização para criar um workspace.';
-    }
-    return `Não foi possível criar o workspace: ${error.message}`;
-  }
-
-  // Após criar, define o novo workspace como o ativo
-  if (workspaceData) {
-      await switchWorkspaceAction(workspaceData.id);
-  }
+  console.log(`Mock: Creating workspace named "${workspaceName}"`);
+  
+  // In a real app, you would:
+  // 1. Get the current user ID.
+  // 2. Insert the new workspace into the 'workspaces' table.
+  // 3. Create an entry in the 'user_workspaces' table to link the user.
+  // 4. Switch the user's active workspace.
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
-  // O redirecionamento agora é feito no client-side para garantir a atualização do estado
-  return null; 
+  
+  // No error means success in mock context
+  return null;
 }
 
 
@@ -49,8 +35,6 @@ export async function updateWorkspaceAction(
   prevState: string | null,
   formData: FormData
 ): Promise<string | null> {
-    const supabase = createClient();
-
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
 
@@ -60,26 +44,8 @@ export async function updateWorkspaceAction(
      if (!workspaceId) {
         return 'ID do workspace não encontrado.';
     }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return 'Usuário não autenticado.';
-    }
     
-    // A política RLS garante que apenas o dono pode alterar
-    const { error } = await supabase
-        .from('workspaces')
-        .update({ name: workspaceName })
-        .eq('id', workspaceId);
-        // A checagem de owner_id é feita pela política de segurança (RLS) no banco
-
-     if (error) {
-        console.error('Error updating workspace:', error);
-         if (error.code === '42501') { // RLS violation
-            return 'Erro de permissão. Você não tem autorização para alterar este workspace.';
-        }
-        return `Não foi possível atualizar o workspace: ${error.message}`;
-    }
+    console.log(`Mock: Updating workspace ${workspaceId} to name "${workspaceName}"`);
 
     revalidatePath('/', 'layout');
     revalidatePath('/settings/workspace');
@@ -88,24 +54,8 @@ export async function updateWorkspaceAction(
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        console.error("User not authenticated");
-        return redirect('/login');
-    }
-
-    const { error } = await supabase
-        .from('users')
-        .update({ last_active_workspace_id: workspaceId })
-        .eq('id', user.id);
-
-    if (error) {
-        console.error("Error switching workspace:", error);
-        // Não redireciona, mas loga o erro. O usuário permanecerá no workspace antigo.
-        return;
-    }
+    console.log(`Mock: Switching to workspace ${workspaceId}`);
+    // In a real app, this would update the user's 'last_active_workspace_id'
     
     revalidatePath('/', 'layout');
 }
