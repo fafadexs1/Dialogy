@@ -1,8 +1,12 @@
+
 'use server';
 
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
+import { signOut } from 'next-auth/react';
+import { auth, handler as nextAuthHandler } from '@/app/api/auth/[...nextauth]/route';
+
 
 // This function is no longer used for login, but we keep it as a reference or for other purposes.
 // The login flow is now handled client-side in login-form.tsx to correctly use next-auth/react.
@@ -48,6 +52,8 @@ export async function register(
 }
 
 export async function signOutAction() {
-    // Mock sign out - redirect to login
-    redirect('/login');
+    // Correctly sign out using next-auth logic
+    // As signOut from next-auth/react is a client-side hook,
+    // we redirect to the logout page provided by NextAuth.
+    redirect('/api/auth/signout');
 }
