@@ -138,3 +138,12 @@ export interface NexusFlowInstance {
   enabled: boolean;
   model?: string;
 }
+
+export interface EvolutionInstance {
+    id: string;
+    name: string;
+    apiUrl: string;
+    apiKey: string;
+    status: 'connected' | 'disconnected' | 'pending';
+    type: 'baileys' | 'wa_cloud';
+}
