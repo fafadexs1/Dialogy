@@ -40,7 +40,7 @@ import type { User, Workspace } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -54,42 +54,57 @@ interface WorkspaceSwitcherProps extends PopoverTriggerProps {
 
 function CreateWorkspaceForm({ setOpen }: { setOpen: (open: boolean) => void }) {
     const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
+
     const { pending } = useFormStatus();
 
+    // Use a ref to track if the submission was successful
+    const formRef = React.useRef<HTMLFormElement>(null);
+    const [submitted, setSubmitted] = React.useState(false);
+
     React.useEffect(() => {
-        if (!errorMessage && !pending) {
+        // If the form was submitted, there's no error, and it's not pending anymore, close the dialog.
+        if (submitted && !errorMessage && !pending) {
             setOpen(false);
         }
-    }, [errorMessage, pending, setOpen])
+        // Reset submitted state if an error occurs
+        if(errorMessage) {
+            setSubmitted(false);
+        }
+    }, [errorMessage, pending, setOpen, submitted]);
+
+
+    const handleFormSubmit = (formData: FormData) => {
+        setSubmitted(true);
+        formAction(formData);
+    }
 
     return (
-        <form action={formAction}>
+        <form ref={formRef} action={handleFormSubmit}>
             <DialogHeader>
             <DialogTitle>Criar Workspace</DialogTitle>
             <DialogDescription>
                 Crie um novo workspace para colaborar com sua equipe.
             </DialogDescription>
             </DialogHeader>
-            <div>
-                <div className="space-y-4 py-2 pb-4">
-                    <div className="space-y-2">
-                    <Label htmlFor="workspaceName">Nome do Workspace</Label>
-                    <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." autoFocus/>
-                    </div>
+            <div className="space-y-4 py-2 pb-4">
+                <div className="space-y-2">
+                <Label htmlFor="workspaceName">Nome do Workspace</Label>
+                <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." autoFocus required/>
                 </div>
-                 {errorMessage && (
-                    <Alert variant="destructive" className="mt-4">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>Erro ao criar workspace</AlertTitle>
-                        <AlertDescription>{errorMessage}</AlertDescription>
-                    </Alert>
-                )}
             </div>
-            <DialogFooter>
+                {errorMessage && (
+                <Alert variant="destructive" className="mt-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Erro ao criar workspace</AlertTitle>
+                    <AlertDescription>{errorMessage}</AlertDescription>
+                </Alert>
+            )}
+            <DialogFooter className='pt-4'>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
                 Cancelar
             </Button>
             <Button type="submit" disabled={pending}>
+                 {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {pending ? 'Criando...' : 'Criar Workspace'}
             </Button>
             </DialogFooter>

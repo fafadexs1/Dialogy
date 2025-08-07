@@ -86,11 +86,13 @@ export function Sidebar({ user }: SidebarProps) {
           <span className="sr-only">Dialogy</span>
         </Link>
         
-        <WorkspaceSwitcher 
-            user={user} 
-            activeWorkspaceId={activeWorkspaceId}
-            onWorkspaceChange={handleWorkspaceChange}
-        />
+        {user.activeWorkspaceId && (
+            <WorkspaceSwitcher 
+                user={user} 
+                activeWorkspaceId={activeWorkspaceId}
+                onWorkspaceChange={handleWorkspaceChange}
+            />
+        )}
         <Separator />
 
         <nav className="flex flex-col items-center gap-2">
@@ -143,10 +145,12 @@ export function Sidebar({ user }: SidebarProps) {
                     <span>Configurações do Workspace</span>
                 </DropdownMenuItem>
             </Link>
-            <DropdownMenuItem>
-                <Settings className="mr-2 h-4 w-4" />
-                <span>Configurações da Conta</span>
-            </DropdownMenuItem>
+             <Link href="/settings/security">
+                <DropdownMenuItem>
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Segurança</span>
+                </DropdownMenuItem>
+            </Link>
             <DropdownMenuSeparator />
             <SignOut />
           </DropdownMenuContent>
