@@ -1,213 +1,202 @@
 
--- Full database schema recreation and security policy implementation for ConnectISP
--- Version: 1.0
--- Date: 2024-08-16
+-- Full script to reset and recreate the core application schema.
+-- This script is designed to be run from a clean state or to reset the existing state.
+-- It is idempotent, meaning it can be run multiple times without causing errors.
 
 DO $$
 BEGIN
 
 RAISE NOTICE 'Starting teardown of existing database objects...';
 
--- 1. Teardown existing objects in the correct dependency order
-RAISE NOTICE 'Dropping existing triggers...';
-DROP TRIGGER IF EXISTS on_public_users_insert ON public.users;
-DROP TRIGGER IF EXISTS add_creator_to_workspace_trigger ON public.workspaces;
+-- Step 1: Drop dependent objects (Triggers, Policies) first.
+-- This is crucial to avoid dependency errors when dropping tables and functions.
+
+-- Drop Triggers
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP TRIGGER IF EXISTS set_workspace_owner_trigger ON public.workspaces;
+DROP TRIGGER IF EXISTS add_creator_to_workspace_trigger ON public.workspaces;
 
-RAISE NOTICE 'Dropping existing functions...';
-DROP FUNCTION IF EXISTS public.handle_new_user();
-DROP FUNCTION IF EXISTS public.add_creator_to_workspace();
-DROP FUNCTION IF EXISTS public.set_workspace_owner();
-
-RAISE NOTICE 'Dropping existing policies...';
--- Drop policies from all tables that have them
-DROP POLICY IF EXISTS "Allow full access based on parent config" ON public.evolution_api_instances;
-DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.evolution_api_configs;
-DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.messages;
-DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.chats;
+-- Drop Policies
+DROP POLICY IF EXISTS "Allow full access to own user data" ON public.users;
+DROP POLICY IF EXISTS "Allow read access to other users" ON public.users;
+DROP POLICY IF EXISTS "Allow full access based on workspace membership" ON public.workspaces;
+DROP POLICY IF EXISTS "Allow full access based on workspace membership" ON public.user_workspaces;
 DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.contacts;
-DROP POLICY IF EXISTS "Allow read access to members" ON public.user_workspaces;
-DROP POLICY IF EXISTS "Allow full access to owners" ON public.workspaces;
-DROP POLICY IF EXISTS "Users can view workspaces they are a member of" ON public.workspaces;
-DROP POLICY IF EXISTS "Owners can update their own workspaces" ON public.workspaces;
-DROP POLICY IF EXISTS "Allow authenticated users to read users table" ON public.users;
-DROP POLICY IF EXISTS "Allow individual user access" ON public.users;
+DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.chats;
+DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.messages;
+DROP POLICY IF EXISTS "Allow full access to workspace data" ON public.evolution_api_configs;
+DROP POLICY IF EXISTS "Allow full access based on parent config" ON public.evolution_api_instances;
 
-RAISE NOTICE 'Dropping FK constraints to break cycles...';
--- Break the dependency cycle between users and workspaces
+
+-- Step 2: Drop the functions that the triggers depended on.
+DROP FUNCTION IF EXISTS public.create_user_profile();
+DROP FUNCTION IF EXISTS public.set_workspace_owner();
+DROP FUNCTION IF EXISTS public.add_creator_to_workspace();
+
+
+-- Step 3: Break the circular dependency between users and workspaces
+-- The users table has a foreign key to workspaces, and workspaces has one to users.
+-- We must remove one of the constraints before dropping the tables.
 ALTER TABLE public.users DROP CONSTRAINT IF EXISTS fk_last_active_workspace;
 
-RAISE NOTICE 'Dropping existing tables...';
+
+-- Step 4: Drop the tables in the correct order to respect dependencies.
+-- Start with tables that have foreign keys, then the tables they point to.
+DROP TABLE IF EXISTS public.user_workspaces;
 DROP TABLE IF EXISTS public.evolution_api_instances;
 DROP TABLE IF EXISTS public.evolution_api_configs;
 DROP TABLE IF EXISTS public.messages;
 DROP TABLE IF EXISTS public.chats;
 DROP TABLE IF EXISTS public.contacts;
-DROP TABLE IF EXISTS public.user_workspaces;
 DROP TABLE IF EXISTS public.workspaces;
 DROP TABLE IF EXISTS public.users;
 
-RAISE NOTICE 'Teardown complete.';
+RAISE NOTICE 'Teardown complete. Starting schema recreation...';
 
--- 2. Workspace Collaboration System Schema
-RAISE NOTICE 'Creating tables...';
+--------------------------------------------------------------------------------
+-- SECTION: USER AND WORKSPACE MANAGEMENT SYSTEM
+--------------------------------------------------------------------------------
+RAISE NOTICE 'Creating user and workspace tables...';
 
--- Users Table: Stores user profile information, extending auth.users
+-- Users Table: Stores user profile information, linked to auth.users.
 CREATE TABLE public.users (
-    id uuid NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    full_name text,
-    avatar_url text,
-    email text UNIQUE,
-    last_active_workspace_id uuid
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    full_name TEXT,
+    avatar_url TEXT,
+    email TEXT UNIQUE,
+    last_active_workspace_id UUID
 );
-RAISE NOTICE 'Table "users" created.';
 
--- Workspaces Table: Stores workspace information
+-- Workspaces Table: Represents a workspace where teams collaborate.
 CREATE TABLE public.workspaces (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    name text NOT NULL,
-    avatar_url text,
-    owner_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    name TEXT NOT NULL,
+    avatar_url TEXT,
+    owner_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE
 );
-RAISE NOTICE 'Table "workspaces" created.';
 
--- Add the foreign key constraint from users to workspaces, completing the cycle
-ALTER TABLE public.users
-ADD CONSTRAINT fk_last_active_workspace FOREIGN KEY (last_active_workspace_id) REFERENCES public.workspaces(id) ON DELETE SET NULL;
-RAISE NOTICE 'Foreign key "fk_last_active_workspace" on "users" created.';
-
-
--- User_Workspaces Table: Junction table for many-to-many relationship between users and workspaces
+-- Junction Table for Many-to-Many relationship between users and workspaces.
 CREATE TABLE public.user_workspaces (
-    user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, workspace_id)
 );
-RAISE NOTICE 'Table "user_workspaces" created.';
 
--- Contacts Table
+-- Add the foreign key constraint back to users for last_active_workspace_id
+ALTER TABLE public.users
+ADD CONSTRAINT fk_last_active_workspace
+FOREIGN KEY (last_active_workspace_id)
+REFERENCES public.workspaces(id) ON DELETE SET NULL;
+
+
+--------------------------------------------------------------------------------
+-- SECTION: CRM AND COMMUNICATION SYSTEM
+--------------------------------------------------------------------------------
+RAISE NOTICE 'Creating CRM and communication tables...';
+
+-- Contacts Table: Stores information about external contacts (customers).
 CREATE TABLE public.contacts (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    name text NOT NULL,
-    email text,
-    phone text,
-    avatar_url text
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    avatar_url TEXT
 );
-RAISE NOTICE 'Table "contacts" created.';
 
--- Chats Table
+-- Chats Table: Represents a conversation with a contact.
 CREATE TABLE public.chats (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    contact_id uuid NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-    agent_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    status text NOT NULL DEFAULT 'atendimentos'::text
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+    agent_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL DEFAULT 'atendimentos'
 );
-RAISE NOTICE 'Table "chats" created.';
 
--- Messages Table
+-- Messages Table: Stores individual messages within a chat.
 CREATE TABLE public.messages (
-    id bigint NOT NULL GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    chat_id uuid NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
-    sender_id uuid NOT NULL, -- Can be a user (agent) or a contact
-    content text NOT NULL,
-    created_at timestamp with time zone NOT NULL DEFAULT now()
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL, -- Can be a user (agent) or a contact
+    content TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-RAISE NOTICE 'Table "messages" created.';
 
--- Evolution API Configs Table
+
+--------------------------------------------------------------------------------
+-- SECTION: INTEGRATIONS SCHEMA
+--------------------------------------------------------------------------------
+RAISE NOTICE 'Creating integration tables...';
+
+-- Evolution API Configs Table: Stores API configuration for each workspace.
 CREATE TABLE public.evolution_api_configs (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    workspace_id uuid NOT NULL UNIQUE REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    api_url text,
-    api_key text
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL UNIQUE REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    api_url TEXT,
+    api_key TEXT
 );
-RAISE NOTICE 'Table "evolution_api_configs" created.';
 
--- Evolution API Instances Table
+-- Evolution API Instances Table: Stores specific instances for a config.
 CREATE TABLE public.evolution_api_instances (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    config_id uuid NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
-    name text NOT NULL,
-    type text NOT NULL DEFAULT 'baileys'::text
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    config_id UUID NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'baileys'
 );
-RAISE NOTICE 'Table "evolution_api_instances" created.';
 
-
--- 3. Workspace Ownership and Membership Management (Triggers and Functions)
-RAISE NOTICE 'Creating functions and triggers for user and workspace management...';
+--------------------------------------------------------------------------------
+-- SECTION: AUTOMATION AND TRIGGERS
+--------------------------------------------------------------------------------
+RAISE NOTICE 'Creating functions and triggers...';
 
 -- Function to create a user profile upon new user signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger
+CREATE OR REPLACE FUNCTION public.create_user_profile()
+RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  INSERT INTO public.users (id, full_name, avatar_url, email)
-  VALUES (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url', new.email);
+  INSERT INTO public.users (id, email, full_name, avatar_url)
+  VALUES (new.id, new.email, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
   RETURN new;
 END;
 $$;
-RAISE NOTICE 'Function "handle_new_user" created.';
 
--- Trigger to call handle_new_user on new user creation in auth.users
-CREATE TRIGGER on_public_users_insert
+-- Trigger to execute the profile creation function
+CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-RAISE NOTICE 'Trigger "on_public_users_insert" on "auth.users" created.';
+  FOR EACH ROW EXECUTE FUNCTION public.create_user_profile();
 
--- Function to set the owner of a new workspace
-CREATE OR REPLACE FUNCTION public.set_workspace_owner()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-  UPDATE public.workspaces
-  SET owner_id = auth.uid()
-  WHERE id = NEW.id;
-  RETURN NEW;
-END;
-$$;
-RAISE NOTICE 'Function "set_workspace_owner" created.';
 
--- Trigger to set owner on new workspace creation
-CREATE TRIGGER set_workspace_owner_trigger
-  AFTER INSERT ON public.workspaces
-  FOR EACH ROW EXECUTE FUNCTION public.set_workspace_owner();
-RAISE NOTICE 'Trigger "set_workspace_owner_trigger" on "workspaces" created.';
-
--- Function to add the workspace creator to the user_workspaces junction table
+-- Function to automatically add the workspace creator to the user_workspaces table
 CREATE OR REPLACE FUNCTION public.add_creator_to_workspace()
-RETURNS trigger
+RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
   INSERT INTO public.user_workspaces (user_id, workspace_id)
-  VALUES (auth.uid(), NEW.id);
-  RETURN NEW;
+  VALUES (new.owner_id, new.id);
+  RETURN new;
 END;
 $$;
-RAISE NOTICE 'Function "add_creator_to_workspace" created.';
 
--- Trigger to add creator to user_workspaces on new workspace creation
+-- Trigger to execute the membership function on new workspace creation
 CREATE TRIGGER add_creator_to_workspace_trigger
   AFTER INSERT ON public.workspaces
   FOR EACH ROW EXECUTE FUNCTION public.add_creator_to_workspace();
-RAISE NOTICE 'Trigger "add_creator_to_workspace_trigger" on "workspaces" created.';
 
 
--- 4. Workspace Security Policy Cleanup and Implementation
-RAISE NOTICE 'Enabling RLS and creating security policies...';
+--------------------------------------------------------------------------------
+-- SECTION: ROW LEVEL SECURITY (RLS) POLICIES
+--------------------------------------------------------------------------------
+RAISE NOTICE 'Enabling RLS and creating policies...';
 
--- Enable RLS on all tables
+-- Enable RLS for all tables
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_workspaces ENABLE ROW LEVEL SECURITY;
@@ -216,11 +205,11 @@ ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.evolution_api_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.evolution_api_instances ENABLE ROW LEVEL SECURITY;
-RAISE NOTICE 'Row Level Security enabled on all tables.';
 
--- Helper function to check workspace membership
-CREATE OR REPLACE FUNCTION public.is_workspace_member(p_workspace_id uuid, p_user_id uuid)
-RETURNS boolean
+
+-- Function to check if a user is a member of a workspace
+CREATE OR REPLACE FUNCTION public.is_workspace_member(p_workspace_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
 AS $$
@@ -230,48 +219,43 @@ AS $$
     WHERE workspace_id = p_workspace_id AND user_id = p_user_id
   );
 $$;
-RAISE NOTICE 'Helper function "is_workspace_member" created.';
 
 -- Policies for 'users' table
-CREATE POLICY "Allow individual user access" ON public.users
+CREATE POLICY "Allow full access to own user data" ON public.users
   FOR ALL USING (auth.uid() = id);
-CREATE POLICY "Allow authenticated users to read users table" ON public.users
-  FOR SELECT USING (auth.role() = 'authenticated');
-RAISE NOTICE 'Policies for "users" created.';
+CREATE POLICY "Allow read access to other users" ON public.users
+  FOR SELECT USING (true); -- Allows reading basic user info (e.g., for avatars, names)
 
 -- Policies for 'workspaces' table
-CREATE POLICY "Allow full access to owners" ON public.workspaces
-  FOR ALL USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
-CREATE POLICY "Users can view workspaces they are a member of" ON public.workspaces
-  FOR SELECT USING (is_workspace_member(id, auth.uid()));
-RAISE NOTICE 'Policies for "workspaces" created.';
+CREATE POLICY "Allow full access based on workspace membership" ON public.workspaces
+  FOR ALL USING (is_workspace_member(id, auth.uid()))
+  WITH CHECK (is_workspace_member(id, auth.uid()));
 
 -- Policies for 'user_workspaces' table
-CREATE POLICY "Allow read access to members" ON public.user_workspaces
-  FOR SELECT USING (auth.uid() = user_id);
-RAISE NOTICE 'Policies for "user_workspaces" created.';
+CREATE POLICY "Allow full access based on workspace membership" ON public.user_workspaces
+  FOR ALL USING (is_workspace_member(workspace_id, auth.uid()));
 
--- Policies for workspace-siloed tables (contacts, chats, messages, etc.)
+-- Policies for all workspace-specific data tables
 CREATE POLICY "Allow full access to workspace data" ON public.contacts
   FOR ALL USING (is_workspace_member(workspace_id, auth.uid()));
+
 CREATE POLICY "Allow full access to workspace data" ON public.chats
   FOR ALL USING (is_workspace_member(workspace_id, auth.uid()));
+
 CREATE POLICY "Allow full access to workspace data" ON public.messages
   FOR ALL USING (is_workspace_member(workspace_id, auth.uid()));
+
 CREATE POLICY "Allow full access to workspace data" ON public.evolution_api_configs
   FOR ALL USING (is_workspace_member(workspace_id, auth.uid()));
-RAISE NOTICE 'Policies for workspace-siloed tables created.';
 
--- Policy for 'evolution_api_instances'
 CREATE POLICY "Allow full access based on parent config" ON public.evolution_api_instances
   FOR ALL USING (
-    is_workspace_member(
-      (SELECT workspace_id FROM public.evolution_api_configs WHERE id = config_id),
-      auth.uid()
+    EXISTS (
+      SELECT 1 FROM public.evolution_api_configs c
+      WHERE c.id = config_id AND is_workspace_member(c.workspace_id, auth.uid())
     )
   );
-RAISE NOTICE 'Policy for "evolution_api_instances" created.';
 
-RAISE NOTICE 'Database schema and policies successfully deployed.';
+RAISE NOTICE 'Database setup complete!';
 
 END $$;
