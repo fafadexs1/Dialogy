@@ -183,7 +183,7 @@ export interface EvolutionInstanceCreationPayload {
     token?: string;
     qrcode?: boolean;
     number?: string;
-    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-WEB.JS';
+    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
     rejectCall?: boolean;
     msgCall?: string;
     groupsIgnore?: boolean;

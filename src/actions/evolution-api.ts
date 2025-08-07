@@ -150,7 +150,7 @@ export async function createEvolutionApiInstance(
         token: formData.get('token') as string | undefined,
         qrcode: formData.get('qrcode') === 'on',
         number: formData.get('number') as string | undefined,
-        integration: formData.get('type') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-WEB.JS' | undefined,
+        integration: formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined,
 
         // General Settings
         rejectCall: formData.get('rejectCall') === 'on',
@@ -215,9 +215,10 @@ export async function createEvolutionApiInstance(
         });
 
         // 4. Se a criação na API for bem-sucedida, salvar no DB local
+        const instanceType = formData.get('integration') === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud';
         await db.query(
             'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
-            [payload.instanceName, (formData.get('type') === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud'), config_id]
+            [payload.instanceName, instanceType, config_id]
         );
 
     } catch (error: any) {
@@ -267,7 +268,7 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
 
 export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'POST' });
         // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
