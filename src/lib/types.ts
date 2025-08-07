@@ -27,6 +27,7 @@ export type OnlineAgent = {
 }
 
 export type BusinessProfile = {
+  workspaceId: string; // A business profile belongs to a workspace
   companyName: string;
   website?: string;
   industry?: string;
@@ -59,6 +60,8 @@ export type Message = {
   sender: User;
   content: string;
   timestamp: string;
+  chat_id: string;
+  workspace_id: string;
 };
 
 export type Chat = {
@@ -67,6 +70,7 @@ export type Chat = {
   agent?: User;
   messages: Message[];
   status: 'atendimentos' | 'gerais' | 'encerrados';
+  workspace_id: string;
 };
 
 export type InternalChannel = {

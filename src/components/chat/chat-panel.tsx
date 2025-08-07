@@ -51,6 +51,7 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
           content: newMessage,
           chat_id: chat.id,
           sender_id: currentUser.id,
+          workspace_id: chat.workspace_id,
         }
       ]);
       
@@ -104,6 +105,7 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
                               content: result.response,
                               chat_id: chat.id,
                               sender_id: chat.agent.id, // AI responds as the agent
+                              workspace_id: chat.workspace_id,
                             }
                           ]);
                         if(error) throw error;

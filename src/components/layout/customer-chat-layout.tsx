@@ -12,8 +12,9 @@ import { useAuth } from '@/hooks/use-auth';
 
 // This is a helper function to map profile IDs to user objects.
 // In a real app, you might fetch this from a user management system or have it in a global state.
-const fetchProfiles = async (supabase: any): Promise<User[]> => {
-    const { data, error } = await supabase.from('profiles').select('*');
+const fetchProfilesInWorkspace = async (supabase: any, workspaceId: string): Promise<User[]> => {
+    // This assumes RLS is in place to only allow fetching users within the accessible workspace
+    const { data, error } = await supabase.from('profiles').select('*').eq('workspace_id', workspaceId);
     if (error) {
         console.error("Error fetching profiles:", error);
         return [];
@@ -50,17 +51,18 @@ export default function CustomerChatLayout() {
   }
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !currentUser.activeWorkspaceId) return;
 
     const initializeData = async () => {
         setLoading(true);
-        const profiles = await fetchProfiles(supabase);
+        const profiles = await fetchProfilesInWorkspace(supabase, currentUser.activeWorkspaceId!);
         setAllUsers(profiles);
 
-        // Fetch chats assigned to the current agent OR chats in the 'gerais' queue
+        // Fetch chats assigned to the current agent OR chats in the 'gerais' queue within the active workspace
         const { data: chatsData, error: chatsError } = await supabase
             .from('chats')
             .select('*')
+            .eq('workspace_id', currentUser.activeWorkspaceId)
             .or(`agent_id.eq.${currentUser.id},status.eq.gerais`)
             .order('created_at', { ascending: false });
 
@@ -79,6 +81,7 @@ export default function CustomerChatLayout() {
                 agent: agent || (chat.agent_id ? getUserById(chat.agent_id) : undefined),
                 messages: [], 
                 status: chat.status as Chat['status'],
+                workspace_id: chat.workspace_id,
             };
         });
 
@@ -117,6 +120,8 @@ export default function CustomerChatLayout() {
             sender: getUserById(msg.sender_id),
             content: msg.content,
             timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            chat_id: msg.chat_id,
+            workspace_id: msg.workspace_id,
         }));
         setMessages(formattedMessages);
     };
@@ -127,11 +132,13 @@ export default function CustomerChatLayout() {
   // This useEffect now handles ALL incoming messages via Realtime
   // and keeps the connection alive regardless of the selected chat.
   useEffect(() => {
+    if (!currentUser?.activeWorkspaceId) return;
+    
     const channel = supabase
       .channel('realtime-messages')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}`},
         (payload) => {
           const newMessagePayload = payload.new as any;
 
@@ -142,6 +149,8 @@ export default function CustomerChatLayout() {
               sender: getUserById(newMessagePayload.sender_id),
               content: newMessagePayload.content,
               timestamp: new Date(newMessagePayload.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              chat_id: newMessagePayload.chat_id,
+              workspace_id: newMessagePayload.workspace_id,
             };
             setMessages((prevMessages) => [...prevMessages, newMessage]);
           } else {
@@ -157,7 +166,7 @@ export default function CustomerChatLayout() {
       supabase.removeChannel(channel);
     };
     // We remove selectedChat from dependencies to keep the channel open
-  }, [supabase, selectedChat?.id, allUsers]);
+  }, [supabase, selectedChat?.id, allUsers, currentUser?.activeWorkspaceId]);
 
 
   if (loading || !currentUser) {
