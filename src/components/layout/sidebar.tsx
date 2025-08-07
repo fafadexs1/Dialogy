@@ -48,10 +48,12 @@ const mainNavItems = [
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
 
-function SignOutButton() {
+function SignOutMenuItem() {
     return (
         <DropdownMenuItem onSelect={(e) => {
             e.preventDefault();
+            // Chama o signOut do next-auth/react, que limpa a sessão
+            // e redireciona para a página de login.
             signOut({ callbackUrl: '/login' });
         }}>
             <LogOut className="mr-2 h-4 w-4" />
@@ -133,7 +135,7 @@ export function Sidebar({ user }: SidebarProps) {
                 </DropdownMenuItem>
             </Link>
             <DropdownMenuSeparator />
-            <SignOutButton />
+            <SignOutMenuItem />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

@@ -4,22 +4,10 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
-import { signOut } from 'next-auth/react';
-import { auth, handler as nextAuthHandler } from '@/app/api/auth/[...nextauth]/route';
 
-
-// This function is no longer used for login, but we keep it as a reference or for other purposes.
-// The login flow is now handled client-side in login-form.tsx to correctly use next-auth/react.
-export async function authenticate(
-  prevState: string | undefined,
-  formData: FormData
-) {
-  // This is a placeholder. The actual logic is now in the client component.
-  // We keep the shell to avoid breaking anything that might still reference it,
-  // but it should ideally be removed if not used elsewhere.
-  return 'This action is deprecated. Login is handled client-side.';
-}
-
+// A função de login foi removida pois o fluxo agora é gerenciado
+// inteiramente pelo NextAuth e pelo formulário do lado do cliente.
+// Manter uma Server Action para isso era redundante e adicionava complexidade.
 
 export async function register(
   prevState: string | undefined,
@@ -39,24 +27,21 @@ export async function register(
         return "Este e-mail já está em uso.";
     }
 
+    // A senha é criptografada aqui antes de salvar
     const hashedPassword = await bcrypt.hash(password, 10);
     
     await db.query('INSERT INTO public.users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, hashedPassword]);
+    console.log(`[REGISTER_ACTION] Usuário ${email} registrado com sucesso.`);
 
   } catch(error) {
-     console.error(error);
+     console.error('[REGISTER_ACTION] Erro:', error);
      return "Ocorreu um erro durante o registro. Tente novamente.";
   }
   
+  // Redireciona para a página de login com um parâmetro de sucesso
   redirect('/login?registered=true');
 }
 
-// This server action is no longer needed as logout is handled on the client-side
-// in the Sidebar component to ensure proper redirection.
-/*
-export async function signOutAction() {
-    // Correctly sign out by redirecting to the NextAuth signout API endpoint.
-    // This endpoint handles cookie clearing and session termination securely.
-    redirect('/api/auth/signout');
-}
-*/
+// A ação de signOut foi removida. A lógica agora está no lado do cliente
+// (no componente Sidebar) para garantir um redirecionamento correto
+// e uma experiência de usuário mais fluida, usando o hook `signOut` do next-auth/react.

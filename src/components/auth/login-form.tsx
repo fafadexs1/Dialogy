@@ -1,8 +1,7 @@
-
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,9 +11,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 export function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get('callbackUrl') || '/';
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,28 +30,21 @@ export function LoginForm() {
 
     try {
       const result = await signIn('credentials', {
-        redirect: false, // Nós cuidaremos do redirecionamento
+        redirect: false, // Manusearemos o redirecionamento manualmente
         email,
         password,
+        callbackUrl,
       });
 
       console.log('[LOGIN_FORM] Resultado do signIn:', result);
 
       if (result?.error) {
-        // O erro 'CredentialsSignin' é o erro padrão para credenciais inválidas.
         console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
         setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
         setLoading(false);
       } else if (result?.ok) {
-        console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
-        // Sucesso! Força o redirecionamento para a página principal.
-        router.push('/');
-        router.refresh(); // Garante que a página seja recarregada com os novos dados da sessão.
-      } else {
-        // Caso inesperado
-        console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
-        setErrorMessage('Ocorreu um erro inesperado durante o login.');
-        setLoading(false);
+        console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando...');
+        router.push(result.url || callbackUrl);
       }
     } catch (error) {
         console.error('[LOGIN_FORM] Erro catastrófico na função handleSubmit:', error);
