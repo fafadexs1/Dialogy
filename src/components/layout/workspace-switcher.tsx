@@ -12,7 +12,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { User, Workspace } from '@/lib/types';
+import type { User } from '@/lib/types';
 import {
   Tooltip,
   TooltipContent,
@@ -36,22 +36,33 @@ export function WorkspaceSwitcher({
   user,
 }: WorkspaceSwitcherProps) {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
-  const router = useRouter();
-
-  const activeWorkspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
   const handleWorkspaceChange = async (workspaceId: string) => {
-    await switchWorkspaceAction(workspaceId);
     setPopoverOpen(false);
-    // Forçar um recarregamento completo para garantir que todos os dados do novo workspace sejam carregados.
+    await switchWorkspaceAction(workspaceId);
     window.location.reload();
   };
   
   if (!user.workspaces || user.workspaces.length === 0) {
-    return null;
+    return (
+        <TooltipProvider>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button asChild variant="ghost" className={cn('h-10 w-10 p-0', className)}>
+                        <Link href="/settings/workspace/new">
+                             <PlusCircledIcon className="h-6 w-6" />
+                        </Link>
+                    </Button>
+                </TooltipTrigger>
+                 <TooltipContent side="right">
+                    <p>Criar um Workspace</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    )
   }
 
-  const currentWorkspace = activeWorkspace || user.workspaces[0];
+  const currentWorkspace = user.workspaces.find(ws => ws.id === user.activeWorkspaceId) || user.workspaces[0];
 
 
   return (
@@ -86,8 +97,8 @@ export function WorkspaceSwitcher({
         </Tooltip>
       </TooltipProvider>
 
-      <PopoverContent className="w-[250px] p-2" align="start">
-        <div className="space-y-1">
+      <PopoverContent className="w-[250px] p-0" align="start">
+        <div className="space-y-1 p-2">
             <p className="text-xs font-medium text-muted-foreground px-2 py-1.5">Workspaces</p>
             {user.workspaces.map((ws) => (
             <Button
@@ -115,7 +126,8 @@ export function WorkspaceSwitcher({
             </Button>
             ))}
         </div>
-        <Separator className="my-2" />
+        <Separator />
+        <div className='p-2'>
         <Button
             asChild
             variant="ghost"
@@ -126,6 +138,7 @@ export function WorkspaceSwitcher({
                 Criar Workspace
             </Link>
         </Button>
+        </div>
       </PopoverContent>
     </Popover>
   );

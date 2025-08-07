@@ -94,7 +94,7 @@ export async function switchWorkspaceAction(workspaceId: string) {
 
     if (!user) {
         console.error("User not authenticated");
-        return;
+        return redirect('/login');
     }
 
     const { error } = await supabase
@@ -104,6 +104,7 @@ export async function switchWorkspaceAction(workspaceId: string) {
 
     if (error) {
         console.error("Error switching workspace:", error);
+        // Não redireciona, mas loga o erro. O usuário permanecerá no workspace antigo.
         return;
     }
     
