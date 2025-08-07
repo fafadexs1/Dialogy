@@ -11,27 +11,18 @@ export async function authenticate(
   formData: FormData
 ) {
  try {
-    // Note: The signIn function from next-auth/react in a server action
-    // will trigger a redirect, so the catch block might not be hit
-    // in the same way as a direct server-side call.
-    // The error handling is kept for cases where it might throw before redirecting.
     await signIn('credentials', {
       ...Object.fromEntries(formData),
-      redirect: false, // Important to handle the response manually
+      redirect: false, 
     });
-    // If signIn doesn't throw, it means success in this context
-    // but next-auth handles the redirect logic. We might need to redirect manually if needed.
-    // For this form, next-auth middleware will handle the redirect on successful login.
   } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case 'CredentialsSignin':
-          return 'Credenciais inválidas.';
-        default:
-          return 'Algo deu errado.';
-      }
+    // The error object in this case is an instance of AuthError, but because
+    // of a Next.js bug, `instanceof AuthError` will return false.
+    // We can check the error type directly on the object.
+    if ((error as any).type === 'CredentialsSignin') {
+        return 'Credenciais inválidas.';
     }
-    // Re-throw other errors to be caught by the framework
+    // If it's not a credentials error, we re-throw it.
     throw error;
   }
 }
