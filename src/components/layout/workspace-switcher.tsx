@@ -2,12 +2,12 @@
 'use client';
 
 import * as React from 'react';
+import { useActionState, useFormStatus } from 'react';
 import {
   CaretSortIcon,
   CheckIcon,
   PlusCircledIcon,
 } from '@radix-ui/react-icons';
-
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,9 @@ import {
 } from '@/components/ui/popover';
 import type { User, Workspace } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { createWorkspaceAction } from '@/actions/workspace';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle } from 'lucide-react';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -47,6 +50,51 @@ interface WorkspaceSwitcherProps extends PopoverTriggerProps {
     user: User;
     activeWorkspaceId: string;
     onWorkspaceChange: (workspaceId: string) => void;
+}
+
+function CreateWorkspaceForm({ setOpen }: { setOpen: (open: boolean) => void }) {
+    const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
+    const { pending } = useFormStatus();
+
+    React.useEffect(() => {
+        if (!errorMessage && !pending) {
+            setOpen(false);
+        }
+    }, [errorMessage, pending, setOpen])
+
+    return (
+        <form action={formAction}>
+            <DialogHeader>
+            <DialogTitle>Criar Workspace</DialogTitle>
+            <DialogDescription>
+                Crie um novo workspace para colaborar com sua equipe.
+            </DialogDescription>
+            </DialogHeader>
+            <div>
+                <div className="space-y-4 py-2 pb-4">
+                    <div className="space-y-2">
+                    <Label htmlFor="workspaceName">Nome do Workspace</Label>
+                    <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." autoFocus/>
+                    </div>
+                </div>
+                 {errorMessage && (
+                    <Alert variant="destructive" className="mt-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Erro ao criar workspace</AlertTitle>
+                        <AlertDescription>{errorMessage}</AlertDescription>
+                    </Alert>
+                )}
+            </div>
+            <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+                Cancelar
+            </Button>
+            <Button type="submit" disabled={pending}>
+                {pending ? 'Criando...' : 'Criar Workspace'}
+            </Button>
+            </DialogFooter>
+        </form>
+    )
 }
 
 export function WorkspaceSwitcher({
@@ -152,26 +200,7 @@ export function WorkspaceSwitcher({
         </PopoverContent>
       </Popover>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Criar Workspace</DialogTitle>
-          <DialogDescription>
-            Crie um novo workspace para colaborar com sua equipe.
-          </DialogDescription>
-        </DialogHeader>
-        <div>
-          <div className="space-y-4 py-2 pb-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nome do Workspace</Label>
-              <Input id="name" placeholder="Ex: Acme Inc." />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setShowNewTeamDialog(false)}>
-            Cancelar
-          </Button>
-          <Button type="submit">Continuar</Button>
-        </DialogFooter>
+        <CreateWorkspaceForm setOpen={setShowNewTeamDialog} />
       </DialogContent>
     </Dialog>
   );

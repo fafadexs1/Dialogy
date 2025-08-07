@@ -15,23 +15,67 @@ export async function createWorkspaceAction(
     return 'O nome do workspace é obrigatório.';
   }
 
-  // Com os triggers no banco de dados, só precisamos inserir o nome.
-  // O owner_id será definido pelo trigger `set_workspace_owner_trigger`.
-  // A vinculação em `user_workspaces` será feita pelo trigger `add_creator_to_workspace_trigger`.
-  const { error } = await supabase
+  const { data: workspaceData, error: insertError } = await supabase
     .from('workspaces')
-    .insert({ name: workspaceName });
+    .insert({ name: workspaceName })
+    .select('id')
+    .single();
 
-  if (error) {
-    console.error('Error creating workspace:', error);
-    if (error.code === '42501') { // permission_denied
+  if (insertError) {
+    console.error('Error creating workspace:', insertError);
+    if (insertError.code === '42501') { 
         return 'Erro de permissão. Você não tem autorização para criar um workspace.';
     }
-    return `Não foi possível criar o workspace: ${error.message}`;
+    return `Não foi possível criar o workspace: ${insertError.message}`;
   }
 
-  // Revalida a home page para refletir o novo estado e acionar o redirecionamento.
+  // O trigger `add_creator_to_workspace_trigger` já cuida da inserção
+  // na tabela `user_workspaces` após a criação do workspace.
+
   revalidatePath('/', 'layout');
+  revalidatePath('/settings/workspace');
 
   return null;
+}
+
+
+export async function updateWorkspaceAction(
+  prevState: string | null,
+  formData: FormData
+): Promise<string | null> {
+    const supabase = createClient();
+
+    const workspaceId = formData.get('workspaceId') as string;
+    const workspaceName = formData.get('workspaceName') as string;
+
+    if (!workspaceName) {
+        return 'O nome do workspace é obrigatório.';
+    }
+     if (!workspaceId) {
+        return 'ID do workspace não encontrado.';
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        return 'Usuário não autenticado.';
+    }
+    
+    const { error } = await supabase
+        .from('workspaces')
+        .update({ name: workspaceName })
+        .eq('id', workspaceId)
+        .eq('owner_id', user.id); // Garante que apenas o dono pode alterar
+
+     if (error) {
+        console.error('Error updating workspace:', error);
+         if (error.code === '42501') { 
+            return 'Erro de permissão. Você não tem autorização para alterar este workspace.';
+        }
+        return `Não foi possível atualizar o workspace: ${error.message}`;
+    }
+
+    revalidatePath('/', 'layout');
+    revalidatePath('/settings/workspace');
+
+    return null;
 }

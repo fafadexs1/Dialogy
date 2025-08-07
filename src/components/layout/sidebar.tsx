@@ -14,6 +14,7 @@ import {
   Slack,
   Puzzle,
   Bot,
+  Building,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -72,7 +73,9 @@ export function Sidebar({ user }: SidebarProps) {
   // This would in a real app be a server call or context update
   const handleWorkspaceChange = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
-    console.log("Switched to workspace:", workspaceId);
+    // In a real app, you'd likely redirect or reload data here.
+    // For now, we'll just log it and the UI will update optimistically.
+    window.location.reload();
   }
 
   return (
@@ -128,10 +131,18 @@ export function Sidebar({ user }: SidebarProps) {
           <DropdownMenuContent side="right">
             <DropdownMenuLabel>{user.name}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <UserIcon className="mr-2 h-4 w-4" />
-              <span>Perfil</span>
-            </DropdownMenuItem>
+            <Link href="/settings/profile">
+                <DropdownMenuItem>
+                    <UserIcon className="mr-2 h-4 w-4" />
+                    <span>Perfil</span>
+                </DropdownMenuItem>
+            </Link>
+             <Link href="/settings/workspace">
+                <DropdownMenuItem>
+                    <Building className="mr-2 h-4 w-4" />
+                    <span>Configurações do Workspace</span>
+                </DropdownMenuItem>
+            </Link>
             <DropdownMenuItem>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Configurações da Conta</span>
