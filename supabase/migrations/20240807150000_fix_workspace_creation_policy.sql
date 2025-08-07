@@ -1,40 +1,33 @@
 
 -- Remover políticas antigas para evitar conflitos
 drop policy if exists "Users can see workspaces they are part of" on public.workspaces;
-drop policy if exists "Authenticated users can create workspaces" on public.workspaces;
-drop policy if exists "Users can insert their own user_workspace link" on public.user_workspaces;
-drop policy if exists "Users can see their own workspace memberships" on public.user_workspaces;
+drop policy if exists "Users can create workspaces" on public.workspaces;
 
-
--- Política para a tabela WORKSPACES
--- 1. Permite que QUALQUER usuário autenticado crie um novo workspace.
-create policy "Authenticated users can insert workspaces"
+-- Permitir que usuários autenticados CRIEM workspaces.
+-- A verificação `with check (true)` é uma forma simples de permitir a inserção para qualquer usuário autenticado.
+create policy "Users can create workspaces"
 on public.workspaces for insert
-to authenticated
-with check (true);
+to authenticated with check (true);
 
--- 2. Permite que usuários vejam APENAS os workspaces dos quais são membros.
-create policy "Users can view workspaces they are members of"
+-- Permitir que usuários VEJAM apenas os workspaces dos quais são membros.
+create policy "Users can see workspaces they are part of"
 on public.workspaces for select
 using (
-  auth.uid() in (
-    select user_id from public.user_workspaces where workspace_id = id
+  id in (
+    select workspace_id from public.user_workspaces where user_id = auth.uid()
   )
 );
 
+-- Remover política antiga para garantir que a nova seja aplicada
+drop policy if exists "Users can manage their own workspace memberships" on public.user_workspaces;
 
--- Política para a tabela USER_WORKSPACES
--- Permite que um usuário veja suas próprias associações de workspace.
-create policy "Users can view their own workspace memberships"
-on public.user_workspaces for select
-using ( auth.uid() = user_id );
-
--- Permite que a função de gatilho (security definer) insira na tabela
--- (Necessário para o gatilho `link_creator_to_workspace`)
-create policy "Allow workspace creator linking via trigger"
+-- Permitir que usuários se insiram (ou sejam inseridos pela aplicação) em um workspace
+-- se o user_id for o deles.
+create policy "Users can be added to workspaces"
 on public.user_workspaces for insert
-with check (true);
+to authenticated with check ( auth.uid() = user_id );
 
--- Um usuário não pode adicionar a si mesmo ou outros a um workspace diretamente
--- Apenas o gatilho pode fazer isso.
-
+-- Permitir que usuários vejam suas próprias associações a workspaces.
+create policy "Users can see their own workspace memberships"
+on public.user_workspaces for select
+to authenticated using ( auth.uid() = user_id );
