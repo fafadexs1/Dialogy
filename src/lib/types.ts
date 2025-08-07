@@ -177,3 +177,37 @@ export interface EvolutionInstance {
     config_id: string;
     qrCode?: string;
 }
+
+export interface EvolutionInstanceCreationPayload {
+    instanceName: string;
+    token?: string;
+    qrcode?: boolean;
+    number?: string;
+    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-WEB.JS';
+    rejectCall?: boolean;
+    msgCall?: string;
+    groupsIgnore?: boolean;
+    alwaysOnline?: boolean;
+    readMessages?: boolean;
+    readStatus?: boolean;
+    syncFullHistory?: boolean;
+    proxyHost?: string;
+    proxyPort?: number;
+    proxyUsername?: string;
+    proxyPassword?: string;
+    webhook?: {
+        url?: string;
+        byEvents?: boolean;
+        base64?: boolean;
+        headers?: { [key: string]: string };
+        events?: string[];
+    };
+    rabbitmq?: {
+        enabled?: boolean;
+        events?: string[];
+    };
+    sqs?: {
+        enabled?: boolean;
+        events?: string[];
+    };
+}

@@ -3,7 +3,7 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { EvolutionApiConfig, EvolutionInstance } from '@/lib/types';
+import type { EvolutionApiConfig, EvolutionInstance, EvolutionInstanceCreationPayload } from '@/lib/types';
 
 /**
  * Retorna a configuração da Evolution API para um workspace específico.
@@ -76,34 +76,158 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<Omi
 }
 
 /**
- * Cria uma nova instância da Evolution API.
+ * Wrapper genérico para chamadas à Evolution API.
+ */
+async function fetchEvolutionAPI(
+    endpoint: string, 
+    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>,
+    options: RequestInit = {}
+) {
+    if (!config.api_url || !config.api_key) {
+        throw new Error("A configuração da API (URL e Chave) é necessária.");
+    }
+    const baseUrl = config.api_url.endsWith('/') ? config.api_url.slice(0, -1) : config.api_url;
+    const url = `${baseUrl}${endpoint}`;
+    
+    console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
+    if (options.body) {
+       console.log(`[EVO_API_FETCH] Body: ${options.body}`);
+    }
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                ...options.headers,
+                'apikey': config.api_key,
+                'Content-Type': 'application/json',
+            },
+            cache: 'no-store'
+        });
+
+        const responseBodyText = await response.text();
+        console.log(`[EVO_API_FETCH] Resposta recebida: Status ${response.status}, Body: ${responseBodyText}`);
+
+        if (!response.ok) {
+            console.error(`[EVO_API_FETCH] Erro na API Evolution: Status ${response.status}. URL: ${url}. Body: ${responseBodyText}`);
+            throw new Error(`Erro da API Evolution: ${response.statusText} - ${responseBodyText}`);
+        }
+        
+        if (response.headers.get("content-type")?.includes("application/json") && responseBodyText) {
+            return JSON.parse(responseBodyText);
+        }
+        return;
+
+    } catch (error) {
+        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+        throw error;
+    }
+}
+
+
+/**
+ * Cria uma nova instância na API da Evolution e a registra no banco de dados local.
  */
 export async function createEvolutionApiInstance(
     prevState: any,
     formData: FormData
 ): Promise<{ error: string | null }> {
-    const name = formData.get('name') as string;
-    const type = formData.get('type') as EvolutionInstance['type'];
     const config_id = formData.get('config_id') as string;
-
-    if (!name || !type || !config_id) {
-        return { error: 'Missing required fields to create an instance.' };
+    if (!config_id) {
+        return { error: 'ID de configuração não encontrado.' };
     }
 
+    // 1. Obter a configuração global da API
+    const configRes = await db.query('SELECT api_url, api_key FROM evolution_api_configs WHERE id = $1', [config_id]);
+    if (configRes.rows.length === 0) {
+        return { error: 'Configuração global da API não encontrada.' };
+    }
+    const apiConfig = configRes.rows[0];
+
+    // 2. Construir o payload para a API da Evolution
+    const payload: EvolutionInstanceCreationPayload = {
+        instanceName: formData.get('instanceName') as string,
+        token: formData.get('token') as string | undefined,
+        qrcode: formData.get('qrcode') === 'on',
+        number: formData.get('number') as string | undefined,
+        integration: formData.get('type') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-WEB.JS' | undefined,
+
+        // General Settings
+        rejectCall: formData.get('rejectCall') === 'on',
+        msgCall: formData.get('msgCall') as string | undefined,
+        groupsIgnore: formData.get('groupsIgnore') === 'on',
+        alwaysOnline: formData.get('alwaysOnline') === 'on',
+        readMessages: formData.get('readMessages') === 'on',
+        readStatus: formData.get('readStatus') === 'on',
+        syncFullHistory: formData.get('syncFullHistory') === 'on',
+        
+        // Proxy
+        proxyHost: formData.get('proxyHost') as string | undefined,
+        proxyPort: Number(formData.get('proxyPort')) || undefined,
+        proxyUsername: formData.get('proxyUsername') as string | undefined,
+        proxyPassword: formData.get('proxyPassword') as string | undefined,
+
+        // Webhook
+        webhook: {
+            url: formData.get('webhook.url') as string | undefined,
+            byEvents: formData.get('webhook.byEvents') === 'on',
+            base64: formData.get('webhook.base64') === 'on',
+            events: (formData.get('webhook.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
+        },
+        // RabbitMQ
+        rabbitmq: {
+            enabled: formData.get('rabbitmq.enabled') === 'on',
+            events: (formData.get('rabbitmq.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
+        },
+        // SQS
+        sqs: {
+            enabled: formData.get('sqs.enabled') === 'on',
+            events: (formData.get('sqs.events') as string)?.split('\n').filter(e => e.trim()) || undefined,
+        },
+    };
+
+    // Remove chaves undefined ou vazias para um payload limpo
+    Object.keys(payload).forEach(key => {
+        const typedKey = key as keyof typeof payload;
+        if (payload[typedKey] === undefined || payload[typedKey] === '' || payload[typedKey] === null) {
+            delete payload[typedKey];
+        }
+        if (typeof payload[typedKey] === 'object' && payload[typedKey] !== null) {
+             Object.keys(payload[typedKey]!).forEach(subKey => {
+                const typedSubKey = subKey as keyof typeof payload[typeof typedKey];
+                const subObject = payload[typedKey] as any;
+                 if (subObject[typedSubKey] === undefined || subObject[typedSubKey] === '' || subObject[typedSubKey] === null || (Array.isArray(subObject[typedSubKey]) && subObject[typedSubKey].length === 0)) {
+                    delete subObject[typedSubKey];
+                }
+             });
+             if (Object.keys(payload[typedKey]!).length === 0) {
+                 delete payload[typedKey];
+             }
+        }
+    });
+
     try {
+        // 3. Chamar a API da Evolution para criar a instância
+        console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
+        await fetchEvolutionAPI('/instance/create', apiConfig, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        // 4. Se a criação na API for bem-sucedida, salvar no DB local
         await db.query(
             'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
-            [name, type, config_id]
+            [payload.instanceName, (formData.get('type') === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud'), config_id]
         );
-    } catch (error) {
-        console.error('[EVO_ACTION_CREATE_INSTANCE] Error creating instance:', error);
-        return { error: 'Failed to create instance.' };
+
+    } catch (error: any) {
+        console.error('[EVO_ACTION_CREATE_INSTANCE] Erro ao criar instância:', error);
+        return { error: `Falha ao criar instância na API Evolution: ${error.message}` };
     }
 
     revalidatePath('/integrations/evolution-api');
     return { error: null };
 }
-
 
 /**
  * Deleta uma instância da Evolution API.
@@ -124,50 +248,6 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     return { error: null };
 }
 
-async function fetchEvolutionAPI(
-    endpoint: string, 
-    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>,
-    options: RequestInit = {}
-) {
-    if (!config.api_url || !config.api_key) {
-        throw new Error("A configuração da API (URL e Chave) é necessária.");
-    }
-    // Garante que a URL não termine com / para evitar barras duplas
-    const baseUrl = config.api_url.endsWith('/') ? config.api_url.slice(0, -1) : config.api_url;
-    const url = `${baseUrl}${endpoint}`;
-    
-    console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
-
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                ...options.headers,
-                'apikey': config.api_key,
-                'Content-Type': 'application/json',
-            },
-            cache: 'no-store' // Impede o cache da requisição
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            console.error(`[EVO_API_FETCH] Erro na API Evolution: Status ${response.status}. URL: ${url}. Body: ${errorBody}`);
-            throw new Error(`Erro da API Evolution: ${response.statusText}`);
-        }
-        
-        // Retorna o corpo da resposta apenas se houver
-        if (response.headers.get("content-type")?.includes("application/json")) {
-            return response.json();
-        }
-        return; // Retorna undefined para respostas sem corpo JSON
-
-    } catch (error) {
-        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
-        throw error;
-    }
-}
-
-
 export async function checkInstanceStatus(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
         const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, config);
@@ -187,7 +267,7 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
 
 export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'POST' });
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
         // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
@@ -220,7 +300,7 @@ export async function testEvolutionApiConnection(
     try {
         // Tenta acessar um endpoint simples que não requer um nome de instância, como o de 'manager'
         // Se a API estiver no ar e a chave for válida, isso deve funcionar.
-        await fetchEvolutionAPI('/manager/restart', { ...config, method: 'POST' });
+        await fetchEvolutionAPI('/manager/restart', { ...config }, { method: 'POST' });
         // Nota: Não queremos realmente reiniciar, apenas testar o endpoint.
         // A API da Evolution V2 não tem um endpoint de "ping" simples, então usamos um que requer autenticação.
         // Um restart falha se não estiver no modo manager, mas ainda valida a conexão.

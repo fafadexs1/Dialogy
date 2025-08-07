@@ -7,7 +7,7 @@ import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, CheckCircle, XCircle, AlertCircle, Rabbit, Webhook, ListTree, Unplug } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +27,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { 
@@ -42,6 +43,9 @@ import {
 } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
@@ -69,26 +73,157 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
     return (
         <form action={formAction}>
             <input type="hidden" name="config_id" value={configId || ''} />
-            <div className="space-y-4 py-2 pb-4">
-                 <div className="space-y-2">
-                    <Label htmlFor="instance-name">Nome da Instância</Label>
-                    <Input id="instance-name" name="name" placeholder="Ex: Vendas Filial RJ" required/>
-                    <p className="text-xs text-muted-foreground">Um nome único para identificar esta conexão. Ex: "Setor de Vendas".</p>
-                </div>
-                 <div className="space-y-2">
-                    <Label htmlFor="instance-type">Tipo de Conexão</Label>
-                    <Select name="type" defaultValue='baileys'>
-                        <SelectTrigger id="instance-type">
-                            <SelectValue placeholder="Selecione o tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="baileys">Baileys (QR Code)</SelectItem>
-                            <SelectItem value="wa_cloud">WhatsApp Cloud API</SelectItem>
-                        </SelectContent>
-                    </Select>
-                     <p className="text-xs text-muted-foreground">Para a Cloud API, a instância deve ser criada no painel da Meta.</p>
-                </div>
-                {state?.error && <p className="text-sm text-red-500">{state.error}</p>}
+            <div className="space-y-4 py-2 pb-4 max-h-[70vh] overflow-y-auto px-1">
+                <Accordion type="multiple" defaultValue={['general']} className="w-full">
+                    {/* General Settings */}
+                    <AccordionItem value="general">
+                        <AccordionTrigger>Configurações Gerais</AccordionTrigger>
+                        <AccordionContent className="space-y-4 p-1">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="instanceName">Nome da Instância</Label>
+                                    <Input id="instanceName" name="instanceName" placeholder="Ex: Vendas Filial RJ" required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="type">Tipo de Conexão</Label>
+                                    <Select name="integration" defaultValue='WHATSAPP-BAILEYS'>
+                                        <SelectTrigger id="type">
+                                            <SelectValue placeholder="Selecione o tipo" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="WHATSAPP-BAILEYS">Baileys (QR Code)</SelectItem>
+                                            <SelectItem value="WHATSAPP-WEB.JS">WhatsApp Web JS (QR Code)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="token">Token Secreto</Label>
+                                    <Input id="token" name="token" placeholder="Deixe em branco para gerar um" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="number">Número do WhatsApp (Opcional)</Label>
+                                    <Input id="number" name="number" placeholder="5511999998888" />
+                                </div>
+                            </div>
+                             <div className="space-y-2">
+                                <Label htmlFor="msgCall">Mensagem ao Rejeitar Chamada</Label>
+                                <Input id="msgCall" name="msgCall" placeholder="No momento não podemos atender ligações." />
+                            </div>
+                            <div className="flex flex-wrap gap-x-6 gap-y-4 pt-2">
+                                <div className="flex items-center space-x-2">
+                                    <Switch id="qrcode" name="qrcode" defaultChecked/>
+                                    <Label htmlFor="qrcode">Gerar QR Code no Console</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Switch id="rejectCall" name="rejectCall" />
+                                    <Label htmlFor="rejectCall">Rejeitar Chamadas</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Switch id="groupsIgnore" name="groupsIgnore" />
+                                    <Label htmlFor="groupsIgnore">Ignorar Grupos</Label>
+                                </div>
+                                 <div className="flex items-center space-x-2">
+                                    <Switch id="alwaysOnline" name="alwaysOnline" />
+                                    <Label htmlFor="alwaysOnline">Sempre Online</Label>
+                                </div>
+                                 <div className="flex items-center space-x-2">
+                                    <Switch id="readMessages" name="readMessages" />
+                                    <Label htmlFor="readMessages">Marcar Mensagens como Lidas</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Switch id="readStatus" name="readStatus" />
+                                    <Label htmlFor="readStatus">Marcar Status como Visto</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Switch id="syncFullHistory" name="syncFullHistory" />
+                                    <Label htmlFor="syncFullHistory">Sincronizar Histórico Completo</Label>
+                                </div>
+                            </div>
+                        </AccordionContent>
+                    </AccordionItem>
+                    
+                    {/* Webhook Settings */}
+                    <AccordionItem value="webhook">
+                        <AccordionTrigger className="flex items-center gap-2"><Webhook className="h-4 w-4"/> Configurações de Webhook</AccordionTrigger>
+                        <AccordionContent className="space-y-4 p-1">
+                            <div className="space-y-2">
+                                <Label htmlFor="webhook.url">URL do Webhook</Label>
+                                <Input id="webhook.url" name="webhook.url" placeholder="https://seu-servidor.com/webhook" />
+                            </div>
+                             <div className="space-y-2">
+                                <Label htmlFor="webhook.events">Eventos do Webhook (um por linha)</Label>
+                                <Textarea id="webhook.events" name="webhook.events" placeholder="APPLICATION_STARTUP&#x0a;QRCODE_UPDATED&#x0a;MESSAGES_SET" rows={4} />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch id="webhook.byEvents" name="webhook.byEvents" />
+                                <Label htmlFor="webhook.byEvents">Enviar eventos individuais (em vez de um array)</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch id="webhook.base64" name="webhook.base64" />
+                                <Label htmlFor="webhook.base64">Enviar mídia em Base64 no webhook</Label>
+                            </div>
+                        </AccordionContent>
+                    </AccordionItem>
+
+                     {/* Queues Settings */}
+                    <AccordionItem value="queues">
+                        <AccordionTrigger className="flex items-center gap-2"><ListTree className="h-4 w-4"/> Filas (RabbitMQ / SQS)</AccordionTrigger>
+                        <AccordionContent className="space-y-6 p-1">
+                           <div className="p-4 border rounded-lg">
+                               <div className="flex items-center justify-between mb-2">
+                                   <Label className="font-semibold flex items-center gap-2"><Rabbit className="h-4 w-4" /> RabbitMQ</Label>
+                                   <Switch id="rabbitmq.enabled" name="rabbitmq.enabled" />
+                               </div>
+                               <Label htmlFor="rabbitmq.events" className="text-xs text-muted-foreground">Eventos (um por linha)</Label>
+                               <Textarea id="rabbitmq.events" name="rabbitmq.events" placeholder="MESSAGES_UPSERT&#x0a;CHATS_UPDATE" rows={3} />
+                           </div>
+                           <div className="p-4 border rounded-lg">
+                               <div className="flex items-center justify-between mb-2">
+                                   <Label className="font-semibold">Amazon SQS</Label>
+                                   <Switch id="sqs.enabled" name="sqs.enabled" />
+                               </div>
+                               <Label htmlFor="sqs.events" className="text-xs text-muted-foreground">Eventos (um por linha)</Label>
+                               <Textarea id="sqs.events" name="sqs.events" placeholder="CONNECTION_UPDATE" rows={3} />
+                           </div>
+                        </AccordionContent>
+                    </AccordionItem>
+
+                     {/* Proxy Settings */}
+                    <AccordionItem value="proxy">
+                        <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
+                        <AccordionContent className="space-y-4 p-1">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="proxyHost">Host</Label>
+                                    <Input id="proxyHost" name="proxyHost" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="proxyPort">Porta</Label>
+                                    <Input id="proxyPort" name="proxyPort" type="number" />
+                                </div>
+                            </div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="proxyUsername">Usuário</Label>
+                                    <Input id="proxyUsername" name="proxyUsername" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="proxyPassword">Senha</Label>
+                                    <Input id="proxyPassword" name="proxyPassword" type="password" />
+                                </div>
+                            </div>
+                        </AccordionContent>
+                    </AccordionItem>
+                </Accordion>
+                {state?.error && (
+                  <Alert variant="destructive" className="mt-4">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Erro ao Criar</AlertTitle>
+                      <AlertDescription>{state.error}</AlertDescription>
+                  </Alert>
+                )}
             </div>
              <DialogFooter>
                 <DialogTrigger asChild>
@@ -248,6 +383,8 @@ export default function EvolutionApiPage() {
             if (instance.status === 'connected') {
                 result = await disconnectInstance(instance.name, config);
             } else {
+                // Para conectar, precisamos da API da Evolution
+                // Por enquanto, vamos simular a busca do QR
                 result = await connectInstance(instance.name, config);
             }
 
@@ -341,11 +478,11 @@ export default function EvolutionApiPage() {
                                         Adicionar Instância
                                     </Button>
                                 </DialogTrigger>
-                                <DialogContent>
+                                <DialogContent className="max-w-2xl">
                                     <DialogHeader>
                                         <DialogTitle>Criar Nova Instância</DialogTitle>
                                         <DialogDescription>
-                                            Configure uma nova instância para conectar um número de WhatsApp.
+                                            Configure uma nova instância para conectar um número de WhatsApp com todas as opções.
                                         </DialogDescription>
                                     </DialogHeader>
                                     <AddInstanceForm 
@@ -420,15 +557,11 @@ export default function EvolutionApiPage() {
                                                         {instance.qrCode ? (
                                                             <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
                                                         ) : (
-                                                            <QrCode className="h-24 w-24 text-muted-foreground/50"/>
+                                                            <div className="flex flex-col items-center justify-center text-muted-foreground">
+                                                                <Loader2 className="h-12 w-12 animate-spin"/>
+                                                                <p className="mt-2 text-sm">Gerando QR Code...</p>
+                                                            </div>
                                                         )}
-                                                        <p className="mt-4 text-sm text-muted-foreground">Leia o QR Code com seu celular.</p>
-                                                        <p className="text-xs text-muted-foreground">Clique em "Conectar" para gerar um novo.</p>
-                                                    </div>
-                                                )}
-                                                {instance.type === 'wa_cloud' && (
-                                                    <div className="p-4 border rounded-lg bg-secondary/50 text-center">
-                                                        <p className="text-sm text-muted-foreground">A conexão com a API Cloud é direta. Use os botões abaixo para gerenciar.</p>
                                                     </div>
                                                 )}
                                             </CardContent>
@@ -441,7 +574,7 @@ export default function EvolutionApiPage() {
                                                 ) : (
                                                     <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
                                                         {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
-                                                        {instance.type === 'baileys' ? 'Conectar e Gerar QR Code' : 'Conectar'}
+                                                        {instance.type === 'baileys' ? 'Conectar' : 'Conectar'}
                                                     </Button>
                                                 )}
                                             </CardFooter>
@@ -462,5 +595,3 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
-
-    
