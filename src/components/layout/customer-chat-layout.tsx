@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, Message, User, OnlineAgent } from '@/lib/types';
+import { type Chat, Message, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { Skeleton } from '../ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
@@ -29,11 +29,8 @@ const fetchProfiles = async (supabase: any): Promise<User[]> => {
     }));
 }
 
-interface CustomerChatLayoutProps {
-    onlineAgents: OnlineAgent[];
-}
 
-export default function CustomerChatLayout({ onlineAgents }: CustomerChatLayoutProps) {
+export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -196,7 +193,6 @@ export default function CustomerChatLayout({ onlineAgents }: CustomerChatLayoutP
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={setSelectedChat}
-        onlineAgents={onlineAgents}
       />
       <ChatPanel key={selectedChat?.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
       <ContactPanel contact={selectedChat?.contact || null} />

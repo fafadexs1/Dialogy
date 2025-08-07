@@ -2,6 +2,7 @@
 
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
+import { PresenceProvider } from '@/hooks/use-online-status';
 
 // export const metadata: Metadata = {
 //   title: 'Dialogy',
@@ -22,7 +23,9 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased">
-        {children}
+        <PresenceProvider>
+          {children}
+        </PresenceProvider>
         <Toaster />
       </body>
     </html>

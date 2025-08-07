@@ -12,12 +12,12 @@ import { type Chat, type OnlineAgent } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { usePresence } from '@/hooks/use-online-status';
 
 interface ChatListProps {
   chats: Chat[];
   selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
-  onlineAgents: OnlineAgent[];
 }
 
 const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
@@ -47,7 +47,8 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, onlineAgents }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
+  const onlineAgents = usePresence();
 
   const renderChatList = (chatList: Chat[]) => (
     <div className="space-y-1 p-2">
