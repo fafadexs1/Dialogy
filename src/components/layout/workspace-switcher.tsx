@@ -3,8 +3,6 @@
 'use client';
 
 import * as React from 'react';
-import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import {
   CheckIcon,
   PlusCircledIcon,
@@ -27,7 +25,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { User } from '@/lib/types';
-import { Tooltip, TooltipContent, TooltipProvider } from '../ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import Link from 'next/link';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
