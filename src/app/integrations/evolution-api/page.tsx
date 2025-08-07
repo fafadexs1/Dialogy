@@ -1,15 +1,15 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, EvolutionInstance } from '@/lib/types';
+import type { User, EvolutionInstance, EvolutionApiConfig } from '@/lib/types';
 import { agents } from '@/lib/mock-data';
 import { createClient } from '@/lib/supabase/client';
 import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings } from 'lucide-react';
+import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -30,13 +30,8 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Separator } from '@/components/ui/separator';
+import { useAuth } from '@/hooks/use-auth';
 
-const mockInstances: EvolutionInstance[] = [
-    { id: 'inst-1', name: 'Atendimento Matriz', status: 'connected', type: 'baileys'},
-    { id: 'inst-2', name: 'Vendas SP', status: 'disconnected', type: 'wa_cloud'},
-    { id: 'inst-3', name: 'Suporte Beta', status: 'pending', type: 'baileys'},
-]
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
@@ -51,19 +46,13 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     )
 }
 
-function AddInstanceForm({ onAddInstance }: { onAddInstance: (instance: Omit<EvolutionInstance, 'id' | 'status'>) => void }) {
+function AddInstanceForm({ onAddInstance, isAdding }: { onAddInstance: (instance: Pick<EvolutionInstance, 'name' | 'type'>) => void, isAdding: boolean }) {
     const [name, setName] = useState('');
     const [type, setType] = useState<EvolutionInstance['type']>('baileys');
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name) {
-            alert('Por favor, preencha o nome da instância.');
-            return;
-        }
         onAddInstance({ name, type });
-        setName('');
-        setType('baileys');
     };
 
     return (
@@ -90,9 +79,12 @@ function AddInstanceForm({ onAddInstance }: { onAddInstance: (instance: Omit<Evo
             </div>
              <DialogFooter>
                 <DialogTrigger asChild>
-                    <Button type="button" variant="outline">Cancelar</Button>
+                    <Button type="button" variant="outline" disabled={isAdding}>Cancelar</Button>
                 </DialogTrigger>
-                <Button type="submit">Criar Instância</Button>
+                <Button type="submit" disabled={isAdding}>
+                    {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isAdding ? 'Criando...' : 'Criar Instância'}
+                </Button>
             </DialogFooter>
         </form>
     );
@@ -100,33 +92,91 @@ function AddInstanceForm({ onAddInstance }: { onAddInstance: (instance: Omit<Evo
 
 
 export default function EvolutionApiPage() {
-    const [user, setUser] = React.useState<User | null>(null);
-    const [instances, setInstances] = useState<EvolutionInstance[]>(mockInstances);
+    const user = useAuth();
+    const [instances, setInstances] = useState<EvolutionInstance[]>([]);
+    const [config, setConfig] = useState<EvolutionApiConfig | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isAdding, setIsAdding] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [globalApiUrl, setGlobalApiUrl] = useState('http://localhost:8080');
-    const [globalApiKey, setGlobalApiKey] = useState('');
-
+    
+    // Local state for inputs to avoid re-rendering on every keystroke
+    const [apiUrlInput, setApiUrlInput] = useState('');
+    const [apiKeyInput, setApiKeyInput] = useState('');
+    
     const supabase = createClient();
     const { toast } = useToast();
 
-    React.useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                 const appUser = agents.find(a => a.email === authUser.email) || {
-                    ...agents[0],
-                    name: authUser.user_metadata.full_name || authUser.email,
-                    email: authUser.email,
-                    id: authUser.id
-                };
-                setUser(appUser);
-            } else {
-                redirect('/login');
-            }
-        };
-        fetchUser();
-    }, [supabase.auth]);
+    useEffect(() => {
+        if (!user) return;
 
+        const fetchData = async () => {
+            setIsLoading(true);
+
+            // Fetch config
+            const { data: configData, error: configError } = await supabase
+                .from('evolution_api_configs')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
+            
+            if (configError && configError.code !== 'PGRST116') { // Ignore 'exact one row' error
+                console.error("Error fetching config:", configError);
+                toast({ title: 'Erro ao buscar configurações', variant: 'destructive'});
+            } else {
+                setConfig(configData);
+                setApiUrlInput(configData?.api_url || '');
+                setApiKeyInput(configData?.api_key || '');
+
+                // Fetch instances if config exists
+                if (configData) {
+                    const { data: instancesData, error: instancesError } = await supabase
+                        .from('evolution_api_instances')
+                        .select('*')
+                        .eq('config_id', configData.id);
+
+                    if (instancesError) {
+                        console.error("Error fetching instances:", instancesError);
+                        toast({ title: 'Erro ao buscar instâncias', variant: 'destructive'});
+                    } else {
+                         // Add a simulated status for the UI, as it's not in the DB
+                        const instancesWithStatus = instancesData.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance);
+                        setInstances(instancesWithStatus);
+                    }
+                }
+            }
+
+            setIsLoading(false);
+        };
+
+        fetchData();
+    }, [user, supabase, toast]);
+
+    const handleSaveConfig = async () => {
+        if (!user) return;
+        setIsSaving(true);
+        
+        // Upsert logic: update if config exists, insert if it doesn't
+        const { data, error } = await supabase
+            .from('evolution_api_configs')
+            .upsert({
+                id: config?.id, // Existing ID or undefined for insert
+                user_id: user.id,
+                api_url: apiUrlInput,
+                api_key: apiKeyInput,
+            }, { onConflict: 'user_id' })
+            .select()
+            .single();
+
+        if (error) {
+            toast({ title: 'Erro ao salvar configurações', description: error.message, variant: 'destructive'});
+        } else {
+            setConfig(data);
+            toast({ title: 'Configurações salvas com sucesso!' });
+        }
+        setIsSaving(false);
+    }
+    
     const getStatusInfo = (status: EvolutionInstance['status']) => {
         switch (status) {
             case 'connected':
@@ -138,35 +188,49 @@ export default function EvolutionApiPage() {
         }
     }
     
-    const handleAddInstance = (newInstanceData: Omit<EvolutionInstance, 'id' | 'status'>) => {
-        const newInstance: EvolutionInstance = {
-            id: `inst-${Date.now()}`,
-            ...newInstanceData,
-            status: 'disconnected',
-        };
-        setInstances([...instances, newInstance]);
-        setIsAddModalOpen(false);
-        toast({
-            title: 'Sucesso!',
-            description: `A instância "${newInstance.name}" foi criada.`
-        })
+    const handleAddInstance = async (newInstanceData: Pick<EvolutionInstance, 'name' | 'type'>) => {
+        if (!config) {
+            toast({ title: 'Salve a configuração global primeiro', variant: 'destructive'});
+            return;
+        }
+        setIsAdding(true);
+
+        const { data, error } = await supabase
+            .from('evolution_api_instances')
+            .insert({ ...newInstanceData, config_id: config.id })
+            .select()
+            .single();
+
+        if (error) {
+            toast({ title: 'Erro ao criar instância', description: error.message, variant: 'destructive'});
+        } else {
+            const newInstance: EvolutionInstance = {...data, status: 'disconnected'};
+            setInstances([...instances, newInstance]);
+            setIsAddModalOpen(false);
+            toast({ title: 'Sucesso!', description: `A instância "${newInstance.name}" foi criada.` });
+        }
+        setIsAdding(false);
     };
 
-    const handleRemoveInstance = (instanceId: string) => {
-        setInstances(instances.filter(inst => inst.id !== instanceId));
-        toast({
-            title: 'Instância Removida',
-            description: 'A instância foi removida com sucesso.',
-            variant: 'destructive'
-        })
+    const handleRemoveInstance = async (instanceId: string) => {
+        const { error } = await supabase.from('evolution_api_instances').delete().eq('id', instanceId);
+
+        if (error) {
+             toast({ title: 'Erro ao remover instância', description: error.message, variant: 'destructive' });
+        } else {
+            setInstances(instances.filter(inst => inst.id !== instanceId));
+            toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
+        }
     }
 
     const handleToggleConnection = (instanceId: string) => {
         setInstances(instances.map(inst => {
             if (inst.id === instanceId) {
                 if (inst.status === 'disconnected') {
+                    // Here you would call the Evolution API to connect
                     return { ...inst, status: inst.type === 'baileys' ? 'pending' : 'connected' };
                 } else {
+                    // Here you would call the Evolution API to disconnect
                      return { ...inst, status: 'disconnected' };
                 }
             }
@@ -175,8 +239,14 @@ export default function EvolutionApiPage() {
     };
 
 
-    if (!user) {
-        return null; // Or a loading spinner
+    if (!user || isLoading) {
+        return (
+             <MainLayout user={user || agents[0]}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainLayout>
+        )
     }
 
     return (
@@ -195,15 +265,18 @@ export default function EvolutionApiPage() {
                        <CardContent className="grid md:grid-cols-2 gap-6">
                            <div className="space-y-2">
                                <Label htmlFor="global-api-url">URL da API</Label>
-                               <Input id="global-api-url" placeholder="Ex: http://localhost:8080" value={globalApiUrl} onChange={e => setGlobalApiUrl(e.target.value)} />
+                               <Input id="global-api-url" placeholder="Ex: http://localhost:8080" value={apiUrlInput} onChange={e => setApiUrlInput(e.target.value)} />
                            </div>
                             <div className="space-y-2">
                                <Label htmlFor="global-api-key">Chave da API (Global API Key)</Label>
-                               <Input id="global-api-key" type="password" value={globalApiKey} onChange={e => setGlobalApiKey(e.target.value)} placeholder="••••••••••••••••••••••••••" />
+                               <Input id="global-api-key" type="password" value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} placeholder="••••••••••••••••••••••••••" />
                            </div>
                        </CardContent>
                        <CardFooter>
-                           <Button>Salvar Configurações</Button>
+                           <Button onClick={handleSaveConfig} disabled={isSaving}>
+                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isSaving ? 'Salvando...' : 'Salvar Configurações'}
+                           </Button>
                        </CardFooter>
                    </Card>
 
@@ -224,7 +297,7 @@ export default function EvolutionApiPage() {
                                             Configure uma nova instância para conectar um número de WhatsApp.
                                         </DialogDescription>
                                     </DialogHeader>
-                                    <AddInstanceForm onAddInstance={handleAddInstance} />
+                                    <AddInstanceForm onAddInstance={handleAddInstance} isAdding={isAdding}/>
                                 </DialogContent>
                             </Dialog>
                         </div>

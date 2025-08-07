@@ -144,4 +144,12 @@ export interface EvolutionInstance {
     name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
+    config_id?: string;
+}
+
+export interface EvolutionApiConfig {
+    id: string;
+    user_id: string;
+    api_url: string | null;
+    api_key: string | null;
 }
