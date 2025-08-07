@@ -164,8 +164,6 @@ export default async function Home() {
     )
   }
 
-  revalidatePath('/', 'layout');
-
   if (!user.activeWorkspaceId) {
     console.log("[PAGE_SERVER] Usuário não possui workspace ativo. Renderizando onboarding.");
     return (
