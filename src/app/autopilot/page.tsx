@@ -20,7 +20,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { BarChart, ResponsiveContainer, XAxis, YAxis, Bar } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/use-auth';
