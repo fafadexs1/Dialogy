@@ -46,17 +46,17 @@ export function useAuth(): AppUser | null {
                 setAppUser(null);
                 return;
             }
-
-            const workspaces: Workspace[] = userWorkspaces.map((uw: any) => ({
+            
+            const workspaces: Workspace[] = userWorkspaces?.map((uw: any) => ({
                 id: uw.workspaces.id,
                 name: uw.workspaces.name,
-                avatar: uw.workspaces.avatar_url,
-            }));
+                avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
+            })) || [];
 
             // Let's assume the first workspace is the active one for now.
             // A real app would have a mechanism to select and persist the active workspace.
             const activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
-
+            
             setAppUser({
                 id: authUser.id,
                 name: authUser.user_metadata.full_name || authUser.email || 'Usuário',
