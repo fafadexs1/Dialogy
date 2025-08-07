@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
@@ -9,41 +9,6 @@ import { type Chat, Message, User, Contact, MessageSender } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { Skeleton } from '../ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
-
-
-// Helper function to fetch all users (agents) in a workspace
-const fetchAgentsInWorkspace = async (supabase: any, workspaceId: string): Promise<User[]> => {
-    const { data, error } = await supabase
-        .from('user_workspaces')
-        .select('users:user_id(id, full_name, avatar_url, email)')
-        .eq('workspace_id', workspaceId);
-
-    if (error) {
-        console.error("Error fetching agents:", error);
-        return [];
-    }
-
-    return data.map((item: any) => ({
-        id: item.users.id,
-        name: item.users.full_name,
-        avatar: item.users.avatar_url || `https://placehold.co/40x40.png?text=${(item.users.full_name || 'U').charAt(0)}`,
-        email: item.users.email,
-    }));
-};
-
-// Helper function to fetch all contacts in a workspace
-const fetchContactsInWorkspace = async (supabase: any, workspaceId: string): Promise<Contact[]> => {
-    const { data, error } = await supabase.from('contacts').select('*').eq('workspace_id', workspaceId);
-    if (error) {
-        console.error("Error fetching contacts:", error);
-        return [];
-    }
-    return data.map((contact: any) => ({
-        ...contact,
-        avatar: contact.avatar_url || `https://placehold.co/40x40.png?text=${(contact.name || 'C').charAt(0)}`,
-    }));
-};
-
 
 export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -57,31 +22,64 @@ export default function CustomerChatLayout() {
   const supabase = createClient();
   const currentUser = useAuth();
 
-  // Utility to find a sender by ID, checking both agents and contacts
-  const getSenderById = (id: string): MessageSender => {
+  const getSenderById = useCallback((id: string): MessageSender => {
     const agent = agents.find(u => u.id === id);
     if (agent) return agent;
+    
     const contact = contacts.find(c => c.id === id);
-    return contact || { 
+    if (contact) return contact;
+
+    return { 
       id: 'unknown', 
-      name: 'Unknown', 
-      avatar: 'https://placehold.co/40x40.png' 
+      name: 'Desconhecido', 
+      avatar: 'https://placehold.co/40x40.png?text=?' 
     };
-  }
+  }, [agents, contacts]);
+
 
   useEffect(() => {
     if (!currentUser || !currentUser.activeWorkspaceId) return;
 
     const initializeData = async () => {
         setLoading(true);
-        const workspaceId = currentUser.activeWorkspaceId!;
+        const workspaceId = currentUser.activeWorkspaceId;
         
-        // Fetch agents and contacts in parallel
-        const [fetchedAgents, fetchedContacts] = await Promise.all([
-            fetchAgentsInWorkspace(supabase, workspaceId),
-            fetchContactsInWorkspace(supabase, workspaceId)
-        ]);
+        // Helper function to fetch all users (agents) in a workspace
+        const { data: agentsData, error: agentsError } = await supabase
+            .from('user_workspaces')
+            .select('users:user_id(id, full_name, avatar_url, email)')
+            .eq('workspace_id', workspaceId);
+
+        if (agentsError) {
+            console.error("Error fetching agents:", agentsError);
+            setLoading(false);
+            return;
+        }
+
+        const fetchedAgents: User[] = agentsData.map((item: any) => ({
+            id: item.users.id,
+            name: item.users.full_name,
+            avatar: item.users.avatar_url || `https://placehold.co/40x40.png?text=${(item.users.full_name || 'U').charAt(0)}`,
+            email: item.users.email,
+        }));
         setAgents(fetchedAgents);
+
+        // Helper function to fetch all contacts in a workspace
+        const { data: contactsData, error: contactsError } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('workspace_id', workspaceId);
+
+        if (contactsError) {
+            console.error("Error fetching contacts:", contactsError);
+            setLoading(false);
+            return;
+        }
+
+         const fetchedContacts: Contact[] = contactsData.map((contact: any) => ({
+            ...contact,
+            avatar: contact.avatar_url || `https://placehold.co/40x40.png?text=${(contact.name || 'C').charAt(0)}`,
+        }));
         setContacts(fetchedContacts);
 
         // Fetch chats for the active workspace
@@ -89,7 +87,6 @@ export default function CustomerChatLayout() {
             .from('chats')
             .select('*')
             .eq('workspace_id', workspaceId)
-            // .or(`agent_id.eq.${currentUser.id},status.eq.gerais`) // This logic might need review
             .order('created_at', { ascending: false });
 
         if (chatsError) {
@@ -103,7 +100,7 @@ export default function CustomerChatLayout() {
             const agent = fetchedAgents.find(a => a.id === chat.agent_id);
             return {
                 id: chat.id,
-                contact: contact || { id: 'unknown', name: 'Unknown Contact', avatar: '', workspace_id: '' },
+                contact: contact || { id: 'unknown-contact', name: 'Contato Desconhecido', avatar: '', workspace_id: workspaceId },
                 agent: agent,
                 messages: [], 
                 status: chat.status as Chat['status'],
@@ -142,8 +139,7 @@ export default function CustomerChatLayout() {
         
         const formattedMessages: Message[] = data.map(msg => ({
             id: msg.id,
-            // The sender could be an agent (user) or a contact
-            sender: getSenderById(msg.sender_id) || getSenderById(selectedChat.contact.id), // Fallback to chat contact
+            sender: getSenderById(msg.sender_id),
             content: msg.content,
             timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             chat_id: msg.chat_id,
@@ -153,7 +149,7 @@ export default function CustomerChatLayout() {
     };
 
     fetchMessages();
-  }, [selectedChat, supabase, agents, contacts]);
+  }, [selectedChat, supabase, agents, contacts, getSenderById]);
 
   useEffect(() => {
     if (!currentUser?.activeWorkspaceId) return;
@@ -169,15 +165,13 @@ export default function CustomerChatLayout() {
           if (selectedChat && newMessagePayload.chat_id === selectedChat.id) {
             const newMessage: Message = {
               id: newMessagePayload.id,
-              sender: getSenderById(newMessagePayload.sender_id) || getSenderById(selectedChat.contact.id),
+              sender: getSenderById(newMessagePayload.sender_id),
               content: newMessagePayload.content,
               timestamp: new Date(newMessagePayload.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
               chat_id: newMessagePayload.chat_id,
               workspace_id: newMessagePayload.workspace_id,
             };
             setMessages((prevMessages) => [...prevMessages, newMessage]);
-          } else {
-            // Future: Handle notifications for other chats
           }
         }
       )
@@ -186,7 +180,7 @@ export default function CustomerChatLayout() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, selectedChat?.id, agents, contacts, currentUser?.activeWorkspaceId]);
+  }, [supabase, selectedChat, getSenderById, currentUser?.activeWorkspaceId]);
 
 
   if (loading || !currentUser) {

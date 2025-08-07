@@ -243,11 +243,9 @@ return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="
 
     if (!user || isLoading) {
         return (
-             <MainLayout user={user!}>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         )
     }
 

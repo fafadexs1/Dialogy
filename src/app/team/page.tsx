@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState } from 'react';
@@ -9,13 +10,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createClient } from '@/lib/supabase/client';
-import { redirect } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
 
 const daysOfWeek = [
   { id: 'seg', label: 'Segunda-feira' },
@@ -114,7 +114,7 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                   <div className="flex items-center gap-3">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={member.avatar} alt={member.name} />
-                      <AvatarFallback>{member.firstName.charAt(0)}</AvatarFallback>
+                      <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <span className="font-medium">{member.name}</span>
                   </div>
@@ -242,30 +242,11 @@ function CreateTeamContent({ onAddTeam, onCancel }: { onAddTeam: (name: string, 
 
 
 export default function TeamPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useAuth();
     const [teams, setTeams] = useState<Team[]>(initialTeams);
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(initialTeams[0]?.id || null);
     const [isCreating, setIsCreating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    const supabase = createClient();
-
-    React.useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                 const appUser = mockAgents.find(a => a.email === authUser.email) || {
-                    ...mockAgents[0],
-                    name: authUser.user_metadata.full_name || authUser.email,
-                    email: authUser.email,
-                    id: authUser.id
-                };
-                setUser(appUser);
-            } else {
-                redirect('/login');
-            }
-        };
-        fetchUser();
-    }, [supabase.auth]);
 
     const handleTeamUpdate = (teamId: string, field: keyof Team, value: any) => {
         setTeams(teams.map(team => team.id === teamId ? { ...team, [field]: value } : team));
@@ -305,7 +286,11 @@ export default function TeamPage() {
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
 
     if (!user) {
-        return null; // or a loading spinner
+        return (
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
+        );
     }
 
   return (

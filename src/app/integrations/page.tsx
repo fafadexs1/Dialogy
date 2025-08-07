@@ -1,40 +1,25 @@
+
+
 'use client';
 
 import React from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, Integration } from '@/lib/types';
-import { agents, integrations as mockIntegrations } from '@/lib/mock-data';
-import { createClient } from '@/lib/supabase/client';
-import { redirect } from 'next/navigation';
+import { integrations as mockIntegrations } from '@/lib/mock-data';
 import { IntegrationCard } from '@/components/integrations/integration-card';
-import Link from 'next/link';
-
+import { useAuth } from '@/hooks/use-auth';
+import { Loader2 } from 'lucide-react';
 
 export default function IntegrationsPage() {
-    const [user, setUser] = React.useState<User | null>(null);
+    const user = useAuth();
     const [integrations] = React.useState<Integration[]>(mockIntegrations);
-    const supabase = createClient();
-
-    React.useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                 const appUser = agents.find(a => a.email === authUser.email) || {
-                    ...agents[0],
-                    name: authUser.user_metadata.full_name || authUser.email,
-                    email: authUser.email,
-                    id: authUser.id
-                };
-                setUser(appUser);
-            } else {
-                redirect('/login');
-            }
-        };
-        fetchUser();
-    }, [supabase.auth]);
 
     if (!user) {
-        return null; // Or a loading spinner
+         return (
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
+        )
     }
 
     return (

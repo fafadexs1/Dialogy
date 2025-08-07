@@ -5,13 +5,11 @@
 import React, { useState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, NexusFlowInstance } from '@/lib/types';
-import { agents, nexusFlowInstances as mockInstances } from '@/lib/mock-data';
-import { createClient } from '@/lib/supabase/client';
-import { redirect } from 'next/navigation';
+import { nexusFlowInstances as mockInstances } from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,10 +20,10 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
+import { useAuth } from '@/hooks/use-auth';
 
 
 type ModelInfo = {
@@ -71,40 +69,24 @@ const chartConfig = {
 
 
 export default function AutopilotPage() {
-    const [user, setUser] = React.useState<User | null>(null);
+    const user = useAuth();
     const [instances, setInstances] = useState<NexusFlowInstance[]>(mockInstances);
     const [aiModel, setAiModel] = useState<string>('googleai/gemini-2.0-flash');
-    const supabase = createClient();
 
     // These would come from a billing service or usage metrics
     const estimatedMonthlyCost = 12.50;
     const currentMonthCost = 4.75;
     const executionsThisMonth = 950;
     const tokensThisMonth = 254000;
-
-
-    React.useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                 const appUser = agents.find(a => a.email === authUser.email) || {
-                    ...agents[0],
-                    name: authUser.user_metadata.full_name || authUser.email,
-                    email: authUser.email,
-                    id: authUser.id
-                };
-                setUser(appUser);
-            } else {
-                redirect('/login');
-            }
-        };
-        fetchUser();
-    }, [supabase.auth]);
     
     const selectedModelInfo = modelInfo[aiModel];
 
     if (!user) {
-        return null; // Or a loading spinner
+        return (
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
+        )
     }
 
     return (

@@ -76,12 +76,12 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
   }, [messages]);
 
   const chatHistoryForAI = messages.map(m => `${m.sender.name}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender.id !== chat?.agent?.id).pop();
+  const lastCustomerMessage = messages.filter(m => m.sender.id !== currentUser?.id).pop();
 
 
   React.useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender.id !== chat.agent?.id) {
+        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender.id !== currentUser?.id) {
             const lastMessageInState = messages[messages.length - 1];
             if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
                 setIsAiThinking(true);
@@ -125,7 +125,7 @@ export default function ChatPanel({ chat, messages, currentUser }: ChatPanelProp
         }
     };
     runAiAgent();
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase]);
+  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, supabase, currentUser?.id]);
 
   if (!chat) {
     return (
