@@ -2,7 +2,8 @@
 'use client';
 
 import * as React from 'react';
-import { useActionState, useFormStatus } from 'react';
+import { useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import {
   CheckIcon,
   PlusCircledIcon,
@@ -190,19 +191,15 @@ export function WorkspaceSwitcher({
                 </CommandGroup>
               </CommandList>
               <CommandSeparator />
-               <DialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start rounded-t-none"
-                    onClick={() => {
-                      setPopoverOpen(false);
-                      setDialogOpen(true);
-                    }}
-                  >
-                    <PlusCircledIcon className="mr-2 h-5 w-5" />
-                    Criar Workspace
-                  </Button>
-              </DialogTrigger>
+               <CommandItem
+                onSelect={() => {
+                  setPopoverOpen(false);
+                  setDialogOpen(true);
+                }}
+              >
+                <PlusCircledIcon className="mr-2 h-5 w-5" />
+                Criar Workspace
+              </CommandItem>
             </Command>
           </PopoverContent>
         </Popover>
