@@ -15,22 +15,20 @@ export async function createWorkspaceAction(
     return 'O nome do workspace é obrigatório.';
   }
 
-  const { data: workspaceData, error: insertError } = await supabase
+  // A lógica de owner_id e de associação do usuário agora é tratada por triggers no banco de dados.
+  // Basta inserir o nome do workspace.
+  const { error } = await supabase
     .from('workspaces')
-    .insert({ name: workspaceName })
-    .select('id')
-    .single();
-
-  if (insertError) {
-    console.error('Error creating workspace:', insertError);
-    if (insertError.code === '42501') { 
+    .insert({ name: workspaceName });
+    
+  if (error) {
+    console.error('Error creating workspace:', error);
+    if (error.code === '42501') { 
+        // 42501 é RLS violation
         return 'Erro de permissão. Você não tem autorização para criar um workspace.';
     }
-    return `Não foi possível criar o workspace: ${insertError.message}`;
+    return `Não foi possível criar o workspace: ${error.message}`;
   }
-
-  // O trigger `add_creator_to_workspace_trigger` já cuida da inserção
-  // na tabela `user_workspaces` após a criação do workspace.
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
@@ -60,15 +58,16 @@ export async function updateWorkspaceAction(
         return 'Usuário não autenticado.';
     }
     
+    // A política RLS garante que apenas o dono pode alterar
     const { error } = await supabase
         .from('workspaces')
         .update({ name: workspaceName })
-        .eq('id', workspaceId)
-        .eq('owner_id', user.id); // Garante que apenas o dono pode alterar
+        .eq('id', workspaceId);
+        // A checagem de owner_id é feita pela política de segurança (RLS) no banco
 
      if (error) {
         console.error('Error updating workspace:', error);
-         if (error.code === '42501') { 
+         if (error.code === '42501') { // RLS violation
             return 'Erro de permissão. Você não tem autorização para alterar este workspace.';
         }
         return `Não foi possível atualizar o workspace: ${error.message}`;
