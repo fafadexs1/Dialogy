@@ -51,8 +51,12 @@ export async function register(
   redirect('/login?registered=true');
 }
 
+// This server action is no longer needed as logout is handled on the client-side
+// in the Sidebar component to ensure proper redirection.
+/*
 export async function signOutAction() {
     // Correctly sign out by redirecting to the NextAuth signout API endpoint.
     // This endpoint handles cookie clearing and session termination securely.
     redirect('/api/auth/signout');
 }
+*/

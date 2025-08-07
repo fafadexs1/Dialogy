@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import Link from 'next/link';
@@ -32,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
-import { signOutAction } from '@/actions/auth';
+import { signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
 
@@ -49,21 +48,17 @@ const mainNavItems = [
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
 
-function SignOut() {
+function SignOutButton() {
     return (
-      <form
-        action={signOutAction}
-        className="w-full"
-      >
-        <button type="submit" className="w-full text-left">
-          <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+        <DropdownMenuItem onSelect={(e) => {
+            e.preventDefault();
+            signOut({ callbackUrl: '/login' });
+        }}>
             <LogOut className="mr-2 h-4 w-4" />
             <span>Sair</span>
-          </DropdownMenuItem>
-        </button>
-      </form>
+        </DropdownMenuItem>
     );
-  }
+}
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
@@ -138,7 +133,7 @@ export function Sidebar({ user }: SidebarProps) {
                 </DropdownMenuItem>
             </Link>
             <DropdownMenuSeparator />
-            <SignOut />
+            <SignOutButton />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
