@@ -41,6 +41,7 @@ import {
     testEvolutionApiConnection
 } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
+import { useRouter } from 'next/navigation';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
@@ -141,6 +142,7 @@ function GlobalApiStatusIndicator({ status }: { status: GlobalApiStatus }) {
 
 export default function EvolutionApiPage() {
     const user = useAuth();
+    const router = useRouter();
     const [instances, setInstances] = useState<EvolutionInstance[]>([]);
     const [config, setConfig] = useState<EvolutionApiConfig | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -152,36 +154,35 @@ export default function EvolutionApiPage() {
     const { toast } = useToast();
 
     const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
-    
+
     const fetchData = useCallback(async (workspaceId: string) => {
-        console.log("Fetching data for workspace:", workspaceId);
         setIsLoading(true);
         setGlobalApiStatus('testing');
         try {
             const configData = await getEvolutionApiConfig(workspaceId);
             setConfig(configData);
 
+            let connectionSuccess = false;
             if (configData && configData.api_url && configData.api_key) {
                 const connectionTest = await testEvolutionApiConnection(configData);
                 setGlobalApiStatus(connectionTest.success ? 'connected' : 'error');
-
-                if (connectionTest.success) {
-                    const instancesFromDb = await getEvolutionApiInstances(workspaceId);
-                    const instancesWithStatus = await Promise.all(
-                        instancesFromDb.map(async (inst) => {
-                            const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
-                            return { ...inst, status, qrCode };
-                        })
-                    );
-                    setInstances(instancesWithStatus);
-                } else {
-                     setInstances([]);
-                }
+                connectionSuccess = connectionTest.success;
             } else {
                 setGlobalApiStatus('idle');
-                setInstances([]);
             }
 
+            if (connectionSuccess && configData) {
+                const instancesFromDb = await getEvolutionApiInstances(workspaceId);
+                const instancesWithStatus = await Promise.all(
+                    instancesFromDb.map(async (inst) => {
+                        const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
+                        return { ...inst, status, qrCode };
+                    })
+                );
+                setInstances(instancesWithStatus);
+            } else {
+                setInstances([]);
+            }
         } catch (error) {
             console.error("Failed to fetch evolution api data", error);
             setGlobalApiStatus('error');
@@ -189,35 +190,32 @@ export default function EvolutionApiPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [toast]);
-    
-    useEffect(() => {
-        if (saveState?.error === null) {
-            toast({ title: "Configuração Salva!", description: "Suas alterações foram salvas com sucesso. Verificando status..." });
-             if (activeWorkspace) {
-                fetchData(activeWorkspace.id);
-            }
-        } else if (saveState?.error) {
-            toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [saveState, toast]);
-
+    }, [toast]); // Dependencies are stable
     
     useEffect(() => {
         if (user?.activeWorkspaceId) {
             const workspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
             setActiveWorkspace(workspace || null);
-        }
-    }, [user]);
-
-    useEffect(() => {
-        if (activeWorkspace) {
-            fetchData(activeWorkspace.id);
-        } else {
+            if(workspace) {
+              fetchData(workspace.id);
+            }
+        } else if (user) { // user is loaded but no active workspace
             setIsLoading(false);
         }
-    }, [activeWorkspace, fetchData]);
+    }, [user, fetchData]);
+
+    // Effect to handle form submission result
+    useEffect(() => {
+        if (saveState?.error === null) { // Success
+            toast({ title: "Configuração Salva!", description: "Suas alterações foram salvas com sucesso. Verificando status..." });
+            if (activeWorkspace) {
+                fetchData(activeWorkspace.id);
+            }
+        } else if (saveState?.error) { // Error
+            toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
+        }
+    }, [saveState, toast, activeWorkspace, fetchData]);
+
 
     const handleCreationSuccess = () => {
         setIsAddModalOpen(false);
@@ -253,23 +251,25 @@ export default function EvolutionApiPage() {
                 result = await connectInstance(instance.name, config);
             }
 
+            // Immediately update the specific instance for better UX
             setInstances(prevInstances =>
                 prevInstances.map(i =>
                     i.id === instance.id ? { ...i, status: result.status, qrCode: result.qrCode } : i
                 )
             );
-             // After action, poll for status
+             
+            // After action, poll for status to get the final state
             setTimeout(() => {
                 if (activeWorkspace) {
                    fetchData(activeWorkspace.id);
                 }
-            }, 3000)
-
+            }, 5000) // Give some time for API to process
 
         } catch (error) {
             toast({ title: 'Erro de Conexão', description: 'Falha ao se comunicar com a API Evolution.', variant: 'destructive' });
         } finally {
-            setInstanceStates(prev => ({ ...prev, [instance.id]: { loading: false } }));
+             // We don't set loading to false immediately, let the fetchData do it.
+             // This avoids UI flickering.
         }
     };
     
@@ -288,9 +288,11 @@ export default function EvolutionApiPage() {
 
     if (!user || isLoading) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainLayout user={user}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainLayout>
         )
     }
 
@@ -403,7 +405,7 @@ export default function EvolutionApiPage() {
                                                         {isLoadingInstance ? (
                                                             <>
                                                                 <Loader2 className="h-4 w-4 animate-spin"/>
-                                                                <span className="text-sm font-medium">Verificando...</span>
+                                                                <span className="text-sm font-medium">Aguarde...</span>
                                                             </>
                                                         ) : (
                                                             <>
@@ -460,3 +462,5 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
+
+    
