@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useState, useEffect, useActionState, startTransition } from 'react';
+import React, { useState, useEffect, useActionState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2 } from 'lucide-react';
+import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +37,8 @@ import {
     deleteEvolutionApiInstance,
     checkInstanceStatus,
     connectInstance,
-    disconnectInstance
+    disconnectInstance,
+    testEvolutionApiConnection
 } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 
@@ -111,6 +112,33 @@ function SaveConfigButton() {
     )
 }
 
+type GlobalApiStatus = 'idle' | 'testing' | 'connected' | 'error';
+
+function GlobalApiStatusIndicator({ status }: { status: GlobalApiStatus }) {
+    const statusInfo = useMemo(() => {
+        switch (status) {
+            case 'testing':
+                return { text: 'Verificando...', icon: <Loader2 className="h-4 w-4 animate-spin" />, color: 'text-muted-foreground' };
+            case 'connected':
+                return { text: 'Conectado', icon: <CheckCircle className="h-4 w-4" />, color: 'text-green-600' };
+            case 'error':
+                return { text: 'Falha na conexão', icon: <XCircle className="h-4 w-4" />, color: 'text-destructive' };
+            default:
+                return { text: '', icon: null, color: '' };
+        }
+    }, [status]);
+
+    if (status === 'idle') return null;
+
+    return (
+        <div className={`flex items-center gap-2 text-sm font-medium ${statusInfo.color}`}>
+            {statusInfo.icon}
+            <span>{statusInfo.text}</span>
+        </div>
+    );
+}
+
+
 export default function EvolutionApiPage() {
     const user = useAuth();
     const [instances, setInstances] = useState<EvolutionInstance[]>([]);
@@ -119,33 +147,44 @@ export default function EvolutionApiPage() {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [instanceStates, setInstanceStates] = useState<Record<string, { loading: boolean }>>({});
+    const [globalApiStatus, setGlobalApiStatus] = useState<GlobalApiStatus>('idle');
     
     const { toast } = useToast();
 
     const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
     
-    const fetchData = React.useCallback(async (workspaceId: string) => {
+    const fetchData = useCallback(async (workspaceId: string) => {
         console.log("Fetching data for workspace:", workspaceId);
         setIsLoading(true);
+        setGlobalApiStatus('testing');
         try {
             const configData = await getEvolutionApiConfig(workspaceId);
             setConfig(configData);
 
             if (configData && configData.api_url && configData.api_key) {
-                const instancesFromDb = await getEvolutionApiInstances(workspaceId);
-                const instancesWithStatus = await Promise.all(
-                    instancesFromDb.map(async (inst) => {
-                        const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
-                        return { ...inst, status, qrCode };
-                    })
-                );
-                setInstances(instancesWithStatus);
+                const connectionTest = await testEvolutionApiConnection(configData);
+                setGlobalApiStatus(connectionTest.success ? 'connected' : 'error');
+
+                if (connectionTest.success) {
+                    const instancesFromDb = await getEvolutionApiInstances(workspaceId);
+                    const instancesWithStatus = await Promise.all(
+                        instancesFromDb.map(async (inst) => {
+                            const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
+                            return { ...inst, status, qrCode };
+                        })
+                    );
+                    setInstances(instancesWithStatus);
+                } else {
+                     setInstances([]);
+                }
             } else {
+                setGlobalApiStatus('idle');
                 setInstances([]);
             }
 
         } catch (error) {
             console.error("Failed to fetch evolution api data", error);
+            setGlobalApiStatus('error');
             toast({ title: "Erro ao buscar dados", description: "Não foi possível carregar as configurações e instâncias.", variant: "destructive" });
         } finally {
             setIsLoading(false);
@@ -162,7 +201,7 @@ export default function EvolutionApiPage() {
             toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [saveState, toast, activeWorkspace]);
+    }, [saveState, toast]);
 
     
     useEffect(() => {
@@ -268,7 +307,10 @@ export default function EvolutionApiPage() {
                         <input type="hidden" name="configId" value={config?.id || ''} />
                         <Card>
                             <CardHeader>
-                                <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
+                                    <GlobalApiStatusIndicator status={globalApiStatus} />
+                                </div>
                                 <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
                             </CardHeader>
                             <CardContent className="grid md:grid-cols-2 gap-6">
@@ -292,7 +334,7 @@ export default function EvolutionApiPage() {
                             <h2 className="text-xl font-bold">Minhas Instâncias</h2>
                              <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
                                 <DialogTrigger asChild>
-                                    <Button disabled={!config}>
+                                    <Button disabled={!config || globalApiStatus !== 'connected'}>
                                         <Plus className="mr-2 h-4 w-4" />
                                         Adicionar Instância
                                     </Button>
@@ -311,101 +353,110 @@ export default function EvolutionApiPage() {
                                 </DialogContent>
                             </Dialog>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {instances.map(instance => {
-                                const statusInfo = getStatusInfo(instance.status);
-                                const isLoadingInstance = instanceStates[instance.id]?.loading;
-                                return (
-                                    <Card key={instance.id} className="flex flex-col">
-                                        <CardHeader>
-                                            <div className="flex justify-between items-start">
-                                                <div className="max-w-[80%] break-words space-y-2">
-                                                    <CardTitle className="flex items-center gap-2">
-                                                        <Server className="h-5 w-5 text-primary"/>
-                                                        {instance.name}
-                                                    </CardTitle>
-                                                    <InstanceTypeBadge type={instance.type} />
+                        
+                        {globalApiStatus === 'error' && (
+                            <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg bg-destructive/10 text-destructive">
+                                <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+                                <p className="font-semibold">Não foi possível conectar à API Global.</p>
+                                <p className="text-sm">Verifique a URL e a Chave da API e salve novamente. As instâncias não podem ser gerenciadas até que a conexão seja estabelecida.</p>
+                            </div>
+                        )}
+
+                        {globalApiStatus !== 'error' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                {instances.map(instance => {
+                                    const statusInfo = getStatusInfo(instance.status);
+                                    const isLoadingInstance = instanceStates[instance.id]?.loading;
+                                    return (
+                                        <Card key={instance.id} className="flex flex-col">
+                                            <CardHeader>
+                                                <div className="flex justify-between items-start">
+                                                    <div className="max-w-[80%] break-words space-y-2">
+                                                        <CardTitle className="flex items-center gap-2">
+                                                            <Server className="h-5 w-5 text-primary"/>
+                                                            {instance.name}
+                                                        </CardTitle>
+                                                        <InstanceTypeBadge type={instance.type} />
+                                                    </div>
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                                <MoreVertical className="h-4 w-4" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end">
+                                                            <DropdownMenuItem disabled>
+                                                                <Edit className="mr-2 h-4 w-4" />
+                                                                Editar
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem onClick={() => handleRemoveInstance(instance.id)} className="text-destructive">
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Remover
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
                                                 </div>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                                            <MoreVertical className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem disabled>
-                                                            <Edit className="mr-2 h-4 w-4" />
-                                                            Editar
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleRemoveInstance(instance.id)} className="text-destructive">
-                                                            <Trash2 className="mr-2 h-4 w-4" />
-                                                            Remover
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
-                                        </CardHeader>
-                                        <CardContent className="flex-grow space-y-4">
-                                            <div className="space-y-1">
-                                                <div className="flex items-center gap-2">
-                                                    {isLoadingInstance ? (
-                                                        <>
-                                                            <Loader2 className="h-4 w-4 animate-spin"/>
-                                                            <span className="text-sm font-medium">Verificando...</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
-                                                            <span className="text-sm font-medium">{statusInfo.text}</span>
-                                                        </>
-                                                    )}
+                                            </CardHeader>
+                                            <CardContent className="flex-grow space-y-4">
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        {isLoadingInstance ? (
+                                                            <>
+                                                                <Loader2 className="h-4 w-4 animate-spin"/>
+                                                                <span className="text-sm font-medium">Verificando...</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
+                                                                <span className="text-sm font-medium">{statusInfo.text}</span>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            {instance.type === 'baileys' && instance.status === 'pending' && (
-                                                <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
-                                                    {instance.qrCode ? (
-                                                        <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
-                                                    ) : (
-                                                        <QrCode className="h-24 w-24 text-muted-foreground/50"/>
-                                                    )}
-                                                    <p className="mt-4 text-sm text-muted-foreground">Leia o QR Code com seu celular.</p>
-                                                    <p className="text-xs text-muted-foreground">Clique em "Conectar" para gerar um novo.</p>
-                                                </div>
-                                            )}
-                                            {instance.type === 'wa_cloud' && (
-                                                <div className="p-4 border rounded-lg bg-secondary/50 text-center">
-                                                    <p className="text-sm text-muted-foreground">A conexão com a API Cloud é direta. Use os botões abaixo para gerenciar.</p>
-                                                </div>
-                                            )}
-                                        </CardContent>
-                                        <CardFooter className="p-4 border-t">
-                                            {instance.status === 'connected' ? (
-                                                <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
-                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PowerOff className="mr-2 h-4 w-4"/>}
-                                                     Desconectar
-                                                </Button>
-                                            ) : (
-                                                <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
-                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
-                                                    {instance.type === 'baileys' ? 'Conectar e Gerar QR Code' : 'Conectar'}
-                                                </Button>
-                                            )}
-                                        </CardFooter>
-                                    </Card>
-                                )
-                            })}
-                             {instances.length === 0 && !isLoading && (
-                                <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
-                                    <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
-                                    <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
-                                </div>
-                            )}
-                        </div>
+                                                {instance.type === 'baileys' && instance.status === 'pending' && (
+                                                    <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
+                                                        {instance.qrCode ? (
+                                                            <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
+                                                        ) : (
+                                                            <QrCode className="h-24 w-24 text-muted-foreground/50"/>
+                                                        )}
+                                                        <p className="mt-4 text-sm text-muted-foreground">Leia o QR Code com seu celular.</p>
+                                                        <p className="text-xs text-muted-foreground">Clique em "Conectar" para gerar um novo.</p>
+                                                    </div>
+                                                )}
+                                                {instance.type === 'wa_cloud' && (
+                                                    <div className="p-4 border rounded-lg bg-secondary/50 text-center">
+                                                        <p className="text-sm text-muted-foreground">A conexão com a API Cloud é direta. Use os botões abaixo para gerenciar.</p>
+                                                    </div>
+                                                )}
+                                            </CardContent>
+                                            <CardFooter className="p-4 border-t">
+                                                {instance.status === 'connected' ? (
+                                                    <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                        {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PowerOff className="mr-2 h-4 w-4"/>}
+                                                        Desconectar
+                                                    </Button>
+                                                ) : (
+                                                    <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                        {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
+                                                        {instance.type === 'baileys' ? 'Conectar e Gerar QR Code' : 'Conectar'}
+                                                    </Button>
+                                                )}
+                                            </CardFooter>
+                                        </Card>
+                                    )
+                                })}
+                                {instances.length === 0 && !isLoading && (
+                                    <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
+                                        <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
+                                        <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </main>
             </div>
         </MainLayout>
     );
 }
-
-    

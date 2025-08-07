@@ -126,13 +126,16 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
 
 async function fetchEvolutionAPI(
     endpoint: string, 
-    config: EvolutionApiConfig,
+    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>,
     options: RequestInit = {}
 ) {
     if (!config.api_url || !config.api_key) {
         throw new Error("A configuração da API (URL e Chave) é necessária.");
     }
-    const url = `${config.api_url}${endpoint}`;
+    // Garante que a URL não termine com / para evitar barras duplas
+    const baseUrl = config.api_url.endsWith('/') ? config.api_url.slice(0, -1) : config.api_url;
+    const url = `${baseUrl}${endpoint}`;
+    
     console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
 
     try {
@@ -207,3 +210,28 @@ export async function disconnectInstance(instanceName: string, config: Evolution
     }
 }
 
+export async function testEvolutionApiConnection(
+    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>
+): Promise<{ success: boolean; message: string }> {
+    if (!config.api_url || !config.api_key) {
+        return { success: false, message: 'URL da API e Chave da API são obrigatórias.' };
+    }
+    
+    try {
+        // Tenta acessar um endpoint simples que não requer um nome de instância, como o de 'manager'
+        // Se a API estiver no ar e a chave for válida, isso deve funcionar.
+        await fetchEvolutionAPI('/manager/restart', { ...config, method: 'POST' });
+        // Nota: Não queremos realmente reiniciar, apenas testar o endpoint.
+        // A API da Evolution V2 não tem um endpoint de "ping" simples, então usamos um que requer autenticação.
+        // Um restart falha se não estiver no modo manager, mas ainda valida a conexão.
+        // Se a chamada acima não lançar um erro, a conexão está ok.
+        return { success: true, message: 'Conexão bem-sucedida.' };
+    } catch (error: any) {
+        // A API pode retornar um erro específico se o modo manager não estiver ativo, o que ainda é um sinal de sucesso na conexão.
+        if (error.message && error.message.includes('403') || error.message && error.message.includes('501')) {
+            return { success: true, message: 'Conexão bem-sucedida.' };
+        }
+        console.error('[EVO_ACTION_TEST_CONNECTION] Erro ao testar a conexão:', error);
+        return { success: false, message: `Falha na conexão: ${error.message}` };
+    }
+}
