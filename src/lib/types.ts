@@ -149,7 +149,7 @@ export interface EvolutionInstance {
 
 export interface EvolutionApiConfig {
     id: string;
-    user_id: string;
+    workspace_id: string;
     api_url: string | null;
     api_key: string | null;
 }

@@ -3,10 +3,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, EvolutionInstance, EvolutionApiConfig } from '@/lib/types';
-import { agents } from '@/lib/mock-data';
+import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
-import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2 } from 'lucide-react';
@@ -99,28 +97,35 @@ export default function EvolutionApiPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [isAdding, setIsAdding] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     
-    // Local state for inputs to avoid re-rendering on every keystroke
     const [apiUrlInput, setApiUrlInput] = useState('');
     const [apiKeyInput, setApiKeyInput] = useState('');
     
     const supabase = createClient();
     const { toast } = useToast();
+    
+    useEffect(() => {
+        if (user && user.activeWorkspaceId) {
+            const workspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
+            setActiveWorkspace(workspace || null);
+        }
+    }, [user]);
 
     useEffect(() => {
-        if (!user) return;
+        if (!activeWorkspace) return;
 
         const fetchData = async () => {
             setIsLoading(true);
 
-            // Fetch config
+            // Fetch config for the active workspace
             const { data: configData, error: configError } = await supabase
                 .from('evolution_api_configs')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('workspace_id', activeWorkspace.id)
                 .single();
             
-            if (configError && configError.code !== 'PGRST116') { // Ignore 'exact one row' error
+            if (configError && configError.code !== 'PGRST116') {
                 console.error("Error fetching config:", configError);
                 toast({ title: 'Erro ao buscar configurações', variant: 'destructive'});
             } else {
@@ -128,7 +133,6 @@ export default function EvolutionApiPage() {
                 setApiUrlInput(configData?.api_url || '');
                 setApiKeyInput(configData?.api_key || '');
 
-                // Fetch instances if config exists
                 if (configData) {
                     const { data: instancesData, error: instancesError } = await supabase
                         .from('evolution_api_instances')
@@ -139,32 +143,31 @@ export default function EvolutionApiPage() {
                         console.error("Error fetching instances:", instancesError);
                         toast({ title: 'Erro ao buscar instâncias', variant: 'destructive'});
                     } else {
-                         // Add a simulated status for the UI, as it's not in the DB
                         const instancesWithStatus = instancesData.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance);
                         setInstances(instancesWithStatus);
                     }
+                } else {
+                    setInstances([]);
                 }
             }
-
             setIsLoading(false);
         };
 
         fetchData();
-    }, [user, supabase, toast]);
+    }, [activeWorkspace, supabase, toast]);
 
     const handleSaveConfig = async () => {
-        if (!user) return;
+        if (!activeWorkspace) return;
         setIsSaving(true);
         
-        // Upsert logic: update if config exists, insert if it doesn't
         const { data, error } = await supabase
             .from('evolution_api_configs')
             .upsert({
-                id: config?.id, // Existing ID or undefined for insert
-                user_id: user.id,
+                id: config?.id,
+                workspace_id: activeWorkspace.id,
                 api_url: apiUrlInput,
                 api_key: apiKeyInput,
-            }, { onConflict: 'user_id' })
+            }, { onConflict: 'workspace_id' })
             .select()
             .single();
 
@@ -227,10 +230,9 @@ export default function EvolutionApiPage() {
         setInstances(instances.map(inst => {
             if (inst.id === instanceId) {
                 if (inst.status === 'disconnected') {
-                    // Here you would call the Evolution API to connect
+                    // Simulating API call
                     return { ...inst, status: inst.type === 'baileys' ? 'pending' : 'connected' };
                 } else {
-                    // Here you would call the Evolution API to disconnect
                      return { ...inst, status: 'disconnected' };
                 }
             }
@@ -241,7 +243,7 @@ export default function EvolutionApiPage() {
 
     if (!user || isLoading) {
         return (
-             <MainLayout user={user || agents[0]}>
+             <MainLayout user={user!}>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
@@ -254,13 +256,13 @@ export default function EvolutionApiPage() {
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold flex items-center gap-2"><Zap /> Conexões com a Evolution API</h1>
-                    <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para atendimento.</p>
+                    <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name}</span></p>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
                    <Card>
                        <CardHeader>
                            <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
-                           <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias.</CardDescription>
+                           <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
                        </CardHeader>
                        <CardContent className="grid md:grid-cols-2 gap-6">
                            <div className="space-y-2">
@@ -285,7 +287,7 @@ export default function EvolutionApiPage() {
                             <h2 className="text-xl font-bold">Minhas Instâncias</h2>
                              <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
                                 <DialogTrigger asChild>
-                                    <Button>
+                                    <Button disabled={!config}>
                                         <Plus className="mr-2 h-4 w-4" />
                                         Adicionar Instância
                                     </Button>
@@ -369,6 +371,12 @@ export default function EvolutionApiPage() {
                                     </Card>
                                 )
                             })}
+                             {instances.length === 0 && (
+                                <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
+                                    <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
+                                    <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </main>
