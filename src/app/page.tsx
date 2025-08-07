@@ -27,21 +27,21 @@ export default async function Home() {
         // Handle error appropriately, maybe redirect to an error page
     }
 
-  // Fetch all workspaces for the user
+  // Fetch all workspaces the user is a member of
   const { data: userWorkspaces, error: workspacesError } = await supabase
-      .from('user_workspaces')
-      .select('workspaces(*)')
-      .eq('user_id', user.id);
+    .from('workspaces')
+    .select('*')
+    .in('id', (await supabase.from('user_workspaces').select('workspace_id').eq('user_id', user.id)).data?.map(uw => uw.workspace_id) || []);
   
   if (workspacesError) {
     console.error("Error fetching user workspaces", workspacesError);
     // Handle error appropriately
   }
 
-  const workspaces: Workspace[] = userWorkspaces?.map((uw: any) => ({
-      id: uw.workspaces.id,
-      name: uw.workspaces.name,
-      avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
+  const workspaces: Workspace[] = userWorkspaces?.map((ws: any) => ({
+      id: ws.id,
+      name: ws.name,
+      avatar: ws.avatar_url || `https://placehold.co/40x40.png?text=${(ws.name || 'W').charAt(0)}`,
   })) || [];
   
   const activeWorkspaceId = userData?.last_active_workspace_id || (workspaces.length > 0 ? workspaces[0].id : undefined);

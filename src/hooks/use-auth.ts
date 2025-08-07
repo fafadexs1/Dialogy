@@ -48,11 +48,11 @@ export function useAuth(): AppUser | null {
                 return;
             }
 
-            // Fetch workspaces for the user
+            // Fetch workspaces the user is a member of
             const { data: userWorkspaces, error: workspacesError } = await supabase
-                .from('user_workspaces')
-                .select('workspaces(*)')
-                .eq('user_id', authUser.id);
+                .from('workspaces')
+                .select('*')
+                .in('id', (await supabase.from('user_workspaces').select('workspace_id').eq('user_id', authUser.id)).data?.map(uw => uw.workspace_id) || []);
 
             if (workspacesError) {
                 console.error("Error fetching user workspaces", workspacesError);
@@ -60,10 +60,10 @@ export function useAuth(): AppUser | null {
                 return;
             }
             
-            const workspaces: Workspace[] = userWorkspaces?.map((uw: any) => ({
-                id: uw.workspaces.id,
-                name: uw.workspaces.name,
-                avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
+            const workspaces: Workspace[] = userWorkspaces?.map((ws: any) => ({
+                id: ws.id,
+                name: ws.name,
+                avatar: ws.avatar_url || `https://placehold.co/40x40.png?text=${(ws.name || 'W').charAt(0)}`,
             })) || [];
 
             // The active workspace is now determined by the user's profile
