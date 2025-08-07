@@ -60,15 +60,14 @@ export async function saveEvolutionApiConfig(prevState: any, formData: FormData)
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
-export async function getEvolutionApiInstances(workspaceId: string): Promise<EvolutionInstance[]> {
+export async function getEvolutionApiInstances(workspaceId: string): Promise<Omit<EvolutionInstance, 'status' | 'qrCode'>[]> {
     try {
-        // Primeiro, precisamos do ID da configuração do workspace.
         const config = await getEvolutionApiConfig(workspaceId);
-        if (!config) {
-            return []; // Sem configuração, sem instâncias.
+        if (!config || !config.id) {
+            return [];
         }
         
-        const res = await db.query('SELECT * FROM evolution_api_instances WHERE config_id = $1', [config.id]);
+        const res = await db.query('SELECT id, name, type, config_id FROM evolution_api_instances WHERE config_id = $1', [config.id]);
         return res.rows;
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
@@ -80,10 +79,12 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<Evo
  * Cria uma nova instância da Evolution API.
  */
 export async function createEvolutionApiInstance(
-    data: { name: string, type: EvolutionInstance['type'], config_id: string },
-    formData: FormData // formData is still passed by default
+    prevState: any,
+    formData: FormData
 ): Promise<{ error: string | null }> {
-    const { name, type, config_id } = data;
+    const name = formData.get('name') as string;
+    const type = formData.get('type') as EvolutionInstance['type'];
+    const config_id = formData.get('config_id') as string;
 
     if (!name || !type || !config_id) {
         return { error: 'Missing required fields to create an instance.' };
@@ -91,8 +92,8 @@ export async function createEvolutionApiInstance(
 
     try {
         await db.query(
-            'INSERT INTO evolution_api_instances (name, type, config_id, status) VALUES ($1, $2, $3, $4)',
-            [name, type, config_id, 'disconnected']
+            'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
+            [name, type, config_id]
         );
     } catch (error) {
         console.error('[EVO_ACTION_CREATE_INSTANCE] Error creating instance:', error);
@@ -102,6 +103,7 @@ export async function createEvolutionApiInstance(
     revalidatePath('/integrations/evolution-api');
     return { error: null };
 }
+
 
 /**
  * Deleta uma instância da Evolution API.
@@ -122,5 +124,86 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     return { error: null };
 }
 
-// Note: Connection/disconnection logic would typically involve calls to the actual Evolution API
-// and are not implemented here as they depend on an external service.
+async function fetchEvolutionAPI(
+    endpoint: string, 
+    config: EvolutionApiConfig,
+    options: RequestInit = {}
+) {
+    if (!config.api_url || !config.api_key) {
+        throw new Error("A configuração da API (URL e Chave) é necessária.");
+    }
+    const url = `${config.api_url}${endpoint}`;
+    console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                ...options.headers,
+                'apikey': config.api_key,
+                'Content-Type': 'application/json',
+            },
+            cache: 'no-store' // Impede o cache da requisição
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[EVO_API_FETCH] Erro na API Evolution: Status ${response.status}. URL: ${url}. Body: ${errorBody}`);
+            throw new Error(`Erro da API Evolution: ${response.statusText}`);
+        }
+        
+        // Retorna o corpo da resposta apenas se houver
+        if (response.headers.get("content-type")?.includes("application/json")) {
+            return response.json();
+        }
+        return; // Retorna undefined para respostas sem corpo JSON
+
+    } catch (error) {
+        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+        throw error;
+    }
+}
+
+
+export async function checkInstanceStatus(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+    try {
+        const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, config);
+        // O estado 'connecting' na API v2 significa que está aguardando o QR code.
+        if (data.instance.state === 'connecting') {
+            return { status: 'pending' };
+        }
+        if (data.instance.state === 'open') {
+             return { status: 'connected' };
+        }
+        return { status: 'disconnected' };
+    } catch (error) {
+        console.error(`[EVO_ACTION_CHECK_STATUS] Erro ao verificar status da instância ${instanceName}:`, error);
+        return { status: 'disconnected' };
+    }
+}
+
+export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+    try {
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'POST' });
+        // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
+        if (data?.base64) {
+            return { status: 'pending', qrCode: data.base64 };
+        }
+        return { status: 'pending' };
+    } catch (error) {
+        console.error(`[EVO_ACTION_CONNECT] Erro ao conectar instância ${instanceName}:`, error);
+        return { status: 'disconnected' };
+    }
+}
+
+export async function disconnectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'] }> {
+    try {
+        await fetchEvolutionAPI(`/instance/logout/${instanceName}`, config, { method: 'POST' });
+        return { status: 'disconnected' };
+    } catch (error) {
+        console.error(`[EVO_ACTION_DISCONNECT] Erro ao desconectar instância ${instanceName}:`, error);
+        // Mesmo em caso de erro, assumimos que desconectou ou já estava desconectado.
+        return { status: 'disconnected' };
+    }
+}
+

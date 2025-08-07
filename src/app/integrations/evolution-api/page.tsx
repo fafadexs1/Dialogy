@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useActionState, startTransition } from 'react';
+import Image from 'next/image';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -28,7 +29,16 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
-import { getEvolutionApiConfig, saveEvolutionApiConfig, getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance } from '@/actions/evolution-api';
+import { 
+    getEvolutionApiConfig, 
+    saveEvolutionApiConfig, 
+    getEvolutionApiInstances, 
+    createEvolutionApiInstance, 
+    deleteEvolutionApiInstance,
+    checkInstanceStatus,
+    connectInstance,
+    disconnectInstance
+} from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
@@ -44,24 +54,28 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     )
 }
 
-function AddInstanceForm({ onAdd, configId }: { onAdd: () => void, configId: string | undefined }) {
+function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
+    const [state, formAction] = useActionState(createEvolutionApiInstance, null);
     const { pending } = useFormStatus();
-    const [name, setName] = useState('');
-    const [type, setType] = useState<EvolutionInstance['type']>('baileys');
 
-    const action = createEvolutionApiInstance.bind(null, { name, type, config_id: configId! });
+    useEffect(() => {
+        if (state?.error === null) {
+            onFormSubmit();
+        }
+    }, [state, onFormSubmit]);
 
     return (
-        <form action={action} onSubmit={onAdd}>
+        <form action={formAction}>
+            <input type="hidden" name="config_id" value={configId || ''} />
             <div className="space-y-4 py-2 pb-4">
                  <div className="space-y-2">
                     <Label htmlFor="instance-name">Nome da Instância</Label>
-                    <Input id="instance-name" name="name" placeholder="Ex: Vendas Filial RJ" value={name} onChange={e => setName(e.target.value)} required/>
+                    <Input id="instance-name" name="name" placeholder="Ex: Vendas Filial RJ" required/>
                     <p className="text-xs text-muted-foreground">Um nome único para identificar esta conexão. Ex: "Setor de Vendas".</p>
                 </div>
                  <div className="space-y-2">
                     <Label htmlFor="instance-type">Tipo de Conexão</Label>
-                    <Select name="type" value={type} onValueChange={(value) => setType(value as EvolutionInstance['type'])}>
+                    <Select name="type" defaultValue='baileys'>
                         <SelectTrigger id="instance-type">
                             <SelectValue placeholder="Selecione o tipo" />
                         </SelectTrigger>
@@ -72,6 +86,7 @@ function AddInstanceForm({ onAdd, configId }: { onAdd: () => void, configId: str
                     </Select>
                      <p className="text-xs text-muted-foreground">Para a Cloud API, a instância deve ser criada no painel da Meta.</p>
                 </div>
+                {state?.error && <p className="text-sm text-red-500">{state.error}</p>}
             </div>
              <DialogFooter>
                 <DialogTrigger asChild>
@@ -103,22 +118,43 @@ export default function EvolutionApiPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+    const [instanceStates, setInstanceStates] = useState<Record<string, { loading: boolean }>>({});
     
     const { toast } = useToast();
 
-    // Use useActionState for the config form
-    const [saveError, saveAction, isSaving] = useActionState(saveEvolutionApiConfig, null);
+    const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
     
-    // Function to fetch all data
+    useEffect(() => {
+        if (saveState?.error === null) {
+            toast({ title: "Configuração Salva!", description: "Suas alterações foram salvas com sucesso." });
+             if (activeWorkspace) {
+                fetchData(activeWorkspace.id);
+            }
+        } else if (saveState?.error) {
+            toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
+        }
+    }, [saveState, toast, activeWorkspace]);
+
     const fetchData = async (workspaceId: string) => {
+        console.log("Fetching data for workspace:", workspaceId);
         setIsLoading(true);
         try {
-            const [configData, instancesData] = await Promise.all([
-                getEvolutionApiConfig(workspaceId),
-                getEvolutionApiInstances(workspaceId)
-            ]);
+            const configData = await getEvolutionApiConfig(workspaceId);
             setConfig(configData);
-            setInstances(instancesData.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance)); // Simulate disconnect on load
+
+            if (configData) {
+                const instancesFromDb = await getEvolutionApiInstances(workspaceId);
+                const instancesWithStatus = await Promise.all(
+                    instancesFromDb.map(async (inst) => {
+                        const { status, qrCode } = await checkInstanceStatus(inst.name, configData);
+                        return { ...inst, status, qrCode };
+                    })
+                );
+                setInstances(instancesWithStatus);
+            } else {
+                setInstances([]);
+            }
+
         } catch (error) {
             console.error("Failed to fetch evolution api data", error);
             toast({ title: "Erro ao buscar dados", description: "Não foi possível carregar as configurações e instâncias.", variant: "destructive" });
@@ -137,16 +173,16 @@ export default function EvolutionApiPage() {
     useEffect(() => {
         if (activeWorkspace) {
             fetchData(activeWorkspace.id);
+        } else {
+            setIsLoading(false);
         }
     }, [activeWorkspace]);
 
-
-    const handleFormActionCompletion = (workspaceId: string, toastTitle: string, toastDescription: string) => {
-        return () => {
-            setIsAddModalOpen(false); // Close modal on success
-            toast({ title: toastTitle, description: toastDescription });
-            // Re-fetch data to show the new instance/changes
-            fetchData(workspaceId);
+    const handleCreationSuccess = () => {
+        setIsAddModalOpen(false);
+        toast({ title: "Instância Criada!", description: "A nova instância foi adicionada com sucesso." });
+        if (activeWorkspace) {
+            fetchData(activeWorkspace.id);
         }
     }
 
@@ -162,18 +198,38 @@ export default function EvolutionApiPage() {
         }
     }
 
-    const handleToggleConnection = (instanceId: string) => {
-        setInstances(instances.map(inst => {
-            if (inst.id === instanceId) {
-                if (inst.status === 'disconnected') {
-                    // Simulating API call
-                    return { ...inst, status: inst.type === 'baileys' ? 'pending' : 'connected' };
-                } else {
-                     return { ...inst, status: 'disconnected' };
-                }
+    const handleToggleConnection = async (instance: EvolutionInstance) => {
+        if (!config) return;
+
+        setInstanceStates(prev => ({ ...prev, [instance.id]: { loading: true } }));
+
+        try {
+            let result: { status: EvolutionInstance['status']; qrCode?: string };
+
+            if (instance.status === 'connected') {
+                result = await disconnectInstance(instance.name, config);
+            } else {
+                result = await connectInstance(instance.name, config);
             }
-            return inst;
-        }));
+
+            setInstances(prevInstances =>
+                prevInstances.map(i =>
+                    i.id === instance.id ? { ...i, status: result.status, qrCode: result.qrCode } : i
+                )
+            );
+             // After action, poll for status
+            setTimeout(() => {
+                if (activeWorkspace) {
+                   fetchData(activeWorkspace.id);
+                }
+            }, 3000)
+
+
+        } catch (error) {
+            toast({ title: 'Erro de Conexão', description: 'Falha ao se comunicar com a API Evolution.', variant: 'destructive' });
+        } finally {
+            setInstanceStates(prev => ({ ...prev, [instance.id]: { loading: false } }));
+        }
     };
     
     const getStatusInfo = (status: EvolutionInstance['status']) => {
@@ -183,7 +239,7 @@ export default function EvolutionApiPage() {
             case 'disconnected':
                 return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
             case 'pending':
-                return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
+                return { text: 'Aguardando QR Code', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
         }
     }
 
@@ -203,7 +259,7 @@ export default function EvolutionApiPage() {
                     <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name}</span></p>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
-                   <form action={saveAction} onSubmit={() => handleFormActionCompletion(activeWorkspace!.id, "Configuração Salva!", "Suas alterações foram salvas com sucesso.")()}>
+                   <form action={saveAction}>
                         <input type="hidden" name="workspaceId" value={activeWorkspace?.id || ''} />
                         <input type="hidden" name="configId" value={config?.id || ''} />
                         <Card>
@@ -246,7 +302,7 @@ export default function EvolutionApiPage() {
                                     </DialogHeader>
                                     <AddInstanceForm 
                                         configId={config?.id}
-                                        onAdd={() => handleFormActionCompletion(activeWorkspace!.id, "Instância Criada!", "A nova instância foi adicionada com sucesso.")()}
+                                        onFormSubmit={handleCreationSuccess}
                                     />
                                 </DialogContent>
                             </Dialog>
@@ -254,6 +310,7 @@ export default function EvolutionApiPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                             {instances.map(instance => {
                                 const statusInfo = getStatusInfo(instance.status);
+                                const isLoadingInstance = instanceStates[instance.id]?.loading;
                                 return (
                                     <Card key={instance.id} className="flex flex-col">
                                         <CardHeader>
@@ -287,31 +344,45 @@ export default function EvolutionApiPage() {
                                         <CardContent className="flex-grow space-y-4">
                                             <div className="space-y-1">
                                                 <div className="flex items-center gap-2">
-                                                    <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
-                                                    <span className="text-sm font-medium">{statusInfo.text}</span>
+                                                    {isLoadingInstance ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin"/>
+                                                            <span className="text-sm font-medium">Verificando...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
+                                                            <span className="text-sm font-medium">{statusInfo.text}</span>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                             {instance.type === 'baileys' && instance.status === 'pending' && (
                                                 <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
-                                                    <QrCode className="h-24 w-24 text-muted-foreground/50"/>
-                                                    <p className="mt-4 text-sm text-muted-foreground">Aguardando leitura do QR Code.</p>
-                                                    <p className="text-xs text-muted-foreground">Clique em Conectar para gerar um novo.</p>
+                                                    {instance.qrCode ? (
+                                                        <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
+                                                    ) : (
+                                                        <QrCode className="h-24 w-24 text-muted-foreground/50"/>
+                                                    )}
+                                                    <p className="mt-4 text-sm text-muted-foreground">Leia o QR Code com seu celular.</p>
+                                                    <p className="text-xs text-muted-foreground">Clique em "Conectar" para gerar um novo.</p>
                                                 </div>
                                             )}
                                             {instance.type === 'wa_cloud' && (
                                                 <div className="p-4 border rounded-lg bg-secondary/50 text-center">
-                                                    <p className="text-sm text-muted-foreground">A conexão com a API Cloud é direta. Clique em conectar para ativá-la.</p>
+                                                    <p className="text-sm text-muted-foreground">A conexão com a API Cloud é direta. Use os botões abaixo para gerenciar.</p>
                                                 </div>
                                             )}
                                         </CardContent>
                                         <CardFooter className="p-4 border-t">
                                             {instance.status === 'connected' ? (
-                                                <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance.id)}>
-                                                    <PowerOff className="mr-2 h-4 w-4"/> Desconectar
+                                                <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PowerOff className="mr-2 h-4 w-4"/>}
+                                                     Desconectar
                                                 </Button>
                                             ) : (
-                                                <Button className="w-full" onClick={() => handleToggleConnection(instance.id)}>
-                                                    <Power className="mr-2 h-4 w-4"/>
+                                                <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
                                                     {instance.type === 'baileys' ? 'Conectar e Gerar QR Code' : 'Conectar'}
                                                 </Button>
                                             )}

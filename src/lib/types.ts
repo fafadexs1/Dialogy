@@ -1,3 +1,4 @@
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -174,4 +175,5 @@ export interface EvolutionInstance {
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
     config_id: string;
+    qrCode?: string;
 }

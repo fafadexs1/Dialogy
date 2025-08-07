@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
     ],
+     domains: ['localhost'],
   },
   webpack: (config, { isServer }) => {
     // Esta configuração é crucial. Ela instrui o Webpack a não tentar empacotar
