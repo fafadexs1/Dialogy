@@ -161,17 +161,17 @@ export interface NexusFlowInstance {
   model?: string;
 }
 
+export interface EvolutionApiConfig {
+    id: string;
+    workspace_id: string;
+    api_url: string | null;
+    api_key: string | null;
+}
+
 export interface EvolutionInstance {
     id: string;
     name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
     config_id: string;
-}
-
-export interface EvolutionApiConfig {
-    id: string;
-    workspace_id: string;
-    api_url: string | null;
-    api_key: string | null;
 }

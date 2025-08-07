@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useActionState, startTransition } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
-
+import { getEvolutionApiConfig, saveEvolutionApiConfig, getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance } from '@/actions/evolution-api';
+import { useFormStatus } from 'react-dom';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
@@ -43,26 +44,24 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     )
 }
 
-function AddInstanceForm({ onAddInstance, isAdding }: { onAddInstance: (instance: Pick<EvolutionInstance, 'name' | 'type'>) => void, isAdding: boolean }) {
+function AddInstanceForm({ onAdd, configId }: { onAdd: () => void, configId: string | undefined }) {
+    const { pending } = useFormStatus();
     const [name, setName] = useState('');
     const [type, setType] = useState<EvolutionInstance['type']>('baileys');
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        onAddInstance({ name, type });
-    };
+    const action = createEvolutionApiInstance.bind(null, { name, type, config_id: configId! });
 
     return (
-        <form onSubmit={handleSubmit}>
+        <form action={action} onSubmit={onAdd}>
             <div className="space-y-4 py-2 pb-4">
                  <div className="space-y-2">
                     <Label htmlFor="instance-name">Nome da Instância</Label>
-                    <Input id="instance-name" placeholder="Ex: Vendas Filial RJ" value={name} onChange={e => setName(e.target.value)} required/>
+                    <Input id="instance-name" name="name" placeholder="Ex: Vendas Filial RJ" value={name} onChange={e => setName(e.target.value)} required/>
                     <p className="text-xs text-muted-foreground">Um nome único para identificar esta conexão. Ex: "Setor de Vendas".</p>
                 </div>
                  <div className="space-y-2">
                     <Label htmlFor="instance-type">Tipo de Conexão</Label>
-                    <Select value={type} onValueChange={(value) => setType(value as EvolutionInstance['type'])}>
+                    <Select name="type" value={type} onValueChange={(value) => setType(value as EvolutionInstance['type'])}>
                         <SelectTrigger id="instance-type">
                             <SelectValue placeholder="Selecione o tipo" />
                         </SelectTrigger>
@@ -76,123 +75,91 @@ function AddInstanceForm({ onAddInstance, isAdding }: { onAddInstance: (instance
             </div>
              <DialogFooter>
                 <DialogTrigger asChild>
-                    <Button type="button" variant="outline" disabled={isAdding}>Cancelar</Button>
+                    <Button type="button" variant="outline" disabled={pending}>Cancelar</Button>
                 </DialogTrigger>
-                <Button type="submit" disabled={isAdding}>
-                    {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {isAdding ? 'Criando...' : 'Criar Instância'}
+                <Button type="submit" disabled={pending || !configId}>
+                    {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {pending ? 'Criando...' : 'Criar Instância'}
                 </Button>
             </DialogFooter>
         </form>
     );
 }
 
+function SaveConfigButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending ? 'Salvando...' : 'Salvar Configurações'}
+        </Button>
+    )
+}
 
 export default function EvolutionApiPage() {
     const user = useAuth();
     const [instances, setInstances] = useState<EvolutionInstance[]>([]);
     const [config, setConfig] = useState<EvolutionApiConfig | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false);
-    const [isAdding, setIsAdding] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     
-    const [apiUrlInput, setApiUrlInput] = useState('');
-    const [apiKeyInput, setApiKeyInput] = useState('');
-    
     const { toast } = useToast();
+
+    // Use useActionState for the config form
+    const [saveError, saveAction, isSaving] = useActionState(saveEvolutionApiConfig, null);
+    
+    // Function to fetch all data
+    const fetchData = async (workspaceId: string) => {
+        setIsLoading(true);
+        try {
+            const [configData, instancesData] = await Promise.all([
+                getEvolutionApiConfig(workspaceId),
+                getEvolutionApiInstances(workspaceId)
+            ]);
+            setConfig(configData);
+            setInstances(instancesData.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance)); // Simulate disconnect on load
+        } catch (error) {
+            console.error("Failed to fetch evolution api data", error);
+            toast({ title: "Erro ao buscar dados", description: "Não foi possível carregar as configurações e instâncias.", variant: "destructive" });
+        } finally {
+            setIsLoading(false);
+        }
+    };
     
     useEffect(() => {
-        if (user && user.activeWorkspaceId) {
+        if (user?.activeWorkspaceId) {
             const workspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
             setActiveWorkspace(workspace || null);
         }
     }, [user]);
 
     useEffect(() => {
-        if (!activeWorkspace) return;
+        if (activeWorkspace) {
+            fetchData(activeWorkspace.id);
+        }
+    }, [activeWorkspace]);
 
-        const fetchData = async () => {
-            setIsLoading(true);
-            // MOCK: In a real app, this would fetch data from your database.
-            console.log(`Fetching config and instances for workspace: ${activeWorkspace.id}`);
-            const mockConfig: EvolutionApiConfig = {
-                id: `config-${activeWorkspace.id}`,
-                workspace_id: activeWorkspace.id,
-                api_url: 'http://localhost:8080',
-                api_key: 'your-api-key',
-            };
-            const mockInstances: EvolutionInstance[] = [
-                { id: 'inst-1', name: 'Vendas SP', status: 'connected', type: 'baileys', config_id: mockConfig.id },
-                { id: 'inst-2', name: 'Suporte Cloud', status: 'disconnected', type: 'wa_cloud', config_id: mockConfig.id },
-            ];
 
-            setConfig(mockConfig);
-            setApiUrlInput(mockConfig.api_url || '');
-            setApiKeyInput(mockConfig.api_key || '');
-            setInstances(mockInstances.map(i => ({...i, status: 'disconnected'}) as EvolutionInstance));
-            setIsLoading(false);
-        };
-
-        fetchData();
-    }, [activeWorkspace, toast]);
-
-    const handleSaveConfig = async () => {
-        if (!activeWorkspace) return;
-        setIsSaving(true);
-        
-        console.log("Mock: Saving config", { workspaceId: activeWorkspace.id, apiUrl: apiUrlInput, apiKey: apiKeyInput });
-        
-        setTimeout(() => {
-            setConfig({
-                id: config?.id || `config-${activeWorkspace.id}`,
-                workspace_id: activeWorkspace.id,
-                api_url: apiUrlInput,
-                api_key: apiKeyInput,
-            });
-            toast({ title: 'Configurações salvas com sucesso!' });
-            setIsSaving(false);
-        }, 1000);
-    }
-    
-    const getStatusInfo = (status: EvolutionInstance['status']) => {
-        switch (status) {
-            case 'connected':
-                return { text: 'Conectado', color: 'bg-green-500', icon: <ShieldCheck className="h-4 w-4" /> };
-            case 'disconnected':
-                return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
-            case 'pending':
-                return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
+    const handleFormActionCompletion = (workspaceId: string, toastTitle: string, toastDescription: string) => {
+        return () => {
+            setIsAddModalOpen(false); // Close modal on success
+            toast({ title: toastTitle, description: toastDescription });
+            // Re-fetch data to show the new instance/changes
+            fetchData(workspaceId);
         }
     }
-    
-    const handleAddInstance = async (newInstanceData: Pick<EvolutionInstance, 'name' | 'type'>) => {
-        if (!config) {
-            toast({ title: 'Salve a configuração global primeiro', variant: 'destructive'});
-            return;
-        }
-        setIsAdding(true);
-
-        console.log("Mock: Adding instance", newInstanceData);
-        setTimeout(() => {
-            const newInstance: EvolutionInstance = {
-                id: `inst-${Date.now()}`,
-                status: 'disconnected',
-                ...newInstanceData,
-                config_id: config.id
-            };
-            setInstances([...instances, newInstance]);
-            setIsAddModalOpen(false);
-            toast({ title: 'Sucesso!', description: `A instância "${newInstance.name}" foi criada.` });
-            setIsAdding(false);
-        }, 1000);
-    };
 
     const handleRemoveInstance = async (instanceId: string) => {
-        console.log("Mock: Removing instance", instanceId);
-        setInstances(instances.filter(inst => inst.id !== instanceId));
-        toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
+        try {
+            await deleteEvolutionApiInstance(instanceId);
+            toast({ title: 'Instância Removida', description: 'A instância foi removida com sucesso.' });
+            if (activeWorkspace) {
+                fetchData(activeWorkspace.id);
+            }
+        } catch (error) {
+            toast({ title: 'Erro ao remover', description: 'Não foi possível remover a instância.', variant: 'destructive' });
+        }
     }
 
     const handleToggleConnection = (instanceId: string) => {
@@ -208,7 +175,17 @@ export default function EvolutionApiPage() {
             return inst;
         }));
     };
-
+    
+    const getStatusInfo = (status: EvolutionInstance['status']) => {
+        switch (status) {
+            case 'connected':
+                return { text: 'Conectado', color: 'bg-green-500', icon: <ShieldCheck className="h-4 w-4" /> };
+            case 'disconnected':
+                return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
+            case 'pending':
+                return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
+        }
+    }
 
     if (!user || isLoading) {
         return (
@@ -226,28 +203,29 @@ export default function EvolutionApiPage() {
                     <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name}</span></p>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
-                   <Card>
-                       <CardHeader>
-                           <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
-                           <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
-                       </CardHeader>
-                       <CardContent className="grid md:grid-cols-2 gap-6">
-                           <div className="space-y-2">
-                               <Label htmlFor="global-api-url">URL da API</Label>
-                               <Input id="global-api-url" placeholder="Ex: http://localhost:8080" value={apiUrlInput} onChange={e => setApiUrlInput(e.target.value)} />
-                           </div>
-                            <div className="space-y-2">
-                               <Label htmlFor="global-api-key">Chave da API (Global API Key)</Label>
-                               <Input id="global-api-key" type="password" value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} placeholder="••••••••••••••••••••••••••" />
-                           </div>
-                       </CardContent>
-                       <CardFooter>
-                           <Button onClick={handleSaveConfig} disabled={isSaving}>
-                            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {isSaving ? 'Salvando...' : 'Salvar Configurações'}
-                           </Button>
-                       </CardFooter>
-                   </Card>
+                   <form action={saveAction} onSubmit={() => handleFormActionCompletion(activeWorkspace!.id, "Configuração Salva!", "Suas alterações foram salvas com sucesso.")()}>
+                        <input type="hidden" name="workspaceId" value={activeWorkspace?.id || ''} />
+                        <input type="hidden" name="configId" value={config?.id || ''} />
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
+                                <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="grid md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="global-api-url">URL da API</Label>
+                                    <Input name="apiUrl" id="global-api-url" placeholder="Ex: http://localhost:8080" defaultValue={config?.api_url || ''} />
+                                </div>
+                                    <div className="space-y-2">
+                                    <Label htmlFor="global-api-key">Chave da API (Global API Key)</Label>
+                                    <Input name="apiKey" id="global-api-key" type="password" defaultValue={config?.api_key || ''} placeholder="••••••••••••••••••••••••••" />
+                                </div>
+                            </CardContent>
+                            <CardFooter>
+                                <SaveConfigButton />
+                            </CardFooter>
+                        </Card>
+                   </form>
 
                     <div>
                         <div className="flex justify-between items-center mb-4">
@@ -266,7 +244,10 @@ export default function EvolutionApiPage() {
                                             Configure uma nova instância para conectar um número de WhatsApp.
                                         </DialogDescription>
                                     </DialogHeader>
-                                    <AddInstanceForm onAddInstance={handleAddInstance} isAdding={isAdding}/>
+                                    <AddInstanceForm 
+                                        configId={config?.id}
+                                        onAdd={() => handleFormActionCompletion(activeWorkspace!.id, "Instância Criada!", "A nova instância foi adicionada com sucesso.")()}
+                                    />
                                 </DialogContent>
                             </Dialog>
                         </div>
@@ -338,7 +319,7 @@ export default function EvolutionApiPage() {
                                     </Card>
                                 )
                             })}
-                             {instances.length === 0 && (
+                             {instances.length === 0 && !isLoading && (
                                 <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
                                     <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
                                     <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
