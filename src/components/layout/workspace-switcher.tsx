@@ -4,7 +4,6 @@
 import * as React from 'react';
 import { useActionState, useFormStatus } from 'react';
 import {
-  CaretSortIcon,
   CheckIcon,
   PlusCircledIcon,
 } from '@radix-ui/react-icons';
@@ -36,7 +35,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { User, Workspace } from '@/lib/types';
+import type { User } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
@@ -107,11 +106,9 @@ function CreateWorkspaceForm({ setOpen }: { setOpen: (open: boolean) => void }) 
     )
 }
 
-function CreateWorkspaceDialog({ children }: { children: React.ReactNode }) {
-    const [open, setOpen] = React.useState(false);
+function CreateWorkspaceDialog({ open, setOpen }: { open: boolean, setOpen: (open: boolean) => void }) {
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>{children}</DialogTrigger>
             <DialogContent>
                 <CreateWorkspaceForm setOpen={setOpen} />
             </DialogContent>
@@ -126,7 +123,9 @@ export function WorkspaceSwitcher({
   activeWorkspaceId,
   onWorkspaceChange,
 }: WorkspaceSwitcherProps) {
-  const [open, setOpen] = React.useState(false);
+  const [popoverOpen, setPopoverOpen] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  
   const activeWorkspace = user.workspaces?.find(ws => ws.id === activeWorkspaceId);
 
   if (!activeWorkspace) {
@@ -134,7 +133,8 @@ export function WorkspaceSwitcher({
   }
 
   return (
-      <Popover open={open} onOpenChange={setOpen}>
+      <>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <TooltipProvider>
             <Tooltip>
                 <TooltipTrigger asChild>
@@ -142,7 +142,7 @@ export function WorkspaceSwitcher({
                     <Button
                         variant="ghost"
                         role="combobox"
-                        aria-expanded={open}
+                        aria-expanded={popoverOpen}
                         aria-label="Select a workspace"
                         className={cn('h-10 w-10 p-0', className)}
                     >
@@ -176,7 +176,7 @@ export function WorkspaceSwitcher({
                     key={ws.id}
                     onSelect={() => {
                       onWorkspaceChange(ws.id);
-                      setOpen(false);
+                      setPopoverOpen(false);
                     }}
                     className="text-sm"
                   >
@@ -203,20 +203,21 @@ export function WorkspaceSwitcher({
             <CommandSeparator />
             <CommandList>
               <CommandGroup>
-                 <CreateWorkspaceDialog>
-                     <CommandItem
-                        onSelect={() => {
-                            setOpen(false);
-                        }}
-                        >
-                        <PlusCircledIcon className="mr-2 h-5 w-5" />
-                        Criar Workspace
-                    </CommandItem>
-                </CreateWorkspaceDialog>
+                 <CommandItem
+                    onSelect={() => {
+                        setPopoverOpen(false);
+                        setDialogOpen(true);
+                    }}
+                    >
+                    <PlusCircledIcon className="mr-2 h-5 w-5" />
+                    Criar Workspace
+                </CommandItem>
               </CommandGroup>
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
+      <CreateWorkspaceDialog open={dialogOpen} setOpen={setDialogOpen} />
+      </>
   );
 }
