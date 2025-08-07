@@ -10,20 +10,37 @@ import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff } from 'lucide-react';
+import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'pending';
 
+interface EvolutionInstance {
+    id: string;
+    name: string;
+    apiUrl: string;
+    apiKey: string;
+    status: ConnectionStatus;
+}
+
+const mockInstances: EvolutionInstance[] = [
+    { id: 'inst-1', name: 'Atendimento Matriz', apiUrl: 'https://api1.example.com', apiKey: 'key-1', status: 'connected'},
+    { id: 'inst-2', name: 'Vendas SP', apiUrl: 'https://api2.example.com', apiKey: 'key-2', status: 'disconnected'},
+    { id: 'inst-3', name: 'Suporte Beta', apiUrl: 'https://api3.example.com', apiKey: 'key-3', status: 'pending'},
+]
+
+
 export default function EvolutionApiPage() {
     const [user, setUser] = React.useState<User | null>(null);
-    const [apiUrl, setApiUrl] = useState('');
-    const [apiKey, setApiKey] = useState('');
-    const [instanceName, setInstanceName] = useState('dialogy-instance');
-    const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-
+    const [instances, setInstances] = useState<EvolutionInstance[]>(mockInstances);
     const supabase = createClient();
 
     React.useEffect(() => {
@@ -51,11 +68,9 @@ export default function EvolutionApiPage() {
             case 'disconnected':
                 return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
             case 'pending':
-                return { text: 'Pendente', color: 'bg-yellow-500', icon: <Zap className="h-4 w-4" /> };
+                return { text: 'Pendente', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
         }
     }
-
-    const statusInfo = getStatusInfo(status);
 
     if (!user) {
         return null; // Or a loading spinner
@@ -66,67 +81,79 @@ export default function EvolutionApiPage() {
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2"><Zap /> Conexão com a Evolution API</h1>
-                        <p className="text-muted-foreground">Gerencie sua instância da API do WhatsApp para atendimento.</p>
+                        <h1 className="text-2xl font-bold flex items-center gap-2"><Zap /> Conexões com a Evolution API</h1>
+                        <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para atendimento.</p>
                     </div>
+                     <Button>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Adicionar Instância
+                    </Button>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                   <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-                        <div className="md:col-span-2 space-y-6">
-                             <Card>
-                                <CardHeader>
-                                    <CardTitle>Configurações da Instância</CardTitle>
-                                    <CardDescription>Insira os dados da sua instância da Evolution API para conectar.</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                     <div className="space-y-2">
-                                        <Label htmlFor="api-url"><Server className="inline-block mr-2 h-4 w-4"/> URL da API</Label>
-                                        <Input id="api-url" placeholder="https://sua-api.com" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="api-key"><KeyRound className="inline-block mr-2 h-4 w-4"/> API Key</Label>
-                                        <Input id="api-key" type="password" placeholder="••••••••••••••••••••••••••" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-                                    </div>
-                                </CardContent>
-                                <CardFooter>
-                                    <Button>Salvar e Testar Conexão</Button>
-                                </CardFooter>
-                            </Card>
-                             <Card>
-                                <CardHeader>
-                                    <CardTitle>Controle da Instância</CardTitle>
-                                    <CardDescription>Gerencie o estado da sua instância de conexão com o WhatsApp.</CardDescription>
-                                </CardHeader>
-                                <CardContent className="flex items-center justify-around gap-4">
-                                    <Button variant="outline" size="lg" className="flex-1">
-                                        <Power className="mr-2 h-4 w-4"/> Iniciar Instância
-                                    </Button>
-                                    <Button variant="destructive" size="lg" className="flex-1">
-                                        <PowerOff className="mr-2 h-4 w-4"/> Desconectar Instância
-                                    </Button>
-                                </CardContent>
-                            </Card>
-                        </div>
-                        <div className="space-y-6">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>Status da Conexão</CardTitle>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="flex items-center justify-between p-4 border rounded-lg">
-                                        <span className="font-semibold">Status</span>
-                                        <Badge>
-                                            <div className={`h-2 w-2 rounded-full mr-2 ${statusInfo.color}`}></div>
-                                            {statusInfo.text}
-                                        </Badge>
-                                    </div>
-                                    <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center">
-                                        <QrCode className="h-24 w-24 text-muted-foreground/50"/>
-                                        <p className="mt-4 text-sm text-muted-foreground">Aguardando leitura do QR Code para conectar.</p>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {instances.map(instance => {
+                             const statusInfo = getStatusInfo(instance.status);
+                             return (
+                                <Card key={instance.id} className="flex flex-col">
+                                    <CardHeader>
+                                        <div className="flex justify-between items-start">
+                                            <div className="max-w-[80%] break-words">
+                                                <CardTitle className="flex items-center gap-2">
+                                                    <Server className="h-5 w-5 text-primary"/>
+                                                    {instance.name}
+                                                </CardTitle>
+                                                <CardDescription className="mt-1">
+                                                     <Badge variant={"outline"}>
+                                                        <div className={`h-2 w-2 rounded-full mr-2 ${statusInfo.color}`}></div>
+                                                        {statusInfo.text}
+                                                    </Badge>
+                                                </CardDescription>
+                                            </div>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                        <MoreVertical className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem>
+                                                        <Edit className="mr-2 h-4 w-4" />
+                                                        Editar
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-destructive">
+                                                        <Trash2 className="mr-2 h-4 w-4" />
+                                                        Remover
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="flex-grow space-y-4">
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-medium text-muted-foreground">URL da API</p>
+                                            <p className="text-sm font-mono bg-secondary/50 p-2 rounded-md truncate">{instance.apiUrl}</p>
+                                        </div>
+                                        {instance.status === 'pending' && (
+                                             <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center">
+                                                <QrCode className="h-24 w-24 text-muted-foreground/50"/>
+                                                <p className="mt-4 text-sm text-muted-foreground">Aguardando leitura do QR Code.</p>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                    <CardFooter className="p-4 border-t">
+                                        {instance.status === 'connected' ? (
+                                             <Button variant="destructive" className="w-full">
+                                                <PowerOff className="mr-2 h-4 w-4"/> Desconectar
+                                            </Button>
+                                        ) : (
+                                            <Button className="w-full">
+                                                <Power className="mr-2 h-4 w-4"/> Conectar e Gerar QR Code
+                                            </Button>
+                                        )}
+                                    </CardFooter>
+                                </Card>
+                             )
+                        })}
                    </div>
                 </main>
             </div>
