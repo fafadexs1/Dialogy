@@ -3,10 +3,7 @@
 'use client';
 
 import * as React from 'react';
-import {
-  CheckIcon,
-  PlusCircledIcon,
-} from '@radix-ui/react-icons';
+import { CheckIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -25,8 +22,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { User } from '@/lib/types';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { useRouter } from 'next/navigation';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../ui/tooltip';
 import Link from 'next/link';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
@@ -34,21 +35,24 @@ type PopoverTriggerProps = React.ComponentPropsWithoutRef<
 >;
 
 interface WorkspaceSwitcherProps extends PopoverTriggerProps {
-    user: User;
-    activeWorkspaceId: string;
-    onWorkspaceChange: (workspaceId: string) => void;
+  user: User;
 }
 
 export function WorkspaceSwitcher({
   className,
   user,
-  activeWorkspaceId,
-  onWorkspaceChange,
 }: WorkspaceSwitcherProps) {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
-  const router = useRouter();
 
-  const activeWorkspace = user.workspaces?.find(ws => ws.id === activeWorkspaceId);
+  const activeWorkspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
+
+  const handleWorkspaceChange = (workspaceId: string) => {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeWorkspaceId', workspaceId);
+        window.location.reload();
+      }
+      setPopoverOpen(false);
+  }
 
   if (!activeWorkspace) {
     return null;
@@ -56,72 +60,69 @@ export function WorkspaceSwitcher({
 
   return (
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <TooltipProvider>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <PopoverTrigger asChild>
-                    <Button
-                        variant="ghost"
-                        role="combobox"
-                        aria-expanded={popoverOpen}
-                        aria-label="Select a workspace"
-                        className={cn('h-10 w-10 p-0', className)}
-                    >
-                        <Avatar className="h-8 w-8">
-                            <AvatarImage
-                                src={activeWorkspace.avatar}
-                                alt={activeWorkspace.name}
-                                data-ai-hint="logo"
-                            />
-                            <AvatarFallback>
-                                {activeWorkspace.name.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                        </Avatar>
-                    </Button>
-                    </PopoverTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                <p>{activeWorkspace.name}</p>
-                </TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                role="combobox"
+                aria-expanded={popoverOpen}
+                aria-label="Select a workspace"
+                className={cn('h-10 w-10 p-0', className)}
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage
+                    src={activeWorkspace.avatar}
+                    alt={activeWorkspace.name}
+                    data-ai-hint="logo"
+                  />
+                  <AvatarFallback>
+                    {activeWorkspace.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            <p>{activeWorkspace.name}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
-        <PopoverContent className="w-[200px] p-0">
+      <PopoverContent className="w-[200px] p-0">
         <Command>
-            <CommandList>
+          <CommandList>
             <CommandInput placeholder="Buscar workspace..." />
             <CommandEmpty>Nenhum workspace encontrado.</CommandEmpty>
             <CommandGroup heading="Workspaces">
-                {user.workspaces?.map((ws) => (
+              {user.workspaces?.map((ws) => (
                 <CommandItem
-                    key={ws.id}
-                    onSelect={() => {
-                    onWorkspaceChange(ws.id);
-                    setPopoverOpen(false);
-                    }}
-                    className="text-sm"
+                  key={ws.id}
+                  onSelect={() => handleWorkspaceChange(ws.id)}
+                  className="text-sm"
                 >
-                    <Avatar className="mr-2 h-5 w-5">
+                  <Avatar className="mr-2 h-5 w-5">
                     <AvatarImage
-                        src={ws.avatar}
-                        alt={ws.name}
+                      src={ws.avatar}
+                      alt={ws.name}
                     />
                     <AvatarFallback>{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    {ws.name}
-                    <CheckIcon
+                  </Avatar>
+                  {ws.name}
+                  <CheckIcon
                     className={cn(
-                        'ml-auto h-4 w-4',
-                        activeWorkspaceId === ws.id
+                      'ml-auto h-4 w-4',
+                      user.activeWorkspaceId === ws.id
                         ? 'opacity-100'
                         : 'opacity-0'
                     )}
-                    />
+                  />
                 </CommandItem>
-                ))}
+              ))}
             </CommandGroup>
-            </CommandList>
-            <CommandSeparator />
+          </CommandList>
+          <CommandSeparator />
             <div className='p-1'>
                 <Button variant="ghost" className="w-full justify-start px-2 py-1.5" asChild>
                     <Link href="/settings/workspace/new" onClick={() => setPopoverOpen(false)}>
@@ -131,7 +132,7 @@ export function WorkspaceSwitcher({
                 </Button>
             </div>
         </Command>
-        </PopoverContent>
+      </PopoverContent>
     </Popover>
   );
 }

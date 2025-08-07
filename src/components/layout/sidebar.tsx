@@ -35,7 +35,6 @@ import type { User } from '@/lib/types';
 import { signOutAction } from '@/actions/auth';
 import { usePathname } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
-import { useState } from 'react';
 
 interface SidebarProps {
   user: User;
@@ -68,15 +67,6 @@ function SignOut() {
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState(user.activeWorkspaceId);
-
-  // This would in a real app be a server call or context update
-  const handleWorkspaceChange = (workspaceId: string) => {
-    setActiveWorkspaceId(workspaceId);
-    // In a real app, you'd likely redirect or reload data here.
-    // For now, we'll just log it and the UI will update optimistically.
-    window.location.reload();
-  }
 
   return (
     <aside className="flex h-full w-auto flex-col justify-between border-r bg-card p-2">
@@ -87,11 +77,7 @@ export function Sidebar({ user }: SidebarProps) {
         </Link>
         
         {user.activeWorkspaceId && (
-            <WorkspaceSwitcher 
-                user={user} 
-                activeWorkspaceId={activeWorkspaceId}
-                onWorkspaceChange={handleWorkspaceChange}
-            />
+            <WorkspaceSwitcher user={user} />
         )}
         <Separator />
 

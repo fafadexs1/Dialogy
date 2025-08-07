@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -53,9 +54,16 @@ export function useAuth(): AppUser | null {
                 avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
             })) || [];
 
-            // Let's assume the first workspace is the active one for now.
             // A real app would have a mechanism to select and persist the active workspace.
-            const activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
+            let activeWorkspaceId: string | undefined = undefined;
+            if (typeof window !== 'undefined') {
+                activeWorkspaceId = localStorage.getItem('activeWorkspaceId') || undefined;
+            }
+
+            // If no active workspace is stored, or if it's not valid, default to the first one.
+            if (!activeWorkspaceId || !workspaces.some(ws => ws.id === activeWorkspaceId)) {
+                activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
+            }
             
             setAppUser({
                 id: authUser.id,
