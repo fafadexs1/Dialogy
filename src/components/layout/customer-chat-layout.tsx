@@ -127,23 +127,31 @@ export default function CustomerChatLayout({ onlineAgents }: CustomerChatLayoutP
     fetchMessages();
   }, [selectedChat, supabase, allUsers]);
 
+  // This useEffect now handles ALL incoming messages via Realtime
+  // and keeps the connection alive regardless of the selected chat.
   useEffect(() => {
-    if (!selectedChat) return;
-
     const channel = supabase
-      .channel(`realtime-chat:${selectedChat.id}`)
+      .channel('realtime-messages')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${selectedChat.id}` },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMessagePayload = payload.new as any;
-          const newMessage: Message = {
-            id: newMessagePayload.id,
-            sender: getUserById(newMessagePayload.sender_id),
-            content: newMessagePayload.content,
-            timestamp: new Date(newMessagePayload.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          };
-          setMessages((prevMessages) => [...prevMessages, newMessage]);
+
+          // Check if the new message belongs to the currently selected chat
+          if (selectedChat && newMessagePayload.chat_id === selectedChat.id) {
+            const newMessage: Message = {
+              id: newMessagePayload.id,
+              sender: getUserById(newMessagePayload.sender_id),
+              content: newMessagePayload.content,
+              timestamp: new Date(newMessagePayload.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            };
+            setMessages((prevMessages) => [...prevMessages, newMessage]);
+          } else {
+            // Logic to handle notifications for other chats can go here.
+            // For example, update the `chats` state to show an unread indicator.
+            console.log('New message received for another chat:', newMessagePayload);
+          }
         }
       )
       .subscribe();
@@ -151,7 +159,8 @@ export default function CustomerChatLayout({ onlineAgents }: CustomerChatLayoutP
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, selectedChat, allUsers]);
+    // We remove selectedChat from dependencies to keep the channel open
+  }, [supabase, selectedChat?.id, allUsers]);
 
 
   if (loading || !currentUser) {
