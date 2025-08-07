@@ -6,7 +6,8 @@ import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { auth } from '@/app/api/auth/[...nextauth]/route';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
@@ -142,7 +143,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
 
 export default async function Home() {
   console.log("--- [PAGE_SERVER] Renderizando a página Home ---");
-  const session = await auth();
+  const session = await getServerSession(authOptions);
 
   if (!session?.user?.id) {
     console.log("[PAGE_SERVER] Usuário não autenticado. Redirecionando para /login.");

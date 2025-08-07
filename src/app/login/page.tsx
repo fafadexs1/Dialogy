@@ -1,41 +1,16 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LoginForm } from '@/components/auth/login-form';
-import { LifeBuoy, CheckCircle2, Loader2 } from 'lucide-react';
+import { LifeBuoy, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function LoginPage() {
-  const { data: session, status } = useSession();
+function LoginPageContent() {
   const searchParams = useSearchParams();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
   const isRegistered = searchParams.get('registered') === 'true';
 
-  useEffect(() => {
-    // Se um usuário já autenticado chegar a esta página, force o logout
-    // para garantir um fluxo de login limpo.
-    if (status === 'authenticated') {
-      setIsLoggingOut(true);
-      signOut({ redirect: false }).then(() => {
-        setIsLoggingOut(false);
-      });
-    }
-  }, [status]);
-  
-  if (status === 'loading' || isLoggingOut) {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-secondary p-4">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">{isLoggingOut ? 'Finalizando sessão anterior...' : 'Carregando...'}</p>
-      </main>
-    );
-  }
-
-  // Renderiza o formulário apenas quando não autenticado e não estiver fazendo logout.
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-secondary p-4">
       <div className="w-full max-w-sm">
@@ -61,5 +36,15 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  // O Suspense é necessário porque useSearchParams só pode ser usado em Client Components
+  // que são filhos de um <Suspense> boundary.
+  return (
+    <Suspense>
+      <LoginPageContent />
+    </Suspense>
   );
 }
