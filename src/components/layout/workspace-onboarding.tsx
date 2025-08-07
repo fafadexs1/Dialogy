@@ -24,6 +24,8 @@ function SubmitButton() {
 export function WorkspaceOnboarding({ user }: { user: User }) {
   const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
 
+  // O userId não é mais necessário no formulário, pois `auth.uid()` será usado
+  // diretamente no banco de dados através dos triggers.
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-muted/40 p-6">
         <Card className="w-full max-w-lg">
@@ -44,7 +46,6 @@ export function WorkspaceOnboarding({ user }: { user: User }) {
                             required
                             autoFocus
                         />
-                         <input type="hidden" name="userId" value={user.id} />
                     </div>
                      {errorMessage && (
                         <Alert variant="destructive" className="mt-4">
