@@ -54,19 +54,14 @@ interface WorkspaceSwitcherProps extends PopoverTriggerProps {
 
 function CreateWorkspaceForm({ setOpen }: { setOpen: (open: boolean) => void }) {
     const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
-
     const { pending } = useFormStatus();
-
-    // Use a ref to track if the submission was successful
     const formRef = React.useRef<HTMLFormElement>(null);
     const [submitted, setSubmitted] = React.useState(false);
 
     React.useEffect(() => {
-        // If the form was submitted, there's no error, and it's not pending anymore, close the dialog.
         if (submitted && !errorMessage && !pending) {
             setOpen(false);
         }
-        // Reset submitted state if an error occurs
         if(errorMessage) {
             setSubmitted(false);
         }
@@ -81,36 +76,49 @@ function CreateWorkspaceForm({ setOpen }: { setOpen: (open: boolean) => void }) 
     return (
         <form ref={formRef} action={handleFormSubmit}>
             <DialogHeader>
-            <DialogTitle>Criar Workspace</DialogTitle>
-            <DialogDescription>
-                Crie um novo workspace para colaborar com sua equipe.
-            </DialogDescription>
+                <DialogTitle>Criar Workspace</DialogTitle>
+                <DialogDescription>
+                    Crie um novo workspace para colaborar com sua equipe.
+                </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2 pb-4">
                 <div className="space-y-2">
-                <Label htmlFor="workspaceName">Nome do Workspace</Label>
-                <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." autoFocus required/>
+                    <Label htmlFor="workspaceName">Nome do Workspace</Label>
+                    <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." autoFocus required/>
                 </div>
+                 {errorMessage && (
+                    <Alert variant="destructive" className="mt-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Erro ao criar workspace</AlertTitle>
+                        <AlertDescription>{errorMessage}</AlertDescription>
+                    </Alert>
+                )}
             </div>
-                {errorMessage && (
-                <Alert variant="destructive" className="mt-4">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Erro ao criar workspace</AlertTitle>
-                    <AlertDescription>{errorMessage}</AlertDescription>
-                </Alert>
-            )}
             <DialogFooter className='pt-4'>
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-                Cancelar
-            </Button>
-            <Button type="submit" disabled={pending}>
-                 {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {pending ? 'Criando...' : 'Criar Workspace'}
-            </Button>
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+                    Cancelar
+                </Button>
+                <Button type="submit" disabled={pending}>
+                    {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {pending ? 'Criando...' : 'Criar Workspace'}
+                </Button>
             </DialogFooter>
         </form>
     )
 }
+
+function CreateWorkspaceDialog({ children }: { children: React.ReactNode }) {
+    const [open, setOpen] = React.useState(false);
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>{children}</DialogTrigger>
+            <DialogContent>
+                <CreateWorkspaceForm setOpen={setOpen} />
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 
 export function WorkspaceSwitcher({
   className,
@@ -119,8 +127,6 @@ export function WorkspaceSwitcher({
   onWorkspaceChange,
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = React.useState(false);
-  const [showNewTeamDialog, setShowNewTeamDialog] = React.useState(false);
-
   const activeWorkspace = user.workspaces?.find(ws => ws.id === activeWorkspaceId);
 
   if (!activeWorkspace) {
@@ -128,7 +134,6 @@ export function WorkspaceSwitcher({
   }
 
   return (
-    <Dialog open={showNewTeamDialog} onOpenChange={setShowNewTeamDialog}>
       <Popover open={open} onOpenChange={setOpen}>
         <TooltipProvider>
             <Tooltip>
@@ -198,25 +203,20 @@ export function WorkspaceSwitcher({
             <CommandSeparator />
             <CommandList>
               <CommandGroup>
-                <DialogTrigger asChild>
-                  <CommandItem
-                    onSelect={() => {
-                      setOpen(false);
-                      setShowNewTeamDialog(true);
-                    }}
-                  >
-                    <PlusCircledIcon className="mr-2 h-5 w-5" />
-                    Criar Workspace
-                  </CommandItem>
-                </DialogTrigger>
+                 <CreateWorkspaceDialog>
+                     <CommandItem
+                        onSelect={() => {
+                            setOpen(false);
+                        }}
+                        >
+                        <PlusCircledIcon className="mr-2 h-5 w-5" />
+                        Criar Workspace
+                    </CommandItem>
+                </CreateWorkspaceDialog>
               </CommandGroup>
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
-      <DialogContent>
-        <CreateWorkspaceForm setOpen={setShowNewTeamDialog} />
-      </DialogContent>
-    </Dialog>
   );
 }
