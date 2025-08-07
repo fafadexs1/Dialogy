@@ -1,7 +1,9 @@
+
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 
 export async function createWorkspaceAction(
   prevState: string | null,
@@ -17,9 +19,11 @@ export async function createWorkspaceAction(
 
   // A lógica de owner_id e de associação do usuário agora é tratada por triggers no banco de dados.
   // Basta inserir o nome do workspace.
-  const { error } = await supabase
+  const { data: workspaceData, error } = await supabase
     .from('workspaces')
-    .insert({ name: workspaceName });
+    .insert({ name: workspaceName })
+    .select()
+    .single();
     
   if (error) {
     console.error('Error creating workspace:', error);
@@ -28,6 +32,11 @@ export async function createWorkspaceAction(
         return 'Erro de permissão. Você não tem autorização para criar um workspace.';
     }
     return `Não foi possível criar o workspace: ${error.message}`;
+  }
+
+  // Após criar, define o novo workspace como o ativo
+  if (workspaceData) {
+      await switchWorkspaceAction(workspaceData.id);
   }
 
   revalidatePath('/', 'layout');
@@ -77,4 +86,26 @@ export async function updateWorkspaceAction(
     revalidatePath('/settings/workspace');
 
     return null;
+}
+
+export async function switchWorkspaceAction(workspaceId: string) {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        console.error("User not authenticated");
+        return;
+    }
+
+    const { error } = await supabase
+        .from('users')
+        .update({ last_active_workspace_id: workspaceId })
+        .eq('id', user.id);
+
+    if (error) {
+        console.error("Error switching workspace:", error);
+        return;
+    }
+    
+    revalidatePath('/', 'layout');
 }

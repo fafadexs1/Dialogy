@@ -1,8 +1,8 @@
 
-
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { CheckIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -28,7 +28,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../ui/tooltip';
-import Link from 'next/link';
+import { switchWorkspaceAction } from '@/actions/workspace';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -43,16 +43,20 @@ export function WorkspaceSwitcher({
   user,
 }: WorkspaceSwitcherProps) {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
+  const router = useRouter();
 
   const activeWorkspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
-  const handleWorkspaceChange = (workspaceId: string) => {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeWorkspaceId', workspaceId);
-        window.location.reload();
-      }
-      setPopoverOpen(false);
-  }
+  const handleWorkspaceChange = async (workspaceId: string) => {
+    await switchWorkspaceAction(workspaceId);
+    setPopoverOpen(false);
+    router.refresh(); // Força a atualização da página para refletir a mudança de contexto
+  };
+  
+  const handleCreateClick = () => {
+    setPopoverOpen(false);
+    router.push('/settings/workspace/new');
+  };
 
   if (!activeWorkspace) {
     return null;
@@ -124,12 +128,10 @@ export function WorkspaceSwitcher({
           </CommandList>
           <CommandSeparator />
             <div className='p-1'>
-                <Button variant="ghost" className="w-full justify-start px-2 py-1.5" asChild>
-                    <Link href="/settings/workspace/new" onClick={() => setPopoverOpen(false)}>
-                        <PlusCircledIcon className="mr-2 h-5 w-5" />
-                        Criar Workspace
-                    </Link>
-                </Button>
+                <CommandItem onSelect={handleCreateClick} className="text-sm cursor-pointer">
+                    <PlusCircledIcon className="mr-2 h-5 w-5" />
+                    Criar Workspace
+                </CommandItem>
             </div>
         </Command>
       </PopoverContent>

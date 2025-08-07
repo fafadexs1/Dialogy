@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -36,14 +35,27 @@ export function useAuth(): AppUser | null {
   useEffect(() => {
       const fetchAppUser = async () => {
         if (authUser) {
+             // Fetch the user's profile data including the last active workspace
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('id, full_name, avatar_url, email, last_active_workspace_id')
+                .eq('id', authUser.id)
+                .single();
+
+            if (userError) {
+                console.error("Error fetching user data from 'users' table", userError);
+                setAppUser(null);
+                return;
+            }
+
             // Fetch workspaces for the user
-            const { data: userWorkspaces, error } = await supabase
+            const { data: userWorkspaces, error: workspacesError } = await supabase
                 .from('user_workspaces')
                 .select('workspaces(*)')
                 .eq('user_id', authUser.id);
 
-            if (error) {
-                console.error("Error fetching user workspaces", error);
+            if (workspacesError) {
+                console.error("Error fetching user workspaces", workspacesError);
                 setAppUser(null);
                 return;
             }
@@ -54,22 +66,14 @@ export function useAuth(): AppUser | null {
                 avatar: uw.workspaces.avatar_url || `https://placehold.co/40x40.png?text=${(uw.workspaces.name || 'W').charAt(0)}`,
             })) || [];
 
-            // A real app would have a mechanism to select and persist the active workspace.
-            let activeWorkspaceId: string | undefined = undefined;
-            if (typeof window !== 'undefined') {
-                activeWorkspaceId = localStorage.getItem('activeWorkspaceId') || undefined;
-            }
-
-            // If no active workspace is stored, or if it's not valid, default to the first one.
-            if (!activeWorkspaceId || !workspaces.some(ws => ws.id === activeWorkspaceId)) {
-                activeWorkspaceId = workspaces.length > 0 ? workspaces[0].id : undefined;
-            }
+            // The active workspace is now determined by the user's profile
+            const activeWorkspaceId = userData?.last_active_workspace_id || (workspaces.length > 0 ? workspaces[0].id : undefined);
             
             setAppUser({
                 id: authUser.id,
-                name: authUser.user_metadata.full_name || authUser.email || 'Usuário',
+                name: userData.full_name || authUser.email || 'Usuário',
                 email: authUser.email || '',
-                avatar: authUser.user_metadata.avatar_url || `https://placehold.co/40x40.png?text=${(authUser.user_metadata.full_name || 'U').charAt(0)}`,
+                avatar: userData.avatar_url || `https://placehold.co/40x40.png?text=${(userData.full_name || 'U').charAt(0)}`,
                 workspaces,
                 activeWorkspaceId,
             });

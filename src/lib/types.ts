@@ -14,6 +14,7 @@ export type User = {
   email?: string;
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
+  last_active_workspace_id?: string;
 };
 
 // Representa um cliente/contato (não autenticado)
@@ -140,7 +141,6 @@ export interface Integration {
   tag: string;
   tagType: 'default' | 'primary' | 'secondary' | 'beta';
   status?: 'active' | 'coming_soon';
-  additionalInfo?: string;
   href?: string;
 }
 
