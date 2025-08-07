@@ -48,23 +48,41 @@ export function useAuth(): AppUser | null {
                 return;
             }
 
-            // Fetch workspaces the user is a member of
-            const { data: userWorkspaces, error: workspacesError } = await supabase
-                .from('workspaces')
-                .select('*')
-                .in('id', (await supabase.from('user_workspaces').select('workspace_id').eq('user_id', authUser.id)).data?.map(uw => uw.workspace_id) || []);
-
-            if (workspacesError) {
-                console.error("Error fetching user workspaces", workspacesError);
+            // Step 1: Fetch workspace IDs
+            const { data: workspaceIdsData, error: workspaceIdsError } = await supabase
+                .from('user_workspaces')
+                .select('workspace_id')
+                .eq('user_id', authUser.id);
+            
+            if (workspaceIdsError) {
+                console.error("Error fetching user workspace IDs", workspaceIdsError);
                 setAppUser(null);
                 return;
             }
+
+            const workspaceIds = workspaceIdsData?.map(uw => uw.workspace_id) || [];
+            let userWorkspaces: any[] = [];
+
+            // Step 2: Fetch workspace details if IDs exist
+            if (workspaceIds.length > 0) {
+                const { data: workspacesData, error: workspacesError } = await supabase
+                    .from('workspaces')
+                    .select('*')
+                    .in('id', workspaceIds);
+
+                if (workspacesError) {
+                    console.error("Error fetching user workspaces", workspacesError);
+                    setAppUser(null);
+                    return;
+                }
+                userWorkspaces = workspacesData || [];
+            }
             
-            const workspaces: Workspace[] = userWorkspaces?.map((ws: any) => ({
+            const workspaces: Workspace[] = userWorkspaces.map((ws: any) => ({
                 id: ws.id,
                 name: ws.name,
                 avatar: ws.avatar_url || `https://placehold.co/40x40.png?text=${(ws.name || 'W').charAt(0)}`,
-            })) || [];
+            }));
 
             // The active workspace is now determined by the user's profile
             const activeWorkspaceId = userData?.last_active_workspace_id || (workspaces.length > 0 ? workspaces[0].id : undefined);

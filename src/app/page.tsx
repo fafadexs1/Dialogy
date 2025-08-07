@@ -27,17 +27,33 @@ export default async function Home() {
         // Handle error appropriately, maybe redirect to an error page
     }
 
-  // Fetch all workspaces the user is a member of
-  const { data: userWorkspaces, error: workspacesError } = await supabase
-    .from('workspaces')
-    .select('*')
-    .in('id', (await supabase.from('user_workspaces').select('workspace_id').eq('user_id', user.id)).data?.map(uw => uw.workspace_id) || []);
-  
-  if (workspacesError) {
-    console.error("Error fetching user workspaces", workspacesError);
-    // Handle error appropriately
+  // Step 1: Fetch workspace IDs the user is a member of.
+  const { data: workspaceIdsData, error: workspaceIdsError } = await supabase
+    .from('user_workspaces')
+    .select('workspace_id')
+    .eq('user_id', user.id);
+
+  if (workspaceIdsError) {
+    console.error("Error fetching user workspace IDs", workspaceIdsError);
   }
 
+  const workspaceIds = workspaceIdsData?.map(uw => uw.workspace_id) || [];
+  let userWorkspaces: any[] = [];
+
+  // Step 2: If there are workspace IDs, fetch the workspace details.
+  if (workspaceIds.length > 0) {
+      const { data: workspacesData, error: workspacesError } = await supabase
+        .from('workspaces')
+        .select('*')
+        .in('id', workspaceIds);
+
+      if (workspacesError) {
+          console.error("Error fetching user workspaces", workspacesError);
+      } else {
+          userWorkspaces = workspacesData || [];
+      }
+  }
+  
   const workspaces: Workspace[] = userWorkspaces?.map((ws: any) => ({
       id: ws.id,
       name: ws.name,
