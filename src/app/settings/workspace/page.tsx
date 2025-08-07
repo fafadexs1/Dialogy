@@ -8,9 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Settings } from 'lucide-react';
 import type { Workspace } from '@/lib/types';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 
 function SubmitButton() {
@@ -51,17 +50,29 @@ export default function WorkspaceSettingsPage() {
     }, [errorMessage, toast]);
 
 
-    if (!user || !activeWorkspace) {
+    if (!user) {
         return <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
     }
 
+    if (!activeWorkspace) {
+        return (
+            <div className="text-center">
+                <h2 className="text-xl font-medium text-muted-foreground">Nenhum workspace selecionado.</h2>
+                <p className="text-muted-foreground">Crie ou selecione um workspace para ver suas configurações.</p>
+            </div>
+        )
+    }
+
     return (
         <div className="max-w-3xl">
             <header className="mb-6">
-                 <h1 className="text-2xl font-bold">Configurações do Workspace</h1>
-                 <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual.</p>
+                 <h1 className="text-2xl font-bold flex items-center gap-2">
+                    <Settings />
+                    Configurações do Workspace
+                </h1>
+                 <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
             <form action={formAction}>
