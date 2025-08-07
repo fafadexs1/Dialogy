@@ -308,8 +308,8 @@ export async function testEvolutionApiConnection(
         return { success: true, message: 'Conexão bem-sucedida.' };
     } catch (error: any) {
         // A API pode retornar um erro específico se o modo manager não estiver ativo, o que ainda é um sinal de sucesso na conexão.
-        if (error.message && error.message.includes('403') || error.message && error.message.includes('501')) {
-            return { success: true, message: 'Conexão bem-sucedida.' };
+        if (error.message && (error.message.includes('403') || error.message.includes('501'))) {
+            return { success: true, message: 'Conexão bem-sucedida (modo manager não ativo, mas API alcançável).' };
         }
         console.error('[EVO_ACTION_TEST_CONNECTION] Erro ao testar a conexão:', error);
         return { success: false, message: `Falha na conexão: ${error.message}` };
