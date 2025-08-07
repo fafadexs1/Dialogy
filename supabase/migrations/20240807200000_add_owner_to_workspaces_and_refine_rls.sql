@@ -1,4 +1,4 @@
-
+-- Adiciona a coluna 'owner_id' à tabela 'workspaces' se ela não existir.
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -8,64 +8,70 @@ BEGIN
     AND table_name = 'workspaces'
     AND column_name = 'owner_id'
   ) THEN
-    -- Add the 'owner_id' column to the 'workspaces' table
-    -- It defaults to the ID of the user who created it and references your users table.
     ALTER TABLE public.workspaces
     ADD COLUMN owner_id uuid DEFAULT auth.uid() REFERENCES public.users(id);
   END IF;
-END $$;
+END
+$$;
 
-
--- First, remove old policies to avoid conflicts.
-DROP POLICY IF EXISTS "Authenticated users can create workspaces" ON public.workspaces;
-DROP POLICY IF EXISTS "Users can view their own workspaces" ON public.workspaces;
+-- Limpa as políticas antigas para evitar conflitos.
 DROP POLICY IF EXISTS "Usuários autenticados podem criar workspaces" ON public.workspaces;
 DROP POLICY IF EXISTS "Usuários podem ver workspaces dos quais são membros" ON public.workspaces;
 DROP POLICY IF EXISTS "Proprietários podem alterar seus próprios workspaces" ON public.workspaces;
 DROP POLICY IF EXISTS "Proprietários podem deletar seus próprios workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Authenticated users can create workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Users can create and view their own workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Users can create workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Users can see workspaces they are part of" ON public.workspaces;
+DROP POLICY IF EXISTS "Users can view their own workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Users can view workspaces they are members of" ON public.workspaces;
 
--- Workspace Policies
--- 1. INSERT: Authenticated users can create workspaces.
-CREATE POLICY "Authenticated users can create workspaces"
+-- Limpa políticas da tabela de junção
+DROP POLICY IF EXISTS "Users can be added to workspaces" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Allow workspace creator linking via trigger" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Users can view their own workspace memberships" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Users can see their own workspace memberships" ON public.user_workspaces;
+
+
+-- POLÍTICAS PARA A TABELA 'workspaces'
+
+-- 1. Permite que usuários autenticados criem um workspace.
+CREATE POLICY "Authenticated users can insert workspaces"
 ON public.workspaces FOR INSERT
 TO authenticated
-WITH CHECK (owner_id = auth.uid());
+WITH CHECK (true);
 
--- 2. SELECT: Users can see workspaces they are members of.
-CREATE POLICY "Users can view workspaces they are members of"
+-- 2. Permite que um usuário veja todos os workspaces dos quais ele é membro.
+CREATE POLICY "Users can select workspaces they are members of"
 ON public.workspaces FOR SELECT
+TO public
 USING (id IN (
     SELECT workspace_id FROM public.user_workspaces WHERE user_id = auth.uid()
 ));
 
--- 3. UPDATE: Only the workspace owner can update it.
+-- 3. Permite que APENAS o proprietário do workspace o altere.
 CREATE POLICY "Owners can update their own workspaces"
 ON public.workspaces FOR UPDATE
+TO public
 USING (owner_id = auth.uid());
 
--- 4. DELETE: Only the workspace owner can delete it.
+-- 4. Permite que APENAS o proprietário do workspace o exclua.
 CREATE POLICY "Owners can delete their own workspaces"
 ON public.workspaces FOR DELETE
+TO public
 USING (owner_id = auth.uid());
 
 
--- User_Workspaces Policies
--- Clean up old policies first
-DROP POLICY IF EXISTS "Users can view their own workspace memberships" ON public.user_workspaces;
-DROP POLICY IF EXISTS "Allow workspace creator linking via trigger" ON public.user_workspaces;
-DROP POLICY IF EXISTS "Users can be added to workspaces" ON public.user_workspaces;
-DROP POLICY IF EXISTS "Users can see their own workspace memberships" ON public.user_workspaces;
+-- POLÍTICAS PARA A TABELA 'user_workspaces'
 
-
--- 1. INSERT: An authenticated user can add themselves to a workspace.
-CREATE POLICY "Users can add themselves to workspaces"
+-- 1. Permite que um usuário se vincule a um workspace.
+CREATE POLICY "Users can insert their own user_workspace link"
 ON public.user_workspaces FOR INSERT
 TO authenticated
-WITH CHECK (auth.uid() = user_id);
+WITH CHECK (user_id = auth.uid());
 
-
--- 2. SELECT: Users can view their own workspace memberships.
+-- 2. Permite que um usuário veja suas próprias associações de workspace.
 CREATE POLICY "Users can view their own workspace memberships"
 ON public.user_workspaces FOR SELECT
 TO authenticated
-USING (auth.uid() = user_id);
+USING (user_id = auth.uid());
