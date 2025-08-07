@@ -38,8 +38,7 @@ import {
     deleteEvolutionApiInstance,
     checkInstanceStatus,
     connectInstance,
-    disconnectInstance,
-    testEvolutionApiConnection
+    disconnectInstance
 } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
@@ -446,7 +445,7 @@ export default function EvolutionApiPage() {
                                 <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground" />
                                 <h3 className="mt-4 text-lg font-medium">Configure sua API Global</h3>
                                 <p className="mt-2 text-sm text-muted-foreground">
-                                    Não foi possível conectar à API Global. Verifique a URL e a Chave da API e salve novamente. As instâncias não podem ser gerenciadas até que a conexão seja estabelecida.
+                                    Para gerenciar instâncias, por favor, insira e salve a URL e a Chave da sua API Evolution nas configurações acima.
                                 </p>
                             </div>
                          ) : (
@@ -543,4 +542,3 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
-

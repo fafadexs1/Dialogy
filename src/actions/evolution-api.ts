@@ -189,22 +189,23 @@ export async function createEvolutionApiInstance(
     // Remove chaves undefined ou vazias para um payload limpo
     Object.keys(payload).forEach(key => {
         const typedKey = key as keyof typeof payload;
-        if (payload[typedKey] === undefined || payload[typedKey] === '' || payload[typedKey] === null) {
+        const value = payload[typedKey];
+        if (value === undefined || value === '' || value === null) {
             delete payload[typedKey];
-        }
-        if (typeof payload[typedKey] === 'object' && payload[typedKey] !== null) {
-             Object.keys(payload[typedKey]!).forEach(subKey => {
-                const typedSubKey = subKey as keyof typeof payload[typeof typedKey];
-                const subObject = payload[typedKey] as any;
-                 if (subObject[typedSubKey] === undefined || subObject[typedSubKey] === '' || subObject[typedSubKey] === null || (Array.isArray(subObject[typedSubKey]) && subObject[typedSubKey].length === 0)) {
-                    delete subObject[typedSubKey];
+        } else if (typeof value === 'object' && !Array.isArray(value)) {
+            Object.keys(value).forEach(subKey => {
+                const subObject = value as any;
+                const subValue = subObject[subKey];
+                if (subValue === undefined || subValue === '' || subValue === null || (Array.isArray(subValue) && subValue.length === 0)) {
+                    delete subObject[subKey];
                 }
-             });
-             if (Object.keys(payload[typedKey]!).length === 0) {
-                 delete payload[typedKey];
-             }
+            });
+            if (Object.keys(value).length === 0) {
+                delete payload[typedKey];
+            }
         }
     });
+
 
     try {
         // 3. Chamar a API da Evolution para criar a instância
@@ -215,7 +216,7 @@ export async function createEvolutionApiInstance(
         });
 
         // 4. Se a criação na API for bem-sucedida, salvar no DB local
-        const instanceType = formData.get('integration') === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud';
+        const instanceType = payload.integration === 'WHATSAPP-BAILEYS' ? 'baileys' : 'wa_cloud';
         await db.query(
             'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
             [payload.instanceName, instanceType, config_id]
