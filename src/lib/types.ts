@@ -15,6 +15,8 @@ export type User = {
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
   last_active_workspace_id?: string;
+  firstName: string; // Adicionado para consistência com o businessProfile
+  lastName: string;  // Adicionado para consistência com o businessProfile
 };
 
 // Representa um cliente/contato (não autenticado)
@@ -27,6 +29,8 @@ export type Contact = {
   phone?: string;
   lastSeen?: string;
   businessProfile?: BusinessProfile;
+  firstName: string;
+  lastName: string;
 }
 
 export type OnlineAgent = {
