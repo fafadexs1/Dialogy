@@ -4,10 +4,10 @@ import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { updateUserOnlineStatus } from '@/actions/user';
 
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
@@ -150,11 +150,18 @@ export default async function Home() {
     redirect('/login');
   }
   
-  console.log("[PAGE_SERVER] Sessão encontrada para o usuário ID:", session.user.id);
-  const user = await fetchUserAndWorkspaces(session.user.id);
+  const userId = session.user.id;
+  console.log("[PAGE_SERVER] Sessão encontrada para o usuário ID:", userId);
+
+  // Mark user as online when they access the main page
+  await updateUserOnlineStatus(userId, true);
+  
+  const user = await fetchUserAndWorkspaces(userId);
   
   if (!user) {
     console.error("[PAGE_SERVER] Não foi possível carregar os dados do usuário. Exibindo mensagem de erro.");
+    // Mark user as offline if fetching data fails and they are essentially logged out
+    await updateUserOnlineStatus(userId, false);
     return (
        <MainLayout>
             <div className="flex-1 flex items-center justify-center">

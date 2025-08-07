@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import type { User, OnlineAgent } from '@/lib/types';
+import type { OnlineAgent } from '@/lib/types';
 import { useAuth } from './use-auth';
-import { agents } from '@/lib/mock-data';
 
 // 1. Create a Context for the presence state
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -14,23 +13,36 @@ export const usePresence = () => {
 };
 
 // 3. Create the Provider component
-// MOCK IMPLEMENTATION: This provider simulates online status for mock agents.
+// This provider fetches online agents from the API periodically.
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const currentUser = useAuth();
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
   useEffect(() => {
-    // Simulate fetching online agents. In a real app, this would come from a presence service.
-    const mockOnlineAgents: OnlineAgent[] = agents
-      .filter(agent => agent.online)
-      .map(agent => ({
-        user: agent,
-        joined_at: new Date().toISOString(),
-      }));
+    const fetchOnlineAgents = async () => {
+      try {
+        const response = await fetch('/api/users/online');
+        if (!response.ok) {
+          throw new Error('Failed to fetch online users');
+        }
+        const agents: OnlineAgent[] = await response.json();
+        setOnlineAgents(agents);
+      } catch (error) {
+        console.error("Error fetching online agents:", error);
+        setOnlineAgents([]); // Clear on error
+      }
+    };
 
-    setOnlineAgents(mockOnlineAgents);
+    if (currentUser) {
+      // Fetch immediately on mount
+      fetchOnlineAgents();
 
-    // No actual subscription needed for mock
+      // Set up an interval to fetch every 30 seconds
+      const intervalId = setInterval(fetchOnlineAgents, 30000);
+
+      // Clean up the interval when the component unmounts
+      return () => clearInterval(intervalId);
+    }
   }, [currentUser]); 
 
   return (

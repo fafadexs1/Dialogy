@@ -34,6 +34,7 @@ import type { User } from '@/lib/types';
 import { signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
+import { updateUserOnlineStatus } from '@/actions/user';
 
 interface SidebarProps {
   user: User;
@@ -48,13 +49,18 @@ const mainNavItems = [
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
 
-function SignOutMenuItem() {
+function SignOutMenuItem({ userId }: { userId: string }) {
+    const handleSignOut = async () => {
+        // First, update the user's status to offline
+        await updateUserOnlineStatus(userId, false);
+        // Then, sign out using NextAuth
+        signOut({ callbackUrl: '/login' });
+    }
+
     return (
         <DropdownMenuItem onSelect={(e) => {
             e.preventDefault();
-            // Chama o signOut do next-auth/react, que limpa a sessão
-            // e redireciona para a página de login.
-            signOut({ callbackUrl: '/login' });
+            handleSignOut();
         }}>
             <LogOut className="mr-2 h-4 w-4" />
             <span>Sair</span>
@@ -135,7 +141,7 @@ export function Sidebar({ user }: SidebarProps) {
                 </DropdownMenuItem>
             </Link>
             <DropdownMenuSeparator />
-            <SignOutMenuItem />
+            <SignOutMenuItem userId={user.id} />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
