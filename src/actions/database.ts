@@ -2,16 +2,40 @@
 'use server';
 
 import { db } from '@/lib/db';
+import { Pool } from 'pg';
 
 export async function initializeDatabase(): Promise<{ success: boolean; message: string }> {
   console.log('Iniciando a inicialização do banco de dados...');
-  const client = await db.connect();
+  // Usar uma conexão de superusuário para criar roles e o banco de dados, se necessário.
+  // ATENÇÃO: A DATABASE_URL principal deve ser de um usuário com privilégios de criação.
+  const adminPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+  });
+
+  const client = await adminPool.connect();
 
   try {
     await client.query('BEGIN');
-    console.log('Transação iniciada. Limpando objetos existentes...');
+    console.log('Transação iniciada.');
 
-    // Teardown em ordem reversa de dependência
+    // 1. Criar o usuário (role) da aplicação se ele não existir.
+    const appUser = 'evolutionapi';
+    const appPassword = 'default_password'; // Use uma senha mais segura em produção!
+    const res = await client.query(`SELECT 1 FROM pg_roles WHERE rolname=$1`, [appUser]);
+    if (res.rowCount === 0) {
+      console.log(`Usuário '${appUser}' não encontrado. Criando...`);
+      await client.query(`CREATE ROLE ${appUser} WITH LOGIN PASSWORD '${appPassword}';`);
+      console.log(`Usuário '${appUser}' criado com sucesso.`);
+    } else {
+      console.log(`Usuário '${appUser}' já existe.`);
+    }
+
+    // 2. Conceder permissões ao novo usuário.
+    await client.query(`GRANT ALL PRIVILEGES ON DATABASE postgres TO ${appUser};`); // Conceder privilégios no DB
+    console.log(`Privilégios concedidos ao usuário '${appUser}'.`);
+
+    // 3. Limpeza de objetos existentes (tabelas, tipos)
+    console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
         'DROP TABLE IF EXISTS public.evolution_api_instances CASCADE;',
         'DROP TABLE IF EXISTS public.evolution_api_configs CASCADE;',
@@ -25,24 +49,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     ];
     
     for (const query of teardownQueries) {
-        try {
-            await client.query(query);
-        } catch (err: any) {
-            // Ignorar erros se o objeto não existir, mas logar outros erros
-            if (err.code !== '42P01' && err.code !== '42704') { // undefined_table, undefined_object
-                 console.warn(`Aviso durante a limpeza: ${err.message}`);
-            }
-        }
+        await client.query(query);
     }
-    
     console.log('Limpeza concluída. Iniciando a criação do schema...');
 
-    // Setup - Criação das tabelas e objetos
+    // 4. Setup - Criação das tabelas e objetos
     const setupQueries = [
-      // ENUMs
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
       
-      // Tabelas
       `CREATE TABLE public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           full_name TEXT NOT NULL,
@@ -105,17 +119,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           name TEXT NOT NULL,
           status TEXT,
           type TEXT
-      );`
+      );`,
+
+      // Grant permissions on new tables to the app user
+      `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
+      `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
+      `GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO ${appUser};`,
     ];
 
     for(const query of setupQueries) {
       await client.query(query);
     }
     
-    console.log('Tabelas criadas com sucesso.');
-    console.log('Configurando automações...');
+    console.log('Tabelas e permissões criadas com sucesso.');
+    console.log('Configurando automações (funções e triggers)...');
     
-    // Funções e Triggers
     const functionsAndTriggers = [
         `CREATE OR REPLACE FUNCTION public.add_creator_to_workspace()
         RETURNS TRIGGER AS $$
@@ -139,7 +157,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     
     await client.query('COMMIT');
     console.log('Banco de dados inicializado com sucesso.');
-    return { success: true, message: 'Banco de dados inicializado com sucesso!' };
+    return { success: true, message: 'Banco de dados inicializado com sucesso! O usuário "evolutionapi" foi criado ou verificado.' };
 
   } catch (error) {
     await client.query('ROLLBACK');
@@ -148,6 +166,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     return { success: false, message: `Falha na inicialização do banco de dados: ${errorMessage}` };
   } finally {
     client.release();
+    await adminPool.end();
     console.log('Conexão com o banco de dados liberada.');
   }
 }
