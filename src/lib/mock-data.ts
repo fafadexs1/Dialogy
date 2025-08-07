@@ -258,8 +258,8 @@ export const integrations: Integration[] = [
     tag: 'WhatsApp',
     tagType: 'primary',
     status: 'active',
-    href: '/integrations/evolution-api',
-  },
+    href: '/integrations/evolution-api'
+  }
 ];
 
 
