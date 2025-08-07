@@ -29,6 +29,7 @@ import {
   TooltipTrigger,
 } from '../ui/tooltip';
 import { switchWorkspaceAction } from '@/actions/workspace';
+import Link from 'next/link';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -50,7 +51,7 @@ export function WorkspaceSwitcher({
   const handleWorkspaceChange = async (workspaceId: string) => {
     await switchWorkspaceAction(workspaceId);
     setPopoverOpen(false);
-    router.refresh(); // Força a atualização da página para refletir a mudança de contexto
+    router.refresh(); 
   };
   
   const handleCreateClick = () => {
@@ -127,12 +128,16 @@ export function WorkspaceSwitcher({
             </CommandGroup>
           </CommandList>
           <CommandSeparator />
-            <div className='p-1'>
-                <CommandItem onSelect={handleCreateClick} className="text-sm cursor-pointer">
-                    <PlusCircledIcon className="mr-2 h-5 w-5" />
-                    Criar Workspace
-                </CommandItem>
-            </div>
+          <div className="p-1">
+             <Button
+                variant="ghost"
+                onClick={handleCreateClick}
+                className="w-full justify-start px-2 py-1.5 text-sm font-normal"
+            >
+                <PlusCircledIcon className="mr-2 h-5 w-5" />
+                Criar Workspace
+            </Button>
+          </div>
         </Command>
       </PopoverContent>
     </Popover>
