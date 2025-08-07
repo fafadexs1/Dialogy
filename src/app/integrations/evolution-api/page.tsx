@@ -124,25 +124,14 @@ export default function EvolutionApiPage() {
 
     const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
     
-    useEffect(() => {
-        if (saveState?.error === null) {
-            toast({ title: "Configuração Salva!", description: "Suas alterações foram salvas com sucesso." });
-             if (activeWorkspace) {
-                fetchData(activeWorkspace.id);
-            }
-        } else if (saveState?.error) {
-            toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
-        }
-    }, [saveState, toast, activeWorkspace]);
-
-    const fetchData = async (workspaceId: string) => {
+    const fetchData = React.useCallback(async (workspaceId: string) => {
         console.log("Fetching data for workspace:", workspaceId);
         setIsLoading(true);
         try {
             const configData = await getEvolutionApiConfig(workspaceId);
             setConfig(configData);
 
-            if (configData) {
+            if (configData && configData.api_url && configData.api_key) {
                 const instancesFromDb = await getEvolutionApiInstances(workspaceId);
                 const instancesWithStatus = await Promise.all(
                     instancesFromDb.map(async (inst) => {
@@ -161,7 +150,20 @@ export default function EvolutionApiPage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [toast]);
+    
+    useEffect(() => {
+        if (saveState?.error === null) {
+            toast({ title: "Configuração Salva!", description: "Suas alterações foram salvas com sucesso. Verificando status..." });
+             if (activeWorkspace) {
+                fetchData(activeWorkspace.id);
+            }
+        } else if (saveState?.error) {
+            toast({ title: "Erro ao Salvar", description: saveState.error, variant: "destructive" });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [saveState, toast, activeWorkspace]);
+
     
     useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -176,7 +178,7 @@ export default function EvolutionApiPage() {
         } else {
             setIsLoading(false);
         }
-    }, [activeWorkspace]);
+    }, [activeWorkspace, fetchData]);
 
     const handleCreationSuccess = () => {
         setIsAddModalOpen(false);
@@ -240,6 +242,8 @@ export default function EvolutionApiPage() {
                 return { text: 'Desconectado', color: 'bg-red-500', icon: <ShieldOff className="h-4 w-4" /> };
             case 'pending':
                 return { text: 'Aguardando QR Code', color: 'bg-yellow-500', icon: <QrCode className="h-4 w-4" /> };
+            default:
+                return { text: 'Desconhecido', color: 'bg-gray-500', icon: <Loader2 className="h-4 w-4" /> };
         }
     }
 
@@ -403,3 +407,5 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
+
+    
