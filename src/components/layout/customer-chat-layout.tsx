@@ -44,11 +44,11 @@ export default function CustomerChatLayout() {
         setLoading(true);
         const workspaceId = currentUser.activeWorkspaceId;
         
-        // Helper function to fetch all users (agents) in a workspace
-        const { data: agentsData, error: agentsError } = await supabase
-            .from('user_workspaces')
-            .select('users:user_id(id, full_name, avatar_url, email)')
-            .eq('workspace_id', workspaceId);
+        // Fetch agents in the workspace
+        const { data: userWorkspaces, error: agentsError } = await supabase
+          .from('user_workspaces')
+          .select('*, user:users(*)')
+          .eq('workspace_id', workspaceId);
 
         if (agentsError) {
             console.error("Error fetching agents:", agentsError);
@@ -56,15 +56,16 @@ export default function CustomerChatLayout() {
             return;
         }
 
-        const fetchedAgents: User[] = agentsData.map((item: any) => ({
-            id: item.users.id,
-            name: item.users.full_name,
-            avatar: item.users.avatar_url || `https://placehold.co/40x40.png?text=${(item.users.full_name || 'U').charAt(0)}`,
-            email: item.users.email,
+        const fetchedAgents: User[] = userWorkspaces.map((item: any) => ({
+            id: item.user.id,
+            name: item.user.full_name,
+            avatar: item.user.avatar_url || `https://placehold.co/40x40.png?text=${(item.user.full_name || 'U').charAt(0)}`,
+            email: item.user.email,
         }));
         setAgents(fetchedAgents);
 
-        // Helper function to fetch all contacts in a workspace
+
+        // Fetch contacts in the workspace
         const { data: contactsData, error: contactsError } = await supabase
             .from('contacts')
             .select('*')
@@ -191,10 +192,10 @@ export default function CustomerChatLayout() {
                 <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-10 w-full" />
                 <div className="space-y-2 mt-4">
-                    <Skeleton className="h-8 w-full" />
-                    <Skeleton className="h-8 w-full" />
-                    <Skeleton className="h-8 w-full" />
-                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
                 </div>
             </div>
             <div className="flex-1 flex flex-col min-w-0">
@@ -206,6 +207,11 @@ export default function CustomerChatLayout() {
                 </div>
                 <Skeleton className="h-24 w-full" />
             </div>
+             <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-32 w-full" />
+             </div>
           </div>
       )
   }
