@@ -1,104 +1,126 @@
--- 1. Trigger para definir o proprietário do workspace
--- Remove o trigger antigo primeiro
+-- Drop old triggers with potentially conflicting names first to avoid dependency errors.
+-- These DROP statements specifically target the triggers mentioned in the error logs.
+DROP TRIGGER IF EXISTS on_workspace_created ON public.workspaces;
 DROP TRIGGER IF EXISTS set_workspace_owner_trigger ON public.workspaces;
 
--- Remove a função
-DROP FUNCTION IF EXISTS public.set_workspace_owner();
+DROP TRIGGER IF EXISTS on_workspace_created_add_user ON public.workspaces;
+DROP TRIGGER IF EXISTS add_creator_to_workspace_trigger ON public.workspaces;
 
--- Cria a função
+-- Now, drop the functions they depend on.
+DROP FUNCTION IF EXISTS public.set_workspace_owner();
+DROP FUNCTION IF EXISTS public.add_creator_to_workspace();
+
+
+-- 1. Function to set the workspace owner automatically
 CREATE OR REPLACE FUNCTION public.set_workspace_owner()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'public'
+SET search_path = 'public'
 AS $$
 begin
-  -- Define o owner_id como o ID do usuário autenticado que está fazendo a inserção
-  -- O RLS já garante que apenas usuários autenticados podem chegar aqui.
+  -- Set the owner_id to the ID of the authenticated user creating the workspace.
+  -- RLS policy ensures only authenticated users can get this far.
   new.owner_id := auth.uid();
   return new;
 end;
 $$;
 
--- Cria o trigger
-CREATE TRIGGER set_workspace_owner_trigger
-BEFORE INSERT ON public.workspaces
-FOR EACH ROW
-EXECUTE FUNCTION public.set_workspace_owner();
-
-
--- 2. Trigger para adicionar o criador como membro do workspace
--- Remove os triggers antigos primeiro (usando os nomes que podem ter sido criados em tentativas anteriores)
-DROP TRIGGER IF EXISTS on_workspace_created_add_user ON public.workspaces;
-DROP TRIGGER IF EXISTS add_creator_to_workspace_trigger ON public.workspaces;
-
--- Remove a função antiga
-DROP FUNCTION IF EXISTS public.add_creator_to_workspace();
-
--- Cria a função
+-- 2. Function to add the creator to the workspace members automatically
 CREATE OR REPLACE FUNCTION public.add_creator_to_workspace()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'public'
+SET search_path = 'public'
 AS $$
 begin
-  -- Insere o criador (auth.uid()) na tabela de associação user_workspaces
+  -- Insert the creator (who is the owner) into the user_workspaces junction table.
   insert into public.user_workspaces (user_id, workspace_id)
   values (new.owner_id, new.id);
   return new;
 end;
 $$;
 
--- Cria o novo trigger
+
+-- 3. Trigger to execute the set_workspace_owner function before a new workspace is inserted
+CREATE TRIGGER set_workspace_owner_trigger
+BEFORE INSERT ON public.workspaces
+FOR EACH ROW
+EXECUTE FUNCTION public.set_workspace_owner();
+
+
+-- 4. Trigger to execute the add_creator_to_workspace function after a new workspace is inserted
 CREATE TRIGGER add_creator_to_workspace_trigger
 AFTER INSERT ON public.workspaces
 FOR EACH ROW
 EXECUTE FUNCTION public.add_creator_to_workspace();
 
 
--- 3. Políticas de RLS para Workspaces
--- Remove políticas antigas para evitar conflitos
-DROP POLICY IF EXISTS "Authenticated users can insert workspaces" ON public.workspaces;
-DROP POLICY IF EXISTS "Users can view workspaces they are a member of" ON public.workspaces;
-DROP POLICY IF EXISTS "Owners can update their own workspaces" ON public.workspaces;
-DROP POLICY IF EXISTS "Owners can delete their own workspaces" ON public.workspaces;
-
--- Permite que usuários autenticados criem workspaces (o owner_id será definido pelo trigger)
+-- 5. RLS Policies for workspaces table
+DROP POLICY IF EXISTS "Authenticated users can create workspaces" ON public.workspaces;
 CREATE POLICY "Authenticated users can create workspaces"
-ON public.workspaces FOR INSERT
-TO authenticated WITH CHECK (true);
+    ON public.workspaces
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (true);
 
--- Permite que usuários vejam os workspaces dos quais são membros
-CREATE POLICY "Users can view workspaces they are a member of"
-ON public.workspaces FOR SELECT
-TO authenticated USING (id IN (
-  SELECT workspace_id FROM user_workspaces WHERE user_id = auth.uid()
-));
-
--- Permite que o proprietário atualize o workspace
+DROP POLICY IF EXISTS "Owners can update their own workspaces" ON public.workspaces;
 CREATE POLICY "Owners can update their own workspaces"
-ON public.workspaces FOR UPDATE
-TO authenticated USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+    ON public.workspaces
+    FOR UPDATE
+    TO authenticated
+    USING (owner_id = auth.uid())
+    WITH CHECK (owner_id = auth.uid());
 
--- Permite que o proprietário exclua o workspace
+DROP POLICY IF EXISTS "Users can view workspaces they are a member of" ON public.workspaces;
+CREATE POLICY "Users can view workspaces they are a member of"
+    ON public.workspaces
+    FOR SELECT
+    TO authenticated
+    USING (id IN (
+        SELECT workspace_id FROM public.user_workspaces WHERE user_id = auth.uid()
+    ));
+
+DROP POLICY IF EXISTS "Owners can delete their own workspaces" ON public.workspaces;
 CREATE POLICY "Owners can delete their own workspaces"
-ON public.workspaces FOR DELETE
-TO authenticated USING (owner_id = auth.uid());
+    ON public.workspaces
+    FOR DELETE
+    TO authenticated
+    USING (owner_id = auth.uid());
 
 
--- 4. Políticas de RLS para User_Workspaces
--- Remove políticas antigas para evitar conflitos
+-- 6. RLS Policies for user_workspaces table
 DROP POLICY IF EXISTS "Users can view their own workspace memberships" ON public.user_workspaces;
-DROP POLICY IF EXISTS "Users can insert themselves into workspaces" ON public.user_workspaces;
-
--- Permite que os usuários vejam suas próprias associações de workspace
 CREATE POLICY "Users can view their own workspace memberships"
-ON public.user_workspaces FOR SELECT
-TO authenticated USING (user_id = auth.uid());
+    ON public.user_workspaces
+    FOR SELECT
+    TO authenticated
+    USING (user_id = auth.uid());
 
--- Permite que o trigger (executando como o usuário) insira a associação
--- A verificação garante que um usuário só pode se adicionar.
-CREATE POLICY "Users can insert themselves into workspaces"
-ON public.user_workspaces FOR INSERT
-TO authenticated WITH CHECK (user_id = auth.uid());
+-- Note: The trigger now handles the initial insert for the creator.
+-- This policy allows workspace owners to add other users.
+DROP POLICY IF EXISTS "Workspace owners can manage members" ON public.user_workspaces;
+CREATE POLICY "Workspace owners can manage members"
+    ON public.user_workspaces
+    FOR ALL
+    TO authenticated
+    USING (
+        -- The user is the owner of the workspace
+        (SELECT owner_id FROM public.workspaces WHERE id = workspace_id) = auth.uid()
+        -- Or the user is modifying their own membership
+        OR user_id = auth.uid()
+    )
+    WITH CHECK (
+        -- The user is the owner of the workspace
+        (SELECT owner_id FROM public.workspaces WHERE id = workspace_id) = auth.uid()
+         -- Or the user is adding themself
+        OR user_id = auth.uid()
+    );
+
+-- Clean up old, redundant policies on user_workspaces
+DROP POLICY IF EXISTS "Users can add themselves to workspaces" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Users can insert their own workspace memberships" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Users can insert themselves into workspaces" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Allow users to join workspaces" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Allow users to see their own workspace memberships" ON public.user_workspaces;
+DROP POLICY IF EXISTS "Users can delete their own or be deleted by owner" ON public.user_workspaces;
