@@ -8,7 +8,37 @@ import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Contact, MessageSender } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
-import { chats as mockChats, contacts as mockContacts, agents as mockAgents } from '@/lib/mock-data';
+import { db } from '@/lib/db'; // Cannot be used on client
+
+// This function would ideally be an API call
+async function fetchDataForWorkspace(workspaceId: string) {
+    // MOCK: This is a placeholder for the data that would be fetched from the database
+    // In a real app, you would have API endpoints like /api/chats?workspaceId=...
+    const allChats: any[] = [
+        { id: 'chat-1', workspace_id: 'ws-1', contact_id: 'contact-1', agent_id: 'agent-1', status: 'atendimentos' }
+    ];
+    const allContacts: any[] = [
+        { id: 'contact-1', name: 'Carlos Silva', avatar: 'https://placehold.co/40x40.png' }
+    ];
+    const allAgents: any[] = [
+        { id: 'agent-1', name: 'Alex Johnson', avatar: 'https://placehold.co/40x40.png' }
+    ];
+    const allMessages: any[] = [
+         { id: 'msg-1', chat_id: 'chat-1', workspace_id: 'ws-1', sender_id: 'contact-1', content: 'Olá! Tenho uma dúvida sobre a minha fatura.', created_at: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })},
+         { id: 'msg-2', chat_id: 'chat-1', workspace_id: 'ws-1', sender_id: 'agent-1', content: 'Olá, Carlos! Claro, posso te ajudar com isso. Qual é a sua dúvida?', created_at: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })},
+    ];
+
+    const chats = allChats
+        .filter(c => c.workspace_id === workspaceId)
+        .map(c => ({
+            ...c,
+            contact: allContacts.find(con => con.id === c.contact_id),
+            agent: allAgents.find(a => a.id === c.agent_id),
+        }));
+
+    return { chats, messages: allMessages };
+}
+
 
 export default function CustomerChatLayout() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -17,18 +47,17 @@ export default function CustomerChatLayout() {
   const [loading, setLoading] = useState(true);
   
   const currentUser = useAuth();
-
-  const getSenderById = useCallback((id: string): MessageSender => {
-    const agent = mockAgents.find(u => u.id === id);
-    if (agent) return agent;
-    
-    const contact = mockContacts.find(c => c.id === id);
-    if (contact) return contact;
+  
+  const getSenderById = useCallback((id: string, allUsers: (User | Contact)[]): MessageSender => {
+    const sender = allUsers.find(u => u.id === id);
+    if (sender) return sender;
 
     return { 
       id: 'unknown', 
       name: 'Desconhecido', 
-      avatar: 'https://placehold.co/40x40.png?text=?' 
+      avatar: 'https://placehold.co/40x40.png?text=?',
+      firstName: '?',
+      lastName: '?',
     };
   }, []);
 
@@ -38,19 +67,13 @@ export default function CustomerChatLayout() {
 
     const initializeData = async () => {
         setLoading(true);
-        // MOCK: Using static data. In a real app, you'd fetch this from your DB.
-        const workspaceChats = mockChats.filter(c => c.workspace_id === currentUser.activeWorkspaceId);
+        // Using the mock fetching function
+        const { chats: fetchedChats } = await fetchDataForWorkspace(currentUser.activeWorkspaceId);
         
-        // Populate agent data in chats for the mock
-        const populatedChats = workspaceChats.map(chat => ({
-          ...chat,
-          agent: mockAgents.find(a => a.id === 'agent-1') // Mock assignment
-        }));
-        
-        setChats(populatedChats);
+        setChats(fetchedChats);
 
-        if (populatedChats.length > 0) {
-            setSelectedChat(populatedChats[0]);
+        if (fetchedChats.length > 0) {
+            setSelectedChat(fetchedChats[0]);
         }
         setLoading(false);
     };
@@ -66,37 +89,22 @@ export default function CustomerChatLayout() {
     };
 
     const fetchMessages = async () => {
-        // MOCK: Simulating fetching messages for the selected chat.
-        // In a real app, this would be a DB query.
-        const mockMessages: Message[] = [
-          { 
-            id: 'msg-1', 
-            chat_id: 'chat-1', 
-            workspace_id: 'ws-1', 
-            sender: getSenderById('contact-1'), 
-            content: 'Olá! Tenho uma dúvida sobre a minha fatura.', 
-            timestamp: '10:30' 
-          },
-          { 
-            id: 'msg-2', 
-            chat_id: 'chat-1', 
-            workspace_id: 'ws-1',
-            sender: getSenderById('agent-1'), 
-            content: 'Olá, Carlos! Claro, posso te ajudar com isso. Qual é a sua dúvida?', 
-            timestamp: '10:31' 
-          },
-          { 
-            id: 'msg-3', 
-            chat_id: 'chat-2', 
-            workspace_id: 'ws-1',
-            sender: getSenderById('contact-2'), 
-            content: 'Gostaria de saber mais sobre o plano Pro.', 
-            timestamp: '11:00' 
-          },
-        ];
+        // Using the mock fetching function
+        const { messages: allMessages } = await fetchDataForWorkspace(selectedChat.workspace_id);
+        const chatMessagesData = allMessages.filter(m => m.chat_id === selectedChat.id);
+
+        const allUsersForChat = [selectedChat.contact, selectedChat.agent].filter(Boolean) as (User | Contact)[];
+
+        const formattedMessages = chatMessagesData.map(m => ({
+            id: m.id,
+            chat_id: m.chat_id,
+            workspace_id: m.workspace_id,
+            content: m.content,
+            timestamp: m.created_at,
+            sender: getSenderById(m.sender_id, allUsersForChat),
+        }));
         
-        const chatMessages = mockMessages.filter(m => m.chat_id === selectedChat.id);
-        setMessages(chatMessages);
+        setMessages(formattedMessages);
     };
 
     fetchMessages();
