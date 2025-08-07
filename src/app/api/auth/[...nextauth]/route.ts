@@ -63,21 +63,26 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async jwt({ token, user }) {
-      // Este callback é chamado sempre que um JWT é criado ou atualizado.
-      // Se o objeto `user` existir (o que acontece no login), adicione o ID dele ao token.
+      // Após o login (quando o objeto 'user' está disponível), 
+      // passamos os dados do usuário para o token.
       if (user) {
-        console.log('[AUTH_CALLBACK] JWT: Adicionando ID do usuário ao token.');
+        console.log('[AUTH_CALLBACK] JWT: Adicionando dados do usuário ao token.');
         token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
+        token.picture = user.image;
       }
       return token;
     },
     async session({ session, token }) {
-      // Este callback é chamado sempre que uma sessão é acessada.
-      // O token JWT já contém o ID que adicionamos acima.
-      // Agora, passamos esse ID do token para o objeto da sessão do cliente.
-      if (session.user && token.id) {
-        console.log('[AUTH_CALLBACK] Session: Adicionando ID do usuário à sessão.');
+      // A cada chamada de sessão, passamos os dados do token (que já tem as informações)
+      // para o objeto da sessão que o cliente recebe.
+      if (session.user) {
+         console.log('[AUTH_CALLBACK] Session: Adicionando dados do token à sessão.');
         session.user.id = token.id as string;
+        session.user.name = token.name;
+        session.user.email = token.email;
+        session.user.image = token.picture;
       }
       return session;
     },
