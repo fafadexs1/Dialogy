@@ -52,8 +52,7 @@ export async function register(
 }
 
 export async function signOutAction() {
-    // Correctly sign out using next-auth logic
-    // As signOut from next-auth/react is a client-side hook,
-    // we redirect to the logout page provided by NextAuth.
+    // Correctly sign out by redirecting to the NextAuth signout API endpoint.
+    // This endpoint handles cookie clearing and session termination securely.
     redirect('/api/auth/signout');
 }

@@ -38,16 +38,15 @@ export function LoginForm() {
     if (result?.error) {
       console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
       setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
+      setLoading(false);
     } else if (result?.ok) {
       console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando para /');
-      // Successful login, NextAuth will handle the session
-      // and we can redirect the user.
+      // On successful login, push the user to the homepage.
       router.push('/');
     } else {
        console.warn('[LOGIN_FORM] Resultado inesperado do signIn:', result);
+       setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
