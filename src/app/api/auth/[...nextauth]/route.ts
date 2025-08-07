@@ -32,7 +32,7 @@ export const authOptions: NextAuthOptions = {
           }
           console.log(`Usuário encontrado: ${user.full_name}`);
 
-          const passwordIsValid = bcrypt.compareSync(credentials.password, user.password_hash);
+          const passwordIsValid = await bcrypt.compare(credentials.password, user.password_hash);
           console.log(`Verificação de senha para ${credentials.email}: ${passwordIsValid ? 'VÁLIDA' : 'INVÁLIDA'}`);
 
           if (passwordIsValid) {
