@@ -46,7 +46,7 @@ export async function POST(
 }
 
 async function handleMessagesUpsert(payload: any) {
-  const { instance: instanceName, data, sender } = payload;
+  const { instance: instanceName, data, sender, server_url } = payload;
   const { key, pushName, message } = data;
 
   console.log(`[WEBHOOK_MSG_UPSERT] Iniciando processamento para instância: ${instanceName}`);
@@ -56,6 +56,8 @@ async function handleMessagesUpsert(payload: any) {
     console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true ou sem conteúdo).');
     return;
   }
+  
+  const parsedUrl = server_url ? new URL(server_url).hostname : null;
 
   const client = await db.connect();
   try {
@@ -63,6 +65,7 @@ async function handleMessagesUpsert(payload: any) {
     console.log('[WEBHOOK_MSG_UPSERT] Transação iniciada.');
 
     // 1. Encontrar o workspace associado à instância
+    console.log('[WEBHOOK_MSG_UPSERT] Buscando workspace...');
     const instanceRes = await client.query(
       `SELECT ec.workspace_id 
        FROM evolution_api_instances AS ei
@@ -79,6 +82,7 @@ async function handleMessagesUpsert(payload: any) {
 
     // 2. Encontrar ou criar o contato
     const contactJid = key.remoteJid;
+    console.log(`[WEBHOOK_MSG_UPSERT] Buscando/Criando contato com JID: ${contactJid}`);
     let contactRes = await client.query('SELECT id FROM contacts WHERE phone_number_jid = $1 AND workspace_id = $2', [contactJid, workspaceId]);
     let contactId;
 
@@ -96,6 +100,7 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     // 3. Encontrar ou criar o chat
+    console.log(`[WEBHOOK_MSG_UPSERT] Buscando/Criando chat para contato ID: ${contactId}`);
     let chatRes = await client.query('SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2', [contactId, workspaceId]);
     let chatId;
 
@@ -126,8 +131,9 @@ async function handleMessagesUpsert(payload: any) {
         instance_name,
         status_from_api,
         source_from_api,
+        server_url,
         raw_payload
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         workspaceId,
         chatId,
@@ -139,6 +145,7 @@ async function handleMessagesUpsert(payload: any) {
         instanceName,
         data.status,
         data.source,
+        parsedUrl,
         payload
       ]
     );
@@ -147,8 +154,8 @@ async function handleMessagesUpsert(payload: any) {
     await client.query('COMMIT');
     console.log(`[WEBHOOK_MSG_UPSERT] Transação commitada. Revalidando o path...`);
     
-    // Revalidar o path da página principal para que a nova mensagem apareça em tempo real
     revalidatePath('/', 'layout');
+    revalidatePath(`/api/chats/${workspaceId}`); // Revalida o novo endpoint de API
 
   } catch (error) {
     console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);

@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
@@ -13,21 +13,74 @@ interface CustomerChatLayoutProps {
     currentUser: User;
 }
 
+// Helper function to fetch chats for the workspace
+async function fetchChatsForWorkspace(workspaceId: string): Promise<Chat[]> {
+    if (!workspaceId) return [];
+    try {
+        const response = await fetch(`/api/chats/${workspaceId}`, { cache: 'no-store' });
+        if (!response.ok) {
+            console.error('Failed to fetch chats');
+            return [];
+        }
+        const data = await response.json();
+        return data.chats;
+    } catch (error) {
+        console.error('Error fetching chats:', error);
+        return [];
+    }
+}
+
+
 export default function CustomerChatLayout({ initialChats, currentUser }: CustomerChatLayoutProps) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>(initialChats);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSetSelectedChat = (chat: Chat) => {
+    setSelectedChat(chat);
+  };
   
+  const updateData = useCallback(async () => {
+    if (!currentUser.activeWorkspaceId) return;
+
+    const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
+    setChats(latestChats);
+
+    // If there is a selected chat, find its latest version and update messages
+    if (selectedChat) {
+      const updatedSelectedChat = latestChats.find(c => c.id === selectedChat.id);
+      if (updatedSelectedChat) {
+        setSelectedChat(updatedSelectedChat);
+      }
+    } else if (latestChats.length > 0 && !selectedChat) {
+      // If no chat was selected and we now have chats, select the first one.
+      setSelectedChat(latestChats[0]);
+    }
+  }, [currentUser.activeWorkspaceId, selectedChat]);
+
   useEffect(() => {
+    // Initial load
     setChats(initialChats);
     if (initialChats.length > 0) {
-        const firstChat = initialChats[0];
-        setSelectedChat(firstChat);
-        setMessages(firstChat.messages || []);
+        handleSetSelectedChat(initialChats[0]);
     }
     setLoading(false);
-  }, [initialChats]);
+
+    // Start polling when component mounts and user is available
+    if (currentUser.activeWorkspaceId) {
+        if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = setInterval(updateData, 5000); // Poll every 5 seconds
+    }
+
+    // Cleanup interval on component unmount
+    return () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+        }
+    };
+  }, [initialChats, currentUser.activeWorkspaceId, updateData]);
 
 
   useEffect(() => {
@@ -76,7 +129,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
       <ChatList
         chats={chats}
         selectedChat={selectedChat}
-        setSelectedChat={setSelectedChat}
+        setSelectedChat={handleSetSelectedChat}
       />
       <ChatPanel key={selectedChat?.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
       <ContactPanel contact={selectedChat?.contact || null} />

@@ -110,6 +110,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           instance_name TEXT,
           status_from_api TEXT,
           source_from_api TEXT,
+          server_url TEXT,
           raw_payload JSONB
       );`,
       
@@ -124,7 +125,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           config_id UUID NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
-          status TEXT,
           type TEXT,
           webhook_url TEXT
       );`,

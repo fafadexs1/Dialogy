@@ -1,0 +1,113 @@
+
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
+
+
+async function fetchDataForWorkspace(workspaceId: string) {
+    if (!workspaceId) return { chats: [] };
+
+    // 1. Fetch all users and contacts for the workspace
+    const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
+    const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
+
+    const allUsers: User[] = userRes.rows.map(u => ({ 
+      id: u.id, 
+      name: u.full_name, 
+      avatar: u.avatar_url,
+      firstName: u.full_name.split(' ')[0] || '',
+      lastName: u.full_name.split(' ').slice(1).join(' ') || '',
+    }));
+    
+    const allContacts: Contact[] = contactRes.rows.map(c => ({ 
+      id: c.id, 
+      workspace_id: workspaceId,
+      name: c.name, 
+      avatar: c.avatar_url,
+      firstName: c.name.split(' ')[0] || '',
+      lastName: c.name.split(' ').slice(1).join(' ') || '',
+    }));
+
+    const allSenders = [...allUsers, ...allContacts];
+
+    const getSenderById = (id: string): MessageSender => {
+      const sender = allSenders.find(s => s.id === id);
+      return sender || { 
+        id: 'unknown', 
+        name: 'Desconhecido', 
+        avatar: 'https://placehold.co/40x40.png?text=?',
+        firstName: '?',
+        lastName: '?',
+      };
+    }
+
+    // 2. Fetch chats
+    const chatRes = await db.query(`
+        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id
+        FROM chats c
+        WHERE c.workspace_id = $1
+    `, [workspaceId]);
+
+    const chats: Chat[] = chatRes.rows.map(r => ({
+        id: r.id,
+        status: r.status,
+        workspace_id: r.workspace_id,
+        contact: getSenderById(r.contact_id) as Contact,
+        agent: getSenderById(r.agent_id) as User,
+        messages: [], // Messages will be populated next
+    }));
+    
+    if (chats.length === 0) {
+        return { chats: [] };
+    }
+
+    // 3. Fetch messages
+    const messageRes = await db.query(`
+        SELECT id, content, created_at, chat_id, sender_id, workspace_id
+        FROM messages
+        WHERE workspace_id = $1
+        ORDER BY created_at ASC
+    `, [workspaceId]);
+
+    const messagesByChat: { [key: string]: Message[] } = {};
+    messageRes.rows.forEach(m => {
+        if (!messagesByChat[m.chat_id]) {
+            messagesByChat[m.chat_id] = [];
+        }
+        messagesByChat[m.chat_id].push({
+            id: m.id,
+            chat_id: m.chat_id,
+            workspace_id: m.workspace_id,
+            content: m.content,
+            timestamp: new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            sender: getSenderById(m.sender_id),
+        });
+    });
+
+    // 4. Combine chats and their messages
+    const chatsWithMessages = chats.map(chat => ({
+      ...chat,
+      messages: messagesByChat[chat.id] || [],
+    }))
+
+    return { chats: chatsWithMessages };
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: { workspaceId: string } }
+) {
+  const { workspaceId } = params;
+
+  if (!workspaceId) {
+    return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });
+  }
+
+  try {
+    const data = await fetchDataForWorkspace(workspaceId);
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error(`[API /chats/${workspaceId}] Error fetching data:`, error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
