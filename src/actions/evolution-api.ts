@@ -148,11 +148,15 @@ export async function createEvolutionApiInstance(
     if (!instanceName) {
         return { error: 'O nome da instância é obrigatório.'}
     }
+    
+    const integrationType = formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
 
     // 2. Construir o payload para a API da Evolution dinamicamente
-    const payload: EvolutionInstanceCreationPayload = {
+    let payload: EvolutionInstanceCreationPayload = {
         instanceName,
-        qrcode: true // Sempre true, conforme solicitado.
+        integration: integrationType,
+        rejectCall: true,
+        groupsIgnore: true,
     };
     
     // Funções auxiliares para manter o código limpo
@@ -162,19 +166,30 @@ export async function createEvolutionApiInstance(
     const addIfOn = (key: keyof EvolutionInstanceCreationPayload, value: FormDataEntryValue | null) => {
         if (value === 'on') (payload as any)[key] = true;
     };
-    
-    addIfPresent('number', formData.get('number') as string);
-    addIfPresent('integration', formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined);
 
-    // General Settings
-    addIfOn('rejectCall', formData.get('rejectCall'));
-    addIfPresent('msgCall', formData.get('msgCall') as string);
-    addIfOn('groupsIgnore', formData.get('groupsIgnore'));
-    addIfOn('alwaysOnline', formData.get('alwaysOnline'));
-    addIfOn('readMessages', formData.get('readMessages'));
-    addIfOn('readStatus', formData.get('readStatus'));
-    addIfOn('syncFullHistory', formData.get('syncFullHistory'));
-    
+    if (integrationType === 'WHATSAPP-BUSINESS') {
+        payload.qrcode = false;
+        const token = formData.get('token') as string;
+        const number = formData.get('number') as string;
+        const businessId = formData.get('businessId') as string;
+
+        if (!token || !number || !businessId) {
+            return { error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
+        }
+        payload.token = token;
+        payload.number = number;
+        payload.businessId = businessId;
+
+    } else { // WHATSAPP-BAILEYS
+        payload.qrcode = true;
+        addIfPresent('number', formData.get('number') as string);
+        addIfPresent('msgCall', formData.get('msgCall') as string);
+        addIfOn('alwaysOnline', formData.get('alwaysOnline'));
+        addIfOn('readMessages', formData.get('readMessages'));
+        addIfOn('readStatus', formData.get('readStatus'));
+        addIfOn('syncFullHistory', formData.get('syncFullHistory'));
+    }
+
     // Proxy
     const proxyHost = formData.get('proxyHost') as string;
     const proxyPort = formData.get('proxyPort') as string;

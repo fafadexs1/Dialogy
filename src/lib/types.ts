@@ -180,10 +180,17 @@ export interface EvolutionInstance {
 
 export interface EvolutionInstanceCreationPayload {
     instanceName: string;
-    token?: string;
-    qrcode?: boolean;
-    number?: string;
     integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
+    
+    // Cloud API Fields
+    token?: string;
+    businessId?: string;
+
+    // Baileys Fields
+    qrcode?: boolean;
+    
+    // Common fields
+    number?: string;
     rejectCall?: boolean;
     msgCall?: string;
     groupsIgnore?: boolean;
@@ -191,15 +198,15 @@ export interface EvolutionInstanceCreationPayload {
     readMessages?: boolean;
     readStatus?: boolean;
     syncFullHistory?: boolean;
-    proxyHost?: string;
-    proxyPort?: number;
-    proxyUsername?: string;
-    proxyPassword?: string;
+    proxy?: {
+        host: string;
+        port: number;
+        username?: string;
+        password?: string;
+    };
     webhook?: {
         url?: string;
-        byEvents?: boolean;
-        base64?: boolean;
-        headers?: { [key: string]: string };
+        enabled?: boolean,
         events?: string[];
     };
     rabbitmq?: {

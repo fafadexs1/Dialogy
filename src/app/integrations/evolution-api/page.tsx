@@ -4,10 +4,10 @@
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import Image from 'next/image';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
+import type { User, EvolutionInstance, EvolutionApiConfig, Workspace, EvolutionInstanceCreationPayload } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Server, Power, PowerOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, AlertCircle, Rabbit, ListTree, Unplug } from 'lucide-react';
+import { Server, Power, PowerOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, AlertCircle, Rabbit, ListTree, Unplug, KeyRound } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -62,6 +62,7 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
 function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
     const [state, formAction] = useActionState(createEvolutionApiInstance, null);
     const { pending } = useFormStatus();
+    const [integrationType, setIntegrationType] = useState<'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS'>('WHATSAPP-BAILEYS');
 
     useEffect(() => {
         if (state?.error === null) {
@@ -85,7 +86,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="type">Tipo de Conexão</Label>
-                                    <Select name="integration" defaultValue='WHATSAPP-BAILEYS'>
+                                    <Select name="integration" defaultValue={integrationType} onValueChange={(value) => setIntegrationType(value as any)}>
                                         <SelectTrigger id="type">
                                             <SelectValue placeholder="Selecione o tipo" />
                                         </SelectTrigger>
@@ -96,45 +97,62 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                     </Select>
                                 </div>
                             </div>
-                             <div className="grid grid-cols-1 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="number">Número do WhatsApp (Opcional)</Label>
-                                    <Input id="number" name="number" placeholder="5511999998888" />
+                            
+                            {integrationType === 'WHATSAPP-BUSINESS' ? (
+                                <div className='space-y-4 pt-4 animate-in fade-in-50'>
+                                     <Alert>
+                                        <KeyRound className="h-4 w-4" />
+                                        <AlertTitle>Informações da Meta Business</AlertTitle>
+                                        <AlertDescription>
+                                            Preencha os campos abaixo com os dados da sua conta de WhatsApp Business na Meta.
+                                        </AlertDescription>
+                                    </Alert>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="token">Token Permanente do Usuário Admin da BM</Label>
+                                        <Input id="token" name="token" type="password" required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="number">ID do Número do WhatsApp</Label>
+                                        <Input id="number" name="number" placeholder="Ex: 1029301920391" required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="businessId">ID da Conta do WhatsApp Business</Label>
+                                        <Input id="businessId" name="businessId" placeholder="Ex: 2910390129312" required />
+                                    </div>
                                 </div>
-                            </div>
-                             <div className="space-y-2">
-                                <Label htmlFor="msgCall">Mensagem ao Rejeitar Chamada</Label>
-                                <Input id="msgCall" name="msgCall" placeholder="No momento não podemos atender ligações." />
-                            </div>
-                            <div className="flex flex-wrap gap-x-6 gap-y-4 pt-2">
-                                 <div className="flex items-center space-x-2">
-                                    <p className="text-sm font-medium text-muted-foreground">Gerar QR Code está sempre ativo por padrão.</p>
+                            ) : (
+                                <div className='space-y-4 pt-4 animate-in fade-in-50'>
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="baileys-number">Número do WhatsApp (Opcional)</Label>
+                                            <Input id="baileys-number" name="number" placeholder="5511999998888" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="msgCall">Mensagem ao Rejeitar Chamada</Label>
+                                        <Input id="msgCall" name="msgCall" defaultValue="No momento não podemos atender ligações." />
+                                    </div>
+                                    <div className="flex flex-wrap gap-x-6 gap-y-4 pt-2">
+                                        <p className="text-sm font-medium text-muted-foreground w-full">As opções 'Rejeitar Chamadas' e 'Ignorar Grupos' estão ativas por padrão.</p>
+                                        <div className="flex items-center space-x-2">
+                                            <Switch id="alwaysOnline" name="alwaysOnline" />
+                                            <Label htmlFor="alwaysOnline">Sempre Online</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Switch id="readMessages" name="readMessages" />
+                                            <Label htmlFor="readMessages">Marcar Mensagens como Lidas</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Switch id="readStatus" name="readStatus" />
+                                            <Label htmlFor="readStatus">Marcar Status como Visto</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Switch id="syncFullHistory" name="syncFullHistory" />
+                                            <Label htmlFor="syncFullHistory">Sincronizar Histórico Completo</Label>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                    <Switch id="rejectCall" name="rejectCall" />
-                                    <Label htmlFor="rejectCall">Rejeitar Chamadas</Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Switch id="groupsIgnore" name="groupsIgnore" />
-                                    <Label htmlFor="groupsIgnore">Ignorar Grupos</Label>
-                                </div>
-                                 <div className="flex items-center space-x-2">
-                                    <Switch id="alwaysOnline" name="alwaysOnline" />
-                                    <Label htmlFor="alwaysOnline">Sempre Online</Label>
-                                </div>
-                                 <div className="flex items-center space-x-2">
-                                    <Switch id="readMessages" name="readMessages" />
-                                    <Label htmlFor="readMessages">Marcar Mensagens como Lidas</Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Switch id="readStatus" name="readStatus" />
-                                    <Label htmlFor="readStatus">Marcar Status como Visto</Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Switch id="syncFullHistory" name="syncFullHistory" />
-                                    <Label htmlFor="syncFullHistory">Sincronizar Histórico Completo</Label>
-                                </div>
-                            </div>
+                            )}
                         </AccordionContent>
                     </AccordionItem>
                     
@@ -510,9 +528,9 @@ export default function EvolutionApiPage() {
                                                         Desconectar
                                                     </Button>
                                                 ) : (
-                                                    <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                    <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance || instance.type === 'wa_cloud'}>
                                                         {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
-                                                        Conectar
+                                                        {instance.type === 'wa_cloud' ? 'Conexão Automática' : 'Conectar'}
                                                     </Button>
                                                 )}
                                             </CardFooter>
