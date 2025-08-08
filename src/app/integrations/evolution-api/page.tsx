@@ -96,11 +96,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                     </Select>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="token">Token Secreto</Label>
-                                    <Input id="token" name="token" placeholder="Deixe em branco para gerar um" />
-                                </div>
+                             <div className="grid grid-cols-1 gap-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="number">Número do WhatsApp (Opcional)</Label>
                                     <Input id="number" name="number" placeholder="5511999998888" />

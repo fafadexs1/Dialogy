@@ -163,7 +163,6 @@ export async function createEvolutionApiInstance(
         if (value === 'on') (payload as any)[key] = true;
     };
     
-    addIfPresent('token', formData.get('token') as string);
     addIfPresent('number', formData.get('number') as string);
     addIfPresent('integration', formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined);
 
