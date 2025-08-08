@@ -132,8 +132,9 @@ async function handleMessagesUpsert(payload: any) {
         status_from_api,
         source_from_api,
         server_url,
+        from_me,
         raw_payload
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         workspaceId,
         chatId,
@@ -146,6 +147,7 @@ async function handleMessagesUpsert(payload: any) {
         data.status,
         data.source,
         parsedUrl,
+        key.fromMe,
         payload
       ]
     );

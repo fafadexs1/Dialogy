@@ -111,6 +111,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           status_from_api TEXT,
           source_from_api TEXT,
           server_url TEXT,
+          from_me BOOLEAN,
           raw_payload JSONB
       );`,
       
