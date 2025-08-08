@@ -191,7 +191,12 @@ export async function createEvolutionApiInstance(
     }
     
     // Automatic Webhook Configuration
-    const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || 'https://your-app.com'; // Fallback URL
+    const webhookBaseUrl = process.env.NEXTAUTH_URL;
+    if (!webhookBaseUrl) {
+        console.error('[EVO_ACTION_CREATE_INSTANCE] Erro: A variável de ambiente NEXTAUTH_URL não está definida.');
+        return { error: 'A URL base da aplicação não está configurada no ambiente.' };
+    }
+
     const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${instanceName}`;
     payload.webhook = {
         url: webhookUrlForInstance,
