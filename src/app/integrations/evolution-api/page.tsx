@@ -156,7 +156,6 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                         </AccordionContent>
                     </AccordionItem>
                     
-                     {/* Proxy Settings */}
                     {integrationType === 'WHATSAPP-BAILEYS' && (
                         <AccordionItem value="proxy">
                             <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
