@@ -1,39 +1,55 @@
 
+'use server';
+
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 
-export async function POST(request: Request) {
+export async function POST(
+    request: Request,
+    { params }: { params: { instanceName: string } }
+) {
+  const instanceNameFromUrl = params.instanceName;
+  console.log(`--- [WEBHOOK] Payload recebido para a instância: ${instanceNameFromUrl} ---`);
+
   try {
     const payload = await request.json();
-    console.log('--- [WEBHOOK] Payload recebido da Evolution API ---');
-    console.log(JSON.stringify(payload, null, 2));
+    console.log('[WEBHOOK] Payload completo:', JSON.stringify(payload, null, 2));
 
-    const { instance, event } = payload;
-    if (!instance || !event) {
-      console.error('[WEBHOOK] Erro: Nome da instância ou evento não encontrado no payload.');
-      return NextResponse.json({ error: 'Instance name or event not found' }, { status: 400 });
+    const { event, instance: instanceNameFromPayload } = payload;
+    
+    // Validação para garantir que a instância na URL corresponde à do payload
+    if (instanceNameFromUrl !== instanceNameFromPayload) {
+        console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+        return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
+    }
+
+    if (!event) {
+      console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
+      return NextResponse.json({ error: 'Event not found' }, { status: 400 });
     }
 
     if (event === 'messages.upsert') {
       await handleMessagesUpsert(payload);
     } else if (event === 'connection.update') {
-      console.log(`[WEBHOOK] Evento de conexão da instância ${instance}: ${payload.data?.state}`);
+      console.log(`[WEBHOOK] Evento de conexão da instância ${instanceNameFromUrl}: ${payload.data?.state}`);
       // Lógica futura para atualizar o status da instância no banco de dados pode ser adicionada aqui
     } else {
-      console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instance}, mas não há handler implementado.`);
+      console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
 
     return NextResponse.json({ message: 'Webhook received successfully' });
   } catch (error) {
-    console.error('[WEBHOOK] Erro ao processar o webhook:', error);
+    console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
 async function handleMessagesUpsert(payload: any) {
-  const { instance: instanceName, data, sender, server_url, date_time } = payload;
-  const { key, pushName, message, messageType, source } = data;
+  const { instance: instanceName, data, sender } = payload;
+  const { key, pushName, message } = data;
+
+  console.log(`[WEBHOOK_MSG_UPSERT] Iniciando processamento para instância: ${instanceName}`);
 
   // Ignorar se a mensagem for do próprio agente ou se não tiver conteúdo
   if (key.fromMe || !message?.conversation) {
@@ -44,6 +60,7 @@ async function handleMessagesUpsert(payload: any) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    console.log('[WEBHOOK_MSG_UPSERT] Transação iniciada.');
 
     // 1. Encontrar o workspace associado à instância
     const instanceRes = await client.query(
@@ -116,26 +133,29 @@ async function handleMessagesUpsert(payload: any) {
         chatId,
         contactId, // O sender_id é o ID do contato que enviou a mensagem
         message.conversation,
-        new Date(date_time),
+        new Date(payload.date_time),
         key.id,
         sender,
         instanceName,
         data.status,
-        source,
+        data.source,
         payload
       ]
     );
-     console.log(`[WEBHOOK_MSG_UPSERT] Mensagem inserida com sucesso.`);
+     console.log(`[WEBHOOK_MSG_UPSERT] Mensagem inserida com sucesso. ID da API: ${key.id}`);
 
     await client.query('COMMIT');
+    console.log(`[WEBHOOK_MSG_UPSERT] Transação commitada. Revalidando o path...`);
     
     // Revalidar o path da página principal para que a nova mensagem apareça em tempo real
     revalidatePath('/', 'layout');
 
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
+    await client.query('ROLLBACK');
+    console.log('[WEBHOOK_MSG_UPSERT] Transação revertida (ROLLBACK).');
   } finally {
     client.release();
+    console.log('[WEBHOOK_MSG_UPSERT] Conexão com o banco liberada.');
   }
 }
