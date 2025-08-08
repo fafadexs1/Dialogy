@@ -15,5 +15,3 @@ export const config = {
     '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup).*)',
   ],
 }
-
-    

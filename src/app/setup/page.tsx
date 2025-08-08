@@ -6,6 +6,7 @@ import { initializeDatabase } from '@/actions/database';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Server, AlertCircle, CheckCircle } from 'lucide-react';
+import Link from 'next/link';
 
 export default function SetupPage() {
   const [loading, setLoading] = useState(false);
@@ -39,11 +40,11 @@ export default function SetupPage() {
 
           {result && (
             <div className={`mt-4 p-4 rounded-md text-sm flex items-start gap-3 ${result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-              {result.success ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+              {result.success ? <CheckCircle className="h-5 w-5 flex-shrink-0" /> : <AlertCircle className="h-5 w-5 flex-shrink-0" />}
               <div>
                 <p className="font-semibold">{result.success ? 'Sucesso!' : 'Erro!'}</p>
                 <p>{result.message}</p>
-                 {result.success && <p>Você pode agora <a href="/" className="underline font-bold">ir para a aplicação</a>.</p>}
+                 {result.success && <p className="mt-2">Você pode agora <Link href="/login" className="underline font-bold">ir para a página de login</Link>.</p>}
               </div>
             </div>
           )}
@@ -52,5 +53,3 @@ export default function SetupPage() {
     </main>
   );
 }
-
-    
