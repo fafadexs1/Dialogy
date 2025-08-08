@@ -187,7 +187,6 @@ export async function createEvolutionApiInstance(
         addIfOn('alwaysOnline', formData.get('alwaysOnline'));
         addIfOn('readMessages', formData.get('readMessages'));
         addIfOn('readStatus', formData.get('readStatus'));
-        addIfOn('syncFullHistory', formData.get('syncFullHistory'));
         
         // Proxy
         const proxyHost = formData.get('proxyHost') as string;
@@ -345,3 +344,5 @@ export async function disconnectInstance(instanceName: string, config: Evolution
         return { status: 'disconnected' };
     }
 }
+
+    

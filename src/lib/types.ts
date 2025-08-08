@@ -197,7 +197,6 @@ export interface EvolutionInstanceCreationPayload {
     alwaysOnline?: boolean;
     readMessages?: boolean;
     readStatus?: boolean;
-    syncFullHistory?: boolean;
     proxy?: {
         host: string;
         port: number;
@@ -218,3 +217,5 @@ export interface EvolutionInstanceCreationPayload {
         events?: string[];
     };
 }
+
+    

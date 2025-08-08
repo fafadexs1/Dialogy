@@ -146,10 +146,6 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                             <Switch id="readStatus" name="readStatus" />
                                             <Label htmlFor="readStatus">Marcar Status como Visto</Label>
                                         </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Switch id="syncFullHistory" name="syncFullHistory" />
-                                            <Label htmlFor="syncFullHistory">Sincronizar Histórico Completo</Label>
-                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -552,3 +548,5 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
+
+    
