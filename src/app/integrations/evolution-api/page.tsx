@@ -497,7 +497,7 @@ export default function EvolutionApiPage() {
                                                 {instance.type === 'baileys' && instance.status === 'pending' && (
                                                     <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
                                                         {instance.qrCode ? (
-                                                            <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
+                                                            <Image src={instance.qrCode} alt="QR Code" width={200} height={200} />
                                                         ) : (
                                                             <div className="flex flex-col items-center justify-center text-muted-foreground">
                                                                 <Loader2 className="h-12 w-12 animate-spin"/>
