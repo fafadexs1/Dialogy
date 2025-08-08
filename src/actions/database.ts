@@ -118,7 +118,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           config_id UUID NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
           status TEXT,
-          type TEXT
+          type TEXT,
+          webhook_url TEXT
       );`,
 
       // Grant permissions on new tables to the app user

@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useState, useEffect, useActionState, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import Image from 'next/image';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { KeyRound, Server, Zap, QrCode, Power, PowerOff, ShieldCheck, ShieldOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, CheckCircle, XCircle, AlertCircle, Rabbit, Webhook, ListTree, Unplug } from 'lucide-react';
+import { Server, Power, PowerOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, AlertCircle, Rabbit, ListTree, Unplug } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +41,6 @@ import {
     disconnectInstance
 } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
-import { useRouter } from 'next/navigation';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -143,30 +142,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                         </AccordionContent>
                     </AccordionItem>
                     
-                    {/* Webhook Settings */}
-                    <AccordionItem value="webhook">
-                        <AccordionTrigger className="flex items-center gap-2"><Webhook className="h-4 w-4"/> Configurações de Webhook</AccordionTrigger>
-                        <AccordionContent className="space-y-4 p-1">
-                            <div className="space-y-2">
-                                <Label htmlFor="webhook.url">URL do Webhook</Label>
-                                <Input id="webhook.url" name="webhook.url" placeholder="https://seu-servidor.com/webhook" />
-                            </div>
-                             <div className="space-y-2">
-                                <Label htmlFor="webhook.events">Eventos do Webhook (um por linha)</Label>
-                                <Textarea id="webhook.events" name="webhook.events" placeholder="APPLICATION_STARTUP&#x0a;QRCODE_UPDATED&#x0a;MESSAGES_SET" rows={4} />
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <Switch id="webhook.byEvents" name="webhook.byEvents" />
-                                <Label htmlFor="webhook.byEvents">Enviar eventos individuais (em vez de um array)</Label>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <Switch id="webhook.base64" name="webhook.base64" />
-                                <Label htmlFor="webhook.base64">Enviar mídia em Base64 no webhook</Label>
-                            </div>
-                        </AccordionContent>
-                    </AccordionItem>
-
-                     {/* Queues Settings */}
+                    {/* Queues Settings */}
                     <AccordionItem value="queues">
                         <AccordionTrigger className="flex items-center gap-2"><ListTree className="h-4 w-4"/> Filas (RabbitMQ / SQS)</AccordionTrigger>
                         <AccordionContent className="space-y-6 p-1">
@@ -396,7 +372,7 @@ export default function EvolutionApiPage() {
         <MainLayout user={user}>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
-                    <h1 className="text-2xl font-bold flex items-center gap-2"><Zap /> Conexões com a Evolution API</h1>
+                    <h1 className="text-2xl font-bold flex items-center gap-2"><Settings /> Conexões com a Evolution API</h1>
                     <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name || '...'}</span></p>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">

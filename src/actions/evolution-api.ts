@@ -67,7 +67,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<Omi
             return [];
         }
         
-        const res = await db.query('SELECT id, name, type, config_id FROM evolution_api_instances WHERE config_id = $1', [config.id]);
+        const res = await db.query('SELECT id, name, type, config_id, webhook_url FROM evolution_api_instances WHERE config_id = $1', [config.id]);
         return res.rows;
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
@@ -188,25 +188,29 @@ export async function createEvolutionApiInstance(
     const proxyUsername = formData.get('proxyUsername') as string;
     const proxyPassword = formData.get('proxyPassword') as string;
     if (proxyHost && proxyPort) {
-        payload.proxyHost = proxyHost;
-        payload.proxyPort = Number(proxyPort);
-        addIfPresent('proxyUsername', proxyUsername);
-        addIfPresent('proxyPassword', proxyPassword);
+        payload.proxy = {
+            host: proxyHost,
+            port: Number(proxyPort)
+        };
+        if (proxyUsername) payload.proxy.username = proxyUsername;
+        if (proxyPassword) payload.proxy.password = proxyPassword;
     }
     
-    // Webhook
-    const webhookUrl = formData.get('webhook.url') as string;
-    if(webhookUrl) {
-        payload.webhook = {
-            url: webhookUrl,
-            byEvents: formData.get('webhook.byEvents') === 'on',
-            base64: formData.get('webhook.base64') === 'on'
-        };
-        const webhookEvents = getEvents(formData.get('webhook.events'));
-        if (webhookEvents) {
-            payload.webhook.events = webhookEvents;
-        }
-    }
+    // Automatic Webhook Configuration
+    const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || 'https://your-app.com'; // Fallback URL
+    const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${instanceName}`;
+    payload.webhook = {
+        url: webhookUrlForInstance,
+        enabled: true,
+        events: [
+            'CHATS_UPSERT',
+            'CONNECTION_UPDATE',
+            'CONTACTS_UPDATE',
+            'CONTACTS_UPSERT',
+            'MESSAGES_DELETE',
+            'MESSAGES_UPSERT'
+        ]
+    };
 
     // RabbitMQ
     if (formData.get('rabbitmq.enabled') === 'on') {
@@ -237,8 +241,8 @@ export async function createEvolutionApiInstance(
         // 4. Se a criação na API for bem-sucedida, salvar no DB local
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
         await db.query(
-            'INSERT INTO evolution_api_instances (name, type, config_id) VALUES ($1, $2, $3)',
-            [payload.instanceName, instanceType, config_id]
+            'INSERT INTO evolution_api_instances (name, type, config_id, webhook_url) VALUES ($1, $2, $3, $4)',
+            [payload.instanceName, instanceType, config_id, payload.webhook.url]
         );
 
     } catch (error: any) {
@@ -299,7 +303,8 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
         const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, config);
         // O estado 'connecting' na API v2 significa que está aguardando o QR code.
         if (data.instance.state === 'connecting') {
-            return { status: 'pending' };
+            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'GET' });
+             return { status: 'pending', qrCode: qrData?.base64 };
         }
         if (data.instance.state === 'open') {
              return { status: 'connected' };
