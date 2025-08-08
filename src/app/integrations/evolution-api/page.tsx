@@ -156,29 +156,6 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                         </AccordionContent>
                     </AccordionItem>
                     
-                    {/* Queues Settings */}
-                    <AccordionItem value="queues">
-                        <AccordionTrigger className="flex items-center gap-2"><ListTree className="h-4 w-4"/> Filas (RabbitMQ / SQS)</AccordionTrigger>
-                        <AccordionContent className="space-y-6 p-1">
-                           <div className="p-4 border rounded-lg">
-                               <div className="flex items-center justify-between mb-2">
-                                   <Label className="font-semibold flex items-center gap-2"><Rabbit className="h-4 w-4" /> RabbitMQ</Label>
-                                   <Switch id="rabbitmq.enabled" name="rabbitmq.enabled" />
-                               </div>
-                               <Label htmlFor="rabbitmq.events" className="text-xs text-muted-foreground">Eventos (um por linha)</Label>
-                               <Textarea id="rabbitmq.events" name="rabbitmq.events" placeholder="MESSAGES_UPSERT&#x0a;CHATS_UPDATE" rows={3} />
-                           </div>
-                           <div className="p-4 border rounded-lg">
-                               <div className="flex items-center justify-between mb-2">
-                                   <Label className="font-semibold">Amazon SQS</Label>
-                                   <Switch id="sqs.enabled" name="sqs.enabled" />
-                               </div>
-                               <Label htmlFor="sqs.events" className="text-xs text-muted-foreground">Eventos (um por linha)</Label>
-                               <Textarea id="sqs.events" name="sqs.events" placeholder="CONNECTION_UPDATE" rows={3} />
-                           </div>
-                        </AccordionContent>
-                    </AccordionItem>
-
                      {/* Proxy Settings */}
                     {integrationType === 'WHATSAPP-BAILEYS' && (
                         <AccordionItem value="proxy">

@@ -225,24 +225,6 @@ export async function createEvolutionApiInstance(
         ]
     };
 
-    // RabbitMQ / SQS
-    const addQueueEvents = (prefix: 'rabbitmq' | 'sqs') => {
-        if (formData.get(`${prefix}.enabled`) === 'on') {
-            (payload as any)[prefix] = { enabled: true };
-            const eventsValue = formData.get(`${prefix}.events`) as string;
-            if (eventsValue) {
-                const events = eventsValue.split('\n').map(e => e.trim()).filter(Boolean);
-                if (events.length > 0) {
-                    (payload as any)[prefix].events = events;
-                }
-            }
-        }
-    };
-    
-    addQueueEvents('rabbitmq');
-    addQueueEvents('sqs');
-
-
     try {
         // 3. Chamar a API da Evolution para criar a instância
         console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
