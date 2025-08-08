@@ -112,7 +112,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                             </div>
                             <div className="flex flex-wrap gap-x-6 gap-y-4 pt-2">
                                  <div className="flex items-center space-x-2">
-                                    <p className="text-sm font-medium text-muted-foreground">Gerar QR Code no Console está sempre ativo por padrão.</p>
+                                    <p className="text-sm font-medium text-muted-foreground">Gerar QR Code está sempre ativo por padrão.</p>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <Switch id="rejectCall" name="rejectCall" />
@@ -332,11 +332,13 @@ export default function EvolutionApiPage() {
                 )
             );
              
-            setTimeout(() => {
-                if (activeWorkspace) {
-                   fetchData(activeWorkspace.id);
-                }
-            }, 5000)
+            if (result.status !== 'connected') {
+                 setTimeout(() => {
+                    if (activeWorkspace) {
+                       fetchData(activeWorkspace.id);
+                    }
+                }, 5000);
+            }
 
         } catch (error) {
             toast({ title: 'Erro de Conexão', description: 'Falha ao se comunicar com a API Evolution.', variant: 'destructive' });

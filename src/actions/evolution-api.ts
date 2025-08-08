@@ -162,13 +162,7 @@ export async function createEvolutionApiInstance(
     const addIfOn = (key: keyof EvolutionInstanceCreationPayload, value: FormDataEntryValue | null) => {
         if (value === 'on') (payload as any)[key] = true;
     };
-    const getEvents = (value: FormDataEntryValue | null) => {
-        const str = value as string;
-        if (!str) return undefined;
-        const events = str.split('\n').map(e => e.trim()).filter(Boolean);
-        return events.length > 0 ? events : undefined;
-    }
-
+    
     addIfPresent('token', formData.get('token') as string);
     addIfPresent('number', formData.get('number') as string);
     addIfPresent('integration', formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | undefined);
@@ -212,23 +206,23 @@ export async function createEvolutionApiInstance(
         ]
     };
 
-    // RabbitMQ
-    if (formData.get('rabbitmq.enabled') === 'on') {
-        payload.rabbitmq = { enabled: true };
-        const rabbitEvents = getEvents(formData.get('rabbitmq.events'));
-        if (rabbitEvents) {
-            payload.rabbitmq.events = rabbitEvents;
+    // RabbitMQ / SQS
+    const addQueueEvents = (prefix: 'rabbitmq' | 'sqs') => {
+        if (formData.get(`${prefix}.enabled`) === 'on') {
+            (payload as any)[prefix] = { enabled: true };
+            const eventsValue = formData.get(`${prefix}.events`) as string;
+            if (eventsValue) {
+                const events = eventsValue.split('\n').map(e => e.trim()).filter(Boolean);
+                if (events.length > 0) {
+                    (payload as any)[prefix].events = events;
+                }
+            }
         }
-    }
+    };
     
-    // SQS
-    if (formData.get('sqs.enabled') === 'on') {
-        payload.sqs = { enabled: true };
-        const sqsEvents = getEvents(formData.get('sqs.events'));
-        if (sqsEvents) {
-            payload.sqs.events = sqsEvents;
-        }
-    }
+    addQueueEvents('rabbitmq');
+    addQueueEvents('sqs');
+
 
     try {
         // 3. Chamar a API da Evolution para criar a instância
@@ -303,7 +297,7 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
         const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, config);
         // O estado 'connecting' na API v2 significa que está aguardando o QR code.
         if (data.instance.state === 'connecting') {
-            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'GET' });
+            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
              return { status: 'pending', qrCode: qrData?.base64 };
         }
         if (data.instance.state === 'open') {
@@ -318,7 +312,7 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
 
 export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config, { method: 'GET' });
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
         // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
