@@ -344,5 +344,3 @@ export async function disconnectInstance(instanceName: string, config: Evolution
         return { status: 'disconnected' };
     }
 }
-
-    
