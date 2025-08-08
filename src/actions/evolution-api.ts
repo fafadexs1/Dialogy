@@ -188,20 +188,30 @@ export async function createEvolutionApiInstance(
         addIfOn('readMessages', formData.get('readMessages'));
         addIfOn('readStatus', formData.get('readStatus'));
         addIfOn('syncFullHistory', formData.get('syncFullHistory'));
-    }
+        
+        // Proxy
+        const proxyHost = formData.get('proxyHost') as string;
+        const proxyPort = formData.get('proxyPort') as string;
+        const proxyUsername = formData.get('proxyUsername') as string;
+        const proxyPassword = formData.get('proxyPassword') as string;
+        if (proxyHost && proxyPort) {
+            payload.proxy = {
+                host: proxyHost,
+                port: Number(proxyPort)
+            };
+            if (proxyUsername) payload.proxy.username = proxyUsername;
+            if (proxyPassword) payload.proxy.password = proxyPassword;
+        }
 
-    // Proxy
-    const proxyHost = formData.get('proxyHost') as string;
-    const proxyPort = formData.get('proxyPort') as string;
-    const proxyUsername = formData.get('proxyUsername') as string;
-    const proxyPassword = formData.get('proxyPassword') as string;
-    if (proxyHost && proxyPort) {
-        payload.proxy = {
-            host: proxyHost,
-            port: Number(proxyPort)
-        };
-        if (proxyUsername) payload.proxy.username = proxyUsername;
-        if (proxyPassword) payload.proxy.password = proxyPassword;
+        // RabbitMQ
+        const rabbitmqEnabled = formData.get('rabbitmqEnabled') === 'on';
+        if (rabbitmqEnabled) {
+            const rabbitmqEventsStr = formData.get('rabbitmqEvents') as string;
+            payload.rabbitmq = {
+                enabled: true,
+                events: rabbitmqEventsStr ? rabbitmqEventsStr.split(',').map(e => e.trim()) : []
+            };
+        }
     }
     
     // Automatic Webhook Configuration

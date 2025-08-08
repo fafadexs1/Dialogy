@@ -157,31 +157,54 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                     </AccordionItem>
                     
                     {integrationType === 'WHATSAPP-BAILEYS' && (
-                        <AccordionItem value="proxy">
-                            <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
-                            <AccordionContent className="space-y-4 p-1">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="proxyHost">Host</Label>
-                                        <Input id="proxyHost" name="proxyHost" />
+                        <>
+                            <AccordionItem value="proxy">
+                                <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
+                                <AccordionContent className="space-y-4 p-1">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="proxyHost">Host</Label>
+                                            <Input id="proxyHost" name="proxyHost" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="proxyPort">Porta</Label>
+                                            <Input id="proxyPort" name="proxyPort" type="number" />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="proxyUsername">Usuário</Label>
+                                            <Input id="proxyUsername" name="proxyUsername" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="proxyPassword">Senha</Label>
+                                            <Input id="proxyPassword" name="proxyPassword" type="password" />
+                                        </div>
+                                    </div>
+                                </AccordionContent>
+                            </AccordionItem>
+                             <AccordionItem value="queues">
+                                <AccordionTrigger className="flex items-center gap-2"><Rabbit className="h-4 w-4"/> Configurações de Fila (RabbitMQ)</AccordionTrigger>
+                                <AccordionContent className="space-y-4 p-1">
+                                    <div className="flex items-center space-x-2">
+                                        <Switch id="rabbitmqEnabled" name="rabbitmqEnabled" />
+                                        <Label htmlFor="rabbitmqEnabled">Habilitar RabbitMQ</Label>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="proxyPort">Porta</Label>
-                                        <Input id="proxyPort" name="proxyPort" type="number" />
+                                        <Label htmlFor="rabbitmqEvents">Eventos do RabbitMQ</Label>
+                                        <Textarea
+                                            id="rabbitmqEvents"
+                                            name="rabbitmqEvents"
+                                            placeholder="Ex: MESSAGES_UPSERT, CONNECTION_UPDATE"
+                                            defaultValue="MESSAGES_UPSERT,CONNECTION_UPDATE,CONTACTS_UPSERT,CHATS_UPSERT,PRESENCE_UPDATE,GROUPS_UPSERT,GROUP_PARTICIPANTS_UPDATE"
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            Separe os eventos por vírgula. Deixe em branco para usar os padrões.
+                                        </p>
                                     </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="proxyUsername">Usuário</Label>
-                                        <Input id="proxyUsername" name="proxyUsername" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="proxyPassword">Senha</Label>
-                                        <Input id="proxyPassword" name="proxyPassword" type="password" />
-                                    </div>
-                                </div>
-                            </AccordionContent>
-                        </AccordionItem>
+                                </AccordionContent>
+                            </AccordionItem>
+                        </>
                     )}
                 </Accordion>
                 {state?.error && (
