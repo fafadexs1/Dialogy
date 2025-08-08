@@ -86,14 +86,14 @@ async function handleMessagesUpsert(payload: any) {
       console.log(`[WEBHOOK_MSG_UPSERT] Chat com contato ID ${contactId} não encontrado. Criando...`);
       const newChatRes = await client.query(
         'INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, $3) RETURNING id',
-        [workspaceId, contactId, 'atendimentos']
+        [workspaceId, contactId, 'gerais'] // <-- ALTERADO: Status inicial para 'gerais'
       );
       chatId = newChatRes.rows[0].id;
        console.log(`[WEBHOOK_MSG_UPSERT] Chat criado com ID: ${chatId}`);
     } else {
       chatId = chatRes.rows[0].id;
-      // Se o chat estava 'encerrado', reabrir para 'atendimentos'
-      await client.query("UPDATE chats SET status = 'atendimentos' WHERE id = $1 AND status = 'encerrados'", [chatId]);
+      // Se o chat estava 'encerrado', reabrir para 'gerais'
+      await client.query("UPDATE chats SET status = 'gerais' WHERE id = $1 AND status = 'encerrados'", [chatId]); // <-- ALTERADO: Reabrir para 'gerais'
       console.log(`[WEBHOOK_MSG_UPSERT] Chat encontrado com ID: ${chatId}`);
     }
 
