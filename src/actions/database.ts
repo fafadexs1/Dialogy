@@ -86,7 +86,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           name TEXT NOT NULL,
           avatar_url TEXT,
           email TEXT,
-          phone TEXT
+          phone TEXT,
+          phone_number_jid TEXT UNIQUE
       );`,
 
       `CREATE TABLE public.chats (
@@ -103,7 +104,13 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
           sender_id UUID NOT NULL,
           content TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW()
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          message_id_from_api TEXT,
+          sender_from_api TEXT,
+          instance_name TEXT,
+          status_from_api TEXT,
+          source_from_api TEXT,
+          raw_payload JSONB
       );`,
       
       `CREATE TABLE public.evolution_api_configs (

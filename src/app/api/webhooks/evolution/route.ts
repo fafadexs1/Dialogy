@@ -1,0 +1,143 @@
+
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { revalidatePath } from 'next/cache';
+
+export async function POST(request: Request) {
+  try {
+    const payload = await request.json();
+    console.log('--- [WEBHOOK] Payload recebido da Evolution API ---');
+    console.log(JSON.stringify(payload, null, 2));
+
+    const { instance, event } = payload;
+    if (!instance || !event) {
+      console.error('[WEBHOOK] Erro: Nome da instância ou evento não encontrado no payload.');
+      return NextResponse.json({ error: 'Instance name or event not found' }, { status: 400 });
+    }
+
+    if (event === 'messages.upsert') {
+      await handleMessagesUpsert(payload);
+    } else if (event === 'connection.update') {
+      console.log(`[WEBHOOK] Evento de conexão da instância ${instance}: ${payload.data?.state}`);
+      // Lógica futura para atualizar o status da instância no banco de dados pode ser adicionada aqui
+    } else {
+      console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instance}, mas não há handler implementado.`);
+    }
+
+    return NextResponse.json({ message: 'Webhook received successfully' });
+  } catch (error) {
+    console.error('[WEBHOOK] Erro ao processar o webhook:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+async function handleMessagesUpsert(payload: any) {
+  const { instance: instanceName, data, sender, server_url, date_time } = payload;
+  const { key, pushName, message, messageType, source } = data;
+
+  // Ignorar se a mensagem for do próprio agente ou se não tiver conteúdo
+  if (key.fromMe || !message?.conversation) {
+    console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true ou sem conteúdo).');
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Encontrar o workspace associado à instância
+    const instanceRes = await client.query(
+      `SELECT ec.workspace_id 
+       FROM evolution_api_instances AS ei
+       JOIN evolution_api_configs AS ec ON ei.config_id = ec.id
+       WHERE ei.name = $1`,
+      [instanceName]
+    );
+
+    if (instanceRes.rows.length === 0) {
+      throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
+    }
+    const workspaceId = instanceRes.rows[0].workspace_id;
+    console.log(`[WEBHOOK_MSG_UPSERT] Workspace ID encontrado: ${workspaceId}`);
+
+    // 2. Encontrar ou criar o contato
+    const contactJid = key.remoteJid;
+    let contactRes = await client.query('SELECT id FROM contacts WHERE phone_number_jid = $1 AND workspace_id = $2', [contactJid, workspaceId]);
+    let contactId;
+
+    if (contactRes.rows.length === 0) {
+      console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado. Criando...`);
+      const newContactRes = await client.query(
+        'INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id',
+        [workspaceId, pushName || contactJid, contactJid]
+      );
+      contactId = newContactRes.rows[0].id;
+      console.log(`[WEBHOOK_MSG_UPSERT] Contato criado com ID: ${contactId}`);
+    } else {
+      contactId = contactRes.rows[0].id;
+      console.log(`[WEBHOOK_MSG_UPSERT] Contato encontrado com ID: ${contactId}`);
+    }
+
+    // 3. Encontrar ou criar o chat
+    let chatRes = await client.query('SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2', [contactId, workspaceId]);
+    let chatId;
+
+    if (chatRes.rows.length === 0) {
+      console.log(`[WEBHOOK_MSG_UPSERT] Chat com contato ID ${contactId} não encontrado. Criando...`);
+      const newChatRes = await client.query(
+        'INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, $3) RETURNING id',
+        [workspaceId, contactId, 'atendimentos']
+      );
+      chatId = newChatRes.rows[0].id;
+       console.log(`[WEBHOOK_MSG_UPSERT] Chat criado com ID: ${chatId}`);
+    } else {
+      chatId = chatRes.rows[0].id;
+      // Se o chat estava 'encerrado', reabrir para 'atendimentos'
+      await client.query("UPDATE chats SET status = 'atendimentos' WHERE id = $1 AND status = 'encerrados'", [chatId]);
+      console.log(`[WEBHOOK_MSG_UPSERT] Chat encontrado com ID: ${chatId}`);
+    }
+
+    // 4. Inserir a mensagem
+    console.log(`[WEBHOOK_MSG_UPSERT] Inserindo mensagem no chat ID: ${chatId}`);
+    await client.query(
+      `INSERT INTO messages (
+        workspace_id, 
+        chat_id, 
+        sender_id, 
+        content, 
+        created_at, 
+        message_id_from_api,
+        sender_from_api,
+        instance_name,
+        status_from_api,
+        source_from_api,
+        raw_payload
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        workspaceId,
+        chatId,
+        contactId, // O sender_id é o ID do contato que enviou a mensagem
+        message.conversation,
+        new Date(date_time),
+        key.id,
+        sender,
+        instanceName,
+        data.status,
+        source,
+        payload
+      ]
+    );
+     console.log(`[WEBHOOK_MSG_UPSERT] Mensagem inserida com sucesso.`);
+
+    await client.query('COMMIT');
+    
+    // Revalidar o path da página principal para que a nova mensagem apareça em tempo real
+    revalidatePath('/', 'layout');
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
+  } finally {
+    client.release();
+  }
+}
