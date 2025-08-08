@@ -34,7 +34,6 @@ async function fetchChatsForWorkspace(workspaceId: string): Promise<Chat[]> {
 export default function CustomerChatLayout({ initialChats, currentUser }: CustomerChatLayoutProps) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -48,7 +47,8 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
     setChats(latestChats);
 
-    // If there is a selected chat, find its latest version and update messages
+    // If there is a selected chat, find its latest version and update the state
+    // This will re-render the ChatPanel with new messages
     if (selectedChat) {
       const updatedSelectedChat = latestChats.find(c => c.id === selectedChat.id);
       if (updatedSelectedChat) {
@@ -81,16 +81,6 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         }
     };
   }, [initialChats, currentUser.activeWorkspaceId, updateData]);
-
-
-  useEffect(() => {
-    if (selectedChat) {
-      setMessages(selectedChat.messages || []);
-    } else {
-      setMessages([]);
-    }
-  }, [selectedChat]);
-
 
   if (loading) {
       return (
@@ -131,7 +121,12 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
       />
-      <ChatPanel key={selectedChat?.id} chat={selectedChat} messages={messages} currentUser={currentUser} />
+      <ChatPanel 
+        key={selectedChat?.id} 
+        chat={selectedChat} 
+        messages={selectedChat?.messages || []} 
+        currentUser={currentUser} 
+      />
       <ContactPanel contact={selectedChat?.contact || null} />
     </div>
   );

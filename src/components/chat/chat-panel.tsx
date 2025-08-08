@@ -38,6 +38,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   
+  // Effect to update local messages when the prop changes
+  React.useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +57,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     }
     
-    setMessages([...messages, sentMessage]);
+    setMessages(prev => [...prev, sentMessage]);
     setNewMessage('');
   };
 
