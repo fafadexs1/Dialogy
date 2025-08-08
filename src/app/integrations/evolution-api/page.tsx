@@ -180,31 +180,33 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                     </AccordionItem>
 
                      {/* Proxy Settings */}
-                    <AccordionItem value="proxy">
-                        <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
-                        <AccordionContent className="space-y-4 p-1">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="proxyHost">Host</Label>
-                                    <Input id="proxyHost" name="proxyHost" />
+                    {integrationType === 'WHATSAPP-BAILEYS' && (
+                        <AccordionItem value="proxy">
+                            <AccordionTrigger className="flex items-center gap-2"><Unplug className="h-4 w-4"/> Configurações de Proxy</AccordionTrigger>
+                            <AccordionContent className="space-y-4 p-1">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="proxyHost">Host</Label>
+                                        <Input id="proxyHost" name="proxyHost" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="proxyPort">Porta</Label>
+                                        <Input id="proxyPort" name="proxyPort" type="number" />
+                                    </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="proxyPort">Porta</Label>
-                                    <Input id="proxyPort" name="proxyPort" type="number" />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="proxyUsername">Usuário</Label>
+                                        <Input id="proxyUsername" name="proxyUsername" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="proxyPassword">Senha</Label>
+                                        <Input id="proxyPassword" name="proxyPassword" type="password" />
+                                    </div>
                                 </div>
-                            </div>
-                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="proxyUsername">Usuário</Label>
-                                    <Input id="proxyUsername" name="proxyUsername" />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="proxyPassword">Senha</Label>
-                                    <Input id="proxyPassword" name="proxyPassword" type="password" />
-                                </div>
-                            </div>
-                        </AccordionContent>
-                    </AccordionItem>
+                            </AccordionContent>
+                        </AccordionItem>
+                    )}
                 </Accordion>
                 {state?.error && (
                   <Alert variant="destructive" className="mt-4">
