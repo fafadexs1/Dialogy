@@ -107,7 +107,7 @@ async function handleMessagesUpsert(payload: any) {
 
     if (chatRes.rows.length === 0) {
       console.log(`[WEBHOOK_MSG_UPSERT] Chat com contato ID ${contactId} não encontrado. Criando...`);
-      // Cria o chat com o status padrão 'atendimentos' que é definido pelo DB
+      // Cria o chat com o status padrão 'gerais' que é definido pelo DB
       const newChatRes = await client.query(
         'INSERT INTO chats (workspace_id, contact_id) VALUES ($1, $2) RETURNING id, status',
         [workspaceId, contactId]
