@@ -7,9 +7,22 @@ export type Workspace = {
     avatar: string;
 }
 
-// Representa um usuário autenticado (agente)
+export type Permission = {
+    id: string;
+    description: string;
+    category: string;
+}
+
+export type Role = {
+    id: string;
+    name: string;
+    description: string;
+    workspace_id: string;
+    permissions: Permission[];
+}
+
 export type User = {
-  id: string; // Vem de auth.users.id
+  id: string;
   name: string; 
   avatar: string;
   email?: string;
@@ -18,14 +31,16 @@ export type User = {
   last_active_workspace_id?: string;
   firstName: string;
   lastName: string;
-  businessProfile?: BusinessProfile; // Para consistência, um User também pode ter um perfil de negócios
+  businessProfile?: BusinessProfile;
   phone?: string;
   online?: boolean;
   memberSince?: string;
   geminiUsage?: number;
+  // RBAC properties
+  role?: Role;
+  permissions?: string[];
 };
 
-// Representa um cliente/contato (não autenticado)
 export type Contact = {
   id: string;
   workspace_id: string;
@@ -45,7 +60,7 @@ export type OnlineAgent = {
 }
 
 export type BusinessProfile = {
-  workspaceId?: string; // A business profile belongs to a workspace
+  workspaceId?: string;
   companyName?: string;
   website?: string;
   industry?: string;
@@ -73,7 +88,6 @@ export type Task = {
   completed: boolean;
 };
 
-// O remetente pode ser um agente (User) ou um contato (Contact)
 export type MessageSender = User | Contact;
 
 export type Message = {

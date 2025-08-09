@@ -17,6 +17,7 @@ import {
   UserPlus,
   Users2,
   ShieldAlert,
+  Fingerprint,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -46,7 +47,6 @@ interface SidebarProps {
 const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
-  // { href: '/team', icon: Slack, label: 'Equipes' }, // Removido para dar lugar ao Dropdown
   { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
@@ -54,9 +54,7 @@ const mainNavItems = [
 
 function SignOutMenuItem({ userId }: { userId: string }) {
     const handleSignOut = async () => {
-        // First, update the user's status to offline
         await updateUserOnlineStatus(userId, false);
-        // Then, sign out using NextAuth
         signOut({ callbackUrl: '/login' });
     }
 
@@ -110,7 +108,6 @@ export function Sidebar({ user }: SidebarProps) {
               </Tooltip>
             ))}
 
-            {/* Menu de Equipes */}
              <DropdownMenu>
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -150,6 +147,12 @@ export function Sidebar({ user }: SidebarProps) {
                         <DropdownMenuItem>
                             <ShieldAlert className="mr-2 h-4 w-4" />
                             <span>Gerenciar Membros</span>
+                        </DropdownMenuItem>
+                    </Link>
+                     <Link href="/team/permissions">
+                        <DropdownMenuItem>
+                            <Fingerprint className="mr-2 h-4 w-4" />
+                            <span>Papéis & Permissões</span>
                         </DropdownMenuItem>
                     </Link>
                 </DropdownMenuContent>
@@ -202,3 +205,5 @@ export function Sidebar({ user }: SidebarProps) {
 function Separator() {
     return <div className="w-full h-px bg-border my-2" />
 }
+
+    

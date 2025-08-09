@@ -6,8 +6,6 @@ import { Pool } from 'pg';
 
 export async function initializeDatabase(): Promise<{ success: boolean; message: string }> {
   console.log('Iniciando a inicialização do banco de dados...');
-  // Usar uma conexão de superusuário para criar roles e o banco de dados, se necessário.
-  // ATENÇÃO: A DATABASE_URL principal deve ser de um usuário com privilégios de criação.
   const adminPool = new Pool({
     connectionString: process.env.DATABASE_URL,
   });
@@ -18,9 +16,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     await client.query('BEGIN');
     console.log('Transação iniciada.');
 
-    // 1. Criar o usuário (role) da aplicação se ele não existir.
     const appUser = 'evolutionapi';
-    const appPassword = 'default_password'; // Use uma senha mais segura em produção!
+    const appPassword = 'default_password';
     const res = await client.query(`SELECT 1 FROM pg_roles WHERE rolname=$1`, [appUser]);
     if (res.rowCount === 0) {
       console.log(`Usuário '${appUser}' não encontrado. Criando...`);
@@ -30,19 +27,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       console.log(`Usuário '${appUser}' já existe.`);
     }
 
-    // 2. Conceder permissões ao novo usuário.
-    await client.query(`GRANT ALL PRIVILEGES ON DATABASE postgres TO ${appUser};`); // Conceder privilégios no DB
+    await client.query(`GRANT ALL PRIVILEGES ON DATABASE postgres TO ${appUser};`);
     console.log(`Privilégios concedidos ao usuário '${appUser}'.`);
 
-    // 3. Limpeza de objetos existentes (tabelas, tipos)
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.role_permissions CASCADE;',
+        'DROP TABLE IF EXISTS public.permissions CASCADE;',
+        'DROP TABLE IF EXISTS public.user_workspace_roles CASCADE;',
+        'DROP TABLE IF EXISTS public.roles CASCADE;',
         'DROP TABLE IF EXISTS public.evolution_api_instances CASCADE;',
         'DROP TABLE IF EXISTS public.evolution_api_configs CASCADE;',
         'DROP TABLE IF EXISTS public.messages CASCADE;',
         'DROP TABLE IF EXISTS public.chats CASCADE;',
         'DROP TABLE IF EXISTS public.contacts CASCADE;',
-        'DROP TABLE IF EXISTS public.user_workspaces CASCADE;',
+        'DROP TABLE IF EXISTS public.user_workspaces CASCADE;', // Mantido para referência, mas será substituído
         'DROP TABLE IF EXISTS public.workspaces CASCADE;',
         'DROP TABLE IF EXISTS public.users CASCADE;',
         'DROP TYPE IF EXISTS public.chat_status_enum;'
@@ -53,7 +52,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     }
     console.log('Limpeza concluída. Iniciando a criação do schema...');
 
-    // 4. Setup - Criação das tabelas e objetos
     const setupQueries = [
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
       
@@ -73,10 +71,32 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           avatar_url TEXT,
           owner_id UUID REFERENCES public.users(id) ON DELETE CASCADE
       );`,
+
+      `CREATE TABLE public.permissions (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        category TEXT NOT NULL
+      );`,
+
+      `CREATE TABLE public.roles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_default BOOLEAN DEFAULT FALSE,
+        UNIQUE(workspace_id, name)
+      );`,
       
-      `CREATE TABLE public.user_workspaces (
-          user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-          workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+      `CREATE TABLE public.role_permissions (
+        role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
+        permission_id TEXT NOT NULL REFERENCES public.permissions(id) ON DELETE CASCADE,
+        PRIMARY KEY (role_id, permission_id)
+      );`,
+
+      `CREATE TABLE public.user_workspace_roles (
+          user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
           PRIMARY KEY (user_id, workspace_id)
       );`,
 
@@ -130,7 +150,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           webhook_url TEXT
       );`,
 
-      // Grant permissions on new tables to the app user
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO ${appUser};`,
@@ -141,21 +160,79 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     }
     
     console.log('Tabelas e permissões criadas com sucesso.');
+
+    console.log('Populando a tabela de permissões...');
+    const permissions = [
+        // Workspace
+        { id: 'workspace:settings:view', description: 'Visualizar as configurações do workspace', category: 'Workspace' },
+        { id: 'workspace:settings:edit', description: 'Editar as configurações do workspace', category: 'Workspace' },
+        // Members
+        { id: 'members:view', description: 'Visualizar membros do workspace', category: 'Membros' },
+        { id: 'members:invite', description: 'Convidar novos membros', category: 'Membros' },
+        { id: 'members:remove', description: 'Remover membros do workspace', category: 'Membros' },
+        // Roles & Permissions
+        { id: 'permissions:view', description: 'Visualizar papéis e permissões', category: 'Permissões' },
+        { id: 'permissions:edit', description: 'Criar, editar e atribuir papéis e permissões', category: 'Permissões' },
+        // Teams
+        { id: 'teams:view', description: 'Visualizar equipes', category: 'Equipes' },
+        { id: 'teams:edit', description: 'Criar e editar equipes', category: 'Equipes' },
+        // Analytics
+        { id: 'analytics:view', description: 'Visualizar a página de Analytics', category: 'Analytics' },
+        // Integrations
+        { id: 'integrations:view', description: 'Visualizar integrações', category: 'Integrações' },
+        { id: 'integrations:edit', description: 'Configurar integrações', category: 'Integrações' },
+        // Autopilot
+        { id: 'autopilot:view', description: 'Visualizar configurações do Piloto Automático', category: 'Piloto Automático' },
+        { id: 'autopilot:edit', description: 'Editar configurações e regras do Piloto Automático', category: 'Piloto Automático' },
+        // CRM
+        { id: 'crm:view', description: 'Visualizar contatos e empresas no CRM', category: 'CRM' },
+        { id: 'crm:edit', description: 'Criar e editar contatos e empresas no CRM', category: 'CRM' },
+        { id: 'crm:delete', description: 'Deletar contatos e empresas no CRM', category: 'CRM' },
+    ];
+    for (const p of permissions) {
+        await client.query('INSERT INTO public.permissions (id, description, category) VALUES ($1, $2, $3)', [p.id, p.description, p.category]);
+    }
+    console.log('Permissões populadas.');
+
     console.log('Configurando automações (funções e triggers)...');
     
     const functionsAndTriggers = [
-        `CREATE OR REPLACE FUNCTION public.add_creator_to_workspace()
+        `CREATE OR REPLACE FUNCTION public.setup_workspace_defaults()
         RETURNS TRIGGER AS $$
+        DECLARE
+          admin_role_id UUID;
+          member_role_id UUID;
         BEGIN
-          INSERT INTO public.user_workspaces (user_id, workspace_id)
-          VALUES (NEW.owner_id, NEW.id);
+          -- Cria o papel de Administrador para o novo workspace
+          INSERT INTO public.roles (workspace_id, name, description, is_default)
+          VALUES (NEW.id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
+          RETURNING id INTO admin_role_id;
+
+          -- Atribui todas as permissões existentes ao papel de Administrador
+          INSERT INTO public.role_permissions (role_id, permission_id)
+          SELECT admin_role_id, id FROM public.permissions;
+
+          -- Cria o papel de Membro para o novo workspace
+          INSERT INTO public.roles (workspace_id, name, description, is_default)
+          VALUES (NEW.id, 'Membro', 'Acesso às funcionalidades principais, mas não pode gerenciar configurações.', TRUE)
+          RETURNING id INTO member_role_id;
+
+          -- Atribui permissões básicas ao papel de Membro
+          INSERT INTO public.role_permissions (role_id, permission_id)
+          SELECT member_role_id, id FROM public.permissions
+          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit');
+          
+          -- Atribui o papel de Administrador ao criador do workspace
+          INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
+          VALUES (NEW.owner_id, NEW.id, admin_role_id);
+          
           RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;`,
         
-        `CREATE TRIGGER add_creator_to_workspace_trigger
+        `CREATE TRIGGER setup_workspace_defaults_trigger
             AFTER INSERT ON public.workspaces
-            FOR EACH ROW EXECUTE PROCEDURE public.add_creator_to_workspace();`,
+            FOR EACH ROW EXECUTE PROCEDURE public.setup_workspace_defaults();`,
     ];
 
     for(const query of functionsAndTriggers) {
@@ -179,3 +256,5 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
+
+    

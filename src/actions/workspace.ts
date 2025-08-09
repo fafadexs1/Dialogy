@@ -26,14 +26,13 @@ export async function createWorkspaceAction(
   try {
     await client.query('BEGIN');
 
-    // 1. Inserir o novo workspace
+    // O trigger 'setup_workspace_defaults_trigger' agora cuida da criação dos papéis
+    // padrão (Admin, Membro) e da associação do criador ao papel de Admin.
     const workspaceRes = await client.query(
       'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id',
       [workspaceName, userId]
     );
     const newWorkspaceId = workspaceRes.rows[0].id;
-
-    // O trigger 'add_creator_to_workspace_trigger' já cuida da inserção na tabela 'user_workspaces'.
 
     // 2. Atualizar o workspace ativo do usuário
     await client.query(
@@ -53,11 +52,9 @@ export async function createWorkspaceAction(
     client.release();
   }
 
-  // Revalida os dados para garantir que a UI seja atualizada
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
 
-  // Retorna nulo em caso de sucesso para o useActionState
   return null;
 }
 
@@ -111,5 +108,6 @@ export async function switchWorkspaceAction(workspaceId: string) {
     }
     
     revalidatePath('/', 'layout');
-    // A página será recarregada no cliente para buscar os novos dados
 }
+
+    
