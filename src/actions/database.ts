@@ -145,7 +145,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           agent_id UUID REFERENCES public.users(id),
-          status chat_status_enum DEFAULT 'gerais'::chat_status_enum
+          status chat_status_enum DEFAULT 'gerais'::chat_status_enum,
+          assigned_at TIMESTAMPTZ
       );`,
 
       `CREATE TABLE public.messages (

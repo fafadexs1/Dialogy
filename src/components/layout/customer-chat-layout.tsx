@@ -41,23 +41,13 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     setSelectedChat(chat);
   };
   
-   useEffect(() => {
-    // Initial load
-    setChats(initialChats);
-    if (initialChats.length > 0) {
-        handleSetSelectedChat(initialChats[0]);
-    }
-    setLoading(false);
-
-    // Function to fetch and update data
-    const updateData = async () => {
+  // Function to fetch and update data, memoized with useCallback
+    const updateData = useCallback(async () => {
         if (!currentUser.activeWorkspaceId) return;
 
         const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
         setChats(latestChats);
 
-        // Update selected chat with new messages using a functional state update
-        // This avoids issues with stale state in closures.
         setSelectedChat(currentSelectedChat => {
             if (currentSelectedChat) {
                 const updatedSelectedChat = latestChats.find(c => c.id === currentSelectedChat.id);
@@ -67,8 +57,16 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             }
             return null;
         });
-    };
+    }, [currentUser.activeWorkspaceId]);
 
+
+   useEffect(() => {
+    // Initial load
+    setChats(initialChats);
+    if (initialChats.length > 0) {
+        handleSetSelectedChat(initialChats[0]);
+    }
+    setLoading(false);
 
     // Start polling when component mounts and user is available
     if (currentUser.activeWorkspaceId) {
@@ -82,7 +80,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             clearInterval(pollingIntervalRef.current);
         }
     };
-  }, [initialChats, currentUser.activeWorkspaceId]);
+  }, [initialChats, currentUser.activeWorkspaceId, updateData]);
 
   if (loading) {
       return (
@@ -129,7 +127,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
       />
-      <ContactPanel chat={selectedChat} />
+      <ContactPanel chat={selectedChat} onTransferSuccess={updateData} />
     </div>
   );
 }

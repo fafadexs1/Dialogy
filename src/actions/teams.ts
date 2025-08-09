@@ -234,3 +234,46 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
         return { success: false, error: "Falha ao atualizar o horário de atendimento." };
     }
 }
+
+export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { teams: [], error: "Usuário não autenticado." };
+
+    // You might want to add a permission check here as well, e.g., 'teams:view'
+    if (!await hasPermission(session.user.id, workspaceId, 'teams:view')) {
+        return { teams: [], error: "Acesso não autorizado." };
+    }
+
+    try {
+        const res = await db.query(`
+            SELECT 
+                t.id, 
+                t.name, 
+                t.color, 
+                t.role_id,
+                COUNT(u.id) FILTER (WHERE u.online = TRUE) as "onlineMembersCount"
+            FROM teams t
+            LEFT JOIN team_members tm ON t.id = tm.team_id
+            LEFT JOIN users u ON tm.user_id = u.id
+            WHERE t.workspace_id = $1
+            GROUP BY t.id
+            ORDER BY t.name;
+        `, [workspaceId]);
+
+        const teams = res.rows.map(row => ({
+            id: row.id,
+            name: row.name,
+            color: row.color,
+            roleId: row.role_id,
+            members: [], // This function doesn't need to return all members
+            businessHours: [], // or business hours
+            onlineMembersCount: parseInt(row.onlineMembersCount, 10) || 0,
+        }));
+
+        return { teams };
+
+    } catch (error) {
+        console.error("Erro ao buscar equipes com membros online:", error);
+        return { teams: [], error: "Falha ao buscar dados das equipes." };
+    }
+}

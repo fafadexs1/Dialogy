@@ -1,8 +1,8 @@
 
 'use client';
 
-import React from 'react';
-import { type Chat, type User } from '@/lib/types';
+import React, { useState, useEffect } from 'react';
+import { type Chat, type User, type Team, type OnlineAgent } from '@/lib/types';
 import {
   Mail,
   Phone,
@@ -12,7 +12,10 @@ import {
   User as UserIcon,
   UserCheck,
   Smartphone,
-  Server
+  Server,
+  Send,
+  Loader2,
+  Users
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -20,12 +23,131 @@ import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Separator } from '../ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '../ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { usePresence } from '@/hooks/use-online-status';
+import { getTeamsWithOnlineMembers } from '@/actions/teams';
+import { useAuth } from '@/hooks/use-auth';
+import { transferChatAction } from '@/actions/chats';
+import { toast } from '@/hooks/use-toast';
+import { ScrollArea } from '../ui/scroll-area';
 
 interface ContactPanelProps {
   chat: Chat | null;
+  onTransferSuccess: () => void;
 }
 
-export default function ContactPanel({ chat }: ContactPanelProps) {
+function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransferSuccess: () => void }) {
+    const currentUser = useAuth();
+    const allOnlineAgents = usePresence();
+    const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
+    const [loading, setLoading] = useState(true);
+    const [isTransferring, setIsTransferring] = useState(false);
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+    useEffect(() => {
+        if (!isDialogOpen || !currentUser?.activeWorkspaceId) return;
+        
+        setLoading(true);
+        getTeamsWithOnlineMembers(currentUser.activeWorkspaceId)
+            .then(data => {
+                if(data.teams) setTeams(data.teams);
+            })
+            .finally(() => setLoading(false));
+
+    }, [isDialogOpen, currentUser?.activeWorkspaceId]);
+
+    const handleTransfer = async (target: { teamId?: string; agentId?: string }) => {
+        setIsTransferring(true);
+        const result = await transferChatAction({
+            chatId: chat.id,
+            ...target
+        });
+
+        if (result.error) {
+            toast({ title: "Erro ao transferir", description: result.error, variant: 'destructive' });
+        } else {
+            toast({ title: "Atendimento transferido!" });
+            onTransferSuccess();
+            setIsDialogOpen(false);
+        }
+        setIsTransferring(false);
+    }
+    
+    // Filter out the current user from the list of agents to transfer to
+    const availableAgents = allOnlineAgents.filter(agent => agent.user.id !== currentUser?.id);
+
+    return (
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                    <Send className="mr-2 h-4 w-4" />
+                    Transferir
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Transferir Atendimento</DialogTitle>
+                    <DialogDescription>
+                        Envie esta conversa para outra equipe ou agente.
+                    </DialogDescription>
+                </DialogHeader>
+                <Tabs defaultValue="team" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="team">Para Equipe</TabsTrigger>
+                        <TabsTrigger value="agent">Para Agente</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="team">
+                       <ScrollArea className="h-64">
+                            <div className="p-1 space-y-2">
+                                {loading ? <Loader2 className="mx-auto my-10 h-6 w-6 animate-spin" /> :
+                                teams.map(team => (
+                                    <div key={team.id} className="flex items-center justify-between p-2 rounded-md border">
+                                        <div className="flex items-center gap-3">
+                                            <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: team.color }}></span>
+                                            <div>
+                                                <p className="font-medium">{team.name}</p>
+                                                <p className="text-xs text-muted-foreground">{team.onlineMembersCount} agente(s) online</p>
+                                            </div>
+                                        </div>
+                                        <Button size="sm" onClick={() => handleTransfer({ teamId: team.id })} disabled={isTransferring || team.onlineMembersCount === 0}>
+                                            {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Transferir
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                       </ScrollArea>
+                    </TabsContent>
+                    <TabsContent value="agent">
+                         <ScrollArea className="h-64">
+                             <div className="p-1 space-y-2">
+                                {availableAgents.length > 0 ? availableAgents.map(agent => (
+                                    <div key={agent.user.id} className="flex items-center justify-between p-2 rounded-md border">
+                                        <div className="flex items-center gap-3">
+                                            <Avatar className="h-8 w-8">
+                                                <AvatarImage src={agent.user.avatar} />
+                                                <AvatarFallback>{agent.user.name.charAt(0)}</AvatarFallback>
+                                            </Avatar>
+                                            <p className="font-medium">{agent.user.name}</p>
+                                        </div>
+                                        <Button size="sm" onClick={() => handleTransfer({ agentId: agent.user.id })} disabled={isTransferring}>
+                                            {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Transferir
+                                        </Button>
+                                    </div>
+                                )) : <p className="text-sm text-muted-foreground text-center pt-10">Nenhum outro agente online.</p>}
+                            </div>
+                        </ScrollArea>
+                    </TabsContent>
+                </Tabs>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+
+export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelProps) {
 
   if (!chat) {
     return (
@@ -119,11 +241,15 @@ export default function ContactPanel({ chat }: ContactPanelProps) {
                     <AvatarImage src={agent.avatar} alt={agent.name} />
                     <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <span className="font-medium">{agent.name}</span>
+                 <div className="flex-1">
+                    <p className="font-medium">{agent.name}</p>
+                    {chat.assigned_at && <p className="text-xs text-muted-foreground">Atribuído em {new Date(chat.assigned_at).toLocaleDateString()}</p>}
+                 </div>
                 </div>
             ) : (
                 <p className="text-muted-foreground italic text-sm px-2">Nenhum atendente atribuído.</p>
             )}
+             <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} />
          </div>
 
         <Separator className="my-6"/>

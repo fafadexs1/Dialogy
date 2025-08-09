@@ -126,6 +126,7 @@ export type Chat = {
   messages: Message[];
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
+  assigned_at?: string;
 };
 
 export type InternalChannel = {
