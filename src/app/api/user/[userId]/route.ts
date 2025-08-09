@@ -27,8 +27,8 @@ export async function GET(
         const dbUser = userRes.rows[0];
         console.log(`[API /user] Usuário encontrado: ${dbUser.full_name}`);
 
-        console.log(`[API /user] Buscando workspaces para o usuário...`);
-        const uwRes = await db.query('SELECT workspace_id FROM user_workspaces WHERE user_id = $1', [userId]);
+        console.log(`[API /user] Buscando workspaces para o usuário na tabela user_workspace_roles...`);
+        const uwRes = await db.query('SELECT workspace_id FROM user_workspace_roles WHERE user_id = $1', [userId]);
         const workspaceIds = uwRes.rows.map(r => r.workspace_id);
         console.log(`[API /user] IDs dos workspaces encontrados: ${workspaceIds.join(', ')}`);
 

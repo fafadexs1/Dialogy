@@ -34,8 +34,8 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
         const dbUser = userRes.rows[0];
         console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.full_name}`);
 
-        // Fetch user_workspaces entries
-        const uwRes = await db.query('SELECT workspace_id FROM user_workspaces WHERE user_id = $1', [userId]);
+        // Fetch user's workspaces from the correct table
+        const uwRes = await db.query('SELECT workspace_id FROM user_workspace_roles WHERE user_id = $1', [userId]);
         const workspaceIds = uwRes.rows.map(r => r.workspace_id);
         console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: IDs dos workspaces do usuário: ${workspaceIds.join(', ')}`);
 
