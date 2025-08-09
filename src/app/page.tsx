@@ -144,7 +144,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
         const messageRes = await db.query(`
-            SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api, type, metadata
+            SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api, type, metadata, api_message_status
             FROM messages
             WHERE chat_id = ANY($1::uuid[])
             ORDER BY created_at ASC
@@ -166,9 +166,10 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id)!, 
+                sender: getSenderById(m.sender_id), 
                 instance_name: m.instance_name,
                 source_from_api: m.source_from_api,
+                api_message_status: m.api_message_status,
             });
         });
 

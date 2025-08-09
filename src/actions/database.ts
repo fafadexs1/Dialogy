@@ -207,6 +207,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           source_from_api TEXT,
           server_url TEXT,
           from_me BOOLEAN,
+          api_message_status TEXT,
           raw_payload JSONB
       );`,
       
@@ -358,7 +359,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
-    
-
-    

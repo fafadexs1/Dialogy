@@ -31,6 +31,8 @@ export async function POST(
 
     if (event === 'messages.upsert') {
       await handleMessagesUpsert(payload);
+    } else if (event === 'messages.update') {
+      await handleMessagesUpdate(payload);
     } else if (event === 'connection.update') {
       console.log(`[WEBHOOK] Evento de conexão da instância ${instanceNameFromUrl}: ${payload.data?.state}`);
       // Lógica futura para atualizar o status da instância no banco de dados pode ser adicionada aqui
@@ -38,12 +40,39 @@ export async function POST(
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
 
+    revalidatePath('/', 'layout');
     return NextResponse.json({ message: 'Webhook received successfully' });
   } catch (error) {
     console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
+async function handleMessagesUpdate(payload: any) {
+    const { instance: instanceName, data } = payload;
+    const { keyId, status } = data;
+
+    if (!keyId || !status) {
+        console.log('[WEBHOOK_MSG_UPDATE] Payload inválido, keyId ou status ausente.');
+        return;
+    }
+
+    console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
+    
+    const client = await db.connect();
+    try {
+        await client.query(
+            `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2`,
+            [status.toUpperCase(), keyId]
+        );
+        console.log(`[WEBHOOK_MSG_UPDATE] Status da mensagem ${keyId} atualizado com sucesso.`);
+    } catch (error) {
+        console.error('[WEBHOOK_MSG_UPDATE] Erro ao atualizar status da mensagem:', error);
+    } finally {
+        client.release();
+    }
+}
+
 
 async function handleMessagesUpsert(payload: any) {
   const { instance: instanceName, data, sender, server_url } = payload;
@@ -171,7 +200,6 @@ async function handleMessagesUpsert(payload: any) {
     await client.query('COMMIT');
     console.log(`[WEBHOOK_MSG_UPSERT] Transação commitada. Revalidando o path...`);
     
-    revalidatePath('/', 'layout');
     revalidatePath(`/api/chats/${workspaceId}`); // Revalida o novo endpoint de API
 
   } catch (error) {
@@ -183,5 +211,3 @@ async function handleMessagesUpsert(payload: any) {
     console.log('[WEBHOOK_MSG_UPSERT] Conexão com o banco liberada.');
   }
 }
-
-    

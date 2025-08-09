@@ -104,7 +104,7 @@ export type Task = {
   completed: boolean;
 };
 
-export type MessageSender = User | Contact;
+export type MessageSender = User | Contact | undefined;
 
 export type Message = {
   id: string;
@@ -119,6 +119,7 @@ export type Message = {
   workspace_id: string;
   instance_name?: string;
   source_from_api?: string;
+  api_message_status?: string;
 };
 
 export type Chat = {
@@ -274,5 +275,3 @@ export interface WorkspaceInvite {
     is_revoked: boolean;
     use_count: number;
 }
-
-    

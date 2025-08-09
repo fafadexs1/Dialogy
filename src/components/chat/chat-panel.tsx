@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck } from 'lucide-react';
 import { type Chat, type Message, type User, Tag } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -227,10 +227,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                   message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={message.sender?.avatar} alt={message.sender?.name} data-ai-hint="person" />
-                  <AvatarFallback>{message.sender?.name?.charAt(0) || '?'}</AvatarFallback>
-                </Avatar>
+                {message.sender && (
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
+                      <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
+                    </Avatar>
+                )}
                 <div
                   className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
                     message.sender?.id === currentUser?.id
@@ -239,13 +241,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                   }`}
                 >
                   <p>{message.content}</p>
-                   <p className={`text-xs mt-2 ${
+                   <div className={`flex items-center justify-end gap-1 mt-2 ${
                       message.sender?.id === currentUser?.id
                         ? 'text-primary-foreground/70'
                         : 'text-muted-foreground'
                     }`}>
-                      {message.timestamp}
-                    </p>
+                      <p className="text-xs">{message.timestamp}</p>
+                      {message.sender?.id === currentUser.id && (
+                          message.api_message_status === 'READ'
+                          ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                          : <Check className="h-4 w-4" />
+                      )}
+                    </div>
                 </div>
               </div>
             )}
