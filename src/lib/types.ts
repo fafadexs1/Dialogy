@@ -110,6 +110,8 @@ export type Message = {
   id: string;
   sender: MessageSender;
   content: string;
+  type: 'text' | 'system';
+  metadata?: any;
   timestamp: string;
   createdAt: string;
   formattedDate: string;
@@ -272,3 +274,5 @@ export interface WorkspaceInvite {
     is_revoked: boolean;
     use_count: number;
 }
+
+    

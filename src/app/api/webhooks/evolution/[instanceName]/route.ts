@@ -137,7 +137,8 @@ async function handleMessagesUpsert(payload: any) {
       `INSERT INTO messages (
         workspace_id, 
         chat_id, 
-        sender_id, 
+        sender_id,
+        type, 
         content, 
         created_at, 
         message_id_from_api,
@@ -148,7 +149,7 @@ async function handleMessagesUpsert(payload: any) {
         server_url,
         from_me,
         raw_payload
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      ) VALUES ($1, $2, $3, 'text', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         workspaceId,
         chatId,
@@ -182,3 +183,5 @@ async function handleMessagesUpsert(payload: any) {
     console.log('[WEBHOOK_MSG_UPSERT] Conexão com o banco liberada.');
   }
 }
+
+    

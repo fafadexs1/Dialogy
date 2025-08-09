@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info } from 'lucide-react';
 import { type Chat, type Message, type User, Tag } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -123,6 +123,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const sentMessage: Message = {
         id: `msg-${Date.now()}`,
         content: newMessage,
+        type: 'text',
         chat_id: chat.id,
         sender: currentUser,
         workspace_id: chat.workspace_id,
@@ -161,7 +162,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         customerMessage: lastCustomerMessage.content,
                         chatHistory: chatHistoryForAI,
                         rules: activeRules,
-                        knowledgeBase: mockKnowledgeBase,
+                        knowledgeBase: "", // mockKnowledgeBase was here
                         model: selectedAiModel,
                     });
                     
@@ -169,6 +170,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         const aiMessage: Message = {
                            id: `msg-ai-${Date.now()}`,
                            content: result.response,
+                           type: 'text',
                            chat_id: chat.id,
                            sender: chat.agent,
                            workspace_id: chat.workspace_id,
@@ -210,25 +212,35 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </div>
                 </div>
             )}
+             {message.type === 'system' ? (
+                <div className="flex justify-center items-center my-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/70 rounded-full px-3 py-1">
+                        <Info className="h-3.5 w-3.5" />
+                        <span>{message.content}</span>
+                        <span>-</span>
+                        <span>{message.timestamp}</span>
+                    </div>
+                </div>
+            ) : (
              <div
                 className={`flex items-end gap-3 animate-in fade-in ${
-                  message.sender.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
+                  message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
-                  <AvatarFallback>{message.sender.name.charAt(0)}</AvatarFallback>
+                  <AvatarImage src={message.sender?.avatar} alt={message.sender?.name} data-ai-hint="person" />
+                  <AvatarFallback>{message.sender?.name.charAt(0)}</AvatarFallback>
                 </Avatar>
                 <div
                   className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
-                    message.sender.id === currentUser?.id
+                    message.sender?.id === currentUser?.id
                       ? 'rounded-br-none bg-primary text-primary-foreground'
                       : 'rounded-bl-none bg-card'
                   }`}
                 >
                   <p>{message.content}</p>
                    <p className={`text-xs mt-2 ${
-                      message.sender.id === currentUser?.id
+                      message.sender?.id === currentUser?.id
                         ? 'text-primary-foreground/70'
                         : 'text-muted-foreground'
                     }`}>
@@ -236,6 +248,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </p>
                 </div>
               </div>
+            )}
         </React.Fragment>
     )
   }
@@ -346,3 +359,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
