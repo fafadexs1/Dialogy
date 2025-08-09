@@ -14,6 +14,8 @@ import {
   Puzzle,
   Bot,
   Building,
+  UserPlus,
+  Users2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -43,7 +45,7 @@ interface SidebarProps {
 const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
-  { href: '/team', icon: Slack, label: 'Equipes' },
+  // { href: '/team', icon: Slack, label: 'Equipes' }, // Removido para dar lugar ao Dropdown
   { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
@@ -106,6 +108,47 @@ export function Sidebar({ user }: SidebarProps) {
                 </TooltipContent>
               </Tooltip>
             ))}
+
+            {/* Menu de Equipes */}
+             <DropdownMenu>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                             <button
+                                className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
+                                ${
+                                    pathname.startsWith('/team')
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                                }`}
+                              >
+                                <Slack className="h-5 w-5" />
+                              </button>
+                        </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                        <p>Equipes e Membros</p>
+                    </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent side="right">
+                    <DropdownMenuLabel>Equipes</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <Link href="/team">
+                        <DropdownMenuItem>
+                            <Users2 className="mr-2 h-4 w-4" />
+                            <span>Gerenciar Equipes</span>
+                        </DropdownMenuItem>
+                    </Link>
+                     <Link href="/team/invite">
+                        <DropdownMenuItem>
+                            <UserPlus className="mr-2 h-4 w-4" />
+                            <span>Convidar Membros</span>
+                        </DropdownMenuItem>
+                    </Link>
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+
           </TooltipProvider>
         </nav>
       </div>
