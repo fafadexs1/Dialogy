@@ -19,6 +19,7 @@ export type Role = {
     description: string;
     workspace_id: string;
     permissions: Permission[];
+    is_default?: boolean;
 }
 
 export type User = {
@@ -40,6 +41,18 @@ export type User = {
   role?: Role;
   permissions?: string[];
 };
+
+export type WorkspaceMember = {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  online: boolean;
+  role: string;
+  memberSince: string;
+  autopilotUsage: number;
+}
+
 
 export type Contact = {
   id: string;

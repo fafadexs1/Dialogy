@@ -97,6 +97,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
           PRIMARY KEY (user_id, workspace_id)
       );`,
 
