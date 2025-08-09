@@ -63,7 +63,7 @@ export default function WorkspaceSettingsPage() {
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     
     const [updateError, updateAction] = useActionState(updateWorkspaceAction, null);
-    const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, null);
+    const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
     
     const { toast } = useToast();
     const isInitialMount = useRef(true);
@@ -101,11 +101,11 @@ export default function WorkspaceSettingsPage() {
     }, [updateError]);
     
     useEffect(() => {
-        if (inviteError === null) { // Success
+        if (inviteError === null) { // Success is null
             toast({ title: "Convite Criado!", description: "O link de convite foi gerado com sucesso." });
             setIsInviteModalOpen(false);
             if (activeWorkspace) fetchInvites(activeWorkspace.id);
-        } else if (inviteError) {
+        } else if (inviteError) { // Error is a string
              toast({ title: "Erro ao criar convite", description: inviteError, variant: "destructive" });
         }
     }, [inviteError, toast, activeWorkspace]);
@@ -268,3 +268,5 @@ export default function WorkspaceSettingsPage() {
         </div>
     )
 }
+
+    
