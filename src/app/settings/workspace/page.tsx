@@ -62,11 +62,10 @@ export default function WorkspaceSettingsPage() {
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     
-    const [updateError, updateAction] = useActionState(updateWorkspaceAction, null);
+    const [updateError, updateAction] = useActionState(updateWorkspaceAction, undefined);
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
     
     const { toast } = useToast();
-    const isInitialMount = useRef(true);
 
     useEffect(() => {
         if (user?.activeWorkspaceId && user.workspaces) {
@@ -87,18 +86,12 @@ export default function WorkspaceSettingsPage() {
     }
 
     useEffect(() => {
-        if (isInitialMount.current) {
-            isInitialMount.current = false;
-            return;
-        }
-
         if (updateError === null) {
             toast({ title: "Workspace Atualizado!", description: "O nome do workspace foi alterado." });
         } else if (updateError) {
             toast({ title: "Erro ao atualizar", description: updateError, variant: "destructive" });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [updateError]);
+    }, [updateError, toast]);
     
     useEffect(() => {
         if (inviteError === null) { // Success is null
@@ -268,5 +261,3 @@ export default function WorkspaceSettingsPage() {
         </div>
     )
 }
-
-    
