@@ -75,7 +75,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
         const messageRes = await db.query(`
-            SELECT id, content, created_at, chat_id, sender_id, workspace_id
+            SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api
             FROM messages
             WHERE chat_id = ANY($1::uuid[])
             ORDER BY created_at ASC
@@ -96,6 +96,8 @@ async function fetchDataForWorkspace(workspaceId: string) {
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
                 sender: getSenderById(m.sender_id)!, // Sender must exist
+                instance_name: m.instance_name,
+                source_from_api: m.source_from_api,
             });
         });
 

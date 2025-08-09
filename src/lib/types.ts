@@ -83,6 +83,8 @@ export type Message = {
   formattedDate: string;
   chat_id: string;
   workspace_id: string;
+  instance_name?: string;
+  source_from_api?: string;
 };
 
 export type Chat = {

@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
+import { FaWhatsapp } from 'react-icons/fa';
 
 interface ChatListProps {
   chats: Chat[];
@@ -52,35 +53,58 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
 
   const renderChatList = (chatList: Chat[]) => (
     <div className="space-y-1 p-2">
-      {chatList.length > 0 ? chatList.map((chat) => (
-        <div
-          key={chat.id}
-          className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
-            selectedChat?.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
-          }`}
-          onClick={() => setSelectedChat(chat)}
-        >
-          <Avatar className="h-10 w-10 border flex-shrink-0">
-            <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
-            <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-semibold truncate">{chat.contact.name}</p>
-              {chat.messages.length > 0 && (
-                <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
-                  {chat.messages[chat.messages.length - 1].timestamp}
-                </p>
+      {chatList.length > 0 ? chatList.map((chat) => {
+        const lastMessage = chat.messages[chat.messages.length - 1];
+        const source = lastMessage?.source_from_api;
+        const instanceName = lastMessage?.instance_name;
+
+        return (
+          <div
+            key={chat.id}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
+              selectedChat?.id === chat.id ? 'bg-primary/10' : 'hover:bg-accent'
+            }`}
+            onClick={() => setSelectedChat(chat)}
+          >
+            <div className="relative flex-shrink-0">
+              <Avatar className="h-10 w-10 border">
+                <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+                <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+              </Avatar>
+              {source === 'whatsapp' && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-card">
+                        <FaWhatsapp size={10} />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Canal: WhatsApp</p>
+                      {instanceName && <p>Instância: {instanceName}</p>}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
-            {chat.messages.length > 0 && (
-                <p className="text-sm text-muted-foreground truncate">
-                    {chat.messages[chat.messages.length - 1].content}
-                </p>
-            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold truncate">{chat.contact.name}</p>
+                {lastMessage && (
+                  <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                    {lastMessage.timestamp}
+                  </p>
+                )}
+              </div>
+              {lastMessage && (
+                  <p className="text-sm text-muted-foreground truncate">
+                      {lastMessage.content}
+                  </p>
+              )}
+            </div>
           </div>
-        </div>
-      )) : (
+        )
+      }) : (
         <div className="text-center py-10">
           <p className="text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
         </div>
