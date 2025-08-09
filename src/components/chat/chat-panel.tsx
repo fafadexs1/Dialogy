@@ -145,15 +145,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }, [messages]);
 
-  const chatHistoryForAI = messages.map(m => `${m.sender.name}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender.id !== currentUser?.id).pop();
+  const chatHistoryForAI = messages.map(m => `${m.sender?.name}: ${m.content}`).join('\n');
+  const lastCustomerMessage = messages.filter(m => m.sender?.id !== currentUser?.id).pop();
 
 
   React.useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender.id !== currentUser?.id) {
+        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser?.id) {
             const lastMessageInState = messages[messages.length - 1];
-            if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
+            if (lastMessageInState.sender?.id === lastCustomerMessage.sender?.id) {
                 setIsAiThinking(true);
                 try {
                     const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
@@ -229,7 +229,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
               >
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={message.sender?.avatar} alt={message.sender?.name} data-ai-hint="person" />
-                  <AvatarFallback>{message.sender?.name.charAt(0)}</AvatarFallback>
+                  <AvatarFallback>{message.sender?.name?.charAt(0) || '?'}</AvatarFallback>
                 </Avatar>
                 <div
                   className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
@@ -300,7 +300,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={chat.agent?.avatar} alt={chat.agent?.name} data-ai-hint="person" />
-                      <AvatarFallback>{chat.agent?.name.charAt(0)}</AvatarFallback>
+                      <AvatarFallback>{chat.agent?.name?.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
                         <div className="flex items-center gap-2">
@@ -359,5 +359,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
