@@ -11,6 +11,8 @@ import {
   Building,
   User as UserIcon,
   UserCheck,
+  Smartphone,
+  Server
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -44,6 +46,7 @@ export default function ContactPanel({ chat }: ContactPanelProps) {
 
   const { contact, agent } = chat;
   const { businessProfile } = contact;
+  const lastMessage = chat.messages[chat.messages.length - 1];
 
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
@@ -83,10 +86,16 @@ export default function ContactPanel({ chat }: ContactPanelProps) {
                 </a>
               </div>
             )}
-            {contact.phone && (
+            {contact.phone_number_jid && (
               <div className="flex items-center gap-3">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{contact.phone}</span>
+                <Smartphone className="h-4 w-4 text-muted-foreground" />
+                <span>{contact.phone_number_jid}</span>
+              </div>
+            )}
+            {lastMessage?.instance_name && (
+              <div className="flex items-center gap-3">
+                <Server className="h-4 w-4 text-muted-foreground" />
+                <span>Instância: {lastMessage.instance_name}</span>
               </div>
             )}
              {businessProfile?.companyName && (

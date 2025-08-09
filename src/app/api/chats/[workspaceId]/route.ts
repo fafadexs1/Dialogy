@@ -32,7 +32,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
     ]));
 
     // 2. Fetch all contacts for the workspace and create a map.
-    const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
+    const contactRes = await db.query('SELECT id, name, avatar_url, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
         c.id,
         {
@@ -40,6 +40,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
             workspace_id: workspaceId,
             name: c.name,
             avatar: c.avatar_url,
+            phone_number_jid: c.phone_number_jid,
             firstName: c.name.split(' ')[0] || '',
             lastName: c.name.split(' ').slice(1).join(' ') || '',
         }
@@ -111,8 +112,9 @@ async function fetchDataForWorkspace(workspaceId: string) {
 
 export async function GET(
   request: Request,
-  { params: { workspaceId } }: { params: { workspaceId: string } }
+  { params }: { params: { workspaceId: string } }
 ) {
+  const { workspaceId } = params;
 
   if (!workspaceId) {
     return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });

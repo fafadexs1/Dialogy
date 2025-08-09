@@ -63,6 +63,7 @@ export type Contact = {
   avatar: string;
   email?: string;
   phone?: string;
+  phone_number_jid?: string;
   lastSeen?: string;
   businessProfile?: BusinessProfile;
   firstName: string;
