@@ -84,7 +84,7 @@ export type BusinessProfile = {
   deals: Deal[];
   tasks: Task[];
   tags: Tag[];
-  customFields?: { [key: string]: any };
+  customFields?: { [key: "string"]: any };
   dialogPriorityScore?: number;
   financialRiskScore?: number;
 };
@@ -255,3 +255,18 @@ export interface EvolutionInstanceCreationPayload {
         events?: string[];
     };
 }
+
+
+export interface WorkspaceInvite {
+    id: string;
+    workspace_id: string;
+    code: string;
+    created_by: string;
+    created_at: string;
+    expires_at: string;
+    max_uses: number | null;
+    is_revoked: boolean;
+    use_count: number;
+}
+
+    

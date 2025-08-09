@@ -37,6 +37,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TABLE IF EXISTS public.teams CASCADE;',
         'DROP TABLE IF EXISTS public.role_permissions CASCADE;',
         'DROP TABLE IF EXISTS public.permissions CASCADE;',
+        'DROP TABLE IF EXISTS public.user_invites CASCADE;',
+        'DROP TABLE IF EXISTS public.workspace_invites CASCADE;',
         'DROP TABLE IF EXISTS public.user_workspace_roles CASCADE;',
         'DROP TABLE IF EXISTS public.roles CASCADE;',
         'DROP TABLE IF EXISTS public.evolution_api_instances CASCADE;',
@@ -72,8 +74,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name TEXT NOT NULL,
           avatar_url TEXT,
-          owner_id UUID NOT NULL,
-          CONSTRAINT fk_owner FOREIGN KEY(owner_id) REFERENCES public.users(id) ON DELETE CASCADE
+          owner_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE
       );`,
 
       `CREATE TABLE public.permissions (
@@ -103,6 +104,24 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           PRIMARY KEY (user_id, workspace_id)
+      );`,
+
+       `CREATE TABLE public.workspace_invites (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          code TEXT NOT NULL UNIQUE,
+          created_by UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          max_uses INT,
+          is_revoked BOOLEAN DEFAULT FALSE
+      );`,
+
+      `CREATE TABLE public.user_invites (
+          invite_id UUID NOT NULL REFERENCES public.workspace_invites(id) ON DELETE CASCADE,
+          user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          used_at TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (invite_id, user_id)
       );`,
 
       `CREATE TABLE public.teams (
@@ -197,6 +216,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         // Workspace
         { id: 'workspace:settings:view', description: 'Visualizar as configurações do workspace', category: 'Workspace' },
         { id: 'workspace:settings:edit', description: 'Editar as configurações do workspace', category: 'Workspace' },
+        { id: 'workspace:invites:manage', description: 'Gerenciar convites para o workspace', category: 'Workspace' },
         // Members
         { id: 'members:view', description: 'Visualizar membros do workspace', category: 'Membros' },
         { id: 'members:invite', description: 'Convidar novos membros', category: 'Membros' },
@@ -221,7 +241,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         { id: 'crm:delete', description: 'Deletar contatos e empresas no CRM', category: 'CRM' },
     ];
     for (const p of permissions) {
-        await client.query('INSERT INTO public.permissions (id, description, category) VALUES ($1, $2, $3)', [p.id, p.description, p.category]);
+        await client.query('INSERT INTO public.permissions (id, description, category) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING', [p.id, p.description, p.category]);
     }
     console.log('Permissões populadas.');
 
