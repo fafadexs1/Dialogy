@@ -16,6 +16,7 @@ import {
   Building,
   UserPlus,
   Users2,
+  ShieldAlert,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -131,7 +132,7 @@ export function Sidebar({ user }: SidebarProps) {
                     </TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent side="right">
-                    <DropdownMenuLabel>Equipes</DropdownMenuLabel>
+                    <DropdownMenuLabel>Equipes e Membros</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <Link href="/team">
                         <DropdownMenuItem>
@@ -143,6 +144,12 @@ export function Sidebar({ user }: SidebarProps) {
                         <DropdownMenuItem>
                             <UserPlus className="mr-2 h-4 w-4" />
                             <span>Convidar Membros</span>
+                        </DropdownMenuItem>
+                    </Link>
+                     <Link href="/team/members">
+                        <DropdownMenuItem>
+                            <ShieldAlert className="mr-2 h-4 w-4" />
+                            <span>Gerenciar Membros</span>
                         </DropdownMenuItem>
                     </Link>
                 </DropdownMenuContent>
