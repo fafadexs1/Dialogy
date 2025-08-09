@@ -15,6 +15,7 @@ import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { Separator } from '../ui/separator';
 
 interface ChatPanelProps {
   chat: Chat | null;
@@ -47,7 +48,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     e.preventDefault();
     if (newMessage.trim() === '' || !currentUser || !chat) return;
     
-    // MOCK: This simulates sending a message.
     const sentMessage: Message = {
         id: `msg-${Date.now()}`,
         content: newMessage,
@@ -55,6 +55,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         sender: currentUser,
         workspace_id: chat.workspace_id,
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString(),
+        formattedDate: "Hoje",
     }
     
     setMessages(prev => [...prev, sentMessage]);
@@ -81,7 +83,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             if (lastMessageInState.sender.id === lastCustomerMessage.sender.id) {
                 setIsAiThinking(true);
                 try {
-                    // Fetch active automation rules
                     const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
                     const result = await generateAgentResponse({
@@ -93,14 +94,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     });
                     
                     if (result && result.response && chat.agent?.id) {
-                        // MOCK: Add AI response to messages
                         const aiMessage: Message = {
                            id: `msg-ai-${Date.now()}`,
                            content: result.response,
                            chat_id: chat.id,
-                           sender: chat.agent, // AI responds as the agent
+                           sender: chat.agent,
                            workspace_id: chat.workspace_id,
                            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                           createdAt: new Date().toISOString(),
+                           formattedDate: "Hoje",
                         };
                         setMessages(prev => [...prev, aiMessage]);
                     }
@@ -121,6 +123,51 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
+
+  const renderMessageWithSeparator = (message: Message, index: number) => {
+    const prevMessage = messages[index - 1];
+    const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
+
+    return (
+        <React.Fragment key={message.id}>
+            {showDateSeparator && (
+                <div className="relative my-6">
+                    <Separator />
+                    <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-muted/20 px-2">
+                        <span className="text-xs font-medium text-muted-foreground">{message.formattedDate}</span>
+                    </div>
+                </div>
+            )}
+             <div
+                className={`flex items-end gap-3 animate-in fade-in ${
+                  message.sender.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
+                }`}
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
+                  <AvatarFallback>{message.sender.name.charAt(0)}</AvatarFallback>
+                </Avatar>
+                <div
+                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
+                    message.sender.id === currentUser?.id
+                      ? 'rounded-br-none bg-primary text-primary-foreground'
+                      : 'rounded-bl-none bg-card'
+                  }`}
+                >
+                  <p>{message.content}</p>
+                   <p className={`text-xs mt-2 ${
+                      message.sender.id === currentUser?.id
+                        ? 'text-primary-foreground/70'
+                        : 'text-muted-foreground'
+                    }`}>
+                      {message.timestamp}
+                    </p>
+                </div>
+              </div>
+        </React.Fragment>
+    )
+  }
+
 
   if (!chat) {
     return (
@@ -154,36 +201,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
       <div className="flex-1 overflow-y-auto" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
-          <div className="space-y-6 p-6">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex items-end gap-3 animate-in fade-in ${
-                  message.sender.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
-                }`}
-              >
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
-                  <AvatarFallback>{message.sender.name.charAt(0)}</AvatarFallback>
-                </Avatar>
-                <div
-                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
-                    message.sender.id === currentUser?.id
-                      ? 'rounded-br-none bg-primary text-primary-foreground'
-                      : 'rounded-bl-none bg-card'
-                  }`}
-                >
-                  <p>{message.content}</p>
-                   <p className={`text-xs mt-2 ${
-                      message.sender.id === currentUser?.id
-                        ? 'text-primary-foreground/70'
-                        : 'text-muted-foreground'
-                    }`}>
-                      {message.timestamp}
-                    </p>
-                </div>
-              </div>
-            ))}
+          <div className="space-y-4 p-6">
+            {messages.map(renderMessageWithSeparator)}
              {isAiThinking && (
                 <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
                     <Avatar className="h-8 w-8">

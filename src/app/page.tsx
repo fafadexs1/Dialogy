@@ -8,7 +8,18 @@ import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { updateUserOnlineStatus } from '@/actions/user';
+import { format, isToday, isYesterday } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
+function formatMessageDate(date: Date): string {
+    if (isToday(date)) {
+        return `Hoje`;
+    }
+    if (isYesterday(date)) {
+        return `Ontem`;
+    }
+    return format(date, "dd/MM/yyyy", { locale: ptBR });
+}
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
     console.log(`--- [PAGE_SERVER] fetchUserAndWorkspaces: Buscando dados para o usuário ID: ${userId} ---`);
@@ -120,12 +131,15 @@ async function fetchDataForWorkspace(workspaceId: string) {
             if (!messagesByChat[m.chat_id]) {
                 messagesByChat[m.chat_id] = [];
             }
+            const createdAtDate = new Date(m.created_at);
             messagesByChat[m.chat_id].push({
                 id: m.id,
                 chat_id: m.chat_id,
                 workspace_id: m.workspace_id,
                 content: m.content,
-                timestamp: new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                createdAt: createdAtDate.toISOString(),
+                formattedDate: formatMessageDate(createdAtDate),
                 sender: getSenderById(m.sender_id),
             });
         });

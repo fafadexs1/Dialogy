@@ -79,6 +79,8 @@ export type Message = {
   sender: MessageSender;
   content: string;
   timestamp: string;
+  createdAt: string;
+  formattedDate: string;
   chat_id: string;
   workspace_id: string;
 };
