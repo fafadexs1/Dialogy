@@ -111,9 +111,8 @@ async function fetchDataForWorkspace(workspaceId: string) {
 
 export async function GET(
   request: Request,
-  { params }: { params: { workspaceId: string } }
+  { params: { workspaceId } }: { params: { workspaceId: string } }
 ) {
-  const { workspaceId } = params;
 
   if (!workspaceId) {
     return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });
