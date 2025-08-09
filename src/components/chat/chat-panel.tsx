@@ -54,7 +54,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         chat_id: chat.id,
         sender: currentUser,
         workspace_id: chat.workspace_id,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     }
     
     setMessages(prev => [...prev, sentMessage]);
@@ -100,7 +100,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                            chat_id: chat.id,
                            sender: chat.agent, // AI responds as the agent
                            workspace_id: chat.workspace_id,
-                           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                         };
                         setMessages(prev => [...prev, aiMessage]);
                     }

@@ -82,7 +82,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
             chat_id: m.chat_id,
             workspace_id: m.workspace_id,
             content: m.content,
-            timestamp: new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            timestamp: new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
             sender: getSenderById(m.sender_id),
         });
     });
