@@ -2,7 +2,7 @@
 'use client';
 
 import React from 'react';
-import { type User } from '@/lib/types';
+import { type Chat, type User } from '@/lib/types';
 import {
   Mail,
   Phone,
@@ -10,6 +10,7 @@ import {
   CheckSquare,
   Building,
   User as UserIcon,
+  UserCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -19,12 +20,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Separator } from '../ui/separator';
 
 interface ContactPanelProps {
-  contact: User | null;
+  chat: Chat | null;
 }
 
-export default function ContactPanel({ contact }: ContactPanelProps) {
+export default function ContactPanel({ chat }: ContactPanelProps) {
 
-  if (!contact) {
+  if (!chat) {
     return (
       <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
         <div className="flex h-16 items-center border-b px-4">
@@ -41,6 +42,7 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
     );
   }
 
+  const { contact, agent } = chat;
   const { businessProfile } = contact;
 
   return (
@@ -94,7 +96,27 @@ export default function ContactPanel({ contact }: ContactPanelProps) {
               </div>
             )}
           </div>
+
+          <Separator className="my-6"/>
         
+          <div className="space-y-2">
+            <h4 className="font-medium text-muted-foreground mb-2 flex items-center gap-2 text-sm">
+                <UserCheck className="h-4 w-4" />
+                Atendente Responsável
+            </h4>
+            {agent && agent.id !== 'unknown' ? (
+                <div className="flex items-center gap-3 p-3 rounded-md bg-secondary/50">
+                <Avatar className="h-9 w-9">
+                    <AvatarImage src={agent.avatar} alt={agent.name} />
+                    <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
+                </Avatar>
+                <span className="font-medium">{agent.name}</span>
+                </div>
+            ) : (
+                <p className="text-muted-foreground italic text-sm px-2">Nenhum atendente atribuído.</p>
+            )}
+         </div>
+
         <Separator className="my-6"/>
 
         <div className="space-y-6">

@@ -129,7 +129,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
       />
-      <ContactPanel contact={selectedChat?.contact || null} />
+      <ContactPanel chat={selectedChat} />
     </div>
   );
 }
