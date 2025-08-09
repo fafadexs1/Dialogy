@@ -32,6 +32,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.contact_tags CASCADE;',
+        'DROP TABLE IF EXISTS public.tags CASCADE;',
         'DROP TABLE IF EXISTS public.business_hours CASCADE;',
         'DROP TABLE IF EXISTS public.team_members CASCADE;',
         'DROP TABLE IF EXISTS public.teams CASCADE;',
@@ -158,6 +160,22 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           phone TEXT,
           phone_number_jid TEXT UNIQUE
       );`,
+      
+      `CREATE TABLE public.tags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        value TEXT NOT NULL,
+        color TEXT NOT NULL,
+        is_close_reason BOOLEAN DEFAULT FALSE,
+        UNIQUE(workspace_id, label)
+      );`,
+
+      `CREATE TABLE public.contact_tags (
+          contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+          tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
+          PRIMARY KEY (contact_id, tag_id)
+      );`,
 
       `CREATE TABLE public.chats (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -165,7 +183,10 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           agent_id UUID REFERENCES public.users(id),
           status chat_status_enum DEFAULT 'gerais'::chat_status_enum,
-          assigned_at TIMESTAMPTZ
+          assigned_at TIMESTAMPTZ,
+          closed_at TIMESTAMPTZ,
+          close_reason_tag_id UUID REFERENCES public.tags(id),
+          close_notes TEXT
       );`,
 
       `CREATE TABLE public.messages (

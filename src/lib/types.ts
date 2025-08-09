@@ -162,7 +162,9 @@ export interface SelectableOption {
     color: string;
 }
 
-export interface Tag extends SelectableOption {}
+export interface Tag extends SelectableOption {
+    is_close_reason?: boolean;
+}
 
 
 export interface Team {

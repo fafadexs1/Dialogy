@@ -91,3 +91,41 @@ export async function transferChatAction(
         return { success: false, error: "Falha no servidor ao tentar transferir o atendimento." };
     }
 }
+
+
+export async function closeChatAction(
+    prevState: any,
+    formData: FormData
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+        return { success: false, error: "Usuário não autenticado." };
+    }
+
+    const chatId = formData.get('chatId') as string;
+    const reasonTagId = formData.get('reasonTagId') as string;
+    const notes = formData.get('notes') as string;
+
+    if (!chatId) {
+        return { success: false, error: "ID do chat é obrigatório." };
+    }
+    
+    // Optional: check if the user has permission to close chats
+    
+    try {
+        await db.query(
+            `UPDATE chats
+             SET 
+                status = 'encerrados',
+                closed_at = NOW(),
+                close_reason_tag_id = $1,
+                close_notes = $2
+             WHERE id = $3`,
+            [reasonTagId || null, notes || null, chatId]
+        );
+        return { success: true };
+    } catch (error) {
+        console.error("Erro ao encerrar atendimento:", error);
+        return { success: false, error: "Falha no servidor ao encerrar o atendimento." };
+    }
+}

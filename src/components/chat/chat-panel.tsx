@@ -1,13 +1,13 @@
 
 'use client';
 
-import React from 'react';
+import React, { useActionState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare } from 'lucide-react';
-import { type Chat, type Message, type User } from '@/lib/types';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown } from 'lucide-react';
+import { type Chat, type Message, type User, Tag } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -16,20 +16,92 @@ import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '../ui/separator';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Textarea } from '../ui/textarea';
+import { closeChatAction } from '@/actions/chats';
+import { useFormStatus } from 'react-dom';
+
 
 interface ChatPanelProps {
   chat: Chat | null;
   messages: Message[];
   currentUser: User;
+  onActionSuccess: () => void;
+  closeReasons: Tag[];
 }
 
-const mockKnowledgeBase = `
-Política de Devolução: Nossa política de devolução permite que os clientes retornem produtos em até 30 dias após a compra, desde que o produto esteja em sua embalagem original e sem sinais de uso. O cliente deve apresentar o recibo original. Para produtos com defeito, a troca é garantida em até 90 dias.
+function CloseChatButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" variant="destructive" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Encerrar Atendimento
+        </Button>
+    )
+}
 
-FAQ - Horário de Funcionamento: Nosso horário de atendimento padrão é de segunda a sexta-feira, das 9h às 18h (horário de Brasília). Não funcionamos em feriados nacionais.
-`;
+function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
+    const [state, formAction] = useActionState(closeChatAction, { success: false });
+    const [isOpen, setIsOpen] = React.useState(false);
+    const { toast } = useToast();
 
-export default function ChatPanel({ chat, messages: initialMessages, currentUser }: ChatPanelProps) {
+    React.useEffect(() => {
+        if(state.success) {
+            toast({ title: "Atendimento encerrado com sucesso!"});
+            setIsOpen(false);
+            onActionSuccess();
+        } else if (state.error) {
+            toast({ title: "Erro ao encerrar", description: state.error, variant: 'destructive'});
+        }
+    }, [state, toast, onActionSuccess]);
+
+    return (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+                <Button variant="outline">
+                    <LogOut className="mr-2 h-4 w-4" /> Encerrar Atendimento
+                </Button>
+            </DialogTrigger>
+            <DialogContent>
+                <form action={formAction}>
+                    <input type="hidden" name="chatId" value={chat.id} />
+                    <DialogHeader>
+                        <DialogTitle>Encerrar Atendimento</DialogTitle>
+                        <DialogDescription>
+                            Selecione um motivo e adicione uma nota final para encerrar esta conversa.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="close-reason">Motivo do Encerramento</Label>
+                             <Select name="reasonTagId">
+                                <SelectTrigger id="close-reason">
+                                    <SelectValue placeholder="Selecione um motivo..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {reasons.map(reason => (
+                                        <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
+                            <Textarea id="close-notes" name="notes" placeholder="Adicione uma observação sobre o encerramento..." />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                        <CloseChatButton />
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
@@ -181,6 +253,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     )
   }
 
+  const isChatOpen = chat.status !== 'encerrados';
+
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
       <header className="flex h-16 items-center justify-between border-b bg-card px-6 flex-shrink-0">
@@ -192,6 +266,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <h2 className="font-semibold">{chat.contact.name}</h2>
         </div>
         <div className="flex items-center gap-2">
+          {isChatOpen && (
+            <CloseChatDialog chat={chat} onActionSuccess={onActionSuccess} reasons={closeReasons} />
+          )}
+          <Button variant="ghost" size="icon">
+              <FileDown className="h-5 w-5"/>
+          </Button>
           <ChatSummary chatHistory={chatHistoryForAI} />
           <Button variant="ghost" size="icon">
               <MoreVertical className="h-5 w-5"/>
@@ -221,42 +301,48 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         </ScrollArea>
       </div>
 
-      <footer className="border-t bg-card p-4 flex-shrink-0">
-        {!isAiAgentActive && (
-            <SmartReplies 
-                customerMessage={lastCustomerMessage?.content || ''}
-                chatHistory={chatHistoryForAI}
-                onSelectReply={(reply) => setNewMessage(reply)}
-            />
-        )}
-        <div className="flex items-center gap-4 mt-2">
-            <form onSubmit={handleSendMessage} className="relative flex-1">
-                <Input
-                    placeholder="Digite sua mensagem..."
-                    className="pr-24"
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    disabled={isAiAgentActive}
-                />
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
-                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
-                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Paperclip className="h-5 w-5" /></Button>
-                    <Button type="submit" size="sm" className='h-8' disabled={isAiAgentActive}>
-                    <Send className="h-4 w-4" />
-                    </Button>
+       {isChatOpen ? (
+            <footer className="border-t bg-card p-4 flex-shrink-0">
+                {!isAiAgentActive && (
+                    <SmartReplies 
+                        customerMessage={lastCustomerMessage?.content || ''}
+                        chatHistory={chatHistoryForAI}
+                        onSelectReply={(reply) => setNewMessage(reply)}
+                    />
+                )}
+                <div className="flex items-center gap-4 mt-2">
+                    <form onSubmit={handleSendMessage} className="relative flex-1">
+                        <Input
+                            placeholder="Digite sua mensagem..."
+                            className="pr-24"
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            disabled={isAiAgentActive}
+                        />
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+                            <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                            <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Paperclip className="h-5 w-5" /></Button>
+                            <Button type="submit" size="sm" className='h-8' disabled={isAiAgentActive}>
+                            <Send className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </form>
+                    <div className="flex items-center space-x-2">
+                        <Bot className="h-5 w-5 text-muted-foreground" />
+                        <Switch
+                            id="ai-agent-switch"
+                            checked={isAiAgentActive}
+                            onCheckedChange={setIsAiAgentActive}
+                        />
+                        <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
+                    </div>
                 </div>
-            </form>
-            <div className="flex items-center space-x-2">
-                <Bot className="h-5 w-5 text-muted-foreground" />
-                <Switch
-                    id="ai-agent-switch"
-                    checked={isAiAgentActive}
-                    onCheckedChange={setIsAiAgentActive}
-                />
-                <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
-            </div>
-        </div>
-      </footer>
+            </footer>
+       ) : (
+            <footer className="border-t bg-card p-4 flex-shrink-0 text-center">
+                <p className='text-sm font-medium text-muted-foreground'>Este atendimento foi encerrado.</p>
+            </footer>
+       )}
     </main>
   );
 }

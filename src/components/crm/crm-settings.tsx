@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState } from 'react';
@@ -32,6 +33,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HTMLInputTypeAttribute } from 'react';
+import { Checkbox } from '../ui/checkbox';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({ 
@@ -45,6 +47,7 @@ function OptionsManager({
 }) {
     const [newItemLabel, setNewItemLabel] = useState('');
     const [newItemColor, setNewItemColor] = useState('#cccccc');
+    const [isCloseReason, setIsCloseReason] = useState(false);
 
     const handleAddItem = (e: React.FormEvent) => {
         e.preventDefault();
@@ -55,11 +58,13 @@ function OptionsManager({
             value: newItemLabel.toLowerCase().replace(/\s+/g, '_'),
             label: newItemLabel,
             color: newItemColor,
+            is_close_reason: title === "Etiquetas (Tags)" ? isCloseReason : undefined,
         };
         
         setOptions([...options, newItem]);
         setNewItemLabel('');
         setNewItemColor('#cccccc');
+        setIsCloseReason(false);
     };
 
     const handleRemoveItem = (itemToRemove: SelectableOption | Tag) => {
@@ -72,37 +77,59 @@ function OptionsManager({
                 <CardTitle className="text-lg">{title}</CardTitle>
             </CardHeader>
             <CardContent>
-                <form onSubmit={handleAddItem} className="flex items-end gap-2 mb-4">
-                    <div className='flex-1'>
-                        <Label htmlFor={`new-option-${title}`} className='text-xs'>Nome da Opção</Label>
-                        <Input
-                            id={`new-option-${title}`} 
-                            placeholder={`Nova opção para ${title}...`}
-                            value={newItemLabel}
-                            onChange={(e) => setNewItemLabel(e.target.value)}
-                        />
-                    </div>
-                     <div>
-                        <Label htmlFor={`new-color-${title}`} className='text-xs'>Cor</Label>
-                        <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
-                            <Palette className="h-4 w-4 text-muted-foreground"/>
-                            <input
-                                id={`new-color-${title}`}
-                                type="color"
-                                value={newItemColor}
-                                onChange={(e) => setNewItemColor(e.target.value)}
-                                className="w-6 h-6 p-0 border-none bg-transparent"
+                <form onSubmit={handleAddItem} className="flex flex-col gap-4 mb-4">
+                    <div className="flex items-end gap-2">
+                        <div className='flex-1'>
+                            <Label htmlFor={`new-option-${title}`} className='text-xs'>Nome da Opção</Label>
+                            <Input
+                                id={`new-option-${title}`} 
+                                placeholder={`Nova opção para ${title}...`}
+                                value={newItemLabel}
+                                onChange={(e) => setNewItemLabel(e.target.value)}
                             />
                         </div>
+                        <div>
+                            <Label htmlFor={`new-color-${title}`} className='text-xs'>Cor</Label>
+                            <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
+                                <Palette className="h-4 w-4 text-muted-foreground"/>
+                                <input
+                                    id={`new-color-${title}`}
+                                    type="color"
+                                    value={newItemColor}
+                                    onChange={(e) => setNewItemColor(e.target.value)}
+                                    className="w-6 h-6 p-0 border-none bg-transparent"
+                                />
+                            </div>
+                        </div>
+                        <Button type="submit" size="sm">Adicionar</Button>
                     </div>
-                    <Button type="submit" size="sm">Adicionar</Button>
+                    {title === "Etiquetas (Tags)" && (
+                        <div className="flex items-center space-x-2">
+                            <Checkbox 
+                                id={`is-close-reason-${title}`} 
+                                checked={isCloseReason}
+                                onCheckedChange={(checked) => setIsCloseReason(!!checked)}
+                            />
+                            <label
+                                htmlFor={`is-close-reason-${title}`}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                                Usar como motivo de encerramento de chat
+                            </label>
+                        </div>
+                    )}
                 </form>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-60 overflow-y-auto">
                     {options.map(option => (
                         <div key={option.id} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
                             <div className='flex items-center gap-2'>
                                 <span className='h-4 w-4 rounded-full' style={{backgroundColor: option.color}}></span>
-                                <span>{option.label}</span>
+                                <div className='flex flex-col'>
+                                    <span>{option.label}</span>
+                                    {(option as Tag).is_close_reason && (
+                                        <span className='text-xs text-blue-500 font-semibold'>Motivo de Encerramento</span>
+                                    )}
+                                </div>
                             </div>
                              <Button variant="ghost" size="icon" onClick={() => handleRemoveItem(option)}>
                                 <Trash2 className="h-4 w-4 text-destructive" />

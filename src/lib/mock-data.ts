@@ -1,3 +1,4 @@
+
 import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance, Contact } from './types';
 
 export const workspaces: Workspace[] = [
@@ -30,6 +31,8 @@ export const mockTags: Tag[] = [
   { id: 'tag-2', value: 'saas-customer', label: 'SaaS Customer', color: '#3b82f6' },
   { id: 'tag-3', value: 'needs-follow-up', label: 'Needs Follow-Up', color: '#eab308' },
   { id: 'tag-4', value: 'enterprise', label: 'Enterprise', color: '#8b5cf6' },
+  { id: 'tag-5', value: 'problema-resolvido', label: 'Problema Resolvido', color: '#22c55e', is_close_reason: true },
+  { id: 'tag-6', value: 'sem-resposta', label: 'Cliente sem resposta', color: '#6b7280', is_close_reason: true },
 ];
 
 export const leadSources: SelectableOption[] = [

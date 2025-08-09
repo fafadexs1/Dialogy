@@ -5,8 +5,9 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, Message, User } from '@/lib/types';
+import { type Chat, Message, User, Tag } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
+import { mockTags } from '@/lib/mock-data'; // Assuming tags are fetched/mocked somewhere
 
 interface CustomerChatLayoutProps {
     initialChats: Chat[];
@@ -35,6 +36,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>(initialChats);
   const [loading, setLoading] = useState(true);
+  const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSetSelectedChat = (chat: Chat) => {
@@ -51,7 +53,12 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         setSelectedChat(currentSelectedChat => {
             if (currentSelectedChat) {
                 const updatedSelectedChat = latestChats.find(c => c.id === currentSelectedChat.id);
-                return updatedSelectedChat || currentSelectedChat;
+                // If the selected chat was closed, it might now have a different status
+                if (updatedSelectedChat) {
+                    return updatedSelectedChat;
+                }
+                // If it's not in the list anymore (e.g., filtered out), clear selection
+                return null;
             } else if (latestChats.length > 0) {
                  return latestChats[0];
             }
@@ -61,18 +68,24 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
 
 
    useEffect(() => {
-    // Initial load
-    setChats(initialChats);
-    if (initialChats.length > 0) {
-        handleSetSelectedChat(initialChats[0]);
-    }
-    setLoading(false);
+    // Fetch initial data and set loading states
+    const initialLoad = async () => {
+        setChats(initialChats);
+        if (initialChats.length > 0) {
+            handleSetSelectedChat(initialChats[0]);
+        }
+        // TODO: Replace mockTags with a real API call to fetch tags for the workspace
+        setCloseReasons(mockTags.filter(t => t.is_close_reason));
+        setLoading(false);
 
-    // Start polling when component mounts and user is available
-    if (currentUser.activeWorkspaceId) {
-        if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = setInterval(updateData, 5000); // Poll every 5 seconds
-    }
+        // Start polling when component mounts and user is available
+        if (currentUser.activeWorkspaceId) {
+            if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = setInterval(updateData, 5000); // Poll every 5 seconds
+        }
+    };
+
+    initialLoad();
 
     // Cleanup interval on component unmount
     return () => {
@@ -126,6 +139,8 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         chat={selectedChat} 
         messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
+        onActionSuccess={updateData}
+        closeReasons={closeReasons}
       />
       <ContactPanel chat={selectedChat} onTransferSuccess={updateData} />
     </div>
