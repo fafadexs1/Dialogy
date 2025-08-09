@@ -43,6 +43,15 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
                 FROM business_hours
                 WHERE team_id = $1
+                ORDER BY CASE
+                    WHEN day_of_week = 'Domingo' THEN 1
+                    WHEN day_of_week = 'Segunda-feira' THEN 2
+                    WHEN day_of_week = 'Terça-feira' THEN 3
+                    WHEN day_of_week = 'Quarta-feira' THEN 4
+                    WHEN day_of_week = 'Quinta-feira' THEN 5
+                    WHEN day_of_week = 'Sexta-feira' THEN 6
+                    WHEN day_of_week = 'Sábado' THEN 7
+                END
             `, [row.id]);
 
             teams.push({
@@ -63,24 +72,42 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
     }
 }
 
-export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ success: boolean; error?: string }> {
+export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ team: Team | null; error?: string }> {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    if (!session?.user?.id) return { team: null, error: "Usuário não autenticado." };
     
     if (!await hasPermission(session.user.id, data.workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para criar equipes." };
+         return { team: null, error: "Você não tem permissão para criar equipes." };
     }
 
     try {
-        await db.query(
-            'INSERT INTO teams (workspace_id, name, role_id) VALUES ($1, $2, $3)',
+        const teamRes = await db.query(
+            'INSERT INTO teams (workspace_id, name, role_id) VALUES ($1, $2, $3) RETURNING id, name, color, role_id',
             [data.workspaceId, data.name, data.roleId]
         );
-        revalidatePath('/team');
-        return { success: true };
+        
+        const newTeam = teamRes.rows[0];
+
+        const businessHoursRes = await db.query(
+             `SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
+                FROM business_hours
+                WHERE team_id = $1`,
+            [newTeam.id]
+        );
+
+        const fullTeam: Team = {
+            id: newTeam.id,
+            name: newTeam.name,
+            color: newTeam.color,
+            roleId: newTeam.role_id,
+            members: [],
+            businessHours: businessHoursRes.rows
+        }
+
+        return { team: fullTeam };
     } catch (error) {
         console.error("Erro ao criar equipe:", error);
-        return { success: false, error: "Falha ao criar a equipe." };
+        return { team: null, error: "Falha ao criar a equipe." };
     }
 }
 
@@ -88,7 +115,6 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     
-    // Need workspaceId to check permission
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
@@ -100,12 +126,14 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
     try {
         const fields = Object.keys(data);
         const values = Object.values(data);
-        const setClauses = fields.map((field, index) => `${field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)} = $${index + 1}`).join(', ');
+        const setClauses = fields.map((field, index) => {
+            const dbField = field === 'roleId' ? 'role_id' : field;
+            return `${dbField} = $${index + 1}`;
+        }).join(', ');
 
         const query = `UPDATE teams SET ${setClauses} WHERE id = $${fields.length + 1}`;
         await db.query(query, [...values, teamId]);
         
-        revalidatePath('/team');
         return { success: true };
     } catch (error) {
         console.error("Erro ao atualizar equipe:", error);
@@ -127,7 +155,6 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
 
     try {
         await db.query('DELETE FROM teams WHERE id = $1', [teamId]);
-        revalidatePath('/team');
         return { success: true };
     } catch (error) {
         console.error("Erro ao remover equipe:", error);
@@ -150,7 +177,6 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
     
     try {
         await db.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [teamId, userId]);
-        revalidatePath('/team');
         return { success: true };
     } catch (error) {
         console.error("Erro ao adicionar membro:", error);
@@ -172,7 +198,6 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 
     try {
         await db.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [teamId, userId]);
-        revalidatePath('/team');
         return { success: true };
     } catch (error) {
         console.error("Erro ao remover membro:", error);
@@ -196,14 +221,13 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
         const fields = Object.keys(data);
         const values = Object.values(data);
         const setClauses = fields.map((field, index) => {
-            const dbField = { isEnabled: 'is_enabled', startTime: 'start_time', endTime: 'end_time' }[field] || field;
+            const dbField = { isEnabled: 'is_enabled', startTime: 'start_time', endTime: 'end_time' }[field as keyof BusinessHour] || field;
             return `${dbField} = $${index + 1}`;
         }).join(', ');
         
         const query = `UPDATE business_hours SET ${setClauses} WHERE team_id = $${fields.length + 1} AND day_of_week = $${fields.length + 2}`;
         await db.query(query, [...values, teamId, day]);
 
-        revalidatePath('/team');
         return { success: true };
     } catch (error) {
         console.error("Erro ao atualizar horário:", error);

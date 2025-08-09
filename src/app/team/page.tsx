@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search, Loader2, Save } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,52 +23,76 @@ const daysOfWeek = [ 'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira',
 
 function TeamSettingsContent({ 
     team, 
-    onMutate,
     allMembers,
     roles,
+    onTeamUpdate,
+    onTeamDelete,
 }: { 
     team: Team, 
-    onMutate: () => void,
     allMembers: User[],
     roles: Role[],
+    onTeamUpdate: (teamId: string, updatedTeam: Team) => void;
+    onTeamDelete: (teamId: string) => void;
 }) {
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [teamName, setTeamName] = useState(team.name);
 
-  const handleUpdate = async (field: keyof Team, value: any) => {
+  const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
     const result = await updateTeam(team.id, { [field]: value });
-    if(result.error) toast({ title: 'Erro ao atualizar', description: result.error, variant: 'destructive' });
-    else onMutate();
+    if (result.error) {
+      toast({ title: 'Erro ao atualizar', description: result.error, variant: 'destructive' });
+    } else {
+      const updatedTeam = { ...team, [field]: value };
+      onTeamUpdate(team.id, updatedTeam);
+      toast({ title: "Campo atualizado!", duration: 2000 });
+    }
   }
   
-  const handleRemove = async () => {
+  const handleRemoveTeam = async () => {
     const result = await deleteTeam(team.id);
-    if(result.error) toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive' });
-    else {
-        toast({ title: 'Equipe removida com sucesso!' });
-        onMutate();
+    if(result.error) {
+      toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive' });
+    } else {
+      toast({ title: 'Equipe removida com sucesso!' });
+      onTeamDelete(team.id);
     }
   }
 
   const handleAddMember = async () => {
     const agentToAdd = allMembers.find(agent => agent.id === selectedAgentId);
     if (!agentToAdd) return;
+    
     const result = await addTeamMember(team.id, agentToAdd.id);
-    if(result.error) toast({ title: 'Erro ao adicionar membro', description: result.error, variant: 'destructive' });
-    else onMutate();
+    if(result.error) {
+      toast({ title: 'Erro ao adicionar membro', description: result.error, variant: 'destructive' });
+    } else {
+      const updatedTeam = { ...team, members: [...team.members, agentToAdd] };
+      onTeamUpdate(team.id, updatedTeam);
+    }
     setSelectedAgentId('');
   }
 
   const handleRemoveMember = async (memberId: string) => {
      const result = await removeTeamMember(team.id, memberId);
-     if(result.error) toast({ title: 'Erro ao remover membro', description: result.error, variant: 'destructive' });
-     else onMutate();
+     if(result.error) {
+       toast({ title: 'Erro ao remover membro', description: result.error, variant: 'destructive' });
+     } else {
+        const updatedMembers = team.members.filter(m => m.id !== memberId);
+        const updatedTeam = { ...team, members: updatedMembers };
+        onTeamUpdate(team.id, updatedTeam);
+     }
   }
   
-  const handleBusinessHoursChange = async (dayLabel: string, field: keyof BusinessHour, value: any) => {
+  const handleBusinessHoursChange = async (dayLabel: string, field: keyof Omit<BusinessHour, 'day'>, value: any) => {
     const result = await updateBusinessHours(team.id, dayLabel, { [field]: value });
-    if(result.error) toast({ title: 'Erro ao salvar horário', description: result.error, variant: 'destructive' });
-    else onMutate();
+    if(result.error) {
+      toast({ title: 'Erro ao salvar horário', description: result.error, variant: 'destructive' });
+    } else {
+       const updatedHours = team.businessHours.map(bh => bh.day === dayLabel ? { ...bh, [field]: value } : bh);
+       const updatedTeam = { ...team, businessHours: updatedHours };
+       onTeamUpdate(team.id, updatedTeam);
+    }
   };
 
   return (
@@ -76,42 +100,58 @@ function TeamSettingsContent({
       <Card>
         <CardHeader>
           <div className="flex justify-between items-start">
-            <div>
-              <CardTitle className="text-2xl">{team.name}</CardTitle>
-              <CardDescription>Gerencie as configurações gerais e membros da equipe.</CardDescription>
+            <div className="flex items-center gap-3">
+              <span className="h-4 w-4 rounded-full flex-shrink-0" style={{ backgroundColor: team.color }}></span>
+              <div>
+                <CardTitle className="text-2xl">{team.name}</CardTitle>
+                <CardDescription>Gerencie as configurações gerais e membros da equipe.</CardDescription>
+              </div>
             </div>
-             <Button variant="destructive" size="sm" onClick={handleRemove}>
+             <Button variant="destructive" size="sm" onClick={handleRemoveTeam}>
                 <Trash2 className="mr-2 h-4 w-4"/>
                 Remover Equipe
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-            <div className="space-y-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div className="space-y-1 md:col-span-2">
               <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
               <Input 
                 id={`team-name-${team.id}`} 
-                defaultValue={team.name}
-                onBlur={(e) => handleUpdate('name', e.target.value)}
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                onBlur={(e) => handleUpdateField('name', e.target.value)}
               />
             </div>
-             <div className="space-y-1">
-              <Label htmlFor={`team-role-${team.id}`}>Papel da Equipe</Label>
-              <Select
-                value={team.roleId}
-                onValueChange={(value) => handleUpdate('roleId', value)}
-              >
-                  <SelectTrigger id={`team-role-${team.id}`}>
-                      <SelectValue placeholder="Selecione um papel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                      {roles.map(role => (
-                          <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
-                      ))}
-                  </SelectContent>
-              </Select>
+            <div className="space-y-1">
+              <Label>Cor da Equipe</Label>
+               <div className="flex items-center gap-2 border rounded-md h-10 px-3 bg-background">
+                  <Palette className="h-4 w-4 text-muted-foreground"/>
+                  <input
+                      type="color"
+                      defaultValue={team.color}
+                      onBlur={(e) => handleUpdateField('color', e.target.value)}
+                      className="w-full h-8 p-0 border-none bg-transparent"
+                  />
+              </div>
             </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`team-role-${team.id}`}>Papel da Equipe</Label>
+            <Select
+              value={team.roleId}
+              onValueChange={(value) => handleUpdateField('roleId', value)}
+            >
+                <SelectTrigger id={`team-role-${team.id}`}>
+                    <SelectValue placeholder="Selecione um papel" />
+                </SelectTrigger>
+                <SelectContent>
+                    {roles.map(role => (
+                        <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Membros da Equipe ({team.members.length})</Label>
@@ -174,14 +214,14 @@ function TeamSettingsContent({
                 <div className={`flex items-center gap-2 transition-opacity ${bh.isEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                   <Input 
                     type="time" 
-                    defaultValue={bh.startTime}
+                    defaultValue={bh.startTime || '09:00'}
                     onBlur={(e) => handleBusinessHoursChange(bh.day, 'startTime', e.target.value)}
                     className="w-[110px]" 
                   />
                   <span className="text-muted-foreground">às</span>
                   <Input 
                     type="time" 
-                    defaultValue={bh.endTime}
+                    defaultValue={bh.endTime || '18:00'}
                     onBlur={(e) => handleBusinessHoursChange(bh.day, 'endTime', e.target.value)}
                     className="w-[110px]" 
                   />
@@ -194,7 +234,7 @@ function TeamSettingsContent({
   )
 }
 
-function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { workspaceId:string, roles: Role[], onAddTeam: () => void, onCancel: () => void }) {
+function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { workspaceId:string, roles: Role[], onAddTeam: (newTeam: Team) => void, onCancel: () => void }) {
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -209,11 +249,11 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
         };
 
         const result = await createTeam({ workspaceId, name, roleId });
-        if (result.error) {
+        if (result.error || !result.team) {
             toast({title: 'Erro ao criar equipe', description: result.error, variant: 'destructive'});
         } else {
             toast({title: 'Equipe criada com sucesso!'});
-            onAddTeam();
+            onAddTeam(result.team);
         }
     }
 
@@ -251,7 +291,7 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
                         </div>
                     </CardContent>
                     <CardFooter className="gap-2">
-                        <Button type="submit"><Save className='mr-2' /> Salvar Equipe</Button>
+                        <Button type="submit"><Save className='mr-2 h-4 w-4' /> Salvar Equipe</Button>
                         <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>
                     </CardFooter>
                 </form>
@@ -272,47 +312,56 @@ export default function TeamPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const { toast } = useToast();
 
-    const fetchData = React.useCallback(async () => {
-        if (!user?.activeWorkspaceId) return;
-        setLoading(true);
-        try {
-            const [teamsData, membersData, rolesData] = await Promise.all([
-                getTeams(user.activeWorkspaceId),
-                getWorkspaceMembers(user.activeWorkspaceId),
-                getRolesAndPermissions(user.activeWorkspaceId)
-            ]);
-
-            if (teamsData.error) throw new Error(teamsData.error);
-            setTeams(teamsData.teams || []);
-            if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
-                setSelectedTeamId(teamsData.teams[0].id);
-            }
-            if (teamsData.teams && teamsData.teams.length === 0) {
-                setSelectedTeamId(null);
-            }
-
-            if (membersData.error) throw new Error(membersData.error);
-            setAllMembers(membersData.members as User[] || []);
-
-            if (rolesData.error) throw new Error(rolesData.error);
-            setRoles(rolesData.roles || []);
-
-        } catch (e: any) {
-            toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
-        } finally {
-            setLoading(false);
-        }
-    }, [user?.activeWorkspaceId, toast, selectedTeamId]);
-
     useEffect(() => {
-        if(user) fetchData();
-    }, [user, fetchData]);
+        const fetchData = async () => {
+            if (!user?.activeWorkspaceId) return;
+            setLoading(true);
+            try {
+                const [teamsData, membersData, rolesData] = await Promise.all([
+                    getTeams(user.activeWorkspaceId),
+                    getWorkspaceMembers(user.activeWorkspaceId),
+                    getRolesAndPermissions(user.activeWorkspaceId)
+                ]);
 
-    const handleTeamUpdate = () => fetchData();
+                if (teamsData.error) throw new Error(teamsData.error);
+                setTeams(teamsData.teams || []);
+                if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
+                    setSelectedTeamId(teamsData.teams[0].id);
+                } else if (teamsData.teams?.length === 0) {
+                    setSelectedTeamId(null);
+                }
+
+                if (membersData.error) throw new Error(membersData.error);
+                // Cast to User[], as WorkspaceMember is a subset
+                setAllMembers(membersData.members as User[] || []);
+
+                if (rolesData.error) throw new Error(rolesData.error);
+                setRoles(rolesData.roles || []);
+
+            } catch (e: any) {
+                toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if(user) fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user, toast]);
+
+    const handleTeamUpdate = (teamId: string, updatedTeam: Team) => {
+        setTeams(prev => prev.map(t => t.id === teamId ? updatedTeam : t));
+    };
+
+    const handleTeamDelete = (teamId: string) => {
+        setTeams(prev => prev.filter(t => t.id !== teamId));
+        setSelectedTeamId(prevId => prevId === teamId ? (teams[0]?.id || null) : prevId);
+    }
     
-    const handleAddTeam = () => {
+    const handleAddTeam = (newTeam: Team) => {
+        setTeams(prev => [...prev, newTeam]);
         setIsCreating(false);
-        fetchData();
+        setSelectedTeamId(newTeam.id);
     };
     
     const handleSelectTeam = (id: string) => {
@@ -330,7 +379,7 @@ export default function TeamPage() {
 
     if (!user || loading) {
         return (
-            <MainLayout user={user}>
+            <MainLayout user={user ?? undefined}>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
@@ -342,8 +391,8 @@ export default function TeamPage() {
     <MainLayout user={user}>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0 bg-card">
-          <h1 className="text-2xl font-bold">Gestão de Equipes</h1>
-          <p className="text-muted-foreground">Crie e gerencie suas equipes, horários e automações.</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="h-6 w-6"/>Gestão de Equipes</h1>
+          <p className="text-muted-foreground">Crie e gerencie suas equipes, horários e permissões.</p>
         </header>
         <div className="flex-1 flex min-h-0 bg-muted/40">
             {/* Left Sidebar for teams list */}
@@ -378,12 +427,26 @@ export default function TeamPage() {
                             >
                                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: team.color }}></span>
                                 <span className="flex-1 truncate">{team.name}</span>
-                                <Avatar className="h-6 w-6">
-                                    <AvatarImage src={team.members[0]?.avatar} />
-                                    <AvatarFallback>{team.members.length}</AvatarFallback>
-                                </Avatar>
+                                <div className="flex -space-x-2 overflow-hidden">
+                                    {team.members.slice(0, 3).map(member => (
+                                        <Avatar key={member.id} className="h-6 w-6 border-2 border-background">
+                                            <AvatarImage src={member.avatar} />
+                                            <AvatarFallback>{member.name[0]}</AvatarFallback>
+                                        </Avatar>
+                                    ))}
+                                    {team.members.length > 3 && (
+                                        <Avatar className="h-6 w-6 border-2 border-background">
+                                            <AvatarFallback>+{team.members.length - 3}</AvatarFallback>
+                                        </Avatar>
+                                    )}
+                                </div>
                             </button>
                         ))}
+                         {filteredTeams.length === 0 && !isCreating && (
+                            <div className="text-center text-sm text-muted-foreground p-4">
+                                Nenhuma equipe encontrada.
+                            </div>
+                        )}
                     </nav>
                  </div>
             </aside>
@@ -394,10 +457,12 @@ export default function TeamPage() {
                         <CreateTeamContent workspaceId={user.activeWorkspaceId!} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
                     ) : selectedTeam ? (
                         <TeamSettingsContent 
+                            key={selectedTeam.id}
                             team={selectedTeam} 
-                            onMutate={handleTeamUpdate} 
                             allMembers={allMembers}
                             roles={roles}
+                            onTeamUpdate={handleTeamUpdate}
+                            onTeamDelete={handleTeamDelete}
                         />
                     ) : (
                         <div className="text-center py-20">
