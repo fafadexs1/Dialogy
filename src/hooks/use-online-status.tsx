@@ -1,8 +1,10 @@
+
 'use client';
 
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
 import type { OnlineAgent } from '@/lib/types';
 import { useAuth } from './use-auth';
+import { updateUserOnlineStatus } from '@/actions/user';
 
 // 1. Create a Context for the presence state
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -13,15 +15,13 @@ export const usePresence = () => {
 };
 
 // 3. Create the Provider component
-// This provider fetches online agents from the API periodically.
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const currentUser = useAuth();
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
-  useEffect(() => {
-    const fetchOnlineAgents = async () => {
+  const fetchOnlineAgents = useCallback(async (workspaceId: string) => {
       try {
-        const response = await fetch('/api/users/online');
+        const response = await fetch(`/api/users/online/${workspaceId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch online users');
         }
@@ -31,19 +31,53 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         console.error("Error fetching online agents:", error);
         setOnlineAgents([]); // Clear on error
       }
-    };
+    }, []);
 
-    if (currentUser) {
+  useEffect(() => {
+    if (currentUser?.activeWorkspaceId) {
+      const workspaceId = currentUser.activeWorkspaceId;
       // Fetch immediately on mount
-      fetchOnlineAgents();
+      fetchOnlineAgents(workspaceId);
 
       // Set up an interval to fetch every 30 seconds
-      const intervalId = setInterval(fetchOnlineAgents, 30000);
-
+      const intervalId = setInterval(() => fetchOnlineAgents(workspaceId), 30000);
+      
       // Clean up the interval when the component unmounts
       return () => clearInterval(intervalId);
     }
-  }, [currentUser]); 
+  }, [currentUser, fetchOnlineAgents]);
+
+  useEffect(() => {
+     if (!currentUser?.id) return;
+     const userId = currentUser.id;
+
+     const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+            updateUserOnlineStatus(userId, false);
+        } else {
+            updateUserOnlineStatus(userId, true);
+        }
+     }
+
+     const handleBeforeUnload = () => {
+        updateUserOnlineStatus(userId, false);
+     }
+     
+     // Set user to online when the provider mounts with a valid user
+     updateUserOnlineStatus(userId, true);
+
+     window.addEventListener('beforeunload', handleBeforeUnload);
+     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+     return () => {
+        // This might not run on tab close, but it's good practice for SPA navigation
+        updateUserOnlineStatus(userId, false); 
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+     }
+
+  }, [currentUser?.id]);
+
 
   return (
     <PresenceContext.Provider value={onlineAgents}>
