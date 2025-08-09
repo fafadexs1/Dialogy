@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, Mail, UserPlus } from 'lucide-react';
+import { Loader2, Mail, UserPlus, Send } from 'lucide-react';
 
 
 export default function InviteMemberPage() {
