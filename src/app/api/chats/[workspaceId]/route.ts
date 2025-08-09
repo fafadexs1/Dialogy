@@ -18,43 +18,40 @@ function formatMessageDate(date: Date): string {
 async function fetchDataForWorkspace(workspaceId: string) {
     if (!workspaceId) return { chats: [] };
 
-    // 1. Fetch all users and contacts for the workspace
+    // 1. Fetch all users (agents) and create a map for quick lookup.
     const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
+    const usersMap = new Map<string, User>(userRes.rows.map(u => [
+        u.id,
+        {
+            id: u.id,
+            name: u.full_name,
+            avatar: u.avatar_url,
+            firstName: u.full_name.split(' ')[0] || '',
+            lastName: u.full_name.split(' ').slice(1).join(' ') || '',
+        }
+    ]));
+
+    // 2. Fetch all contacts for the workspace and create a map.
     const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
+    const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
+        c.id,
+        {
+            id: c.id,
+            workspace_id: workspaceId,
+            name: c.name,
+            avatar: c.avatar_url,
+            firstName: c.name.split(' ')[0] || '',
+            lastName: c.name.split(' ').slice(1).join(' ') || '',
+        }
+    ]));
 
-    const allUsers: User[] = userRes.rows.map(u => ({ 
-      id: u.id, 
-      name: u.full_name, 
-      avatar: u.avatar_url,
-      firstName: u.full_name.split(' ')[0] || '',
-      lastName: u.full_name.split(' ').slice(1).join(' ') || '',
-    }));
-    
-    const allContacts: Contact[] = contactRes.rows.map(c => ({ 
-      id: c.id, 
-      workspace_id: workspaceId,
-      name: c.name, 
-      avatar: c.avatar_url,
-      firstName: c.name.split(' ')[0] || '',
-      lastName: c.name.split(' ').slice(1).join(' ') || '',
-    }));
-
-    const allSenders: (User | Contact)[] = [...allUsers, ...allContacts];
-
+    // Helper to find any sender (user or contact) by their ID
     const getSenderById = (id: string | null): MessageSender | undefined => {
-      if (!id) return undefined;
-      const sender = allSenders.find(s => s.id === id);
-      // Se não encontrar, retorna um objeto padrão para evitar quebras
-      return sender || { 
-        id: 'unknown', 
-        name: 'Desconhecido', 
-        avatar: 'https://placehold.co/40x40.png?text=?',
-        firstName: '?',
-        lastName: '?',
-      };
-    }
-
-    // 2. Fetch chats and order them by the most recent message
+        if (!id) return undefined;
+        return usersMap.get(id) || contactsMap.get(id);
+    };
+    
+    // 3. Fetch chats and order them by the most recent message
     const chatRes = await db.query(`
         SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id, MAX(m.created_at) as last_message_time
         FROM chats c
@@ -68,48 +65,46 @@ async function fetchDataForWorkspace(workspaceId: string) {
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: getSenderById(r.contact_id) as Contact,
-        agent: getSenderById(r.agent_id) as User,
-        messages: [], // Messages will be populated next
+        // Find the contact from the contacts map
+        contact: contactsMap.get(r.contact_id)!, // Contact must exist
+        // Find the agent from the users map (can be undefined)
+        agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
+        messages: [],
     }));
-    
-    if (chats.length === 0) {
-        return { chats: [] };
+
+    // 4. Fetch and combine messages if chats exist
+    if (chats.length > 0) {
+        const messageRes = await db.query(`
+            SELECT id, content, created_at, chat_id, sender_id, workspace_id
+            FROM messages
+            WHERE chat_id = ANY($1::uuid[])
+            ORDER BY created_at ASC
+        `, [chats.map(c => c.id)]);
+
+        const messagesByChat: { [key: string]: Message[] } = {};
+        messageRes.rows.forEach(m => {
+            if (!messagesByChat[m.chat_id]) {
+                messagesByChat[m.chat_id] = [];
+            }
+            const createdAtDate = new Date(m.created_at);
+            messagesByChat[m.chat_id].push({
+                id: m.id,
+                chat_id: m.chat_id,
+                workspace_id: m.workspace_id,
+                content: m.content,
+                timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                createdAt: createdAtDate.toISOString(),
+                formattedDate: formatMessageDate(createdAtDate),
+                sender: getSenderById(m.sender_id)!, // Sender must exist
+            });
+        });
+
+        chats.forEach(chat => {
+          chat.messages = messagesByChat[chat.id] || [];
+        });
     }
 
-    // 3. Fetch messages
-    const messageRes = await db.query(`
-        SELECT id, content, created_at, chat_id, sender_id, workspace_id
-        FROM messages
-        WHERE workspace_id = $1
-        ORDER BY created_at ASC
-    `, [workspaceId]);
-
-    const messagesByChat: { [key: string]: Message[] } = {};
-    messageRes.rows.forEach(m => {
-        if (!messagesByChat[m.chat_id]) {
-            messagesByChat[m.chat_id] = [];
-        }
-        const createdAtDate = new Date(m.created_at);
-        messagesByChat[m.chat_id].push({
-            id: m.id,
-            chat_id: m.chat_id,
-            workspace_id: m.workspace_id,
-            content: m.content,
-            timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            createdAt: createdAtDate.toISOString(),
-            formattedDate: formatMessageDate(createdAtDate),
-            sender: getSenderById(m.sender_id)!, // Non-null assertion as sender should exist
-        });
-    });
-
-    // 4. Combine chats and their messages
-    const chatsWithMessages = chats.map(chat => ({
-      ...chat,
-      messages: messagesByChat[chat.id] || [],
-    }))
-
-    return { chats: chatsWithMessages };
+    return { chats };
 }
 
 export async function GET(
