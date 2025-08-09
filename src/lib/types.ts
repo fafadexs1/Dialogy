@@ -21,6 +21,8 @@ export type User = {
   businessProfile?: BusinessProfile; // Para consistência, um User também pode ter um perfil de negócios
   phone?: string;
   online?: boolean;
+  memberSince?: string;
+  geminiUsage?: number;
 };
 
 // Representa um cliente/contato (não autenticado)

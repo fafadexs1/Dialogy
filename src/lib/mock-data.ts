@@ -17,10 +17,12 @@ export const agents: User[] = [
     email: 'agent@dialogy.com',
     workspaces: workspaces,
     activeWorkspaceId: 'ws-1',
+    memberSince: 'Jan 2024',
+    geminiUsage: 15.70,
   },
-  { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com' },
-  { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com' },
-  { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com' },
+  { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com', memberSince: 'Fev 2024', geminiUsage: 8.45 },
+  { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com', memberSince: 'Dez 2023', geminiUsage: 22.10 },
+  { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com', memberSince: 'Mar 2024', geminiUsage: 2.30 },
 ];
 
 export const mockTags: Tag[] = [

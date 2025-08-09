@@ -4,14 +4,14 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, UserCheck } from 'lucide-react';
+import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, UserCheck, DollarSign, BarChart } from 'lucide-react';
 import { agents as mockAgents } from '@/lib/mock-data';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 
 export default function ManageMembersPage() {
     const user = useAuth();
@@ -47,9 +47,11 @@ export default function ManageMembersPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className='w-[40%]'>Membro</TableHead>
+                                        <TableHead className='w-[35%]'>Membro</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Função</TableHead>
+                                        <TableHead>Membro Desde</TableHead>
+                                        <TableHead>Uso do Gemini (Mês)</TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -69,12 +71,23 @@ export default function ManageMembersPage() {
                                                 </div>
                                             </TableCell>
                                             <TableCell>
-                                                <Badge variant={member.online ? 'default' : 'secondary'} className={member.online ? 'bg-green-500/20 text-green-700' : ''}>
+                                                <Badge variant={member.online ? 'default' : 'secondary'} className={member.online ? 'bg-green-500/20 text-green-700 border-transparent' : ''}>
                                                     {member.online ? 'Online' : 'Offline'}
                                                 </Badge>
                                             </TableCell>
                                             <TableCell>
                                                 <Badge variant="outline">Membro</Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className="text-sm text-muted-foreground">{member.memberSince || 'N/A'}</span>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-1 font-medium text-muted-foreground">
+                                                  <DollarSign className="h-4 w-4 text-green-500" />
+                                                  <span>
+                                                    {(member.geminiUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                  </span>
+                                                </div>
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <DropdownMenu>
@@ -88,6 +101,11 @@ export default function ManageMembersPage() {
                                                             <Edit className="mr-2 h-4 w-4" />
                                                             Editar Função
                                                         </DropdownMenuItem>
+                                                        <DropdownMenuItem disabled>
+                                                            <BarChart className="mr-2 h-4 w-4" />
+                                                            Ver Histórico de Uso
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuSeparator />
                                                         <DropdownMenuItem disabled>
                                                             <UserCheck className="mr-2 h-4 w-4" />
                                                             Advertir Membro
