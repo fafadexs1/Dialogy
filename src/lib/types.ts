@@ -127,6 +127,8 @@ export type Chat = {
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
   assigned_at?: string;
+  source?: string;
+  instance_name?: string;
 };
 
 export type InternalChannel = {
@@ -268,5 +270,3 @@ export interface WorkspaceInvite {
     is_revoked: boolean;
     use_count: number;
 }
-
-    

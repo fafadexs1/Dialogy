@@ -55,9 +55,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
     <div className="space-y-1 p-2">
       {chatList.length > 0 ? chatList.map((chat) => {
         const lastMessage = chat.messages[chat.messages.length - 1];
-        const source = lastMessage?.source_from_api;
-        const instanceName = lastMessage?.instance_name;
-
+        
         return (
           <div
             key={chat.id}
@@ -71,7 +69,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
                 <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
               </Avatar>
-              {source === 'whatsapp' && (
+              {chat.source === 'whatsapp' && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -81,7 +79,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>Canal: WhatsApp</p>
-                      {instanceName && <p>Instância: {instanceName}</p>}
+                      {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
