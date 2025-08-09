@@ -26,8 +26,11 @@ export async function createWorkspaceAction(
   try {
     await client.query('BEGIN');
 
-    // O trigger 'setup_workspace_defaults_trigger' agora cuida da criação dos papéis
-    // padrão (Admin, Membro) e da associação do criador ao papel de Admin.
+    // 1. Inserir o novo workspace.
+    // O trigger 'setup_workspace_defaults_trigger' cuidará automaticamente:
+    // - Da criação dos papéis padrão (Administrador, Membro).
+    // - Da atribuição de permissões a esses papéis.
+    // - Da associação do usuário criador (owner_id) ao papel de Administrador.
     const workspaceRes = await client.query(
       'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id',
       [workspaceName, userId]
@@ -42,7 +45,7 @@ export async function createWorkspaceAction(
 
     await client.query('COMMIT');
     
-    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e definido como ativo para o usuário ID: ${userId}.`);
+    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e definido como ativo para o usuário ID: ${userId}. Papéis padrão e permissões foram atribuídos pelo trigger do DB.`);
 
   } catch (error) {
     await client.query('ROLLBACK');
@@ -54,8 +57,8 @@ export async function createWorkspaceAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
-
-  return null;
+  // Redireciona para a página principal após a criação bem-sucedida.
+  redirect('/');
 }
 
 
@@ -77,6 +80,8 @@ export async function updateWorkspaceAction(
      if (!workspaceId) {
         return 'ID do workspace não encontrado.';
     }
+    
+    // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
     
     try {
         await db.query('UPDATE workspaces SET name = $1 WHERE id = $2', [workspaceName, workspaceId]);
@@ -109,5 +114,3 @@ export async function switchWorkspaceAction(workspaceId: string) {
     
     revalidatePath('/', 'layout');
 }
-
-    

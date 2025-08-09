@@ -23,43 +23,11 @@ function SubmitButton() {
 }
 
 export default function NewWorkspacePage() {
-  const [errorMessage, formAction, isPending] = useActionState(createWorkspaceAction, null);
-  const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
-  const { toast } = useToast();
+  const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
   
-  useEffect(() => {
-    // This effect is triggered after the form action completes.
-    // If there is no error message and the action is no longer pending,
-    // it means the submission was successful.
-    const formSubmitted = formRef.current?.dataset.submitted === 'true';
-
-    if (formSubmitted && !isPending) {
-        if (!errorMessage) {
-            toast({
-                title: 'Sucesso!',
-                description: 'Workspace criado. Redirecionando...',
-            });
-            // Redirect after successful creation
-            router.push('/');
-        } else {
-             // Reset the 'submitted' state to allow for a new attempt.
-            if(formRef.current) {
-                formRef.current.dataset.submitted = 'false';
-            }
-        }
-    }
-  }, [isPending, errorMessage, router, toast]);
-
-
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if(formRef.current) {
-        formRef.current.dataset.submitted = 'true';
-    }
-    const formData = new FormData(event.currentTarget);
-    formAction(formData);
-  };
+  // Como a Server Action agora redireciona com sucesso,
+  // não precisamos mais de lógica complexa de useEffect para redirecionar o cliente.
+  // O router só será usado se houver um erro.
 
   return (
     <div className="max-w-3xl">
@@ -74,7 +42,7 @@ export default function NewWorkspacePage() {
         </header>
 
         <Card className="w-full max-w-lg">
-            <form ref={formRef} onSubmit={handleFormSubmit} data-submitted="false">
+            <form action={formAction}>
                 <CardHeader>
                     <CardTitle>Detalhes do Workspace</CardTitle>
                     <CardDescription>
