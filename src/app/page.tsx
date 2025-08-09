@@ -63,8 +63,8 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
     }
 }
 
-async function fetchDataForWorkspace(workspaceId: string) {
-    console.log(`--- [PAGE_SERVER] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} ---`);
+async function fetchDataForWorkspace(workspaceId: string, userId: string) {
+    console.log(`--- [PAGE_SERVER] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
     if (!workspaceId) return { chats: [] };
 
     // 1. Fetch all users (agents) and create a map for quick lookup.
@@ -81,7 +81,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
     ]));
 
     // 2. Fetch all contacts for the workspace and create a map.
-    const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
+    const contactRes = await db.query('SELECT id, name, avatar_url, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
         c.id,
         {
@@ -89,6 +89,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
             workspace_id: workspaceId,
             name: c.name,
             avatar: c.avatar_url,
+            phone_number_jid: c.phone_number_jid,
             firstName: c.name.split(' ')[0] || '',
             lastName: c.name.split(' ').slice(1).join(' ') || '',
         }
@@ -100,32 +101,50 @@ async function fetchDataForWorkspace(workspaceId: string) {
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // 3. Fetch chats and order them by the most recent message
+    // 3. Fetch chats and order them by the most recent message, also fetching the source of the last message.
+    // **CRITICAL CHANGE**: Only fetch chats that are 'gerais', 'encerrados', or assigned to the current user.
     const chatRes = await db.query(`
-        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id, MAX(m.created_at) as last_message_time
+        WITH LastMessage AS (
+            SELECT
+                chat_id,
+                source_from_api,
+                instance_name,
+                created_at,
+                ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
+            FROM messages
+        )
+        SELECT 
+            c.id, 
+            c.status, 
+            c.workspace_id, 
+            c.contact_id, 
+            c.agent_id, 
+            MAX(m.created_at) as last_message_time,
+            lm.source_from_api as source,
+            lm.instance_name
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
-        WHERE c.workspace_id = $1
-        GROUP BY c.id
+        LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
+        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'encerrados') OR c.agent_id = $2)
+        GROUP BY c.id, lm.source_from_api, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
-    `, [workspaceId]);
+    `, [workspaceId, userId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        // Find the contact from the contacts map
-        contact: contactsMap.get(r.contact_id)!, // Non-null assertion as contact must exist
-        // Find the agent from the users map (can be undefined)
+        contact: contactsMap.get(r.contact_id)!, // Contact must exist
         agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
         messages: [],
+        source: r.source,
+        instance_name: r.instance_name,
     }));
-    console.log(`[PAGE_SERVER] fetchDataForWorkspace: ${chats.length} chats encontrados.`);
 
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
         const messageRes = await db.query(`
-            SELECT id, content, created_at, chat_id, sender_id, workspace_id
+            SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api
             FROM messages
             WHERE chat_id = ANY($1::uuid[])
             ORDER BY created_at ASC
@@ -146,6 +165,8 @@ async function fetchDataForWorkspace(workspaceId: string) {
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
                 sender: getSenderById(m.sender_id)!, // Sender must exist
+                instance_name: m.instance_name,
+                source_from_api: m.source_from_api,
             });
         });
 
@@ -154,7 +175,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
         });
     }
 
-    console.log(`[PAGE_SERVER] fetchDataForWorkspace: Dados de chats e mensagens combinados.`);
+    console.log(`[PAGE_SERVER] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);
     return { chats };
 }
 
@@ -199,7 +220,7 @@ export default async function Home() {
   }
 
   console.log(`[PAGE_SERVER] Usuário tem um workspace ativo (ID: ${user.activeWorkspaceId}). Buscando dados...`);
-  const { chats } = await fetchDataForWorkspace(user.activeWorkspaceId);
+  const { chats } = await fetchDataForWorkspace(user.activeWorkspaceId, user.id);
 
   console.log("[PAGE_SERVER] Renderizando layout principal com CustomerChatLayout.");
   return (

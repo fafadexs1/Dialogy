@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type OnlineAgent } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -19,6 +19,7 @@ interface ChatListProps {
   chats: Chat[];
   selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
+  currentUser: User;
 }
 
 const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
@@ -48,7 +49,7 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser }: ChatListProps) {
   const onlineAgents = usePresence();
 
   const renderChatList = (chatList: Chat[]) => (
@@ -111,7 +112,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
   );
 
   const gerais = chats.filter(c => c.status === 'gerais');
-  const atendimentos = chats.filter(c => c.status === 'atendimentos');
+  // Only show chats assigned to the current user in the 'atendimentos' tab
+  const atendimentos = chats.filter(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (

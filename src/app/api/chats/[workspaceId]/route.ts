@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
 import { format, isToday, isYesterday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 function formatMessageDate(date: Date): string {
     if (isToday(date)) {
@@ -15,7 +17,7 @@ function formatMessageDate(date: Date): string {
     return format(date, "dd/MM/yyyy", { locale: ptBR });
 }
 
-async function fetchDataForWorkspace(workspaceId: string) {
+async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     if (!workspaceId) return { chats: [] };
 
     // 1. Fetch all users (agents) and create a map for quick lookup.
@@ -53,6 +55,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
     };
     
     // 3. Fetch chats and order them by the most recent message, also fetching the source of the last message.
+    // **CRITICAL CHANGE**: Only fetch chats that are 'gerais', 'encerrados', or assigned to the current user.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -75,10 +78,10 @@ async function fetchDataForWorkspace(workspaceId: string) {
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-        WHERE c.workspace_id = $1
+        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'encerrados') OR c.agent_id = $2)
         GROUP BY c.id, lm.source_from_api, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
-    `, [workspaceId]);
+    `, [workspaceId, userId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
@@ -132,6 +135,11 @@ export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { workspaceId } = params;
 
   if (!workspaceId) {
@@ -139,7 +147,8 @@ export async function GET(
   }
 
   try {
-    const data = await fetchDataForWorkspace(workspaceId);
+    // Pass the logged-in user's ID to the data fetching function
+    const data = await fetchDataForWorkspace(workspaceId, session.user.id);
     return NextResponse.json(data);
   } catch (error) {
     console.error(`[API /chats/${workspaceId}] Error fetching data:`, error);

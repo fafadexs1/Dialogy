@@ -50,21 +50,27 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
         setChats(latestChats);
 
+        // Preserve selection if possible, otherwise select the first chat in the new list
         setSelectedChat(currentSelectedChat => {
             if (currentSelectedChat) {
                 const updatedSelectedChat = latestChats.find(c => c.id === currentSelectedChat.id);
-                // If the selected chat was closed, it might now have a different status
+                // If the selected chat is still in the list, keep it selected.
                 if (updatedSelectedChat) {
                     return updatedSelectedChat;
                 }
-                // If it's not in the list anymore (e.g., filtered out), clear selection
-                return null;
-            } else if (latestChats.length > 0) {
-                 return latestChats[0];
             }
-            return null;
+            // If no chat is selected, or the selected chat is no longer in the list,
+            // select the first one from the appropriate category.
+            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+            if (atendimentoChat) return atendimentoChat;
+
+            const geraisChat = latestChats.find(c => c.status === 'gerais');
+            if (geraisChat) return geraisChat;
+            
+            return latestChats.length > 0 ? latestChats[0] : null;
         });
-    }, [currentUser.activeWorkspaceId]);
+
+    }, [currentUser.activeWorkspaceId, currentUser.id]);
 
 
    useEffect(() => {
@@ -72,7 +78,9 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     const initialLoad = async () => {
         setChats(initialChats);
         if (initialChats.length > 0) {
-            handleSetSelectedChat(initialChats[0]);
+            const atendimentoChat = initialChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+            const geraisChat = initialChats.find(c => c.status === 'gerais');
+            handleSetSelectedChat(atendimentoChat || geraisChat || initialChats[0]);
         }
         // TODO: Replace mockTags with a real API call to fetch tags for the workspace
         setCloseReasons(mockTags.filter(t => t.is_close_reason));
@@ -93,7 +101,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             clearInterval(pollingIntervalRef.current);
         }
     };
-  }, [initialChats, currentUser.activeWorkspaceId, updateData]);
+  }, [initialChats, currentUser.activeWorkspaceId, currentUser.id, updateData]);
 
   if (loading) {
       return (
@@ -133,6 +141,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
+        currentUser={currentUser}
       />
       <ChatPanel 
         key={selectedChat?.id} 
