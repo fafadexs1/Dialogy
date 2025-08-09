@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useAuth } from "@/hooks/use-auth";
 import { updateWorkspaceAction } from '@/actions/workspace';
@@ -66,6 +66,7 @@ export default function WorkspaceSettingsPage() {
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, null);
     
     const { toast } = useToast();
+    const isInitialMount = useRef(true);
 
     useEffect(() => {
         if (user?.activeWorkspaceId && user.workspaces) {
@@ -86,15 +87,18 @@ export default function WorkspaceSettingsPage() {
     }
 
     useEffect(() => {
-        if (updateError === null && !useFormStatus().pending) {
-            // A small hack to prevent toast on initial load
-            if(workspaceName !== activeWorkspace?.name) {
-                toast({ title: "Workspace Atualizado!", description: "O nome do workspace foi alterado." });
-            }
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+
+        if (updateError === null) {
+            toast({ title: "Workspace Atualizado!", description: "O nome do workspace foi alterado." });
         } else if (updateError) {
             toast({ title: "Erro ao atualizar", description: updateError, variant: "destructive" });
         }
-    }, [updateError, toast, workspaceName, activeWorkspace?.name]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [updateError]);
     
     useEffect(() => {
         if (inviteError === null) { // Success
