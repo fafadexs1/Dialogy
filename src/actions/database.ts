@@ -41,7 +41,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TABLE IF EXISTS public.messages CASCADE;',
         'DROP TABLE IF EXISTS public.chats CASCADE;',
         'DROP TABLE IF EXISTS public.contacts CASCADE;',
-        'DROP TABLE IF EXISTS public.user_workspaces CASCADE;', // Mantido para referência, mas será substituído
+        'DROP TABLE IF EXISTS public.user_workspaces CASCADE;', // Tabela antiga, removida para limpeza.
         'DROP TABLE IF EXISTS public.workspaces CASCADE;',
         'DROP TABLE IF EXISTS public.users CASCADE;',
         'DROP TYPE IF EXISTS public.chat_status_enum;'

@@ -30,7 +30,7 @@ export async function createWorkspaceAction(
     // O trigger 'setup_workspace_defaults_trigger' cuidará automaticamente:
     // - Da criação dos papéis padrão (Administrador, Membro).
     // - Da atribuição de permissões a esses papéis.
-    // - Da associação do usuário criador (owner_id) ao papel de Administrador.
+    // - Da associação do usuário criador (owner_id) ao papel de Administrador na tabela 'user_workspace_roles'.
     const workspaceRes = await client.query(
       'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id',
       [workspaceName, userId]
