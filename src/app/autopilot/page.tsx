@@ -257,11 +257,11 @@ export default function AutopilotPage() {
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     </div>
-                                     <CardDescription>
+                                     <div className="text-sm text-muted-foreground">
                                         <Badge variant={instance.enabled ? "default" : "secondary"}>
                                             {instance.enabled ? 'Ativa' : 'Inativa'}
                                         </Badge>
-                                     </CardDescription>
+                                     </div>
                                 </CardHeader>
                                 <CardContent className="space-y-4 flex-grow">
                                      <div className="space-y-2">
@@ -289,3 +289,5 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
+
+    
