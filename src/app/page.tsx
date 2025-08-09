@@ -102,7 +102,6 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     };
     
     // 3. Fetch chats and order them by the most recent message, also fetching the source of the last message.
-    // **CRITICAL CHANGE**: Only fetch chats that are 'gerais', 'encerrados', or assigned to the current user.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -112,7 +111,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 created_at,
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
-             WHERE type = 'text' -- Consider only text messages for source and instance name
+             WHERE type = 'text'
         )
         SELECT 
             c.id, 
@@ -135,7 +134,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: contactsMap.get(r.contact_id)!, // Contact must exist
+        contact: contactsMap.get(r.contact_id)!, 
         agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
         messages: [],
         source: r.source,
@@ -167,7 +166,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id)!, // Sender must exist for text messages
+                sender: getSenderById(m.sender_id)!, 
                 instance_name: m.instance_name,
                 source_from_api: m.source_from_api,
             });
@@ -195,14 +194,12 @@ export default async function Home() {
   const userId = session.user.id;
   console.log("[PAGE_SERVER] Sessão encontrada para o usuário ID:", userId);
 
-  // Mark user as online when they access the main page
   await updateUserOnlineStatus(userId, true);
   
   const user = await fetchUserAndWorkspaces(userId);
   
   if (!user) {
     console.error("[PAGE_SERVER] Não foi possível carregar os dados do usuário. Exibindo mensagem de erro.");
-    // Mark user as offline if fetching data fails and they are essentially logged out
     await updateUserOnlineStatus(userId, false);
     return (
        <MainLayout>
@@ -232,5 +229,3 @@ export default async function Home() {
     </MainLayout>
   );
 }
-
-    

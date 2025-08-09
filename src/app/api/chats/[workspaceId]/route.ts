@@ -20,7 +20,6 @@ function formatMessageDate(date: Date): string {
 async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     if (!workspaceId) return { chats: [] };
 
-    // 1. Fetch all users (agents) and create a map for quick lookup.
     const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
     const usersMap = new Map<string, User>(userRes.rows.map(u => [
         u.id,
@@ -33,7 +32,6 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         }
     ]));
 
-    // 2. Fetch all contacts for the workspace and create a map.
     const contactRes = await db.query('SELECT id, name, avatar_url, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
         c.id,
@@ -48,14 +46,11 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         }
     ]));
 
-    // Helper to find any sender (user or contact) by their ID
     const getSenderById = (id: string | null): MessageSender | undefined => {
         if (!id) return undefined;
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // 3. Fetch chats and order them by the most recent message, also fetching the source of the last message.
-    // **CRITICAL CHANGE**: Only fetch chats that are 'gerais', 'encerrados', or assigned to the current user.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -65,7 +60,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 created_at,
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
-            WHERE type = 'text' -- Consider only text messages for source and instance name
+            WHERE type = 'text'
         )
         SELECT 
             c.id, 
@@ -88,14 +83,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: contactsMap.get(r.contact_id)!, // Contact must exist
+        contact: contactsMap.get(r.contact_id)!, 
         agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
         messages: [],
         source: r.source,
         instance_name: r.instance_name,
     }));
 
-    // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
         const messageRes = await db.query(`
             SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api, type, metadata
@@ -120,7 +114,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id)!, // Sender must exist for text messages
+                sender: getSenderById(m.sender_id)!, 
                 instance_name: m.instance_name,
                 source_from_api: m.source_from_api,
             });
@@ -150,7 +144,6 @@ export async function GET(
   }
 
   try {
-    // Pass the logged-in user's ID to the data fetching function
     const data = await fetchDataForWorkspace(workspaceId, session.user.id);
     return NextResponse.json(data);
   } catch (error) {
@@ -158,5 +151,3 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-    
