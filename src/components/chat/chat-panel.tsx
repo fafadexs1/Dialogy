@@ -174,6 +174,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                   }`}
                 >
                   <p>{message.content}</p>
+                   <p className={`text-xs mt-2 ${
+                      message.sender.id === currentUser?.id
+                        ? 'text-primary-foreground/70'
+                        : 'text-muted-foreground'
+                    }`}>
+                      {message.timestamp}
+                    </p>
                 </div>
               </div>
             ))}
