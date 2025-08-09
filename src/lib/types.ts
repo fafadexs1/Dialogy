@@ -17,9 +17,9 @@ export type Role = {
     id: string;
     name: string;
     description: string;
-    workspace_id: string;
+    workspace_id?: string;
     permissions: Permission[];
-    is_default?: boolean;
+    is_default: boolean;
 }
 
 export type User = {
@@ -36,7 +36,8 @@ export type User = {
   phone?: string;
   online?: boolean;
   memberSince?: string;
-  geminiUsage?: number;
+  geminiUsage?: number; // Old, to be removed
+  autopilotUsage?: number;
   // RBAC properties
   role?: Role;
   permissions?: string[];
@@ -49,6 +50,7 @@ export type WorkspaceMember = {
   avatar: string;
   online: boolean;
   role: string;
+  team: string;
   memberSince: string;
   autopilotUsage: number;
 }
@@ -163,13 +165,14 @@ export interface Team {
   id: string;
   name: string;
   color: string;
+  roleId: string;
   businessHours: BusinessHour[];
   members: User[];
 }
 
 export interface BusinessHour {
   day: string;
-  enabled: boolean;
+  isEnabled: boolean;
   startTime: string;
   endTime: string;
 }
@@ -250,5 +253,3 @@ export interface EvolutionInstanceCreationPayload {
         events?: string[];
     };
 }
-
-    

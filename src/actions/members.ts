@@ -35,10 +35,13 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
                 u.avatar_url,
                 u.online,
                 r.name as role_name,
-                uwr.created_at
+                uwr.created_at,
+                t.name as team_name
             FROM users u
             JOIN user_workspace_roles uwr ON u.id = uwr.user_id
             LEFT JOIN roles r ON uwr.role_id = r.id
+            LEFT JOIN team_members tm ON u.id = tm.user_id
+            LEFT JOIN teams t ON tm.team_id = t.id AND t.workspace_id = uwr.workspace_id
             WHERE uwr.workspace_id = $1
             ORDER BY u.full_name
         `, [workspaceId]);
@@ -50,8 +53,8 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
             avatar: row.avatar_url,
             online: row.online,
             role: row.role_name || 'N/A',
+            team: row.team_name || 'Nenhuma',
             memberSince: row.created_at ? new Date(row.created_at).toLocaleDateString('pt-BR', { year: 'numeric', month: 'short' }) : 'N/A',
-            // This is a placeholder value. In a real app, this would come from usage tracking.
             autopilotUsage: parseFloat((Math.random() * 25).toFixed(2)),
         }));
 
@@ -91,5 +94,3 @@ export async function removeMemberAction(memberId: string, workspaceId: string):
         return { success: false, error: "Falha ao remover o membro do banco de dados." };
     }
 }
-
-    

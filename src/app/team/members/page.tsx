@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign } from 'lucide-react';
+import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users } from 'lucide-react';
 import type { WorkspaceMember } from '@/lib/types';
 import { getWorkspaceMembers, removeMemberAction } from '@/actions/members';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -155,9 +155,10 @@ export default function ManageMembersPage() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
-                                            <TableHead className='w-[35%]'>Membro</TableHead>
+                                            <TableHead className='w-[30%]'>Membro</TableHead>
                                             <TableHead>Status</TableHead>
                                             <TableHead>Função</TableHead>
+                                            <TableHead>Equipe</TableHead>
                                             <TableHead>Membro Desde</TableHead>
                                             <TableHead>Uso (Piloto Automático)</TableHead>
                                             <TableHead className="text-right">Ações</TableHead>
@@ -185,6 +186,12 @@ export default function ManageMembersPage() {
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="outline">{member.role}</Badge>
+                                                </TableCell>
+                                                 <TableCell>
+                                                    <Badge variant="secondary" className="flex items-center gap-1.5 w-fit">
+                                                        <Users className="h-3 w-3"/>
+                                                        {member.team}
+                                                    </Badge>
                                                 </TableCell>
                                                 <TableCell>
                                                     <span className="text-sm text-muted-foreground">{member.memberSince}</span>

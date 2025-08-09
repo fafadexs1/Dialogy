@@ -32,6 +32,9 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.business_hours CASCADE;',
+        'DROP TABLE IF EXISTS public.team_members CASCADE;',
+        'DROP TABLE IF EXISTS public.teams CASCADE;',
         'DROP TABLE IF EXISTS public.role_permissions CASCADE;',
         'DROP TABLE IF EXISTS public.permissions CASCADE;',
         'DROP TABLE IF EXISTS public.user_workspace_roles CASCADE;',
@@ -100,6 +103,31 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           PRIMARY KEY (user_id, workspace_id)
+      );`,
+
+      `CREATE TABLE public.teams (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE RESTRICT,
+        name TEXT NOT NULL,
+        color TEXT DEFAULT '#3b82f6',
+        UNIQUE(workspace_id, name)
+      );`,
+
+      `CREATE TABLE public.team_members (
+        team_id UUID NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        PRIMARY KEY (team_id, user_id)
+      );`,
+
+      `CREATE TABLE public.business_hours (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          team_id UUID NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+          day_of_week TEXT NOT NULL, -- Ex: 'Segunda-feira', 'Terca-feira'
+          is_enabled BOOLEAN DEFAULT TRUE,
+          start_time TIME,
+          end_time TIME,
+          UNIQUE(team_id, day_of_week)
       );`,
 
       `CREATE TABLE public.contacts (
@@ -177,7 +205,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         { id: 'permissions:edit', description: 'Criar, editar e atribuir papéis e permissões', category: 'Permissões' },
         // Teams
         { id: 'teams:view', description: 'Visualizar equipes', category: 'Equipes' },
-        { id: 'teams:edit', description: 'Criar e editar equipes', category: 'Equipes' },
+        { id: 'teams:edit', description: 'Criar, editar e gerenciar equipes e seus membros', category: 'Equipes' },
         // Analytics
         { id: 'analytics:view', description: 'Visualizar a página de Analytics', category: 'Analytics' },
         // Integrations
@@ -235,6 +263,32 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         `CREATE TRIGGER setup_workspace_defaults_trigger
             AFTER INSERT ON public.workspaces
             FOR EACH ROW EXECUTE PROCEDURE public.setup_workspace_defaults();`,
+
+        `CREATE OR REPLACE FUNCTION public.setup_default_business_hours()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            days_of_week TEXT[] := ARRAY['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+            day_name TEXT;
+        BEGIN
+            FOREACH day_name IN ARRAY days_of_week
+            LOOP
+                INSERT INTO public.business_hours (team_id, day_of_week, is_enabled, start_time, end_time)
+                VALUES (
+                    NEW.id,
+                    day_name,
+                    -- Desabilita Sábado e Domingo por padrão
+                    (day_name <> 'Sábado' AND day_name <> 'Domingo'), 
+                    '09:00:00',
+                    '18:00:00'
+                );
+            END LOOP;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;`,
+
+        `CREATE TRIGGER setup_default_business_hours_trigger
+            AFTER INSERT ON public.teams
+            FOR EACH ROW EXECUTE PROCEDURE public.setup_default_business_hours();`
     ];
 
     for(const query of functionsAndTriggers) {
@@ -258,5 +312,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
-    

@@ -1,70 +1,74 @@
 
-
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, Team, BusinessHour } from '@/lib/types';
-import { agents as mockAgents } from '@/lib/mock-data';
+import type { User, Team, BusinessHour, Role } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search, Loader2 } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2, Save } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/hooks/use-toast';
+import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours } from '@/actions/teams';
+import { getWorkspaceMembers } from '@/actions/members';
+import { getRolesAndPermissions } from '@/actions/permissions';
 
-const daysOfWeek = [
-  { id: 'seg', label: 'Segunda-feira' },
-  { id: 'ter', label: 'Terça-feira' },
-  { id: 'qua', label: 'Quarta-feira' },
-  { id: 'qui', label: 'Quinta-feira' },
-  { id: 'sex', label: 'Sexta-feira' },
-  { id: 'sab', label: 'Sábado' },
-  { id: 'dom', label: 'Domingo' },
-];
+const daysOfWeek = [ 'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado' ];
 
-const defaultBusinessHours: BusinessHour[] = daysOfWeek.map(day => ({
-    day: day.label,
-    enabled: !['sab', 'dom'].includes(day.id),
-    startTime: '09:00',
-    endTime: '18:00',
-}));
-
-
-const initialTeams: Team[] = [
-  { id: 'team-1', name: 'Suporte Técnico', color: '#3b82f6', members: [mockAgents[0], mockAgents[3]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-2', name: 'Vendas', color: '#10b981', members: [mockAgents[1], mockAgents[2]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-  { id: 'team-3', name: 'Financeiro', color: '#f97316', members: [mockAgents[0]], businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)) },
-];
-
-function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team, onTeamUpdate: (teamId: string, field: keyof Team, value: any) => void, onRemoveTeam: (teamId: string) => void }) {
+function TeamSettingsContent({ 
+    team, 
+    onMutate,
+    allMembers,
+    roles,
+}: { 
+    team: Team, 
+    onMutate: () => void,
+    allMembers: User[],
+    roles: Role[],
+}) {
+  const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
-  const agents = mockAgents;
 
-  const handleAddMember = (teamId: string) => {
-    const agentToAdd = agents.find(agent => agent.id === selectedAgentId);
-    if (!agentToAdd) return;
-
-    const isAlreadyMember = team.members.some(member => member.id === agentToAdd.id);
-    if (!isAlreadyMember) {
-        onTeamUpdate(teamId, 'members', [...team.members, agentToAdd]);
+  const handleUpdate = async (field: keyof Team, value: any) => {
+    const result = await updateTeam(team.id, { [field]: value });
+    if(result.error) toast({ title: 'Erro ao atualizar', description: result.error, variant: 'destructive' });
+    else onMutate();
+  }
+  
+  const handleRemove = async () => {
+    const result = await deleteTeam(team.id);
+    if(result.error) toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive' });
+    else {
+        toast({ title: 'Equipe removida com sucesso!' });
+        onMutate();
     }
+  }
+
+  const handleAddMember = async () => {
+    const agentToAdd = allMembers.find(agent => agent.id === selectedAgentId);
+    if (!agentToAdd) return;
+    const result = await addTeamMember(team.id, agentToAdd.id);
+    if(result.error) toast({ title: 'Erro ao adicionar membro', description: result.error, variant: 'destructive' });
+    else onMutate();
     setSelectedAgentId('');
   }
 
-  const handleRemoveMember = (teamId: string, memberId: string) => {
-     onTeamUpdate(teamId, 'members', team.members.filter(member => member.id !== memberId));
+  const handleRemoveMember = async (memberId: string) => {
+     const result = await removeTeamMember(team.id, memberId);
+     if(result.error) toast({ title: 'Erro ao remover membro', description: result.error, variant: 'destructive' });
+     else onMutate();
   }
   
-  const handleBusinessHoursChange = (dayLabel: string, field: keyof BusinessHour, value: any) => {
-    const updatedHours = team.businessHours.map(bh => 
-        bh.day === dayLabel ? { ...bh, [field]: value } : bh
-    );
-    onTeamUpdate(team.id, 'businessHours', updatedHours);
+  const handleBusinessHoursChange = async (dayLabel: string, field: keyof BusinessHour, value: any) => {
+    const result = await updateBusinessHours(team.id, dayLabel, { [field]: value });
+    if(result.error) toast({ title: 'Erro ao salvar horário', description: result.error, variant: 'destructive' });
+    else onMutate();
   };
 
   return (
@@ -76,34 +80,37 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
               <CardTitle className="text-2xl">{team.name}</CardTitle>
               <CardDescription>Gerencie as configurações gerais e membros da equipe.</CardDescription>
             </div>
-             <Button variant="destructive" size="sm" onClick={() => onRemoveTeam(team.id)}>
+             <Button variant="destructive" size="sm" onClick={handleRemove}>
                 <Trash2 className="mr-2 h-4 w-4"/>
                 Remover Equipe
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            <div className="space-y-1 col-span-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+            <div className="space-y-1">
               <Label htmlFor={`team-name-${team.id}`}>Nome da Equipe</Label>
               <Input 
                 id={`team-name-${team.id}`} 
-                value={team.name}
-                onChange={(e) => onTeamUpdate(team.id, 'name', e.target.value)}
+                defaultValue={team.name}
+                onBlur={(e) => handleUpdate('name', e.target.value)}
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor={`team-color-${team.id}`}>Cor</Label>
-              <div className="flex items-center gap-2 border rounded-md h-10 px-3 bg-background">
-                 <input
-                  id={`team-color-${team.id}`}
-                  type="color"
-                  value={team.color}
-                  onChange={(e) => onTeamUpdate(team.id, 'color', e.target.value)}
-                  className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer"
-                />
-                <span className="text-sm uppercase">{team.color}</span>
-              </div>
+             <div className="space-y-1">
+              <Label htmlFor={`team-role-${team.id}`}>Papel da Equipe</Label>
+              <Select
+                value={team.roleId}
+                onValueChange={(value) => handleUpdate('roleId', value)}
+              >
+                  <SelectTrigger id={`team-role-${team.id}`}>
+                      <SelectValue placeholder="Selecione um papel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      {roles.map(role => (
+                          <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
             </div>
           </div>
           <div>
@@ -118,7 +125,7 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                     </Avatar>
                     <span className="font-medium">{member.name}</span>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleRemoveMember(team.id, member.id)}>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleRemoveMember(member.id)}>
                     <X className="h-4 w-4 text-muted-foreground" />
                   </Button>
                 </div>
@@ -131,7 +138,7 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                     <SelectValue placeholder="Adicionar um novo membro" />
                   </SelectTrigger>
                   <SelectContent>
-                    {agents
+                    {allMembers
                       .filter(agent => !team.members.some(m => m.id === agent.id))
                       .map(agent => (
                       <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
@@ -139,7 +146,7 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => handleAddMember(team.id)} disabled={!selectedAgentId}>
+              <Button onClick={handleAddMember} disabled={!selectedAgentId}>
                 <UserPlus className="mr-2 h-4 w-4"/>
                 Adicionar
               </Button>
@@ -159,23 +166,23 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
                 <div className='flex items-center gap-4'>
                   <Switch 
                     id={`switch-${team.id}-${bh.day}`} 
-                    checked={bh.enabled}
-                    onCheckedChange={(checked) => handleBusinessHoursChange(bh.day, 'enabled', checked)}
+                    checked={bh.isEnabled}
+                    onCheckedChange={(checked) => handleBusinessHoursChange(bh.day, 'isEnabled', checked)}
                   />
                   <Label htmlFor={`switch-${team.id}-${bh.day}`} className='font-medium text-base min-w-[100px]'>{bh.day}</Label>
                 </div>
-                <div className={`flex items-center gap-2 transition-opacity ${bh.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                <div className={`flex items-center gap-2 transition-opacity ${bh.isEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                   <Input 
                     type="time" 
-                    value={bh.startTime}
-                    onChange={(e) => handleBusinessHoursChange(bh.day, 'startTime', e.target.value)}
+                    defaultValue={bh.startTime}
+                    onBlur={(e) => handleBusinessHoursChange(bh.day, 'startTime', e.target.value)}
                     className="w-[110px]" 
                   />
                   <span className="text-muted-foreground">às</span>
                   <Input 
                     type="time" 
-                    value={bh.endTime}
-                    onChange={(e) => handleBusinessHoursChange(bh.day, 'endTime', e.target.value)}
+                    defaultValue={bh.endTime}
+                    onBlur={(e) => handleBusinessHoursChange(bh.day, 'endTime', e.target.value)}
                     className="w-[110px]" 
                   />
                 </div>
@@ -187,14 +194,27 @@ function TeamSettingsContent({ team, onTeamUpdate, onRemoveTeam }: { team: Team,
   )
 }
 
-function CreateTeamContent({ onAddTeam, onCancel }: { onAddTeam: (name: string, color: string) => void, onCancel: () => void }) {
-    const [newTeamName, setNewTeamName] = useState('');
-    const [newTeamColor, setNewTeamColor] = useState('#3b82f6');
+function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { workspaceId:string, roles: Role[], onAddTeam: () => void, onCancel: () => void }) {
+    const { toast } = useToast();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (!newTeamName.trim()) return;
-        onAddTeam(newTeamName, newTeamColor);
+        const formData = new FormData(e.currentTarget);
+        const name = formData.get('name') as string;
+        const roleId = formData.get('roleId') as string;
+
+        if (!name.trim() || !roleId) {
+            toast({title: 'Campos obrigatórios', description: 'Nome da equipe e papel são obrigatórios.', variant: 'destructive' });
+            return;
+        };
+
+        const result = await createTeam({ workspaceId, name, roleId });
+        if (result.error) {
+            toast({title: 'Erro ao criar equipe', description: result.error, variant: 'destructive'});
+        } else {
+            toast({title: 'Equipe criada com sucesso!'});
+            onAddTeam();
+        }
     }
 
     return (
@@ -203,35 +223,35 @@ function CreateTeamContent({ onAddTeam, onCancel }: { onAddTeam: (name: string, 
                 <form onSubmit={handleSubmit}>
                     <CardHeader>
                         <CardTitle className="text-2xl">Criar Nova Equipe</CardTitle>
-                        <CardDescription>Dê um nome e uma cor para sua nova equipe para começar a adicionar membros e configurar horários.</CardDescription>
+                        <CardDescription>Dê um nome e defina um papel (role) para sua nova equipe.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                          <div className="space-y-1">
                             <Label htmlFor="team-name">Nome da Equipe</Label>
                             <Input 
                                 id="team-name"
+                                name="name"
                                 placeholder="Ex: Sucesso do Cliente"
-                                value={newTeamName}
-                                onChange={(e) => setNewTeamName(e.target.value)}
                                 autoFocus
                             />
                         </div>
-                        <div className="space-y-1">
-                            <Label htmlFor="team-color">Cor</Label>
-                            <div className="flex items-center gap-2 border rounded-md h-10 px-3 bg-background">
-                                <input
-                                id="team-color"
-                                type="color"
-                                value={newTeamColor}
-                                onChange={(e) => setNewTeamColor(e.target.value)}
-                                className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer"
-                                />
-                                <span className="font-mono uppercase">{newTeamColor}</span>
-                            </div>
+                         <div className="space-y-1">
+                            <Label htmlFor="team-role">Papel da Equipe</Label>
+                             <Select name="roleId">
+                                <SelectTrigger id="team-role">
+                                    <SelectValue placeholder="Selecione um papel" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {roles.map(role => (
+                                        <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                             <p className="text-xs text-muted-foreground">O papel define as permissões que todos os membros desta equipe terão.</p>
                         </div>
                     </CardContent>
                     <CardFooter className="gap-2">
-                        <Button type="submit">Salvar Equipe</Button>
+                        <Button type="submit"><Save className='mr-2' /> Salvar Equipe</Button>
                         <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>
                     </CardFooter>
                 </form>
@@ -243,33 +263,56 @@ function CreateTeamContent({ onAddTeam, onCancel }: { onAddTeam: (name: string, 
 
 export default function TeamPage() {
     const user = useAuth();
-    const [teams, setTeams] = useState<Team[]>(initialTeams);
-    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(initialTeams[0]?.id || null);
+    const [teams, setTeams] = useState<Team[]>([]);
+    const [allMembers, setAllMembers] = useState<User[]>([]);
+    const [roles, setRoles] = useState<Role[]>([]);
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const { toast } = useToast();
 
-    const handleTeamUpdate = (teamId: string, field: keyof Team, value: any) => {
-        setTeams(teams.map(team => team.id === teamId ? { ...team, [field]: value } : team));
-    }
-    
-    const handleAddTeam = (name: string, color: string) => {
-        const newTeam: Team = {
-          id: `team-${Date.now()}`,
-          name,
-          color,
-          members: [],
-          businessHours: JSON.parse(JSON.stringify(defaultBusinessHours)),
-        };
-        setTeams([...teams, newTeam]);
-        setIsCreating(false);
-        setSelectedTeamId(newTeam.id);
-    };
+    const fetchData = React.useCallback(async () => {
+        if (!user?.activeWorkspaceId) return;
+        setLoading(true);
+        try {
+            const [teamsData, membersData, rolesData] = await Promise.all([
+                getTeams(user.activeWorkspaceId),
+                getWorkspaceMembers(user.activeWorkspaceId),
+                getRolesAndPermissions(user.activeWorkspaceId)
+            ]);
 
-    const handleRemoveTeam = (id: string) => {
-        setTeams(teams.filter(team => team.id !== id));
-        if (selectedTeamId === id) {
-            setSelectedTeamId(teams[0]?.id || null);
+            if (teamsData.error) throw new Error(teamsData.error);
+            setTeams(teamsData.teams || []);
+            if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
+                setSelectedTeamId(teamsData.teams[0].id);
+            }
+            if (teamsData.teams && teamsData.teams.length === 0) {
+                setSelectedTeamId(null);
+            }
+
+            if (membersData.error) throw new Error(membersData.error);
+            setAllMembers(membersData.members as User[] || []);
+
+            if (rolesData.error) throw new Error(rolesData.error);
+            setRoles(rolesData.roles || []);
+
+        } catch (e: any) {
+            toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
+        } finally {
+            setLoading(false);
         }
+    }, [user?.activeWorkspaceId, toast, selectedTeamId]);
+
+    useEffect(() => {
+        if(user) fetchData();
+    }, [user, fetchData]);
+
+    const handleTeamUpdate = () => fetchData();
+    
+    const handleAddTeam = () => {
+        setIsCreating(false);
+        fetchData();
     };
     
     const handleSelectTeam = (id: string) => {
@@ -285,11 +328,13 @@ export default function TeamPage() {
     const filteredTeams = teams.filter(team => team.name.toLowerCase().includes(searchTerm.toLowerCase()));
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
 
-    if (!user) {
+    if (!user || loading) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainLayout user={user}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainLayout>
         );
     }
 
@@ -346,9 +391,14 @@ export default function TeamPage() {
             <main className="flex-1 overflow-y-auto">
                 <div className="max-w-4xl mx-auto py-6 px-4">
                     {isCreating ? (
-                        <CreateTeamContent onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
+                        <CreateTeamContent workspaceId={user.activeWorkspaceId!} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
                     ) : selectedTeam ? (
-                        <TeamSettingsContent team={selectedTeam} onTeamUpdate={handleTeamUpdate} onRemoveTeam={handleRemoveTeam}/>
+                        <TeamSettingsContent 
+                            team={selectedTeam} 
+                            onMutate={handleTeamUpdate} 
+                            allMembers={allMembers}
+                            roles={roles}
+                        />
                     ) : (
                         <div className="text-center py-20">
                             <h2 className="text-xl font-medium text-muted-foreground">Selecione uma equipe ou crie uma nova</h2>
@@ -362,6 +412,3 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
-
-
-    

@@ -21,16 +21,13 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { roles: [], permissions: [], error: "Usuário não autenticado." };
-    
-    // For viewing, we check if the user is part of the workspace at all, as any member should see the matrix.
-    // The actual editing capability will be checked in the update actions.
-    const memberCheck = await db.query(`SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2`, [session.user.id, workspaceId]);
-    if (memberCheck.rowCount === 0) {
-        return { roles: [], permissions: [], error: "Acesso não autorizado." };
+
+    if (!await hasPermission(session.user.id, workspaceId, 'permissions:view')) {
+         return { roles: [], permissions: [], error: "Acesso não autorizado." };
     }
     
     try {
-        const rolesRes = await db.query('SELECT id, name, description FROM roles WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
+        const rolesRes = await db.query('SELECT id, name, description, is_default FROM roles WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
         const permissionsRes = await db.query('SELECT id, description, category FROM permissions ORDER BY category, id');
         const rolePermissionsRes = await db.query(`
             SELECT rp.role_id, p.id, p.description, p.category
@@ -43,7 +40,10 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
         const permissions: Permission[] = permissionsRes.rows;
 
         const roles: Role[] = rolesRes.rows.map(role => ({
-            ...role,
+            id: role.id,
+            name: role.name,
+            description: role.description,
+            is_default: role.is_default,
             permissions: rolePermissionsRes.rows
                 .filter(rp => rp.role_id === role.id)
                 .map(({ id, description, category }) => ({ id, description, category }))
@@ -62,14 +62,18 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
 
     try {
         // First, get the workspaceId from the role
-        const roleRes = await db.query('SELECT workspace_id FROM roles WHERE id = $1', [roleId]);
+        const roleRes = await db.query('SELECT workspace_id, is_default FROM roles WHERE id = $1', [roleId]);
         if (roleRes.rowCount === 0) {
             return { success: false, error: "Papel não encontrado." };
         }
-        const workspaceId = roleRes.rows[0].workspace_id;
+        const { workspace_id: workspaceId, is_default: isDefault } = roleRes.rows[0];
         
         if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
             return { success: false, error: "Você não tem permissão para editar papéis." };
+        }
+
+        if (isDefault) {
+            return { success: false, error: "Não é possível alterar as permissões de papéis padrão." };
         }
 
         if (enabled) {
@@ -136,6 +140,11 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
     if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para editar papéis." };
     }
+    
+    const roleCheck = await db.query('SELECT is_default FROM roles WHERE id = $1', [roleId]);
+    if (roleCheck.rows[0]?.is_default) {
+        return { success: false, error: "Não é possível editar papéis padrão." };
+    }
 
     try {
         await db.query(
@@ -159,16 +168,24 @@ export async function deleteRoleAction(roleId: string, workspaceId: string): Pro
     }
     
     try {
-        // Check if role is default or has users assigned
+        // Check if role is default
         const roleCheck = await db.query('SELECT is_default FROM roles WHERE id = $1', [roleId]);
         if (roleCheck.rows[0]?.is_default) {
             return { success: false, error: "Não é possível remover papéis padrão." };
         }
 
-        const usersInRoleCheck = await db.query('SELECT 1 FROM user_workspace_roles WHERE role_id = $1', [roleId]);
+        // Check if role has users assigned
+        const usersInRoleCheck = await db.query('SELECT 1 FROM user_workspace_roles WHERE role_id = $1 LIMIT 1', [roleId]);
         if (usersInRoleCheck.rowCount > 0) {
             return { success: false, error: "Não é possível remover um papel que ainda possui membros." };
         }
+
+        // Check if role is assigned to a team
+        const teamsWithRoleCheck = await db.query('SELECT 1 FROM teams WHERE role_id = $1 LIMIT 1', [roleId]);
+        if (teamsWithRoleCheck.rowCount > 0) {
+            return { success: false, error: "Não é possível remover um papel que está atribuído a uma equipe." };
+        }
+
 
         await db.query('DELETE FROM roles WHERE id = $1', [roleId]);
         revalidatePath('/team/permissions');
