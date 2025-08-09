@@ -41,32 +41,34 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     setSelectedChat(chat);
   };
   
-  const updateData = useCallback(async () => {
-    if (!currentUser.activeWorkspaceId) return;
-
-    const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
-    setChats(latestChats);
-
-    // If there is a selected chat, find its latest version and update the state
-    // This will re-render the ChatPanel with new messages
-    if (selectedChat) {
-      const updatedSelectedChat = latestChats.find(c => c.id === selectedChat.id);
-      if (updatedSelectedChat) {
-        setSelectedChat(updatedSelectedChat);
-      }
-    } else if (latestChats.length > 0 && !selectedChat) {
-      // If no chat was selected and we now have chats, select the first one.
-      setSelectedChat(latestChats[0]);
-    }
-  }, [currentUser.activeWorkspaceId, selectedChat]);
-
-  useEffect(() => {
+   useEffect(() => {
     // Initial load
     setChats(initialChats);
     if (initialChats.length > 0) {
         handleSetSelectedChat(initialChats[0]);
     }
     setLoading(false);
+
+    // Function to fetch and update data
+    const updateData = async () => {
+        if (!currentUser.activeWorkspaceId) return;
+
+        const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
+        setChats(latestChats);
+
+        // Update selected chat with new messages using a functional state update
+        // This avoids issues with stale state in closures.
+        setSelectedChat(currentSelectedChat => {
+            if (currentSelectedChat) {
+                const updatedSelectedChat = latestChats.find(c => c.id === currentSelectedChat.id);
+                return updatedSelectedChat || currentSelectedChat;
+            } else if (latestChats.length > 0) {
+                 return latestChats[0];
+            }
+            return null;
+        });
+    };
+
 
     // Start polling when component mounts and user is available
     if (currentUser.activeWorkspaceId) {
@@ -80,7 +82,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             clearInterval(pollingIntervalRef.current);
         }
     };
-  }, [initialChats, currentUser.activeWorkspaceId, updateData]);
+  }, [initialChats, currentUser.activeWorkspaceId]);
 
   if (loading) {
       return (
