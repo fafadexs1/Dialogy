@@ -196,7 +196,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
           sender_id UUID,
-          type message_type_enum DEFAULT 'text'::message_type_enum,
+          type message_type_enum DEFAULT 'text',
           content TEXT,
           metadata JSONB,
           created_at TIMESTAMPTZ DEFAULT NOW(),
