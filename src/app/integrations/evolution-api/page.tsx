@@ -59,9 +59,18 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     )
 }
 
+function CreateInstanceButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending ? 'Criando...' : 'Criar Instância'}
+        </Button>
+    );
+}
+
 function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
     const [state, formAction] = useActionState(createEvolutionApiInstance, null);
-    const { pending } = useFormStatus();
     const [integrationType, setIntegrationType] = useState<'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS'>('WHATSAPP-BAILEYS');
 
     useEffect(() => {
@@ -213,12 +222,9 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
             </div>
              <DialogFooter>
                 <DialogTrigger asChild>
-                    <Button type="button" variant="outline" disabled={pending}>Cancelar</Button>
+                    <Button type="button" variant="outline">Cancelar</Button>
                 </DialogTrigger>
-                <Button type="submit" disabled={pending || !configId}>
-                    {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {pending ? 'Criando...' : 'Criar Instância'}
-                </Button>
+                <CreateInstanceButton />
             </DialogFooter>
         </form>
     );
@@ -548,5 +554,3 @@ export default function EvolutionApiPage() {
         </MainLayout>
     );
 }
-
-    

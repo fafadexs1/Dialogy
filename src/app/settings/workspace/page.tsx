@@ -29,6 +29,16 @@ function SubmitButton() {
     )
 }
 
+function CreateInviteButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending ? 'Gerando...' : 'Gerar Convite'}
+        </Button>
+    )
+}
+
 function CopyButton({ text }: { text: string }) {
     const [copied, setCopied] = useState(false);
 
@@ -76,10 +86,15 @@ export default function WorkspaceSettingsPage() {
     }
 
     useEffect(() => {
-        if (updateError) {
+        if (updateError === null && !useFormStatus().pending) {
+            // A small hack to prevent toast on initial load
+            if(workspaceName !== activeWorkspace?.name) {
+                toast({ title: "Workspace Atualizado!", description: "O nome do workspace foi alterado." });
+            }
+        } else if (updateError) {
             toast({ title: "Erro ao atualizar", description: updateError, variant: "destructive" });
         }
-    }, [updateError, toast]);
+    }, [updateError, toast, workspaceName, activeWorkspace?.name]);
     
     useEffect(() => {
         if (inviteError === null) { // Success
@@ -196,7 +211,7 @@ export default function WorkspaceSettingsPage() {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="ghost" onClick={() => setIsInviteModalOpen(false)}>Cancelar</Button>
-                                    <Button type="submit">Gerar Convite</Button>
+                                    <CreateInviteButton />
                                 </DialogFooter>
                             </form>
                         </DialogContent>
@@ -249,5 +264,3 @@ export default function WorkspaceSettingsPage() {
         </div>
     )
 }
-
-    

@@ -31,6 +31,16 @@ import {
 } from "@/components/ui/alert-dialog"
 
 // --- Dialog Forms ---
+function RoleFormButton({isEditing}: {isEditing: boolean}) {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Save className="mr-2 h-4 w-4"/> 
+            {isEditing ? 'Salvar Alterações' : 'Salvar Papel'}
+        </Button>
+    )
+}
 
 function RoleForm({ 
     workspaceId, 
@@ -76,9 +86,7 @@ function RoleForm({
             </div>
             <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                <Button type="submit">
-                   <Save className="mr-2 h-4 w-4"/> Salvar
-                </Button>
+                <RoleFormButton isEditing={!!initialData} />
             </DialogFooter>
         </form>
     );
@@ -234,6 +242,17 @@ function PermissionsMatrix({
     );
 }
 
+function CreateRoleButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Criar Novo Papel
+        </Button>
+    )
+}
+
 // --- Main Page Component ---
 export default function PermissionsPage() {
     const user = useAuth();
@@ -241,6 +260,7 @@ export default function PermissionsPage() {
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     const fetchData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -268,6 +288,11 @@ export default function PermissionsPage() {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+    
+    const handleSuccess = () => {
+        setIsCreateModalOpen(false);
+        fetchData();
+    }
 
     if (!user) {
         return (
@@ -287,9 +312,9 @@ export default function PermissionsPage() {
                         <h1 className="text-2xl font-bold flex items-center gap-2"><Fingerprint /> Papéis & Permissões</h1>
                         <p className="text-muted-foreground">Defina papéis e controle o que cada membro pode acessar e fazer no workspace.</p>
                     </div>
-                     <Dialog>
+                     <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
                         <DialogTrigger asChild>
-                            <Button>
+                           <Button>
                                 <PlusCircle className="mr-2 h-4 w-4" />
                                 Criar Novo Papel
                             </Button>
@@ -303,7 +328,7 @@ export default function PermissionsPage() {
                             </DialogHeader>
                             <RoleForm 
                                 workspaceId={user.activeWorkspaceId!} 
-                                onSuccess={fetchData} 
+                                onSuccess={handleSuccess} 
                                 action={createRoleAction}
                             />
                         </DialogContent>
