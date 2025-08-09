@@ -231,25 +231,28 @@ export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelPr
           <Separator className="my-6"/>
         
           <div className="space-y-2">
-            <h4 className="font-medium text-muted-foreground mb-2 flex items-center gap-2 text-sm">
-                <UserCheck className="h-4 w-4" />
-                Atendente Responsável
-            </h4>
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="font-medium text-muted-foreground flex items-center gap-2 text-sm">
+                  <UserCheck className="h-4 w-4" />
+                  Atendente Responsável
+              </h4>
+               <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} />
+            </div>
+
             {agent && agent.id !== 'unknown' ? (
                 <div className="flex items-center gap-3 p-3 rounded-md bg-secondary/50">
-                <Avatar className="h-9 w-9">
-                    <AvatarImage src={agent.avatar} alt={agent.name} />
-                    <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
-                </Avatar>
-                 <div className="flex-1">
-                    <p className="font-medium">{agent.name}</p>
-                    {chat.assigned_at && <p className="text-xs text-muted-foreground">Atribuído em {new Date(chat.assigned_at).toLocaleDateString()}</p>}
-                 </div>
+                  <Avatar className="h-9 w-9">
+                      <AvatarImage src={agent.avatar} alt={agent.name} />
+                      <AvatarFallback>{agent.name.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                      <p className="font-medium">{agent.name}</p>
+                      {chat.assigned_at && <p className="text-xs text-muted-foreground">Atribuído em {new Date(chat.assigned_at).toLocaleDateString()}</p>}
+                  </div>
                 </div>
             ) : (
                 <p className="text-muted-foreground italic text-sm px-2">Nenhum atendente atribuído.</p>
             )}
-             <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} />
          </div>
 
         <Separator className="my-6"/>
