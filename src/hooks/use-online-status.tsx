@@ -52,14 +52,15 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
      const userId = currentUser.id;
 
      const handleVisibilityChange = () => {
-        if (document.visibilityState === 'hidden') {
-            updateUserOnlineStatus(userId, false);
-        } else {
+        // When the tab becomes visible again, ensure the user is marked as online.
+        // We no longer mark them as offline when hidden.
+        if (document.visibilityState === 'visible') {
             updateUserOnlineStatus(userId, true);
         }
      }
 
      const handleBeforeUnload = () => {
+        // This is the only place we should mark the user as offline automatically.
         updateUserOnlineStatus(userId, false);
      }
      
