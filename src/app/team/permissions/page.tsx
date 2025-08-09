@@ -13,7 +13,7 @@ import type { Role, Permission } from '@/lib/types';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useFormStatus } from 'react-dom';
@@ -200,7 +200,7 @@ function PermissionsMatrix({
                                 {Object.entries(permissionCategories).map(([category, permissions]) => (
                                     <React.Fragment key={category}>
                                         <tr className="border-t">
-                                            <td colSpan={roles.length + 1} className="py-2 px-4 bg-secondary/30 font-semibold text-muted-foreground sticky left-0 z-10">
+                                            <td colSpan={initialRoles.length + 1} className="py-2 px-4 bg-secondary/30 font-semibold text-muted-foreground sticky left-0 z-10">
                                                 {category}
                                             </td>
                                         </tr>
