@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, UserCheck, DollarSign, BarChart, AlertCircle } from 'lucide-react';
+import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign } from 'lucide-react';
 import type { WorkspaceMember } from '@/lib/types';
 import { getWorkspaceMembers, removeMemberAction } from '@/actions/members';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,9 +28,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from '@/hooks/use-toast';
+import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 
 function MemberActions({ member, workspaceId, onMutate }: { member: WorkspaceMember, workspaceId: string, onMutate: () => void }) {
     
@@ -187,7 +187,7 @@ export default function ManageMembersPage() {
                                                     <Badge variant="outline">{member.role}</Badge>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <span className="text-sm text-muted-foreground">{member.memberSince || 'N/A'}</span>
+                                                    <span className="text-sm text-muted-foreground">{member.memberSince}</span>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="flex items-center gap-1 font-medium text-muted-foreground">
@@ -198,7 +198,7 @@ export default function ManageMembersPage() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                   <MemberActions member={member} workspaceId={activeWorkspace!.id} onMutate={fetchData} />
+                                                   {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} onMutate={fetchData} />}
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -212,5 +212,3 @@ export default function ManageMembersPage() {
         </MainLayout>
     )
 }
-
-    

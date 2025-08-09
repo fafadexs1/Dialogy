@@ -69,7 +69,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name TEXT NOT NULL,
           avatar_url TEXT,
-          owner_id UUID REFERENCES public.users(id) ON DELETE CASCADE
+          owner_id UUID NOT NULL,
+          CONSTRAINT fk_owner FOREIGN KEY(owner_id) REFERENCES public.users(id) ON DELETE CASCADE
       );`,
 
       `CREATE TABLE public.permissions (
@@ -257,5 +258,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
-    
