@@ -86,17 +86,17 @@ async function fetchDataForWorkspace(workspaceId: string) {
       lastName: c.name.split(' ').slice(1).join(' ') || '',
     }));
 
-    const allSenders = [...allUsers, ...allContacts];
+    const allSenders: (User | Contact)[] = [...allUsers, ...allContacts];
 
-    const getSenderById = (id: string): MessageSender => {
-      const sender = allSenders.find(s => s.id === id);
-      return sender || { 
-        id: 'unknown', 
-        name: 'Desconhecido', 
-        avatar: 'https://placehold.co/40x40.png?text=?',
-        firstName: '?',
-        lastName: '?',
-      };
+    const getSenderById = (id: string | null): MessageSender | undefined => {
+        if (!id) return undefined;
+        return allSenders.find(s => s.id === id) || { 
+            id: 'unknown', 
+            name: 'Desconhecido', 
+            avatar: 'https://placehold.co/40x40.png?text=?',
+            firstName: '?',
+            lastName: '?',
+        };
     };
 
     const chatRes = await db.query(`
@@ -140,7 +140,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
                 timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id),
+                sender: getSenderById(m.sender_id)!,
             });
         });
 

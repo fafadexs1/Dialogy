@@ -39,10 +39,12 @@ async function fetchDataForWorkspace(workspaceId: string) {
       lastName: c.name.split(' ').slice(1).join(' ') || '',
     }));
 
-    const allSenders = [...allUsers, ...allContacts];
+    const allSenders: (User | Contact)[] = [...allUsers, ...allContacts];
 
-    const getSenderById = (id: string): MessageSender => {
+    const getSenderById = (id: string | null): MessageSender | undefined => {
+      if (!id) return undefined;
       const sender = allSenders.find(s => s.id === id);
+      // Se não encontrar, retorna um objeto padrão para evitar quebras
       return sender || { 
         id: 'unknown', 
         name: 'Desconhecido', 
@@ -97,7 +99,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
             timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
             createdAt: createdAtDate.toISOString(),
             formattedDate: formatMessageDate(createdAtDate),
-            sender: getSenderById(m.sender_id),
+            sender: getSenderById(m.sender_id)!, // Non-null assertion as sender should exist
         });
     });
 
