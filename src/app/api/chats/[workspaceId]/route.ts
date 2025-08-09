@@ -41,11 +41,14 @@ async function fetchDataForWorkspace(workspaceId: string) {
       };
     }
 
-    // 2. Fetch chats
+    // 2. Fetch chats and order them by the most recent message
     const chatRes = await db.query(`
-        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id
+        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id, MAX(m.created_at) as last_message_time
         FROM chats c
+        LEFT JOIN messages m ON c.id = m.chat_id
         WHERE c.workspace_id = $1
+        GROUP BY c.id
+        ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({

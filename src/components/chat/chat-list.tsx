@@ -88,8 +88,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
     </div>
   );
 
-  const atendimentos = chats.filter(c => c.status === 'atendimentos');
   const gerais = chats.filter(c => c.status === 'gerais');
+  const atendimentos = chats.filter(c => c.status === 'atendimentos');
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
@@ -128,22 +128,22 @@ export default function ChatList({ chats, selectedChat, setSelectedChat }: ChatL
         </TooltipProvider>
       </div>
 
-      <Tabs defaultValue="atendimentos" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0">
         <div className="p-2 flex-shrink-0">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
+            <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
             <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
           </TabsList>
         </div>
         
         <div className="flex-1 relative">
           <ScrollArea className="absolute inset-0 h-full w-full">
+             <TabsContent value="gerais" className="m-0">
+              {renderChatList(gerais)}
+            </TabsContent>
             <TabsContent value="atendimentos" className="m-0">
               {renderChatList(atendimentos)}
-            </TabsContent>
-            <TabsContent value="gerais" className="m-0">
-              {renderChatList(gerais)}
             </TabsContent>
             <TabsContent value="encerrados" className="m-0">
               {renderChatList(encerrados)}

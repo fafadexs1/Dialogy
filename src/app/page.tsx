@@ -54,12 +54,9 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
 
 async function fetchDataForWorkspace(workspaceId: string) {
     console.log(`--- [PAGE_SERVER] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} ---`);
-    if (!workspaceId) return { chats: [], messagesByChat: {} };
+    if (!workspaceId) return { chats: [] };
 
-    // 1. Fetch all users and contacts for the workspace
     const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
-    const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
-
     const allUsers: User[] = userRes.rows.map(u => ({ 
       id: u.id, 
       name: u.full_name, 
@@ -68,6 +65,7 @@ async function fetchDataForWorkspace(workspaceId: string) {
       lastName: u.full_name.split(' ').slice(1).join(' ') || '',
     }));
     
+    const contactRes = await db.query('SELECT id, name, avatar_url FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const allContacts: Contact[] = contactRes.rows.map(c => ({ 
       id: c.id, 
       workspace_id: workspaceId,
@@ -88,13 +86,15 @@ async function fetchDataForWorkspace(workspaceId: string) {
         firstName: '?',
         lastName: '?',
       };
-    }
+    };
 
-    // 2. Fetch chats
     const chatRes = await db.query(`
-        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id
+        SELECT c.id, c.status, c.workspace_id, c.contact_id, c.agent_id, MAX(m.created_at) as last_message_time
         FROM chats c
+        LEFT JOIN messages m ON c.id = m.chat_id
         WHERE c.workspace_id = $1
+        GROUP BY c.id
+        ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
@@ -103,41 +103,40 @@ async function fetchDataForWorkspace(workspaceId: string) {
         workspace_id: r.workspace_id,
         contact: getSenderById(r.contact_id) as Contact,
         agent: getSenderById(r.agent_id) as User,
-        messages: [], // Messages will be populated next
+        messages: [],
     }));
     console.log(`[PAGE_SERVER] fetchDataForWorkspace: ${chats.length} chats encontrados.`);
 
-    // 3. Fetch messages
-    const messageRes = await db.query(`
-        SELECT id, content, created_at, chat_id, sender_id, workspace_id
-        FROM messages
-        WHERE workspace_id = $1
-        ORDER BY created_at ASC
-    `, [workspaceId]);
+    if (chats.length > 0) {
+        const messageRes = await db.query(`
+            SELECT id, content, created_at, chat_id, sender_id, workspace_id
+            FROM messages
+            WHERE chat_id = ANY($1::uuid[])
+            ORDER BY created_at ASC
+        `, [chats.map(c => c.id)]);
 
-    const messagesByChat: { [key: string]: Message[] } = {};
-    messageRes.rows.forEach(m => {
-        if (!messagesByChat[m.chat_id]) {
-            messagesByChat[m.chat_id] = [];
-        }
-        messagesByChat[m.chat_id].push({
-            id: m.id,
-            chat_id: m.chat_id,
-            workspace_id: m.workspace_id,
-            content: m.content,
-            timestamp: new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            sender: getSenderById(m.sender_id),
+        const messagesByChat: { [key: string]: Message[] } = {};
+        messageRes.rows.forEach(m => {
+            if (!messagesByChat[m.chat_id]) {
+                messagesByChat[m.chat_id] = [];
+            }
+            messagesByChat[m.chat_id].push({
+                id: m.id,
+                chat_id: m.chat_id,
+                workspace_id: m.workspace_id,
+                content: m.content,
+                timestamp: new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                sender: getSenderById(m.sender_id),
+            });
         });
-    });
 
-    // 4. Combine chats and their messages
-    const chatsWithMessages = chats.map(chat => ({
-      ...chat,
-      messages: messagesByChat[chat.id] || [],
-    }))
+        chats.forEach(chat => {
+          chat.messages = messagesByChat[chat.id] || [];
+        });
+    }
 
     console.log(`[PAGE_SERVER] fetchDataForWorkspace: Dados de chats e mensagens combinados.`);
-    return { chats: chatsWithMessages };
+    return { chats };
 }
 
 

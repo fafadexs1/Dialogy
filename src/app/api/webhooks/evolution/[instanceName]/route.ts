@@ -101,20 +101,34 @@ async function handleMessagesUpsert(payload: any) {
 
     // 3. Encontrar ou criar o chat
     console.log(`[WEBHOOK_MSG_UPSERT] Buscando/Criando chat para contato ID: ${contactId}`);
-    let chatRes = await client.query('SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2', [contactId, workspaceId]);
+    let chatRes = await client.query('SELECT id, status FROM chats WHERE contact_id = $1 AND workspace_id = $2', [contactId, workspaceId]);
     let chatId;
+    let chatStatus;
 
     if (chatRes.rows.length === 0) {
       console.log(`[WEBHOOK_MSG_UPSERT] Chat com contato ID ${contactId} não encontrado. Criando...`);
+      // Cria o chat com o status padrão 'atendimentos' que é definido pelo DB
       const newChatRes = await client.query(
-        'INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, $3) RETURNING id',
-        [workspaceId, contactId, 'atendimentos']
+        'INSERT INTO chats (workspace_id, contact_id) VALUES ($1, $2) RETURNING id, status',
+        [workspaceId, contactId]
       );
       chatId = newChatRes.rows[0].id;
-       console.log(`[WEBHOOK_MSG_UPSERT] Chat criado com ID: ${chatId}`);
+      chatStatus = newChatRes.rows[0].status;
+      console.log(`[WEBHOOK_MSG_UPSERT] Chat criado com ID: ${chatId} e Status: ${chatStatus}`);
     } else {
       chatId = chatRes.rows[0].id;
-      console.log(`[WEBHOOK_MSG_UPSERT] Chat encontrado com ID: ${chatId}`);
+      chatStatus = chatRes.rows[0].status;
+      console.log(`[WEBHOOK_MSG_UPSERT] Chat encontrado com ID: ${chatId} e Status: ${chatStatus}`);
+
+      // Se o chat estava encerrado, reabra-o na aba "Gerais"
+      if (chatStatus === 'encerrados') {
+        console.log(`[WEBHOOK_MSG_UPSERT] Chat estava encerrado. Movendo para 'gerais'.`);
+        await client.query(
+            "UPDATE chats SET status = 'gerais' WHERE id = $1",
+            [chatId]
+        );
+         console.log(`[WEBHOOK_MSG_UPSERT] Status do chat ${chatId} atualizado para 'gerais'.`);
+      }
     }
 
     // 4. Inserir a mensagem
