@@ -32,7 +32,7 @@ export async function sendMessageAction(
             `SELECT
                 c.workspace_id,
                 ct.phone_number_jid as "remoteJid",
-                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
+                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
              FROM chats c
              JOIN contacts ct ON c.contact_id = ct.id
              WHERE c.id = $1`,
@@ -56,7 +56,7 @@ export async function sendMessageAction(
         }
         const apiConfig = apiConfigRes.rows[0];
 
-        // 2. Send message via Evolution API
+        // 2. Send message via Evolution API with the corrected payload
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
             apiConfig,
@@ -64,13 +64,7 @@ export async function sendMessageAction(
                 method: 'POST',
                 body: JSON.stringify({
                     number: remoteJid,
-                    options: {
-                      delay: 1200,
-                      presence: "composing"
-                    },
-                    textMessage: {
-                      text: content
-                    },
+                    text: content,
                 }),
             }
         );
@@ -136,7 +130,7 @@ export async function sendMediaAction(
             `SELECT
                 c.workspace_id,
                 ct.phone_number_jid as "remoteJid",
-                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
+                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
              FROM chats c
              JOIN contacts ct ON c.contact_id = ct.id
              WHERE c.id = $1`,
@@ -155,10 +149,6 @@ export async function sendMediaAction(
         for (const file of mediaFiles) {
             const apiPayload = {
                 number: remoteJid,
-                options: {
-                    delay: 1200,
-                    presence: "composing"
-                },
                 mediaMessage: {
                     mediatype: file.mediatype,
                     media: file.base64,
@@ -192,7 +182,7 @@ export async function sendMediaAction(
 
         await client.query('COMMIT');
         
-        revalidatePath(`/api/chats/${workspaceId}`);
+        revalidatePath(`/api/chats/${workspace_id}`);
         revalidatePath('/', 'layout');
 
         return { success: true };
