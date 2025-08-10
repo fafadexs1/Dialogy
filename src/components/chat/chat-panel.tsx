@@ -498,15 +498,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     : (isFromMe 
                                         ? 'rounded-br-none bg-primary text-primary-foreground' 
                                         : 'rounded-bl-none bg-card'),
-                                // Add padding only if it's not a media message without a caption
-                                !(message.metadata?.mediaUrl && !message.content) && "px-4 py-3 text-sm",
-                                (message.metadata?.mediaUrl && message.content) && "p-0" // Reset padding for media with caption
+                                !(message.metadata?.mediaUrl) && "px-4 py-3 text-sm",
+                                (message.metadata?.mediaUrl && message.content) && "p-0"
                             )}
                         >
                             {renderMessageContent(message)}
                         </div>
 
-                        <div className={cn("flex items-center gap-1 mt-1.5 text-xs", isFromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                        <div className={cn("flex items-center gap-1 mt-1.5 text-xs text-muted-foreground")}>
                             <span>{message.timestamp}</span>
                             {message.from_me && message.status !== 'deleted' && (
                                 message.api_message_status === 'READ'
@@ -659,3 +658,4 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
