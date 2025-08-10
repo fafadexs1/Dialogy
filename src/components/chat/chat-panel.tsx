@@ -40,6 +40,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -344,7 +345,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         setMediaFiles([]);
         setNewMessage('');
 
-        const result = await sendMediaAction(chat.id, caption, mediaData);
+        const result = await sendMediaAction(chat.id, caption || ' ', mediaData);
         if (result.success) {
             onActionSuccess();
         } else {
