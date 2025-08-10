@@ -7,9 +7,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -45,6 +44,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 import { cn } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 
 
 interface ChatPanelProps {
@@ -222,21 +223,48 @@ function MediaMessage({ message }: { message: Message }) {
         return <p>{message.content}</p>;
     };
     
-    const showCaption = message.content && message.content.trim() !== '';
+    return renderMedia();
+}
+
+function FormattingToolbar({ textareaRef, onValueChange }: { textareaRef: React.RefObject<HTMLTextAreaElement>, onValueChange: (value: string) => void }) {
+    const applyFormat = (format: 'bold' | 'italic' | 'strike' | 'mono') => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = textarea.value.substring(start, end);
+        
+        let char;
+        switch(format) {
+            case 'bold': char = '*'; break;
+            case 'italic': char = '_'; break;
+            case 'strike': char = '~'; break;
+            case 'mono': char = '```'; break;
+        }
+
+        const newText = `${textarea.value.substring(0, start)}${char}${selectedText}${char}${textarea.value.substring(end)}`;
+        
+        onValueChange(newText);
+
+        // Focus and set cursor position after state update
+        setTimeout(() => {
+            textarea.focus();
+            const newPos = start === end ? (start + char.length) : (end + (char.length * 2));
+            textarea.setSelectionRange(newPos, newPos);
+        }, 0);
+    };
 
     return (
-        <div className="max-w-xs">
-           <div className="p-1">
-             {renderMedia()}
-           </div>
-           {showCaption && (
-                <div className="px-1 py-1">
-                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
-                </div>
-            )}
+        <div className="flex items-center gap-1 p-1 rounded-t-md border-b bg-muted/50">
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('bold')}><Bold className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('italic')}><Italic className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('strike')}><Strikethrough className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('mono')}><Code className="h-4 w-4" /></Button>
         </div>
-    );
+    )
 }
+
 
 export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
   const [newMessage, setNewMessage] = useState('');
@@ -247,6 +275,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   const { toast } = useToast();
   
@@ -467,6 +496,23 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
     return <p className="whitespace-pre-wrap px-4 py-3 text-sm">{message.content}</p>;
   };
+  
+    const onEmojiClick = (emojiData: EmojiClickData) => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        
+        const newText = newMessage.substring(0, start) + emojiData.emoji + newMessage.substring(end);
+        setNewMessage(newText);
+        
+        // Focus and set cursor position after state update
+        setTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(start + emojiData.emoji.length, start + emojiData.emoji.length);
+        }, 0);
+    };
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
@@ -659,26 +705,43 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         onSelectReply={(reply) => setNewMessage(reply)}
                     />
                 )}
-                <div className="flex items-center gap-4 mt-2">
+                <div className="relative">
                      <form
                         onSubmit={(e) => {
                             e.preventDefault();
                             handleFormSubmit(new FormData(e.currentTarget));
                         }}
-                        className="relative flex-1"
+                        className="flex flex-col"
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
-                        <Input
-                            name="content"
-                            placeholder={mediaFiles.length > 0 ? "Adicionar uma legenda..." : "Digite sua mensagem..."}
-                            className="pr-24"
-                            value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
-                            disabled={isAiAgentActive}
-                            autoComplete="off"
-                        />
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
-                            <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                         <div className="border rounded-lg overflow-hidden">
+                            <FormattingToolbar textareaRef={textareaRef} onValueChange={setNewMessage} />
+                            <Textarea
+                                ref={textareaRef}
+                                name="content"
+                                placeholder={mediaFiles.length > 0 ? "Adicionar uma legenda..." : "Digite sua mensagem..."}
+                                className="pr-24 min-h-14 border-0 rounded-t-none focus-visible:ring-0"
+                                value={newMessage}
+                                onChange={(e) => setNewMessage(e.target.value)}
+                                disabled={isAiAgentActive}
+                                autoComplete="off"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleFormSubmit(new FormData(e.currentTarget));
+                                    }
+                                }}
+                            />
+                        </div>
+                        <div className="absolute right-2 bottom-2 flex items-center">
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0 border-none">
+                                    <EmojiPicker onEmojiClick={onEmojiClick} />
+                                </PopoverContent>
+                            </Popover>
                             <input
                                 type="file"
                                 ref={fileInputRef}
@@ -692,14 +755,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 variant="ghost"
                                 size="icon"
                                 disabled={isAiAgentActive}
-                                onClick={() => fileInputRef.current?.click()}
+                                onClick={() => fileInput.current?.click()}
                             >
                                 <Paperclip className="h-5 w-5" />
                             </Button>
                             <SendMessageButton disabled={mediaFiles.length === 0 && !newMessage.trim()} />
                         </div>
                     </form>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 mt-2">
                         <Bot className="h-5 w-5 text-muted-foreground" />
                         <Switch
                             id="ai-agent-switch"
