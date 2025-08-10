@@ -43,6 +43,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
+import { cn } from '@/lib/utils';
+
 
 interface ChatPanelProps {
   chat: Chat | null;
@@ -166,12 +168,12 @@ function MediaMessage({ message }: { message: Message }) {
             );
         }
         if (mimetype.startsWith('video/')) {
-            return (
+             return (
                 <Dialog>
                     <DialogTrigger asChild>
-                        <div className="relative w-full max-w-xs aspect-square bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer group hover:bg-slate-800 transition-colors overflow-hidden">
-                             <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors z-10"></div>
-                            <PlayCircle className="h-16 w-16 text-white/70 z-20 group-hover:scale-110 transition-transform" />
+                         <div className="relative group w-full max-w-xs aspect-video bg-slate-800 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/50 transition-colors z-10"></div>
+                            <PlayCircle className="h-16 w-16 text-white/80 z-20 group-hover:scale-110 transition-transform" />
                         </div>
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
@@ -394,9 +396,11 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (message.status === 'deleted') {
       return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
     }
-    if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
+    // Check if it's a media message
+    if (!message.content && (message.metadata?.mediaUrl || message.metadata?.mimetype)) {
       return <MediaMessage message={message} />;
     }
+    // Default to text content
     return <p className="whitespace-pre-wrap">{message.content}</p>;
   };
 
@@ -404,6 +408,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const renderMessageWithSeparator = (message: Message, index: number) => {
     const prevMessage = initialMessages[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
+
+    // Check if the message is media-only (no text content)
+    const isMediaOnly = !message.content && (message.metadata?.mediaUrl || message.metadata?.mimetype);
 
     return (
         <React.Fragment key={message.id}>
@@ -475,27 +482,33 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     )}
                 
                     <div
-                    className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md break-words ${
+                    className={cn(
+                        "max-w-xl break-words",
+                        !isMediaOnly && "rounded-xl px-4 py-3 text-sm shadow-md",
+                        isMediaOnly && "p-0 bg-transparent shadow-none",
                         message.sender?.id === currentUser?.id
                         ? 'rounded-br-none bg-primary text-primary-foreground'
-                        : 'rounded-bl-none bg-card'
-                    } ${message.status === 'deleted' ? 'bg-secondary/50 border' : ''}`}
+                        : 'rounded-bl-none bg-card',
+                        message.status === 'deleted' ? 'bg-secondary/50 border' : ''
+                    )}
                     >
                         {renderMessageContent(message)}
-                        <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
-                            message.sender?.id === currentUser.id
-                                ? 'text-primary-foreground/70'
-                                : 'text-muted-foreground'
-                            }`}>
-                            <span>{message.timestamp}</span>
-                            {message.from_me && message.status !== 'deleted' && (
-                                message.api_message_status === 'READ'
-                                ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                                : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                ? <CheckCheck className="h-4 w-4" />
-                                : <Check className="h-4 w-4" />
-                            )}
-                        </div>
+                        {!isMediaOnly && (
+                            <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
+                                message.sender?.id === currentUser.id
+                                    ? 'text-primary-foreground/70'
+                                    : 'text-muted-foreground'
+                                }`}>
+                                <span>{message.timestamp}</span>
+                                {message.from_me && message.status !== 'deleted' && (
+                                    message.api_message_status === 'READ'
+                                    ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                                    : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                                    ? <CheckCheck className="h-4 w-4" />
+                                    : <Check className="h-4 w-4" />
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
               </div>
@@ -639,5 +652,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
