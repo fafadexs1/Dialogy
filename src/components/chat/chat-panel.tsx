@@ -1,7 +1,6 @@
-
 'use client';
 
-import React, { useActionState, useEffect, useRef } from 'react';
+import React, { useActionState, useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +21,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendMessageAction } from '@/actions/messages';
+import { sendMessageAction, sendMediaAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +38,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
+import MediaPreview, { type MediaFileType } from './media-preview';
 
 interface ChatPanelProps {
   chat: Chat | null;
@@ -59,15 +59,14 @@ function CloseChatButton() {
     )
 }
 
-function SendMessageButton() {
+function SendMessageButton({ disabled }: { disabled?: boolean }) {
     const { pending } = useFormStatus();
     return (
-        <Button type="submit" size="sm" className='h-8' disabled={pending}>
+        <Button type="submit" size="sm" className='h-8' disabled={pending || disabled}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
     )
 }
-
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [state, formAction] = useActionState(closeChatAction, { success: false });
@@ -130,26 +129,31 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 }
 
 export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
-  const [newMessage, setNewMessage] = React.useState('');
-  const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
-  const [isAiThinking, setIsAiThinking] = React.useState(false);
-  // This would typically come from a global state or settings context
-  const [selectedAiModel, setSelectedAiModel] = React.useState('googleai/gemini-2.0-flash');
-  const scrollAreaRef = React.useRef<HTMLDivElement>(null);
-  const formRef = React.useRef<HTMLFormElement>(null);
+  const [newMessage, setNewMessage] = useState('');
+  const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
+  const [isAiAgentActive, setIsAiAgentActive] = useState(false);
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [selectedAiModel, setSelectedAiModel] = useState('googleai/gemini-2.0-flash');
+  
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const { toast } = useToast();
   
-  const [sendState, sendFormAction] = useActionState(sendMessageAction, { success: false });
+  const [sendState, sendFormAction] = useActionState(sendMessageAction, { success: false, error: null });
 
-   useEffect(() => {
+  useEffect(() => {
         if (sendState.success) {
-            setNewMessage(''); // Clear input on successful send
+            formRef.current?.reset();
+            setNewMessage('');
+            onActionSuccess();
         } else if (sendState.error) {
             toast({ title: 'Erro ao Enviar Mensagem', description: sendState.error, variant: 'destructive' });
         }
-    }, [sendState, toast]);
+    }, [sendState, toast, onActionSuccess]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (scrollAreaRef.current) {
         const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
         if (viewport) {
@@ -162,7 +166,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const lastCustomerMessage = initialMessages.filter(m => m.sender?.id !== currentUser?.id).pop();
 
 
-  React.useEffect(() => {
+  useEffect(() => {
     const runAiAgent = async () => {
         if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser?.id) {
             const lastMessageInState = initialMessages[initialMessages.length - 1];
@@ -202,7 +206,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   }, [initialMessages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
   
   // Mark messages as read effect
-  React.useEffect(() => {
+  useEffect(() => {
       if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
 
       const unreadMessages = initialMessages.filter(m => m.sender?.id === chat.contact.id && m.api_message_status !== 'READ' && m.message_id_from_api);
@@ -231,6 +235,67 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
       onActionSuccess(); // Re-fetch data
     }
   }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    const filePromises = files.map(file => {
+        return new Promise<MediaFileType>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64 = (e.target?.result as string).split(',')[1];
+                let mediatype: MediaFileType['mediatype'] = 'document';
+                if (file.type.startsWith('image/')) mediatype = 'image';
+                if (file.type.startsWith('video/')) mediatype = 'video';
+                
+                resolve({
+                    id: `${file.name}-${file.lastModified}`,
+                    file: file,
+                    name: file.name,
+                    type: file.type,
+                    mediatype: mediatype,
+                    base64: base64,
+                });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    });
+
+    Promise.all(filePromises).then(newFiles => {
+        setMediaFiles(prev => [...prev, ...newFiles]);
+    });
+    
+    // Reset file input to allow selecting the same file again
+    event.target.value = '';
+  };
+
+  const handleFormSubmit = async (formData: FormData) => {
+    if (mediaFiles.length > 0) {
+        // Handle media sending
+        if (!chat) return;
+        const caption = formData.get('content') as string;
+        const mediaData = mediaFiles.map(mf => ({
+            base64: mf.base64,
+            mimetype: mf.type,
+            filename: mf.name,
+            mediatype: mf.mediatype,
+        }));
+        
+        const result = await sendMediaAction(chat.id, caption, mediaData);
+        if (result.success) {
+            setMediaFiles([]);
+            setNewMessage('');
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+        }
+    } else {
+        // Handle text message sending
+        sendFormAction(formData);
+    }
+  };
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
@@ -304,13 +369,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                
                 <div
-                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
+                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md break-words ${
                     message.sender?.id === currentUser?.id
                       ? 'rounded-br-none bg-primary text-primary-foreground'
                       : 'rounded-bl-none bg-card'
                   } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
                 >
-                  <p>{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
+                  <p className="whitespace-pre-wrap">{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
                    <div className={`flex items-center justify-end gap-1 mt-2 ${
                       message.sender?.id === currentUser?.id
                         ? 'text-primary-foreground/70'
@@ -397,7 +462,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
        {isChatOpen ? (
             <footer className="border-t bg-card p-4 flex-shrink-0">
-                {!isAiAgentActive && (
+                {mediaFiles.length > 0 ? (
+                    <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
+                ) : !isAiAgentActive && (
                     <SmartReplies 
                         customerMessage={lastCustomerMessage?.content || ''}
                         chatHistory={chatHistoryForAI}
@@ -407,13 +474,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 <div className="flex items-center gap-4 mt-2">
                      <form
                         ref={formRef}
-                        action={sendFormAction}
+                        action={handleFormSubmit}
                         className="relative flex-1"
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
                         <Input
                             name="content"
-                            placeholder="Digite sua mensagem..."
+                            placeholder={mediaFiles.length > 0 ? "Adicionar uma legenda..." : "Digite sua mensagem..."}
                             className="pr-24"
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
@@ -421,8 +488,24 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         />
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
                             <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
-                            <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Paperclip className="h-5 w-5" /></Button>
-                            <SendMessageButton />
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                                className="hidden"
+                                multiple
+                                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                            />
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                disabled={isAiAgentActive}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <Paperclip className="h-5 w-5" />
+                            </Button>
+                            <SendMessageButton disabled={mediaFiles.length === 0 && !newMessage.trim()} />
                         </div>
                     </form>
                     <div className="flex items-center space-x-2">
@@ -444,5 +527,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
