@@ -65,7 +65,13 @@ export async function sendMessageAction(
                 method: 'POST',
                 body: JSON.stringify({
                     number: remoteJid,
-                    text: content,
+                    options: {
+                      delay: 1200,
+                      presence: 'composing',
+                    },
+                    textMessage: {
+                      text: content
+                    }
                 }),
             }
         );
@@ -174,7 +180,7 @@ export async function sendMediaAction(
                 if (messageType && responseMessage[messageType]) {
                     const mediaDetails = responseMessage[messageType];
                     dbMetadata = {
-                        mediaUrl: mediaDetails.url,
+                        mediaUrl: mediaDetails.mediaUrl, // Corrected from .url
                         mimetype: mediaDetails.mimetype,
                         caption: mediaDetails.caption,
                         fileName: mediaDetails.fileName || file.filename,
