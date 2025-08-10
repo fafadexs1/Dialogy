@@ -168,6 +168,17 @@ export async function sendMediaAction(
             const responseMessage = apiResponse?.message;
             let dbContent = caption;
             let dbMetadata = {};
+            
+            // Set a default content for the preview in chat list if caption is empty
+            if (!dbContent) {
+                switch(file.mediatype) {
+                    case 'image': dbContent = '📷 Imagem'; break;
+                    case 'video': dbContent = '📹 Vídeo'; break;
+                    case 'document': dbContent = '📄 Documento'; break;
+                    default: dbContent = 'Arquivo de mídia';
+                }
+            }
+
 
             if (responseMessage) {
                 const messageTypeKey = Object.keys(responseMessage).find(k => k.endsWith('Message'));
@@ -180,7 +191,10 @@ export async function sendMediaAction(
                         caption: mediaDetails.caption,
                         fileName: mediaDetails.fileName || file.filename,
                     };
-                    dbContent = mediaDetails.caption || caption || '';
+                    // Use the received caption if available, otherwise keep the default.
+                    if (mediaDetails.caption && mediaDetails.caption.trim() !== '') {
+                        dbContent = mediaDetails.caption;
+                    }
                 }
             }
             
