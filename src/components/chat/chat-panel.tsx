@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -395,12 +396,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (message.status === 'deleted') {
         return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
     }
-    // This is the key change: check for mediaUrl regardless of content.
-    // The `MediaMessage` component itself will handle showing the caption if it exists.
     if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
         return <MediaMessage message={message} />;
     }
-    // Default to text content if no media is present
     return <p className="whitespace-pre-wrap">{message.content}</p>;
   };
 
@@ -409,7 +407,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const prevMessage = initialMessages[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
-    const isMedia = message.metadata?.mediaUrl || message.metadata?.mimetype;
+    const isMedia = !!(message.metadata?.mediaUrl || message.metadata?.mimetype);
 
     return (
         <React.Fragment key={message.id}>
@@ -483,8 +481,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     <div
                     className={cn(
                         "max-w-xl break-words",
-                        !isMedia && "rounded-xl px-4 py-3 text-sm shadow-md",
-                        isMedia && "p-0 bg-transparent shadow-none",
+                        isMedia && !message.content ? "p-0 bg-transparent shadow-none" : "rounded-xl px-4 py-3 text-sm shadow-md",
                         message.sender?.id === currentUser?.id
                         ? 'rounded-br-none bg-primary text-primary-foreground'
                         : 'rounded-bl-none bg-card',
@@ -493,6 +490,22 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     >
                         {renderMessageContent(message)}
                         {!isMedia && (
+                            <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
+                                message.sender?.id === currentUser.id
+                                    ? 'text-primary-foreground/70'
+                                    : 'text-muted-foreground'
+                                }`}>
+                                <span>{message.timestamp}</span>
+                                {message.from_me && message.status !== 'deleted' && (
+                                    message.api_message_status === 'READ'
+                                    ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                                    : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                                    ? <CheckCheck className="h-4 w-4" />
+                                    : <Check className="h-4 w-4" />
+                                )}
+                            </div>
+                        )}
+                         {isMedia && message.content && (
                             <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
                                 message.sender?.id === currentUser.id
                                     ? 'text-primary-foreground/70'

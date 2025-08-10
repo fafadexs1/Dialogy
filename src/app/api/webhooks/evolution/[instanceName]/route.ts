@@ -145,13 +145,11 @@ async function handleMessagesUpsert(payload: any) {
   
   const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
   
+  // A legenda é o content principal para mídias
   content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
   
   if (message.mediaUrl) {
       metadata.mediaUrl = message.mediaUrl;
-  } else if (messageDetails?.url) {
-      // Fallback for older structures or different media types
-      metadata.mediaUrl = messageDetails.url;
   }
 
   if (messageType) {

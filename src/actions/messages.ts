@@ -164,19 +164,15 @@ export async function sendMediaAction(
                 { method: 'POST', body: JSON.stringify(apiPayload) }
             );
 
-            // Extract data from the successful API response to store in our DB
-            const responseMessage = apiResponse?.message;
-            let dbContent = caption;
+            const dbContent = caption || '';
             let dbMetadata = {};
-            
-            if (responseMessage) {
-                const messageTypeKey = Object.keys(responseMessage).find(k => k.endsWith('Message'));
-                
-                if (messageTypeKey && responseMessage[messageTypeKey]) {
-                    const mediaDetails = responseMessage[messageTypeKey];
-                    dbContent = mediaDetails.caption || caption; // Use received caption or the one sent
+
+            if (apiResponse?.message) {
+                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
+                if (messageTypeKey && apiResponse.message[messageTypeKey]) {
+                    const mediaDetails = apiResponse.message[messageTypeKey];
                     dbMetadata = {
-                        mediaUrl: responseMessage.mediaUrl, 
+                        mediaUrl: apiResponse.message.mediaUrl, // Use the correct root-level mediaUrl
                         mimetype: mediaDetails.mimetype,
                         fileName: mediaDetails.fileName || file.filename,
                     };
