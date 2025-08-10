@@ -399,11 +399,19 @@ export async function deleteMessageAction(
         }
         const { message_id_from_api: apiMessageId, from_me: fromMe, chat_id } = msgRes.rows[0];
         
+        if (!apiMessageId) {
+            throw new Error("A mensagem não possui um ID da API para ser apagada.");
+        }
+
         const chatRes = await client.query('SELECT c.workspace_id, ct.phone_number_jid as remoteJid FROM chats c JOIN contacts ct ON c.contact_id = ct.id WHERE c.id = $1', [chat_id]);
         if (chatRes.rowCount === 0) {
              throw new Error("Chat não encontrado.");
         }
         const { workspace_id, remotejid: remoteJid } = chatRes.rows[0];
+        
+        if (!remoteJid) {
+            throw new Error("Número do contato (remoteJid) não encontrado.");
+        }
         
         const configRes = await client.query('SELECT api_url, api_key FROM evolution_api_configs WHERE workspace_id = $1', [workspace_id]);
         if (configRes.rowCount === 0) {
@@ -412,9 +420,18 @@ export async function deleteMessageAction(
 
         const apiConfig = configRes.rows[0];
         
+        // Correct payload for the delete request
+        const deletePayload = {
+            id: apiMessageId,
+            remoteJid,
+            fromMe,
+        };
+        
+        console.log(`[EVO_ACTION_DELETE_MSG] Enviando requisição para apagar. Payload: ${JSON.stringify(deletePayload)}`);
+
         await fetchEvolutionAPI(`/chat/deleteMessageForEveryone/${instanceName}`, apiConfig, {
             method: 'DELETE',
-            body: JSON.stringify({ id: apiMessageId, remoteJid, fromMe })
+            body: JSON.stringify(deletePayload)
         });
         
         await client.query("UPDATE messages SET status = 'deleted', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
