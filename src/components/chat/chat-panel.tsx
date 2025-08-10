@@ -149,7 +149,7 @@ function MediaMessage({ message }: { message: Message }) {
                             className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
                         />
                     </DialogTrigger>
-                    <DialogContent className="max-w-4xl p-2">
+                    <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
                         <Image
                             src={mediaUrl}
                             alt={caption || fileName || 'Imagem enviada'}
@@ -163,10 +163,19 @@ function MediaMessage({ message }: { message: Message }) {
         }
         if (mimetype.startsWith('video/')) {
             return (
-                <video controls className="rounded-lg w-full max-w-xs">
-                    <source src={mediaUrl} type={mimetype} />
-                    Seu navegador não suporta a tag de vídeo.
-                </video>
+                <Dialog>
+                    <DialogTrigger asChild>
+                         <div className="relative w-full max-w-xs aspect-square bg-slate-800 rounded-lg flex items-center justify-center cursor-pointer hover:bg-slate-700 transition-colors">
+                            <PlayCircle className="h-16 w-16 text-white/70" />
+                        </div>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
+                        <video controls autoPlay className="rounded-lg w-full h-auto">
+                            <source src={mediaUrl} type={mimetype} />
+                            Seu navegador não suporta a tag de vídeo.
+                        </video>
+                    </DialogContent>
+                </Dialog>
             );
         }
         if (mimetype.startsWith('audio/')) {
