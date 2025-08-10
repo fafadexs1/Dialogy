@@ -120,7 +120,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           expires_at TIMESTAMPTZ NOT NULL,
           max_uses INT,
-          is_revoked BOOLEAN DEFAULT FALSE
+          is_revoked BOOLEAN DEFAULT FALSE,
+          use_count INT DEFAULT 0
       );`,
 
       `CREATE TABLE public.user_invites (
@@ -162,7 +163,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           avatar_url TEXT,
           email TEXT,
           phone TEXT,
-          phone_number_jid TEXT UNIQUE
+          phone_number_jid TEXT,
+          UNIQUE(workspace_id, phone_number_jid)
       );`,
       
       `CREATE TABLE public.tags (
@@ -338,7 +340,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
         `CREATE TRIGGER setup_default_business_hours_trigger
             AFTER INSERT ON public.teams
-            FOR EACH ROW EXECUTE PROCEDURE public.setup_default_business_hours();`
+            FOR EACH ROW EXECUTE PROCEDURE public.setup_default_business_hours();`,
+            
+        `CREATE OR REPLACE FUNCTION public.update_invite_use_count()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          UPDATE public.workspace_invites
+          SET use_count = use_count + 1
+          WHERE id = NEW.invite_id;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;`,
+
+        `CREATE TRIGGER update_invite_use_count_trigger
+            AFTER INSERT ON public.user_invites
+            FOR EACH ROW EXECUTE PROCEDURE public.update_invite_use_count();`
     ];
 
     for(const query of functionsAndTriggers) {
