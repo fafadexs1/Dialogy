@@ -40,7 +40,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -541,9 +540,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
        {isChatOpen ? (
             <footer className="border-t bg-card p-4 flex-shrink-0">
-                {mediaFiles.length > 0 ? (
+                {mediaFiles.length > 0 && (
                     <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
-                ) : !isAiAgentActive && (
+                )}
+                {!isAiAgentActive && mediaFiles.length === 0 && (
                     <SmartReplies 
                         customerMessage={lastCustomerMessage?.content || ''}
                         chatHistory={chatHistoryForAI}
@@ -609,5 +609,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
