@@ -152,9 +152,10 @@ export async function sendMediaAction(
             const apiPayload = {
                 number: remoteJid,
                 mediatype: file.mediatype,
-                media: `data:${file.mimetype};base64,${file.base64}`,
+                mimetype: file.mimetype,
+                media: file.base64,
                 fileName: file.filename,
-                caption: caption || ' ' // Ensure caption is not empty
+                caption: caption || ' ',
             };
             
             const apiResponse = await fetchEvolutionAPI(
