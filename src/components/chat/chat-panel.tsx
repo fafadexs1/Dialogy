@@ -139,20 +139,31 @@ function MediaMessage({ message }: { message: Message }) {
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
             return (
-                <Link href={mediaUrl} target="_blank" rel="noopener noreferrer">
-                    <Image
-                        src={mediaUrl}
-                        alt={caption || fileName || 'Imagem enviada'}
-                        width={300}
-                        height={300}
-                        className="rounded-lg object-cover max-w-xs"
-                    />
-                </Link>
+                 <Dialog>
+                    <DialogTrigger asChild>
+                        <Image
+                            src={mediaUrl}
+                            alt={caption || fileName || 'Imagem enviada'}
+                            width={300}
+                            height={300}
+                            className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
+                        />
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl p-2">
+                        <Image
+                            src={mediaUrl}
+                            alt={caption || fileName || 'Imagem enviada'}
+                            width={1024}
+                            height={768}
+                            className="rounded-lg object-contain max-h-[80vh] w-full"
+                        />
+                    </DialogContent>
+                </Dialog>
             );
         }
         if (mimetype.startsWith('video/')) {
             return (
-                <video controls className="rounded-lg max-w-xs">
+                <video controls className="rounded-lg w-full max-w-xs">
                     <source src={mediaUrl} type={mimetype} />
                     Seu navegador não suporta a tag de vídeo.
                 </video>
