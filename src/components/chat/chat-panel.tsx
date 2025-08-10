@@ -133,13 +133,11 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
     )
 }
 
-function MediaMessage({ message, currentUser }: { message: Message, currentUser: User }) {
+function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName } = message.metadata || {};
 
     if (!mediaUrl) return <p>{message.content}</p>;
     
-    const isFromMe = message.sender?.id === currentUser.id;
-
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
             return (
@@ -217,17 +215,12 @@ function MediaMessage({ message, currentUser }: { message: Message, currentUser:
     const showCaption = message.content && message.content.trim() !== '';
 
     return (
-        <div className={cn(
-            "rounded-xl shadow-md max-w-xs",
-             isFromMe
-                ? 'rounded-br-none bg-primary text-primary-foreground'
-                : 'rounded-bl-none bg-card'
-        )}>
+        <div className="max-w-xs">
            <div className="p-1">
              {renderMedia()}
            </div>
            {showCaption && (
-                <div className="px-4 pb-3 pt-1">
+                <div className="px-1 py-1">
                     <p className="whitespace-pre-wrap text-sm">{message.content}</p>
                 </div>
             )}
@@ -409,10 +402,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const renderMessageContent = (message: Message) => {
     if (message.status === 'deleted') {
-        return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
+        return <p className="whitespace-pre-wrap italic">🗑️ Mensagem apagada</p>;
     }
     if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
-        return <MediaMessage message={message} currentUser={currentUser} />;
+        return <MediaMessage message={message} />;
     }
     return <p className="whitespace-pre-wrap">{message.content}</p>;
   };
@@ -422,9 +415,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const prevMessage = initialMessages[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
-    const isMedia = !!(message.metadata?.mediaUrl || message.metadata?.mimetype);
     const isFromMe = message.sender?.id === currentUser?.id;
-    const hasContent = message.content && message.content.trim() !== '';
 
     return (
         <React.Fragment key={message.id}>
@@ -447,7 +438,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 </div>
             ) : (
              <div
-                className={`group flex items-end gap-3 animate-in fade-in ${
+                className={`group flex items-start gap-3 animate-in fade-in ${
                   isFromMe ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
@@ -459,7 +450,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
 
                 <div
-                  className={`flex items-center gap-2 ${ isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
+                  className={`flex items-end gap-2 ${ isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
                 >
                     {isFromMe && message.status !== 'deleted' && (
                         <div className="flex-shrink-0">
@@ -496,40 +487,37 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     )}
                 
                     <div
-                        className={cn("max-w-xl break-words",
-                            !isMedia && "rounded-xl px-4 py-3 text-sm shadow-md",
-                            !isMedia && (isFromMe ? 'rounded-br-none bg-primary text-primary-foreground' : 'rounded-bl-none bg-card'),
-                            message.status === 'deleted' && 'bg-secondary/50 border rounded-xl px-4 py-3 text-sm'
+                        className={cn("flex flex-col",
+                            isFromMe ? 'items-end' : 'items-start'
                         )}
                     >
-                        {renderMessageContent(message)}
-                        
-                        {!isMedia && (
-                            <div className={cn("flex items-center justify-end gap-1 mt-2 text-xs", isFromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
-                                <span>{message.timestamp}</span>
-                                {message.from_me && message.status !== 'deleted' && (
-                                    message.api_message_status === 'READ'
-                                    ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                                    : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                    ? <CheckCheck className="h-4 w-4" />
-                                    : <Check className="h-4 w-4" />
-                                )}
-                            </div>
-                        )}
+                         <div
+                            className={cn("break-words rounded-xl shadow-md",
+                                message.status === 'deleted' 
+                                    ? 'bg-secondary/50 border rounded-xl px-4 py-3 text-sm'
+                                    : (isFromMe 
+                                        ? 'rounded-br-none bg-primary text-primary-foreground' 
+                                        : 'rounded-bl-none bg-card'),
+                                // Add padding only if it's not a media message without a caption
+                                !(message.metadata?.mediaUrl && !message.content) && "px-4 py-3 text-sm",
+                                (message.metadata?.mediaUrl && message.content) && "p-0" // Reset padding for media with caption
+                            )}
+                        >
+                            {renderMessageContent(message)}
+                        </div>
+
+                        <div className={cn("flex items-center gap-1 mt-1.5 text-xs", isFromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                            <span>{message.timestamp}</span>
+                            {message.from_me && message.status !== 'deleted' && (
+                                message.api_message_status === 'READ'
+                                ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                                : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                                ? <CheckCheck className="h-4 w-4" />
+                                : <Check className="h-4 w-4" />
+                            )}
+                        </div>
                     </div>
                 </div>
-                 {isMedia && (
-                    <div className={cn("flex items-center gap-1 text-xs text-muted-foreground", isFromMe ? "mr-10" : "ml-10")}>
-                        <span>{message.timestamp}</span>
-                        {isFromMe && message.status !== 'deleted' && (
-                            message.api_message_status === 'READ'
-                            ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                            : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                            ? <CheckCheck className="h-4 w-4 text-muted-foreground" />
-                            : <Check className="h-4 w-4 text-muted-foreground" />
-                        )}
-                    </div>
-                 )}
               </div>
             )}
         </React.Fragment>
