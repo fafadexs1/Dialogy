@@ -40,6 +40,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -638,5 +639,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
