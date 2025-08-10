@@ -18,15 +18,11 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
-        port: '',
-        pathname: '/**',
+        hostname: '**',
       },
       {
-        protocol: 'https',
-        hostname: 'mmg.whatsapp.net',
-        port: '',
-        pathname: '/**',
+        protocol: 'http',
+        hostname: '**',
       }
     ],
      domains: ['localhost'],
