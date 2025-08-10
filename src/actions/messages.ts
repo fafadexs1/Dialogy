@@ -176,19 +176,17 @@ export async function sendMediaAction(
             let dbMetadata = {};
 
             if (responseMessage) {
-                // The correct media URL is at the message level, not inside imageMessage/videoMessage etc.
-                const mediaUrl = responseMessage.mediaUrl;
+                 const mediaUrl = responseMessage.mediaUrl;
                 const messageTypeKey = Object.keys(responseMessage).find(k => k.endsWith('Message'));
                 
                 if (messageTypeKey && responseMessage[messageTypeKey]) {
                     const mediaDetails = responseMessage[messageTypeKey];
                     dbMetadata = {
-                        mediaUrl: mediaUrl, // Use the correct mediaUrl from the response root
+                        mediaUrl: mediaUrl,
                         mimetype: mediaDetails.mimetype,
                         caption: mediaDetails.caption,
                         fileName: mediaDetails.fileName || file.filename,
                     };
-                    // Use caption from response if available, otherwise from input
                     dbContent = mediaDetails.caption || caption || '';
                 }
             }
