@@ -228,7 +228,7 @@ function MediaMessage({ message }: { message: Message }) {
         <div className='flex flex-col gap-1.5'>
             {renderMedia()}
             {message.content && (
-                <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                <p className="whitespace-pre-wrap text-sm" dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content) }} />
             )}
         </div>
     )
@@ -253,6 +253,16 @@ function FormattingToolbar() {
             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('strikethrough'); }}><Strikethrough className="h-4 w-4" /></Button>
         </div>
     )
+}
+
+function formatWhatsappText(text: string): string {
+    if (!text) return '';
+    return text
+        .replace(/\*(.*?)\*/g, '<b>$1</b>')         // Bold
+        .replace(/_(.*?)_/g, '<i>$1</i>')         // Italic
+        .replace(/~(.*?)~/g, '<s>$1</s>')         // Strikethrough
+        .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>') // Code block
+        .replace(/`(.*?)`/g, '<code>$1</code>');      // Inline code
 }
 
 
@@ -497,7 +507,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (isMedia) {
         return <MediaMessage message={message} />;
     }
-    return <p className="whitespace-pre-wrap text-sm">{message.content}</p>;
+    return <p className="whitespace-pre-wrap text-sm" dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content) }} />;
   };
   
     const onEmojiClick = (emojiData: EmojiClickData) => {
@@ -606,7 +616,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             ) : renderMessageContent(message)}
                         </div>
                     </div>
-                     <div className={cn("flex items-center gap-1 text-xs", isFromMe ? 'text-muted-foreground' : 'text-muted-foreground')}>
+                     <div className={cn("flex items-center gap-1 text-xs text-muted-foreground", isFromMe ? '' : '')}>
                         <span>{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
@@ -708,22 +718,24 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
                          <input type="hidden" name="content" value={newMessage} />
-                         <div className="relative border rounded-lg overflow-hidden">
-                            <FormattingToolbar />
-                            <ContentEditable
-                                innerRef={contentEditableRef}
-                                html={newMessage}
-                                disabled={isAiAgentActive}
-                                onChange={(e) => setNewMessage(e.target.value)}
-                                className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
-                                tagName="div"
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleFormSubmit(new FormData(e.currentTarget.form!));
-                                    }
-                                }}
-                            />
+                         <div className="relative overflow-hidden">
+                            <div className='border rounded-lg'>
+                                <FormattingToolbar />
+                                <ContentEditable
+                                    innerRef={contentEditableRef}
+                                    html={newMessage}
+                                    disabled={isAiAgentActive}
+                                    onChange={(e) => setNewMessage(e.target.value)}
+                                    className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
+                                    tagName="div"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleFormSubmit(new FormData(e.currentTarget.form!));
+                                        }
+                                    }}
+                                />
+                            </div>
                             <div className="absolute right-2 bottom-2.5 flex items-center">
                                 <Popover>
                                     <PopoverTrigger asChild>
