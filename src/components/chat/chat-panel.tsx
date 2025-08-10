@@ -298,6 +298,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }, [initialMessages]);
 
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto'; // Reset height
+      textarea.style.height = `${textarea.scrollHeight}px`; // Set to scroll height
+    }
+  }, [newMessage]);
+
+
   const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
   const lastCustomerMessage = initialMessages.filter(m => m.sender?.id !== currentUser?.id).pop();
 
@@ -705,26 +714,26 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         onSelectReply={(reply) => setNewMessage(reply)}
                     />
                 )}
-                <div className="relative">
+                <div className="space-y-2">
                      <form
                         onSubmit={(e) => {
                             e.preventDefault();
                             handleFormSubmit(new FormData(e.currentTarget));
                         }}
-                        className="flex flex-col"
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
-                         <div className="border rounded-lg overflow-hidden">
+                         <div className="relative border rounded-lg overflow-hidden">
                             <FormattingToolbar textareaRef={textareaRef} onValueChange={setNewMessage} />
                             <Textarea
                                 ref={textareaRef}
                                 name="content"
                                 placeholder={mediaFiles.length > 0 ? "Adicionar uma legenda..." : "Digite sua mensagem..."}
-                                className="pr-24 min-h-14 border-0 rounded-t-none focus-visible:ring-0"
+                                className="pr-28 pl-4 py-3 min-h-14 border-0 rounded-t-none focus-visible:ring-0 resize-none"
                                 value={newMessage}
                                 onChange={(e) => setNewMessage(e.target.value)}
                                 disabled={isAiAgentActive}
                                 autoComplete="off"
+                                rows={1}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
@@ -732,37 +741,38 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     }
                                 }}
                             />
-                        </div>
-                        <div className="absolute right-2 bottom-2 flex items-center">
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0 border-none">
-                                    <EmojiPicker onEmojiClick={onEmojiClick} />
-                                </PopoverContent>
-                            </Popover>
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={handleFileChange}
-                                className="hidden"
-                                multiple
-                                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
-                            />
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                disabled={isAiAgentActive}
-                                onClick={() => fileInput.current?.click()}
-                            >
-                                <Paperclip className="h-5 w-5" />
-                            </Button>
-                            <SendMessageButton disabled={mediaFiles.length === 0 && !newMessage.trim()} />
+                            <div className="absolute right-2 bottom-2.5 flex items-center">
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0 border-none mb-2">
+                                        <EmojiPicker onEmojiClick={onEmojiClick} />
+                                    </PopoverContent>
+                                </Popover>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                    className="hidden"
+                                    multiple
+                                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={isAiAgentActive}
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <Paperclip className="h-5 w-5" />
+                                </Button>
+                                <SendMessageButton disabled={mediaFiles.length === 0 && !newMessage.trim()} />
+                            </div>
                         </div>
                     </form>
-                    <div className="flex items-center space-x-2 mt-2">
+                    <div className="flex items-center space-x-2">
                         <Bot className="h-5 w-5 text-muted-foreground" />
                         <Switch
                             id="ai-agent-switch"
