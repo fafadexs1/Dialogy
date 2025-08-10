@@ -69,7 +69,7 @@ export async function sendMessageAction(
                 }),
             }
         );
-
+        
         // 3. Save the message to our database using the API response
         await client.query(
             `INSERT INTO messages (
@@ -83,7 +83,7 @@ export async function sendMessageAction(
                 api_message_status,
                 instance_name
              ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7)`,
-            [workspace_id, chatId, currentUserId, content, apiResponse?.key?.id, apiResponse?.status, instanceName]
+            [workspace_id, chatId, currentUserId, content, apiResponse?.key?.id, 'SENT', instanceName]
         );
 
         await client.query('COMMIT');
@@ -152,7 +152,6 @@ export async function sendMediaAction(
             const apiPayload = {
                 number: remoteJid,
                 mediatype: file.mediatype,
-                mimetype: file.mimetype,
                 media: `data:${file.mimetype};base64,${file.base64}`,
                 fileName: file.filename,
                 caption: caption
@@ -164,13 +163,26 @@ export async function sendMediaAction(
                 { method: 'POST', body: JSON.stringify(apiPayload) }
             );
 
-            // Create a representative content string for the DB
-            const mediaIcon = file.mediatype === 'image' ? '📷' : file.mediatype === 'video' ? '📹' : '📄';
-            let dbContent = `${mediaIcon} ${file.filename}`;
-            if (caption) {
-                dbContent += `\n${caption}`;
-            }
+            // Extract data from the successful API response to store in our DB
+            const responseMessage = apiResponse?.message;
+            let dbContent = caption;
+            let dbMetadata = {};
 
+            if (responseMessage) {
+                const messageType = Object.keys(responseMessage).find(k => k.endsWith('Message'));
+                if (messageType && responseMessage[messageType]) {
+                    const mediaDetails = responseMessage[messageType];
+                    dbMetadata = {
+                        mediaUrl: mediaDetails.url,
+                        mimetype: mediaDetails.mimetype,
+                        caption: mediaDetails.caption,
+                        fileName: mediaDetails.fileName || file.filename,
+                    };
+                    // Use caption from response if available, otherwise from input
+                    dbContent = mediaDetails.caption || caption || '';
+                }
+            }
+            
             await client.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, sender_id, type, content, from_me,
@@ -182,8 +194,8 @@ export async function sendMediaAction(
                     currentUserId, 
                     dbContent, 
                     apiResponse?.key?.id, 
-                    apiResponse?.status, 
-                    { original_filename: file.filename, mimetype: file.mimetype, caption: caption },
+                    apiResponse?.status || 'SENT', 
+                    dbMetadata,
                     instanceName
                 ]
             );
