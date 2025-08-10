@@ -46,6 +46,7 @@ import MediaPreview, { type MediaFileType } from './media-preview';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
+import ContentEditable from 'react-contenteditable';
 
 
 interface ChatPanelProps {
@@ -223,44 +224,33 @@ function MediaMessage({ message }: { message: Message }) {
         return <p>{message.content}</p>;
     };
     
-    return renderMedia();
+    return (
+        <div className='flex flex-col gap-1.5'>
+            {renderMedia()}
+            {message.content && (
+                <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+            )}
+        </div>
+    )
 }
 
-function FormattingToolbar({ textareaRef, onValueChange }: { textareaRef: React.RefObject<HTMLTextAreaElement>, onValueChange: (value: string) => void }) {
-    const applyFormat = (format: 'bold' | 'italic' | 'strike' | 'mono') => {
-        const textarea = textareaRef.current;
-        if (!textarea) return;
-
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const selectedText = textarea.value.substring(start, end);
-        
-        let char;
-        switch(format) {
-            case 'bold': char = '*'; break;
-            case 'italic': char = '_'; break;
-            case 'strike': char = '~'; break;
-            case 'mono': char = '```'; break;
+function FormattingToolbar() {
+    const applyFormat = (format: 'bold' | 'italic' | 'strikethrough' | 'createLink') => {
+        if (format === 'createLink') {
+            const url = prompt("Enter the URL");
+            if (url) {
+                document.execCommand(format, false, url);
+            }
+        } else {
+            document.execCommand(format, false, undefined);
         }
-
-        const newText = `${textarea.value.substring(0, start)}${char}${selectedText}${char}${textarea.value.substring(end)}`;
-        
-        onValueChange(newText);
-
-        // Focus and set cursor position after state update
-        setTimeout(() => {
-            textarea.focus();
-            const newPos = start === end ? (start + char.length) : (end + (char.length * 2));
-            textarea.setSelectionRange(newPos, newPos);
-        }, 0);
     };
 
     return (
         <div className="flex items-center gap-1 p-1 rounded-t-md border-b bg-muted/50">
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('bold')}><Bold className="h-4 w-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('italic')}><Italic className="h-4 w-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('strike')}><Strikethrough className="h-4 w-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => applyFormat('mono')}><Code className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('bold'); }}><Bold className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('italic'); }}><Italic className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('strikethrough'); }}><Strikethrough className="h-4 w-4" /></Button>
         </div>
     )
 }
@@ -275,7 +265,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const contentEditableRef = useRef<HTMLElement>(null);
   
   const { toast } = useToast();
   
@@ -297,15 +287,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         }
     }
   }, [initialMessages]);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = 'auto'; // Reset height
-      textarea.style.height = `${textarea.scrollHeight}px`; // Set to scroll height
-    }
-  }, [newMessage]);
-
 
   const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
   const lastCustomerMessage = initialMessages.filter(m => m.sender?.id !== currentUser?.id).pop();
@@ -386,13 +367,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             const video = document.createElement('video');
             const reader = new FileReader();
 
-            // Set up video element
             video.preload = 'metadata';
             video.muted = true;
             video.playsInline = true;
 
             video.onloadeddata = () => {
-                video.currentTime = 1; // Seek to 1 second
+                video.currentTime = 1; 
             };
             
             video.onseeked = () => {
@@ -400,19 +380,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
-                if (!ctx) {
-                    reject(new Error('Could not get canvas context'));
-                    return;
-                }
+                if (!ctx) return reject(new Error('Could not get canvas context'));
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL('image/jpeg'));
+                const dataUrl = canvas.toDataURL('image/jpeg');
+                URL.revokeObjectURL(video.src);
+                resolve(dataUrl);
             };
 
             video.onerror = (e) => {
+                URL.revokeObjectURL(video.src);
                 reject(e);
             }
 
-            // Load the video file
             reader.onload = (event) => {
                 if (typeof event.target?.result === 'string') {
                     video.src = event.target.result;
@@ -448,7 +427,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 thumbnail = await generateVideoThumbnail(file);
             } catch (error) {
                 console.error("Error generating video thumbnail:", error);
-                // Continue without a thumbnail if generation fails
             }
         }
         
@@ -469,10 +447,26 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     event.target.value = '';
   };
 
+  const htmlToWhatsappMarkdown = (html: string): string => {
+      if (!html) return '';
+      return html
+          .replace(/<b>(.*?)<\/b>/g, '*$1*')
+          .replace(/<i>(.*?)<\/i>/g, '_$1_')
+          .replace(/<s>(.*?)<\/s>/g, '~$1~')
+          .replace(/<strike>(.*?)<\/strike>/g, '~$1~')
+          .replace(/<br>/g, '\n')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/<[^>]*>/g, ''); // Remove remaining HTML tags
+  };
+
+
   const handleFormSubmit = async (formData: FormData) => {
+    const plainTextContent = htmlToWhatsappMarkdown(newMessage);
+    formData.set('content', plainTextContent);
+
     if (mediaFiles.length > 0) {
         if (!chat) return;
-        const caption = formData.get('content') as string;
+        const caption = plainTextContent;
         const mediaData = mediaFiles.map(mf => ({
             base64: mf.base64,
             mimetype: mf.type,
@@ -499,28 +493,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
   const renderMessageContent = (message: Message) => {
-    const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail || (message.metadata?.mimetype && !message.content);
+    const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
     if (isMedia) {
         return <MediaMessage message={message} />;
     }
-    return <p className="whitespace-pre-wrap px-4 py-3 text-sm">{message.content}</p>;
+    return <p className="whitespace-pre-wrap text-sm">{message.content}</p>;
   };
   
     const onEmojiClick = (emojiData: EmojiClickData) => {
-        const textarea = textareaRef.current;
-        if (!textarea) return;
+        const editableDiv = contentEditableRef.current;
+        if (!editableDiv) return;
 
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        
-        const newText = newMessage.substring(0, start) + emojiData.emoji + newMessage.substring(end);
-        setNewMessage(newText);
-        
-        // Focus and set cursor position after state update
-        setTimeout(() => {
-            textarea.focus();
-            textarea.setSelectionRange(start + emojiData.emoji.length, start + emojiData.emoji.length);
-        }, 0);
+        editableDiv.focus();
+        document.execCommand('insertText', false, emojiData.emoji);
     };
 
 
@@ -608,7 +593,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         )}
                     
                         <div
-                            className={cn("break-words rounded-xl shadow-md",
+                            className={cn("break-words rounded-xl shadow-md p-3",
                                 isDeleted 
                                     ? 'bg-secondary/50 border'
                                     : (isFromMe 
@@ -617,11 +602,11 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             )}
                         >
                             {isDeleted ? (
-                                <p className="whitespace-pre-wrap italic px-4 py-3 text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
                             ) : renderMessageContent(message)}
                         </div>
                     </div>
-                     <div className={cn("flex items-center gap-1 text-xs text-muted-foreground")}>
+                     <div className={cn("flex items-center gap-1 text-xs", isFromMe ? 'text-muted-foreground' : 'text-muted-foreground')}>
                         <span>{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
@@ -722,22 +707,20 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         }}
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
+                         <input type="hidden" name="content" value={newMessage} />
                          <div className="relative border rounded-lg overflow-hidden">
-                            <FormattingToolbar textareaRef={textareaRef} onValueChange={setNewMessage} />
-                            <Textarea
-                                ref={textareaRef}
-                                name="content"
-                                placeholder={mediaFiles.length > 0 ? "Adicionar uma legenda..." : "Digite sua mensagem..."}
-                                className="pr-28 pl-4 py-3 min-h-14 border-0 rounded-t-none focus-visible:ring-0 resize-none"
-                                value={newMessage}
-                                onChange={(e) => setNewMessage(e.target.value)}
+                            <FormattingToolbar />
+                            <ContentEditable
+                                innerRef={contentEditableRef}
+                                html={newMessage}
                                 disabled={isAiAgentActive}
-                                autoComplete="off"
-                                rows={1}
+                                onChange={(e) => setNewMessage(e.target.value)}
+                                className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
+                                tagName="div"
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
-                                        handleFormSubmit(new FormData(e.currentTarget));
+                                        handleFormSubmit(new FormData(e.currentTarget.form!));
                                     }
                                 }}
                             />
@@ -768,7 +751,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 >
                                     <Paperclip className="h-5 w-5" />
                                 </Button>
-                                <SendMessageButton disabled={mediaFiles.length === 0 && !newMessage.trim()} />
+                                <SendMessageButton disabled={mediaFiles.length === 0 && !htmlToWhatsappMarkdown(newMessage).trim()} />
                             </div>
                         </div>
                     </form>
