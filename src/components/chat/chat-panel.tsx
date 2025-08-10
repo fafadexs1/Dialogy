@@ -392,27 +392,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             if (!ctx) return reject(new Error('Could not get canvas context'));
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const dataUrl = canvas.toDataURL('image/jpeg');
-            URL.revokeObjectURL(video.src); // Clean up the object URL
+            video.src = ''; // Clean up
             resolve(dataUrl);
         };
 
         video.onerror = (e) => {
             console.error("Video load error:", e);
-            URL.revokeObjectURL(video.src);
+            video.src = ''; // Clean up
             reject(new Error("Failed to load video for thumbnail generation"));
         }
-
-        // Use FileReader to create a blob URL, which is more reliable
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            if (typeof event.target?.result === 'string') {
-                video.src = event.target.result;
-            } else {
-                 reject(new Error('FileReader did not return a string.'));
-            }
-        };
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(file);
+        
+        video.src = URL.createObjectURL(file);
     });
 };
 
@@ -560,8 +550,21 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                    <div className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
-                        {isFromMe && !isDeleted && (
+                    <div className={cn("flex items-end gap-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                        <div
+                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
+                                isDeleted 
+                                    ? 'bg-secondary/50 border'
+                                    : (isFromMe 
+                                        ? 'bg-primary text-primary-foreground' 
+                                        : 'bg-card')
+                            )}
+                        >
+                            {isDeleted ? (
+                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                            ) : renderMessageContent(message)}
+                        </div>
+                         {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0">
                                 <AlertDialog>
                                     <DropdownMenu>
@@ -594,22 +597,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 </AlertDialog>
                             </div>
                         )}
-                        <div
-                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
-                                isDeleted 
-                                    ? 'bg-secondary/50 border'
-                                    : (isFromMe 
-                                        ? 'bg-primary text-primary-foreground' 
-                                        : 'bg-card')
-                            )}
-                        >
-                            {isDeleted ? (
-                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
-                            ) : renderMessageContent(message)}
-                        </div>
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                        <span>{message.timestamp}</span>
+                    <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                        <span className="mx-1">{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
                             ? <CheckCheck className="h-4 w-4 text-sky-400" />
@@ -666,7 +656,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
       <div className="flex-1 overflow-y-auto" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
-          <div className="space-y-4 p-6">
+          <div className="space-y-1 p-6">
             {initialMessages.map(renderMessageWithSeparator)}
             {isAiThinking && (
               <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
