@@ -344,22 +344,46 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   }
 
   const generateVideoThumbnail = (file: File): Promise<string> => {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const video = document.createElement('video');
-            video.src = URL.createObjectURL(file);
-            video.currentTime = 1; // Seek to 1 second
+            const reader = new FileReader();
+
+            // Set up video element
+            video.preload = 'metadata';
+            video.muted = true;
+            video.playsInline = true;
 
             video.onloadeddata = () => {
-                video.onseeked = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    URL.revokeObjectURL(video.src);
-                    resolve(canvas.toDataURL('image/jpeg'));
-                };
+                video.currentTime = 1; // Seek to 1 second
             };
+            
+            video.onseeked = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error('Could not get canvas context'));
+                    return;
+                }
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg'));
+            };
+
+            video.onerror = (e) => {
+                reject(e);
+            }
+
+            // Load the video file
+            reader.onload = (event) => {
+                if (typeof event.target?.result === 'string') {
+                    video.src = event.target.result;
+                } else {
+                     reject(new Error('FileReader did not return a string.'));
+                }
+            };
+            reader.onerror = (e) => reject(e);
+            reader.readAsDataURL(file);
         });
     };
 
@@ -382,7 +406,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (file.type.startsWith('image/')) mediatype = 'image';
         if (file.type.startsWith('video/')) {
             mediatype = 'video';
-            thumbnail = await generateVideoThumbnail(file);
+            try {
+                thumbnail = await generateVideoThumbnail(file);
+            } catch (error) {
+                console.error("Error generating video thumbnail:", error);
+                // Continue without a thumbnail if generation fails
+            }
         }
         
         return {
@@ -432,10 +461,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
   const renderMessageContent = (message: Message) => {
-    if (message.status === 'deleted') {
-        return <p className="whitespace-pre-wrap italic px-4 py-3 text-sm">🗑️ Mensagem apagada</p>;
-    }
-    if (message.metadata?.mediaUrl || message.metadata?.thumbnail) {
+    const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail || (message.metadata?.mimetype && !message.content);
+    if (isMedia) {
         return <MediaMessage message={message} />;
     }
     return <p className="whitespace-pre-wrap px-4 py-3 text-sm">{message.content}</p>;
@@ -447,6 +474,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isFromMe = message.sender?.id === currentUser?.id;
+    
+    const isDeleted = message.status === 'deleted';
 
     return (
         <React.Fragment key={message.id}>
@@ -489,7 +518,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row'
                         )}
                     >
-                        {isFromMe && message.status !== 'deleted' && (
+                        {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0">
                                 <AlertDialog>
                                     <DropdownMenu>
@@ -525,19 +554,21 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     
                         <div
                             className={cn("break-words rounded-xl shadow-md",
-                                message.status === 'deleted' 
+                                isDeleted 
                                     ? 'bg-secondary/50 border'
                                     : (isFromMe 
-                                        ? 'rounded-br-none bg-primary text-primary-foreground' 
-                                        : 'rounded-bl-none bg-card')
+                                        ? 'bg-primary text-primary-foreground' 
+                                        : 'bg-card')
                             )}
                         >
-                            {renderMessageContent(message)}
+                            {isDeleted ? (
+                                <p className="whitespace-pre-wrap italic px-4 py-3 text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                            ) : renderMessageContent(message)}
                         </div>
                     </div>
                      <div className={cn("flex items-center gap-1 text-xs text-muted-foreground")}>
                         <span>{message.timestamp}</span>
-                        {message.from_me && message.status !== 'deleted' && (
+                        {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
                             ? <CheckCheck className="h-4 w-4 text-sky-400" />
                             : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
