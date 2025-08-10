@@ -40,7 +40,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -150,6 +149,10 @@ function MediaMessage({ message }: { message: Message }) {
                         />
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
+                       <DialogHeader>
+                            <DialogTitle className="sr-only">Visualização de Imagem</DialogTitle>
+                            <DialogDescription className="sr-only">Visualizando a imagem enviada no chat em tamanho maior.</DialogDescription>
+                        </DialogHeader>
                         <Image
                             src={mediaUrl}
                             alt={caption || fileName || 'Imagem enviada'}
@@ -165,11 +168,16 @@ function MediaMessage({ message }: { message: Message }) {
             return (
                 <Dialog>
                     <DialogTrigger asChild>
-                         <div className="relative w-full max-w-xs aspect-square bg-slate-800 rounded-lg flex items-center justify-center cursor-pointer hover:bg-slate-700 transition-colors">
-                            <PlayCircle className="h-16 w-16 text-white/70" />
+                        <div className="relative w-full max-w-xs aspect-square bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer group hover:bg-slate-800 transition-colors overflow-hidden">
+                            <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors z-10"></div>
+                            <PlayCircle className="h-16 w-16 text-white/70 z-20 group-hover:scale-110 transition-transform" />
                         </div>
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
+                         <DialogHeader>
+                            <DialogTitle className="sr-only">Player de Vídeo</DialogTitle>
+                            <DialogDescription className="sr-only">Reproduzindo o vídeo enviado no chat.</DialogDescription>
+                        </DialogHeader>
                         <video controls autoPlay className="rounded-lg w-full h-auto">
                             <source src={mediaUrl} type={mimetype} />
                             Seu navegador não suporta a tag de vídeo.
@@ -630,3 +638,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
