@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -39,6 +40,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -392,7 +394,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 </div>
             ) : (
              <div
-                className={`flex items-end gap-3 animate-in fade-in group ${
+                className={`group flex items-end gap-3 animate-in fade-in ${
                   message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
@@ -408,7 +410,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 >
                     {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
                         <div className="flex-shrink-0">
-                            <AlertDialog>
+                             <AlertDialog>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" size="icon" className="h-7 w-7">
