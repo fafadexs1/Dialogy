@@ -101,7 +101,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // 3. Fetch chats and order them by the most recent message, also fetching the source of the last message.
+    // 3. Fetch chats and order them by the most recent message, also fetching the source and instance name of the last message.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -111,7 +111,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 created_at,
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
-             WHERE type = 'text'
+            WHERE type = 'text' OR type IS NULL
         )
         SELECT 
             c.id, 
@@ -119,6 +119,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.workspace_id, 
             c.contact_id, 
             c.agent_id, 
+            c.assigned_at,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name
@@ -139,6 +140,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         messages: [],
         source: r.source,
         instance_name: r.instance_name,
+        assigned_at: r.assigned_at,
     }));
 
     // 4. Fetch and combine messages if chats exist

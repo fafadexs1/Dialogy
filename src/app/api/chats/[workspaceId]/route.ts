@@ -60,7 +60,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 created_at,
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
-            WHERE type = 'text'
+            WHERE type = 'text' OR type IS NULL
         )
         SELECT 
             c.id, 
@@ -68,6 +68,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.workspace_id, 
             c.contact_id, 
             c.agent_id, 
+            c.assigned_at,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name
@@ -88,6 +89,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         messages: [],
         source: r.source,
         instance_name: r.instance_name,
+        assigned_at: r.assigned_at,
     }));
 
     if (chats.length > 0) {
