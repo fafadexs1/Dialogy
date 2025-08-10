@@ -382,8 +382,8 @@ export async function markMessagesAsReadAction(
 
 
 export async function deleteMessageAction(
-    instanceName: string,
     messageId: string, // This is the DB message ID
+    instanceName: string
 ): Promise<{ success: boolean, error?: string }> {
      if (!instanceName || !messageId) {
         return { success: false, error: "Dados insuficientes para apagar a mensagem." };
@@ -413,9 +413,15 @@ export async function deleteMessageAction(
             throw new Error("Número do contato (remoteJid) não encontrado.");
         }
         
-        const configRes = await client.query('SELECT api_url, api_key FROM evolution_api_configs WHERE workspace_id = $1', [workspace_id]);
+        const configRes = await client.query(
+            `SELECT c.api_url, c.api_key 
+            FROM evolution_api_configs c
+            JOIN evolution_api_instances i ON c.id = i.config_id
+            WHERE i.name = $1`,
+            [instanceName]
+        );
         if (configRes.rowCount === 0) {
-            throw new Error("Configuração da API não encontrada.");
+            throw new Error("Configuração da API não encontrada para esta instância.");
         }
 
         const apiConfig = configRes.rows[0];
@@ -448,3 +454,5 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+    
