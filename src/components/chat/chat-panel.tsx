@@ -171,7 +171,7 @@ function MediaMessage({ message }: { message: Message }) {
              return (
                 <Dialog>
                     <DialogTrigger asChild>
-                         <div className="relative group w-full max-w-xs aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                         <div className="relative group w-[300px] h-[300px] bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
                             <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
                         </div>
@@ -450,71 +450,70 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
 
                 <div
-                  className={`flex items-end gap-2 ${ isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
+                  className={cn("flex flex-col gap-1.5",
+                      isFromMe ? 'items-end' : 'items-start'
+                  )}
                 >
-                    {isFromMe && message.status !== 'deleted' && (
-                        <div className="flex-shrink-0">
-                             <AlertDialog>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent>
-                                        <AlertDialogTrigger asChild>
-                                            <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Apagar para todos
-                                            </DropdownMenuItem>
-                                        </AlertDialogTrigger>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                        </div>
-                    )}
-                
                     <div
-                        className={cn("flex flex-col",
-                            isFromMe ? 'items-end' : 'items-start'
+                        className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row'
                         )}
                     >
-                         <div
+                        {isFromMe && message.status !== 'deleted' && (
+                            <div className="flex-shrink-0">
+                                <AlertDialog>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <MoreVertical className="h-4 w-4" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent>
+                                            <AlertDialogTrigger asChild>
+                                                <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Apagar para todos
+                                                </DropdownMenuItem>
+                                            </AlertDialogTrigger>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            </div>
+                        )}
+                    
+                        <div
                             className={cn("break-words rounded-xl shadow-md",
                                 message.status === 'deleted' 
                                     ? 'bg-secondary/50 border rounded-xl px-4 py-3 text-sm'
                                     : (isFromMe 
                                         ? 'rounded-br-none bg-primary text-primary-foreground' 
                                         : 'rounded-bl-none bg-card'),
-                                !(message.metadata?.mediaUrl) && "px-4 py-3 text-sm",
-                                (message.metadata?.mediaUrl && message.content) && "p-0"
+                                !(message.metadata?.mediaUrl || message.metadata?.mimetype) && "px-4 py-3 text-sm"
                             )}
                         >
                             {renderMessageContent(message)}
                         </div>
-
-                        <div className={cn("flex items-center gap-1 mt-1.5 text-xs text-muted-foreground")}>
-                            <span>{message.timestamp}</span>
-                            {message.from_me && message.status !== 'deleted' && (
-                                message.api_message_status === 'READ'
-                                ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                                : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                ? <CheckCheck className="h-4 w-4" />
-                                : <Check className="h-4 w-4" />
-                            )}
-                        </div>
+                    </div>
+                     <div className={cn("flex items-center gap-1 text-xs text-muted-foreground")}>
+                        <span>{message.timestamp}</span>
+                        {message.from_me && message.status !== 'deleted' && (
+                            message.api_message_status === 'READ'
+                            ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                            : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                            ? <CheckCheck className="h-4 w-4" />
+                            : <Check className="h-4 w-4" />
+                        )}
                     </div>
                 </div>
               </div>
@@ -658,4 +657,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
 
