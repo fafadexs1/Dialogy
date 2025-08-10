@@ -334,61 +334,65 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 ) : <div className="w-8"></div> }
 
-                {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
-                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                         <AlertDialog>
-                             <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                                        <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                     <AlertDialogTrigger asChild>
-                                        <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
-                                            <Trash2 className="mr-2 h-4 w-4" />
-                                            Apagar para todos
-                                        </DropdownMenuItem>
-                                     </AlertDialogTrigger>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
-                     </div>
-                )}
-               
                 <div
-                  className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md break-words ${
-                    message.sender?.id === currentUser?.id
-                      ? 'rounded-br-none bg-primary text-primary-foreground'
-                      : 'rounded-bl-none bg-card'
-                  } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
+                  className={`flex items-center gap-2 ${ message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'}`}
                 >
-                  <p className="whitespace-pre-wrap">{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
-                   <div className={`flex items-center justify-end gap-1 mt-2 ${
-                      message.sender?.id === currentUser.id
-                        ? 'text-primary-foreground/70'
-                        : 'text-muted-foreground'
-                    }`}>
-                      <p className="text-xs">{message.timestamp}</p>
-                      {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
-                          message.api_message_status === 'READ'
-                          ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                          : message.api_message_status === 'DELIVERED'
-                          ? <CheckCheck className="h-4 w-4" />
-                          : <Check className="h-4 w-4" />
-                      )}
+                    {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
+                        <div className="flex-shrink-0">
+                            <AlertDialog>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                                            <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <AlertDialogTrigger asChild>
+                                            <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Apagar para todos
+                                            </DropdownMenuItem>
+                                        </AlertDialogTrigger>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        </div>
+                    )}
+                
+                    <div
+                    className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md break-words ${
+                        message.sender?.id === currentUser?.id
+                        ? 'rounded-br-none bg-primary text-primary-foreground'
+                        : 'rounded-bl-none bg-card'
+                    } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
+                    >
+                        <p className="whitespace-pre-wrap">{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
+                        <div className={`flex items-center justify-end gap-1 mt-2 ${
+                            message.sender?.id === currentUser.id
+                                ? 'text-primary-foreground/70'
+                                : 'text-muted-foreground'
+                            }`}>
+                            <p className="text-xs">{message.timestamp}</p>
+                            {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
+                                message.api_message_status === 'READ'
+                                ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                                : message.api_message_status === 'DELIVERED'
+                                ? <CheckCheck className="h-4 w-4" />
+                                : <Check className="h-4 w-4" />
+                            )}
+                        </div>
                     </div>
                 </div>
               </div>
@@ -439,61 +443,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
       <div className="flex-1 overflow-y-auto" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-4 p-6">
-            {initialMessages.map((message, index) => (
-              <div
-                key={message.id}
-                className={`flex items-end gap-3 animate-in fade-in group ${
-                  message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
-                }`}
-              >
-                <div className="flex-shrink-0">
-                  {message.sender ? (
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
-                      <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
-                    </Avatar>
-                  ) : <div className="w-8 h-8" />}
-                </div>
-
-                {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
-                  <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <AlertDialog>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          <AlertDialogTrigger asChild>
-                            <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Apagar para todos
-                            </DropdownMenuItem>
-                          </AlertDialogTrigger>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                )}
-
-                <div className="flex-grow">
-                  {renderMessageWithSeparator(message, index)}
-                </div>
-              </div>
-            ))}
+            {initialMessages.map(renderMessageWithSeparator)}
             {isAiThinking && (
               <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
                 {chat.agent ? (
