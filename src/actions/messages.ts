@@ -57,7 +57,7 @@ export async function sendMessageAction(
         }
         const apiConfig = apiConfigRes.rows[0];
 
-        // 2. Send message via Evolution API
+        // 2. Send message via Evolution API with the corrected payload
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
             apiConfig,
@@ -65,13 +65,7 @@ export async function sendMessageAction(
                 method: 'POST',
                 body: JSON.stringify({
                     number: remoteJid,
-                    options: {
-                      delay: 1200,
-                      presence: 'composing',
-                    },
-                    textMessage: {
-                      text: content
-                    }
+                    text: content,
                 }),
             }
         );
@@ -176,13 +170,12 @@ export async function sendMediaAction(
             let dbMetadata = {};
 
             if (responseMessage) {
-                 const mediaUrl = responseMessage.mediaUrl;
                 const messageTypeKey = Object.keys(responseMessage).find(k => k.endsWith('Message'));
                 
                 if (messageTypeKey && responseMessage[messageTypeKey]) {
                     const mediaDetails = responseMessage[messageTypeKey];
                     dbMetadata = {
-                        mediaUrl: mediaUrl,
+                        mediaUrl: responseMessage.mediaUrl, // Correctly get mediaUrl from the parent message object
                         mimetype: mediaDetails.mimetype,
                         caption: mediaDetails.caption,
                         fileName: mediaDetails.fileName || file.filename,
