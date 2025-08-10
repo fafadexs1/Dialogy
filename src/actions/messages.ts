@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -6,6 +7,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
+import type { MessageMetadata } from '@/lib/types';
 
 export async function sendMessageAction(
     prevState: any,
@@ -112,6 +114,7 @@ export async function sendMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document';
+        thumbnail?: string; // Add thumbnail here
     }[]
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
@@ -165,14 +168,17 @@ export async function sendMediaAction(
             );
 
             const dbContent = caption || '';
-            let dbMetadata = {};
+            let dbMetadata: MessageMetadata = {
+                thumbnail: file.thumbnail, // Pass the thumbnail
+            };
 
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
                     const mediaDetails = apiResponse.message[messageTypeKey];
                     dbMetadata = {
-                        mediaUrl: apiResponse.message.mediaUrl, // Use the correct root-level mediaUrl
+                        ...dbMetadata,
+                        mediaUrl: apiResponse.message.mediaUrl,
                         mimetype: mediaDetails.mimetype,
                         fileName: mediaDetails.fileName || file.filename,
                     };

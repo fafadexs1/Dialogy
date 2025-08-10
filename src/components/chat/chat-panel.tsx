@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download } from 'lucide-react';
-import { type Chat, type Message, type User, Tag } from '@/lib/types';
+import { type Chat, type Message, type User, Tag, MessageMetadata } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -134,9 +135,9 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 }
 
 function MediaMessage({ message }: { message: Message }) {
-    const { mediaUrl, mimetype = '', fileName } = message.metadata || {};
+    const { mediaUrl, mimetype = '', fileName, thumbnail } = message.metadata || {};
 
-    if (!mediaUrl) return <p>{message.content}</p>;
+    if (!mediaUrl && !thumbnail) return <p>{message.content || 'Mídia inválida'}</p>;
     
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
@@ -144,11 +145,11 @@ function MediaMessage({ message }: { message: Message }) {
                  <Dialog>
                     <DialogTrigger asChild>
                         <Image
-                            src={mediaUrl}
+                            src={mediaUrl!}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="rounded-lg object-cover w-full max-w-xs cursor-pointer hover:brightness-90 transition-all"
+                            className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
                         />
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
@@ -157,7 +158,7 @@ function MediaMessage({ message }: { message: Message }) {
                             <DialogDescription className="sr-only">Visualizando a imagem enviada no chat em tamanho maior.</DialogDescription>
                         </DialogHeader>
                         <Image
-                            src={mediaUrl}
+                            src={mediaUrl!}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={1024}
                             height={768}
@@ -172,6 +173,15 @@ function MediaMessage({ message }: { message: Message }) {
                 <Dialog>
                     <DialogTrigger asChild>
                          <div className="relative group w-[300px] h-[300px] bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                            {thumbnail ? (
+                                <Image
+                                    src={thumbnail}
+                                    alt="Video thumbnail"
+                                    layout="fill"
+                                    objectFit="cover"
+                                    className="group-hover:brightness-75 transition-all"
+                                />
+                            ) : null}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
                             <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
                         </div>
@@ -333,38 +343,62 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const generateVideoThumbnail = (file: File): Promise<string> => {
+        return new Promise((resolve) => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.currentTime = 1; // Seek to 1 second
+
+            video.onloadeddata = () => {
+                video.onseeked = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    URL.revokeObjectURL(video.src);
+                    resolve(canvas.toDataURL('image/jpeg'));
+                };
+            };
+        });
+    };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
-    const filePromises = files.map(file => {
-        return new Promise<MediaFileType>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64 = (e.target?.result as string).split(',')[1];
-                let mediatype: MediaFileType['mediatype'] = 'document';
-                if (file.type.startsWith('image/')) mediatype = 'image';
-                if (file.type.startsWith('video/')) mediatype = 'video';
-                
-                resolve({
-                    id: `${file.name}-${file.lastModified}`,
-                    file: file,
-                    name: file.name,
-                    type: file.type,
-                    mediatype: mediatype,
-                    base64: base64,
-                });
-            };
+    const filePromises = files.map(async (file): Promise<MediaFileType> => {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onload = (e) => resolve((e.target?.result as string).split(',')[1]);
             reader.onerror = reject;
             reader.readAsDataURL(file);
         });
+
+        const base64 = await base64Promise;
+        let mediatype: MediaFileType['mediatype'] = 'document';
+        let thumbnail: string | undefined;
+
+        if (file.type.startsWith('image/')) mediatype = 'image';
+        if (file.type.startsWith('video/')) {
+            mediatype = 'video';
+            thumbnail = await generateVideoThumbnail(file);
+        }
+        
+        return {
+            id: `${file.name}-${file.lastModified}`,
+            file: file,
+            name: file.name,
+            type: file.type,
+            mediatype: mediatype,
+            base64: base64,
+            thumbnail: thumbnail,
+        };
     });
 
-    Promise.all(filePromises).then(newFiles => {
-        setMediaFiles(prev => [...prev, ...newFiles]);
-    });
+    const newFiles = await Promise.all(filePromises);
+    setMediaFiles(prev => [...prev, ...newFiles]);
     
-    // Reset file input to allow selecting the same file again
     event.target.value = '';
   };
 
@@ -377,9 +411,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             mimetype: mf.type,
             filename: mf.name,
             mediatype: mf.mediatype,
+            thumbnail: mf.thumbnail,
         }));
         
-        // Clear inputs immediately for better UX
         const currentMediaFiles = [...mediaFiles];
         setMediaFiles([]);
         setNewMessage('');
@@ -389,25 +423,22 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             onActionSuccess();
         } else {
             toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
-            // Restore files on failure
             setMediaFiles(currentMediaFiles);
         }
     } else {
-        // Handle text message sending
         sendFormAction(formData);
-        // Clear input immediately for better UX
         setNewMessage('');
     }
   };
 
   const renderMessageContent = (message: Message) => {
     if (message.status === 'deleted') {
-        return <p className="whitespace-pre-wrap italic">🗑️ Mensagem apagada</p>;
+        return <p className="whitespace-pre-wrap italic px-4 py-3 text-sm">🗑️ Mensagem apagada</p>;
     }
-    if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
+    if (message.metadata?.mediaUrl || message.metadata?.thumbnail) {
         return <MediaMessage message={message} />;
     }
-    return <p className="whitespace-pre-wrap">{message.content}</p>;
+    return <p className="whitespace-pre-wrap px-4 py-3 text-sm">{message.content}</p>;
   };
 
 
@@ -495,11 +526,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         <div
                             className={cn("break-words rounded-xl shadow-md",
                                 message.status === 'deleted' 
-                                    ? 'bg-secondary/50 border rounded-xl px-4 py-3 text-sm'
+                                    ? 'bg-secondary/50 border'
                                     : (isFromMe 
                                         ? 'rounded-br-none bg-primary text-primary-foreground' 
-                                        : 'rounded-bl-none bg-card'),
-                                !(message.metadata?.mediaUrl || message.metadata?.mimetype) && "px-4 py-3 text-sm"
+                                        : 'rounded-bl-none bg-card')
                             )}
                         >
                             {renderMessageContent(message)}
@@ -657,5 +687,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-

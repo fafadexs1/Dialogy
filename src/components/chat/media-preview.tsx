@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React from 'react';
@@ -16,6 +17,7 @@ export interface MediaFileType {
   type: string;
   base64: string;
   mediatype: 'image' | 'video' | 'document';
+  thumbnail?: string; // Optional Base64 thumbnail for videos
 }
 
 interface MediaPreviewProps {
@@ -52,14 +54,14 @@ export default function MediaPreview({ mediaFiles, setMediaFiles }: MediaPreview
           {mediaFiles.map(file => (
             <div key={file.id} className="flex items-center gap-3 p-2 border rounded-lg bg-background">
               <div className="flex-shrink-0 h-12 w-12 rounded-md bg-secondary flex items-center justify-center overflow-hidden">
-                {file.mediatype === 'image' ? (
+                {file.mediatype === 'image' || (file.mediatype === 'video' && file.thumbnail) ? (
                   <Image
-                    src={URL.createObjectURL(file.file)}
+                    src={file.thumbnail || URL.createObjectURL(file.file)}
                     alt={file.name}
                     width={48}
                     height={48}
                     className="object-cover h-full w-full"
-                    onLoad={e => URL.revokeObjectURL(e.currentTarget.src)}
+                    onLoad={e => { if (file.mediatype === 'image') URL.revokeObjectURL(e.currentTarget.src) }}
                   />
                 ) : (
                   getFileIcon(file.mediatype)

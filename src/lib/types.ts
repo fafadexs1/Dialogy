@@ -1,4 +1,5 @@
 
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -106,13 +107,20 @@ export type Task = {
 
 export type MessageSender = User | Contact | undefined;
 
+export type MessageMetadata = {
+    mediaUrl?: string;
+    mimetype?: string;
+    fileName?: string;
+    thumbnail?: string; // Base64 encoded thumbnail
+}
+
 export type Message = {
   id: string;
   sender?: MessageSender;
   content: string;
   type: 'text' | 'system';
   status: 'default' | 'deleted';
-  metadata?: any;
+  metadata?: MessageMetadata;
   timestamp: string;
   createdAt: string;
   formattedDate: string;
