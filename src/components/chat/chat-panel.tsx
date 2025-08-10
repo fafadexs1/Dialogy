@@ -559,7 +559,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                       <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                     </Avatar>
                 )}
-                <div className={cn("flex flex-col gap-1.5", isFromMe ? 'items-end' : 'items-start')}>
+                <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                     <div className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                         {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0">
@@ -608,7 +608,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             ) : renderMessageContent(message)}
                         </div>
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                         <span>{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
