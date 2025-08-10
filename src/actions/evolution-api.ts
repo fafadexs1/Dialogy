@@ -78,7 +78,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<Omi
 /**
  * Wrapper genérico para chamadas à Evolution API.
  */
-async function fetchEvolutionAPI(
+export async function fetchEvolutionAPI(
     endpoint: string, 
     config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>,
     options: RequestInit = {}
