@@ -155,7 +155,7 @@ export async function sendMediaAction(
                 mimetype: file.mimetype,
                 media: file.base64,
                 fileName: file.filename,
-                caption: caption || ' ',
+                caption: caption || ' ', // Ensure caption is at least a space
             };
             
             const apiResponse = await fetchEvolutionAPI(
@@ -169,32 +169,17 @@ export async function sendMediaAction(
             let dbContent = caption;
             let dbMetadata = {};
             
-            // Set a default content for the preview in chat list if caption is empty
-            if (!dbContent) {
-                switch(file.mediatype) {
-                    case 'image': dbContent = '📷 Imagem'; break;
-                    case 'video': dbContent = '📹 Vídeo'; break;
-                    case 'document': dbContent = '📄 Documento'; break;
-                    default: dbContent = 'Arquivo de mídia';
-                }
-            }
-
-
             if (responseMessage) {
                 const messageTypeKey = Object.keys(responseMessage).find(k => k.endsWith('Message'));
                 
                 if (messageTypeKey && responseMessage[messageTypeKey]) {
                     const mediaDetails = responseMessage[messageTypeKey];
+                    dbContent = mediaDetails.caption || caption; // Use received caption or the one sent
                     dbMetadata = {
-                        mediaUrl: responseMessage.mediaUrl, // Correctly get mediaUrl from the parent message object
+                        mediaUrl: responseMessage.mediaUrl, 
                         mimetype: mediaDetails.mimetype,
-                        caption: mediaDetails.caption,
                         fileName: mediaDetails.fileName || file.filename,
                     };
-                    // Use the received caption if available, otherwise keep the default.
-                    if (mediaDetails.caption && mediaDetails.caption.trim() !== '') {
-                        dbContent = mediaDetails.caption;
-                    }
                 }
             }
             

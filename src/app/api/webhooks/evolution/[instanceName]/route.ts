@@ -151,14 +151,14 @@ async function handleMessagesUpsert(payload: any) {
       content = message.conversation || message.extendedTextMessage?.text || '';
       break;
     case 'imageMessage':
-      content = message.imageMessage?.caption || '📷 Imagem';
+      content = message.imageMessage?.caption || '';
       metadata = {
         mediaUrl: message.mediaUrl,
         mimetype: message.imageMessage?.mimetype,
       };
       break;
     case 'videoMessage':
-      content = message.videoMessage?.caption || '📹 Vídeo';
+      content = message.videoMessage?.caption || '';
       metadata = {
         mediaUrl: message.mediaUrl,
         mimetype: message.videoMessage?.mimetype,
@@ -166,7 +166,7 @@ async function handleMessagesUpsert(payload: any) {
       };
       break;
     case 'audioMessage':
-      content = '🎤 Mensagem de áudio';
+      content = ''; // Audio messages don't have captions
       metadata = {
         mediaUrl: message.mediaUrl,
         mimetype: message.audioMessage?.mimetype,
@@ -175,7 +175,7 @@ async function handleMessagesUpsert(payload: any) {
       };
       break;
     case 'documentMessage':
-      content = message.documentMessage?.caption || message.documentMessage?.fileName || '📄 Documento';
+      content = message.documentMessage?.caption || '';
       metadata = {
         mediaUrl: message.mediaUrl,
         mimetype: message.documentMessage?.mimetype,

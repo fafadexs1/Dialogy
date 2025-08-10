@@ -2,13 +2,13 @@
 'use client';
 
 import React from 'react';
-import { Search, PlusCircle } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type OnlineAgent, type User } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User, type Message } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -44,6 +44,34 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
     <div className="flex flex-col gap-1">
       <p className="font-semibold">{agent.user.name}</p>
       {onlineSince && <p className="text-xs text-muted-foreground">Online {onlineSince}</p>}
+    </div>
+  );
+};
+
+const LastMessagePreview = ({ message }: { message: Message }) => {
+  if (message.content) {
+    return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
+  }
+
+  const mimetype = message.metadata?.mimetype || '';
+  let Icon = File;
+  let text = 'Arquivo';
+
+  if (mimetype.startsWith('image/')) {
+    Icon = ImageIcon;
+    text = 'Imagem';
+  } else if (mimetype.startsWith('video/')) {
+    Icon = Video;
+    text = 'Vídeo';
+  } else if (mimetype.startsWith('audio/')) {
+    Icon = Mic;
+    text = 'Áudio';
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <Icon className="h-4 w-4 flex-shrink-0" />
+      <span className="truncate">{text}</span>
     </div>
   );
 };
@@ -95,11 +123,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   </p>
                 )}
               </div>
-              {lastMessage && (
-                  <p className="text-sm text-muted-foreground truncate">
-                      {lastMessage.content}
-                  </p>
-              )}
+              {lastMessage && <LastMessagePreview message={lastMessage} />}
             </div>
           </div>
         )
