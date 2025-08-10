@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -134,7 +133,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 }
 
 function MediaMessage({ message }: { message: Message }) {
-    const { mediaUrl, mimetype = '', fileName, caption } = message.metadata || {};
+    const { mediaUrl, mimetype = '', fileName } = message.metadata || {};
 
     if (!mediaUrl) return <p>{message.content}</p>;
 
@@ -145,7 +144,7 @@ function MediaMessage({ message }: { message: Message }) {
                     <DialogTrigger asChild>
                         <Image
                             src={mediaUrl}
-                            alt={caption || fileName || 'Imagem enviada'}
+                            alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
                             className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
@@ -158,7 +157,7 @@ function MediaMessage({ message }: { message: Message }) {
                         </DialogHeader>
                         <Image
                             src={mediaUrl}
-                            alt={caption || fileName || 'Imagem enviada'}
+                            alt={message.content || fileName || 'Imagem enviada'}
                             width={1024}
                             height={768}
                             className="rounded-lg object-contain max-h-[80vh] w-full"
@@ -171,12 +170,12 @@ function MediaMessage({ message }: { message: Message }) {
              return (
                 <Dialog>
                     <DialogTrigger asChild>
-                         <div className="relative group w-full max-w-xs aspect-video bg-slate-800 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
-                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/50 transition-colors z-10"></div>
-                            <PlayCircle className="h-16 w-16 text-white/80 z-20 group-hover:scale-110 transition-transform" />
+                         <div className="relative group w-full max-w-xs aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
+                            <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
                         </div>
                     </DialogTrigger>
-                    <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
+                    <DialogContent className="max-w-4xl p-0 bg-black/50 border-none">
                          <DialogHeader>
                             <DialogTitle className="sr-only">Player de Vídeo</DialogTitle>
                             <DialogDescription className="sr-only">Reproduzindo o vídeo enviado no chat.</DialogDescription>
@@ -198,7 +197,7 @@ function MediaMessage({ message }: { message: Message }) {
                     href={mediaUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors"
+                    className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors max-w-xs"
                 >
                     <File className="h-8 w-8 text-muted-foreground flex-shrink-0" />
                     <div className='min-w-0'>
@@ -215,7 +214,7 @@ function MediaMessage({ message }: { message: Message }) {
     return (
         <div className="space-y-2">
             {renderMedia()}
-            {caption && <p className="text-sm pt-1">{caption}</p>}
+            {message.content && <p className="text-sm pt-1">{message.content}</p>}
         </div>
     );
 }
@@ -394,13 +393,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const renderMessageContent = (message: Message) => {
     if (message.status === 'deleted') {
-      return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
+        return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
     }
-    // Check if it's a media message
-    if (!message.content && (message.metadata?.mediaUrl || message.metadata?.mimetype)) {
-      return <MediaMessage message={message} />;
+    // This is the key change: check for mediaUrl regardless of content.
+    // The `MediaMessage` component itself will handle showing the caption if it exists.
+    if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
+        return <MediaMessage message={message} />;
     }
-    // Default to text content
+    // Default to text content if no media is present
     return <p className="whitespace-pre-wrap">{message.content}</p>;
   };
 
@@ -409,8 +409,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const prevMessage = initialMessages[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
-    // Check if the message is media-only (no text content)
-    const isMediaOnly = !message.content && (message.metadata?.mediaUrl || message.metadata?.mimetype);
+    const isMedia = message.metadata?.mediaUrl || message.metadata?.mimetype;
 
     return (
         <React.Fragment key={message.id}>
@@ -484,8 +483,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     <div
                     className={cn(
                         "max-w-xl break-words",
-                        !isMediaOnly && "rounded-xl px-4 py-3 text-sm shadow-md",
-                        isMediaOnly && "p-0 bg-transparent shadow-none",
+                        !isMedia && "rounded-xl px-4 py-3 text-sm shadow-md",
+                        isMedia && "p-0 bg-transparent shadow-none",
                         message.sender?.id === currentUser?.id
                         ? 'rounded-br-none bg-primary text-primary-foreground'
                         : 'rounded-bl-none bg-card',
@@ -493,7 +492,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     )}
                     >
                         {renderMessageContent(message)}
-                        {!isMediaOnly && (
+                        {!isMedia && (
                             <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
                                 message.sender?.id === currentUser.id
                                     ? 'text-primary-foreground/70'

@@ -1,4 +1,3 @@
-
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -141,52 +140,39 @@ async function handleMessagesUpsert(payload: any) {
     return;
   }
 
-  // Find the message content and metadata based on the message type
   let content = '';
   let metadata: any = {};
   
-  switch (messageType) {
-    case 'conversation':
-    case 'extendedTextMessage':
-      content = message.conversation || message.extendedTextMessage?.text || '';
-      break;
-    case 'imageMessage':
-      content = message.imageMessage?.caption || '';
-      metadata = {
-        mediaUrl: message.mediaUrl,
-        mimetype: message.imageMessage?.mimetype,
-      };
-      break;
-    case 'videoMessage':
-      content = message.videoMessage?.caption || '';
-      metadata = {
-        mediaUrl: message.mediaUrl,
-        mimetype: message.videoMessage?.mimetype,
-        seconds: message.videoMessage?.seconds,
-      };
-      break;
-    case 'audioMessage':
-      content = ''; // Audio messages don't have captions
-      metadata = {
-        mediaUrl: message.mediaUrl,
-        mimetype: message.audioMessage?.mimetype,
-        seconds: message.audioMessage?.seconds,
-        ptt: message.audioMessage?.ptt, // Is it a Push-to-Talk?
-      };
-      break;
-    case 'documentMessage':
-      content = message.documentMessage?.caption || '';
-      metadata = {
-        mediaUrl: message.mediaUrl,
-        mimetype: message.documentMessage?.mimetype,
-        fileName: message.documentMessage?.fileName,
-      };
-      break;
-    default:
-      console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
-      return;
-  }
+  const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
   
+  content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
+  
+  if (message.mediaUrl) {
+      metadata.mediaUrl = message.mediaUrl;
+  } else if (messageDetails?.url) {
+      // Fallback for older structures or different media types
+      metadata.mediaUrl = messageDetails.url;
+  }
+
+  if (messageType) {
+    switch (messageType) {
+      case 'imageMessage':
+      case 'videoMessage':
+      case 'audioMessage':
+      case 'documentMessage':
+        metadata.mimetype = messageDetails?.mimetype;
+        metadata.fileName = messageDetails?.fileName;
+        break;
+      case 'conversation':
+      case 'extendedTextMessage':
+        // No special metadata needed
+        break;
+      default:
+        console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
+        return;
+    }
+  }
+
   if (!content.trim() && !metadata.mediaUrl) {
     console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
     return;
@@ -247,8 +233,6 @@ async function handleMessagesUpsert(payload: any) {
       }
     }
 
-    // Use a timestamp from the server running this code.
-    // The payload.date_time might be from a different timezone or incorrect.
     const messageTimestamp = new Date();
 
     await client.query(
