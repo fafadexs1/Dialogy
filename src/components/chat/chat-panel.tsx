@@ -170,7 +170,7 @@ function MediaMessage({ message }: { message: Message }) {
                 <Dialog>
                     <DialogTrigger asChild>
                         <div className="relative w-full max-w-xs aspect-square bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer group hover:bg-slate-800 transition-colors overflow-hidden">
-                            <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors z-10"></div>
+                             <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors z-10"></div>
                             <PlayCircle className="h-16 w-16 text-white/70 z-20 group-hover:scale-110 transition-transform" />
                         </div>
                     </DialogTrigger>
@@ -179,7 +179,7 @@ function MediaMessage({ message }: { message: Message }) {
                             <DialogTitle className="sr-only">Player de Vídeo</DialogTitle>
                             <DialogDescription className="sr-only">Reproduzindo o vídeo enviado no chat.</DialogDescription>
                         </DialogHeader>
-                        <video controls autoPlay className="rounded-lg w-full h-auto">
+                        <video controls autoPlay className="rounded-lg w-full h-auto max-h-[80vh]">
                             <source src={mediaUrl} type={mimetype} />
                             Seu navegador não suporta a tag de vídeo.
                         </video>
@@ -639,3 +639,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
