@@ -149,7 +149,7 @@ function MediaMessage({ message }: { message: Message }) {
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
+                            className="rounded-lg object-cover w-[300px] h-[300px] cursor-pointer hover:brightness-90 transition-all"
                         />
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
@@ -162,7 +162,7 @@ function MediaMessage({ message }: { message: Message }) {
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={1024}
                             height={768}
-                            className="rounded-lg object-contain max-h-[80vh] w-full"
+                            className="rounded-lg object-contain w-full h-auto max-h-[80vh]"
                         />
                     </DialogContent>
                 </Dialog>
