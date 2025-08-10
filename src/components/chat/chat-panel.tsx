@@ -22,6 +22,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
+import { sendMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +58,16 @@ function CloseChatButton() {
         </Button>
     )
 }
+
+function SendMessageButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" size="sm" className='h-8' disabled={pending}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
+    )
+}
+
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [state, formAction] = useActionState(closeChatAction, { success: false });
@@ -119,40 +130,24 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 }
 
 export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
-  const [messages, setMessages] = React.useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = React.useState('');
   const [isAiAgentActive, setIsAiAgentActive] = React.useState(false);
   const [isAiThinking, setIsAiThinking] = React.useState(false);
   // This would typically come from a global state or settings context
   const [selectedAiModel, setSelectedAiModel] = React.useState('googleai/gemini-2.0-flash');
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const formRef = React.useRef<HTMLFormElement>(null);
   const { toast } = useToast();
   
-  // Effect to update local messages when the prop changes
-  React.useEffect(() => {
-    setMessages(initialMessages);
-  }, [initialMessages]);
+  const [sendState, sendFormAction] = useActionState(sendMessageAction, { success: false });
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newMessage.trim() === '' || !currentUser || !chat) return;
-    
-    const sentMessage: Message = {
-        id: `msg-${Date.now()}`,
-        content: newMessage,
-        type: 'text',
-        status: 'default',
-        chat_id: chat.id,
-        sender: currentUser,
-        workspace_id: chat.workspace_id,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        createdAt: new Date().toISOString(),
-        formattedDate: "Hoje",
-    }
-    
-    setMessages(prev => [...prev, sentMessage]);
-    setNewMessage('');
-  };
+   useEffect(() => {
+        if (sendState.success) {
+            setNewMessage(''); // Clear input on successful send
+        } else if (sendState.error) {
+            toast({ title: 'Erro ao Enviar Mensagem', description: sendState.error, variant: 'destructive' });
+        }
+    }, [sendState, toast]);
 
   React.useEffect(() => {
     if (scrollAreaRef.current) {
@@ -161,16 +156,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             viewport.scrollTop = viewport.scrollHeight;
         }
     }
-  }, [messages]);
+  }, [initialMessages]);
 
-  const chatHistoryForAI = messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
-  const lastCustomerMessage = messages.filter(m => m.sender?.id !== currentUser?.id).pop();
+  const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+  const lastCustomerMessage = initialMessages.filter(m => m.sender?.id !== currentUser?.id).pop();
 
 
   React.useEffect(() => {
     const runAiAgent = async () => {
         if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser?.id) {
-            const lastMessageInState = messages[messages.length - 1];
+            const lastMessageInState = initialMessages[initialMessages.length - 1];
             if (lastMessageInState.sender?.id === lastCustomerMessage.sender?.id) {
                 setIsAiThinking(true);
                 try {
@@ -185,19 +180,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     });
                     
                     if (result && result.response && chat.agent?.id) {
-                        const aiMessage: Message = {
-                           id: `msg-ai-${Date.now()}`,
-                           content: result.response,
-                           type: 'text',
-                           status: 'default',
-                           chat_id: chat.id,
-                           sender: chat.agent,
-                           workspace_id: chat.workspace_id,
-                           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                           createdAt: new Date().toISOString(),
-                           formattedDate: "Hoje",
-                        };
-                        setMessages(prev => [...prev, aiMessage]);
+                        // TODO: Send AI message through an action
+                        console.log("AI would have sent:", result.response);
                     }
 
                 } catch (error) {
@@ -215,13 +199,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     };
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
+  }, [initialMessages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
   
   // Mark messages as read effect
   React.useEffect(() => {
       if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
 
-      const unreadMessages = messages.filter(m => m.sender?.id === chat.contact.id && m.api_message_status !== 'READ' && m.message_id_from_api);
+      const unreadMessages = initialMessages.filter(m => m.sender?.id === chat.contact.id && m.api_message_status !== 'READ' && m.message_id_from_api);
       
       if (unreadMessages.length > 0) {
           const messagesToMark = unreadMessages.map(m => ({
@@ -232,7 +216,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           
           markMessagesAsReadAction(chat.instance_name, messagesToMark);
       }
-  }, [messages, chat]);
+  }, [initialMessages, chat]);
   
   const handleDeleteMessage = async (messageId: string, instanceName?: string) => {
     if (!instanceName) {
@@ -250,7 +234,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
-    const prevMessage = messages[index - 1];
+    const prevMessage = initialMessages[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     return (
@@ -280,7 +264,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
               >
                 {message.sender ? (
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
+                      <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
                       <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                     </Avatar>
                 ) : <div className="w-8"></div> }
@@ -390,12 +374,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
       <div className="flex-1 overflow-y-auto" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-4 p-6">
-            {messages.map(renderMessageWithSeparator)}
+            {initialMessages.map(renderMessageWithSeparator)}
              {isAiThinking && (
                 <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
                     {chat.agent ? (
                         <Avatar className="h-8 w-8">
-                        <AvatarImage src={chat.agent.avatar} alt={chat.agent.name} data-ai-hint="person" />
+                        <AvatarImage src={chat.agent.avatar} alt={chat.agent.name || ''} data-ai-hint="person" />
                         <AvatarFallback>{chat.agent.name?.charAt(0)}</AvatarFallback>
                         </Avatar>
                     ): <div className="w-8"></div>}
@@ -421,8 +405,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="flex items-center gap-4 mt-2">
-                    <form onSubmit={handleSendMessage} className="relative flex-1">
+                     <form
+                        ref={formRef}
+                        action={sendFormAction}
+                        className="relative flex-1"
+                    >
+                        <input type="hidden" name="chatId" value={chat.id} />
                         <Input
+                            name="content"
                             placeholder="Digite sua mensagem..."
                             className="pr-24"
                             value={newMessage}
@@ -432,9 +422,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
                             <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
                             <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Paperclip className="h-5 w-5" /></Button>
-                            <Button type="submit" size="sm" className='h-8' disabled={isAiAgentActive}>
-                            <Send className="h-4 w-4" />
-                            </Button>
+                            <SendMessageButton />
                         </div>
                     </form>
                     <div className="flex items-center space-x-2">
@@ -456,3 +444,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
