@@ -8,17 +8,21 @@ import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { updateUserOnlineStatus } from '@/actions/user';
-import { format, isToday, isYesterday } from 'date-fns';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 
+const timeZone = 'America/Sao_Paulo';
+
 function formatMessageDate(date: Date): string {
-    if (isToday(date)) {
+    const zonedDate = toZonedTime(date, timeZone);
+    if (isToday(zonedDate)) {
         return `Hoje`;
     }
-    if (isYesterday(date)) {
+    if (isYesterday(zonedDate)) {
         return `Ontem`;
     }
-    return format(date, "dd/MM/yyyy", { locale: ptBR });
+    return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
@@ -158,6 +162,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 messagesByChat[m.chat_id] = [];
             }
             const createdAtDate = new Date(m.created_at);
+            const zonedDate = toZonedTime(createdAtDate, timeZone);
+            
             messagesByChat[m.chat_id].push({
                 id: m.id,
                 chat_id: m.chat_id,
@@ -166,7 +172,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 type: m.type,
                 status: m.status,
                 metadata: m.metadata,
-                timestamp: createdAtDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
                 sender: getSenderById(m.sender_id), 

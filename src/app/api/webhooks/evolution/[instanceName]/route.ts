@@ -247,6 +247,10 @@ async function handleMessagesUpsert(payload: any) {
       }
     }
 
+    // Use a timestamp from the server running this code.
+    // The payload.date_time might be from a different timezone or incorrect.
+    const messageTimestamp = new Date();
+
     await client.query(
       `INSERT INTO messages (
         workspace_id, chat_id, sender_id, type, content, metadata,
@@ -255,8 +259,8 @@ async function handleMessagesUpsert(payload: any) {
         api_message_status, raw_payload
       ) VALUES ($1, $2, $3, 'text', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
-        workspaceId, chatId, contactId, content, metadata,
-        new Date(payload.date_time), key.id, sender, instanceName,
+        workspaceId, chatId, contactId, 'text', content, metadata,
+        messageTimestamp, key.id, sender, instanceName,
         data.status, data.source, parsedUrl, key.fromMe,
         data.status?.toUpperCase(), payload
       ]

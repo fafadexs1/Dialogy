@@ -108,7 +108,7 @@ export type MessageSender = User | Contact | undefined;
 
 export type Message = {
   id: string;
-  sender: MessageSender;
+  sender?: MessageSender;
   content: string;
   type: 'text' | 'system';
   status: 'default' | 'deleted';
