@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -150,14 +151,11 @@ export async function sendMediaAction(
         for (const file of mediaFiles) {
             const apiPayload = {
                 number: remoteJid,
-                mediaMessage: {
-                    mediatype: file.mediatype,
-                    media: `data:${file.mimetype};base64,${file.base64}`,
-                    fileName: file.filename,
-                },
-                options: {
-                    caption: caption
-                }
+                mediatype: file.mediatype,
+                mimetype: file.mimetype,
+                media: `data:${file.mimetype};base64,${file.base64}`,
+                fileName: file.filename,
+                caption: caption
             };
             
             const apiResponse = await fetchEvolutionAPI(
