@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2 } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download } from 'lucide-react';
 import { type Chat, type Message, type User, Tag } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -37,7 +39,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
 
@@ -126,6 +127,64 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
             </DialogContent>
         </Dialog>
     )
+}
+
+function MediaMessage({ message }: { message: Message }) {
+    const { mediaUrl, mimetype = '', fileName, caption } = message.metadata || {};
+
+    if (!mediaUrl) return <p>{message.content}</p>;
+
+    const renderMedia = () => {
+        if (mimetype.startsWith('image/')) {
+            return (
+                <Link href={mediaUrl} target="_blank" rel="noopener noreferrer">
+                    <Image
+                        src={mediaUrl}
+                        alt={caption || fileName || 'Imagem enviada'}
+                        width={300}
+                        height={300}
+                        className="rounded-lg object-cover max-w-xs"
+                    />
+                </Link>
+            );
+        }
+        if (mimetype.startsWith('video/')) {
+            return (
+                <video controls className="rounded-lg max-w-xs">
+                    <source src={mediaUrl} type={mimetype} />
+                    Seu navegador não suporta a tag de vídeo.
+                </video>
+            );
+        }
+        if (mimetype.startsWith('audio/')) {
+            return <audio controls src={mediaUrl} className="w-full max-w-xs" />;
+        }
+        if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
+            return (
+                <a
+                    href={mediaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors"
+                >
+                    <File className="h-8 w-8 text-muted-foreground flex-shrink-0" />
+                    <div className='min-w-0'>
+                        <p className="font-medium truncate">{fileName || 'Documento'}</p>
+                        <p className="text-xs text-muted-foreground">Clique para abrir ou baixar</p>
+                    </div>
+                    <Download className="h-5 w-5 text-muted-foreground ml-auto flex-shrink-0"/>
+                </a>
+            );
+        }
+        return <p>{message.content}</p>;
+    };
+
+    return (
+        <div className="space-y-2">
+            {renderMedia()}
+            {caption && <p className="text-sm pt-1">{caption}</p>}
+        </div>
+    );
 }
 
 export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
@@ -297,6 +356,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   };
 
+  const renderMessageContent = (message: Message) => {
+    if (message.status === 'deleted') {
+      return <p className="whitespace-pre-wrap">🗑️ Mensagem apagada</p>;
+    }
+    if (message.metadata?.mediaUrl) {
+      return <MediaMessage message={message} />;
+    }
+    return <p className="whitespace-pre-wrap">{message.content}</p>;
+  };
+
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
     const prevMessage = initialMessages[index - 1];
@@ -327,12 +396,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                   message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
-                {message.sender ? (
+                {message.sender && (
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
                       <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                     </Avatar>
-                ) : <div className="w-8"></div> }
+                )}
 
                 <div
                   className={`flex items-center gap-2 ${ message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'}`}
@@ -378,7 +447,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         : 'rounded-bl-none bg-card'
                     } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
                     >
-                        <p className="whitespace-pre-wrap">{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
+                        {renderMessageContent(message)}
                         <div className={`flex items-center justify-end gap-1 mt-2 ${
                             message.sender?.id === currentUser.id
                                 ? 'text-primary-foreground/70'
