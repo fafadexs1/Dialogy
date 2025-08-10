@@ -136,6 +136,16 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
     )
 }
 
+function formatWhatsappText(text: string): string {
+    if (!text) return '';
+    return text
+        .replace(/\*(.*?)\*/g, '<b>$1</b>')         // Bold
+        .replace(/_(.*?)_/g, '<i>$1</i>')         // Italic
+        .replace(/~(.*?)~/g, '<s>$1</s>')         // Strikethrough
+        .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>') // Code block
+        .replace(/`(.*?)`/g, '<code>$1</code>');      // Inline code
+}
+
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail } = message.metadata || {};
 
@@ -179,7 +189,7 @@ function MediaMessage({ message }: { message: Message }) {
                                 <Image
                                     src={thumbnail}
                                     alt="Video thumbnail"
-                                    layout="fill"
+                                    fill
                                     objectFit="cover"
                                     className="group-hover:brightness-75 transition-all"
                                 />
@@ -253,16 +263,6 @@ function FormattingToolbar() {
             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('strikethrough'); }}><Strikethrough className="h-4 w-4" /></Button>
         </div>
     )
-}
-
-function formatWhatsappText(text: string): string {
-    if (!text) return '';
-    return text
-        .replace(/\*(.*?)\*/g, '<b>$1</b>')         // Bold
-        .replace(/_(.*?)_/g, '<i>$1</i>')         // Italic
-        .replace(/~(.*?)~/g, '<s>$1</s>')         // Strikethrough
-        .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>') // Code block
-        .replace(/`(.*?)`/g, '<code>$1</code>');      // Inline code
 }
 
 
@@ -373,46 +373,48 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   }
 
   const generateVideoThumbnail = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const video = document.createElement('video');
-            const reader = new FileReader();
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
 
-            video.preload = 'metadata';
-            video.muted = true;
-            video.playsInline = true;
+        video.onloadeddata = () => {
+            // Seek to a specific time, e.g., 1 second
+            video.currentTime = 1;
+        };
+        
+        video.onseeked = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject(new Error('Could not get canvas context'));
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg');
+            URL.revokeObjectURL(video.src); // Clean up the object URL
+            resolve(dataUrl);
+        };
 
-            video.onloadeddata = () => {
-                video.currentTime = 1; 
-            };
-            
-            video.onseeked = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return reject(new Error('Could not get canvas context'));
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const dataUrl = canvas.toDataURL('image/jpeg');
-                URL.revokeObjectURL(video.src);
-                resolve(dataUrl);
-            };
+        video.onerror = (e) => {
+            console.error("Video load error:", e);
+            URL.revokeObjectURL(video.src);
+            reject(new Error("Failed to load video for thumbnail generation"));
+        }
 
-            video.onerror = (e) => {
-                URL.revokeObjectURL(video.src);
-                reject(e);
+        // Use FileReader to create a blob URL, which is more reliable
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (typeof event.target?.result === 'string') {
+                video.src = event.target.result;
+            } else {
+                 reject(new Error('FileReader did not return a string.'));
             }
-
-            reader.onload = (event) => {
-                if (typeof event.target?.result === 'string') {
-                    video.src = event.target.result;
-                } else {
-                     reject(new Error('FileReader did not return a string.'));
-                }
-            };
-            reader.onerror = (e) => reject(e);
-            reader.readAsDataURL(file);
-        });
-    };
+        };
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+    });
+};
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -488,6 +490,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         const currentMediaFiles = [...mediaFiles];
         setMediaFiles([]);
         setNewMessage('');
+        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
 
         const result = await sendMediaAction(chat.id, caption, mediaData);
         if (result.success) {
@@ -497,8 +501,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             setMediaFiles(currentMediaFiles);
         }
     } else {
+        if (!plainTextContent.trim()) return;
         sendFormAction(formData);
         setNewMessage('');
+        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
     }
   };
 
@@ -524,7 +530,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isFromMe = message.sender?.id === currentUser?.id;
-    
     const isDeleted = message.status === 'deleted';
 
     return (
@@ -547,27 +552,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </div>
                 </div>
             ) : (
-             <div
-                className={`group flex items-start gap-3 animate-in fade-in ${
-                  isFromMe ? 'flex-row-reverse' : 'flex-row'
-                }`}
-              >
+             <div className={`group flex items-start gap-3 animate-in fade-in ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}>
                 {message.sender && (
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
                       <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                     </Avatar>
                 )}
-
-                <div
-                  className={cn("flex flex-col gap-1.5",
-                      isFromMe ? 'items-end' : 'items-start'
-                  )}
-                >
-                    <div
-                        className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row'
-                        )}
-                    >
+                <div className={cn("flex flex-col gap-1.5", isFromMe ? 'items-end' : 'items-start')}>
+                    <div className={cn("flex items-end gap-2", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                         {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0">
                                 <AlertDialog>
@@ -601,9 +594,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 </AlertDialog>
                             </div>
                         )}
-                    
                         <div
-                            className={cn("break-words rounded-xl shadow-md p-3",
+                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
                                 isDeleted 
                                     ? 'bg-secondary/50 border'
                                     : (isFromMe 
@@ -616,7 +608,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             ) : renderMessageContent(message)}
                         </div>
                     </div>
-                     <div className={cn("flex items-center gap-1 text-xs text-muted-foreground", isFromMe ? '' : '')}>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <span>{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
@@ -717,7 +709,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         }}
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
-                         <input type="hidden" name="content" value={newMessage} />
                          <div className="relative overflow-hidden">
                             <div className='border rounded-lg'>
                                 <FormattingToolbar />
