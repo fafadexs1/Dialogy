@@ -133,10 +133,12 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
     )
 }
 
-function MediaMessage({ message }: { message: Message }) {
+function MediaMessage({ message, currentUser }: { message: Message, currentUser: User }) {
     const { mediaUrl, mimetype = '', fileName } = message.metadata || {};
 
     if (!mediaUrl) return <p>{message.content}</p>;
+    
+    const isFromMe = message.sender?.id === currentUser.id;
 
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
@@ -148,7 +150,7 @@ function MediaMessage({ message }: { message: Message }) {
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="rounded-lg object-cover max-w-xs cursor-pointer hover:brightness-90 transition-all"
+                            className="rounded-lg object-cover w-full max-w-xs cursor-pointer hover:brightness-90 transition-all"
                         />
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
@@ -211,11 +213,24 @@ function MediaMessage({ message }: { message: Message }) {
         }
         return <p>{message.content}</p>;
     };
+    
+    const showCaption = message.content && message.content.trim() !== '';
 
     return (
-        <div className="space-y-2">
-            {renderMedia()}
-            {message.content && <p className="text-sm pt-1">{message.content}</p>}
+        <div className={cn(
+            "rounded-xl shadow-md max-w-xs",
+             isFromMe
+                ? 'rounded-br-none bg-primary text-primary-foreground'
+                : 'rounded-bl-none bg-card'
+        )}>
+           <div className="p-1">
+             {renderMedia()}
+           </div>
+           {showCaption && (
+                <div className="px-4 pb-3 pt-1">
+                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                </div>
+            )}
         </div>
     );
 }
@@ -257,7 +272,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser?.id) {
+        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser.id) {
             const lastMessageInState = initialMessages[initialMessages.length - 1];
             if (lastMessageInState.sender?.id === lastCustomerMessage.sender?.id) {
                 setIsAiThinking(true);
@@ -292,7 +307,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     };
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
+  }, [initialMessages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser.id]);
   
   // Mark messages as read effect
   useEffect(() => {
@@ -397,7 +412,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
     }
     if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
-        return <MediaMessage message={message} />;
+        return <MediaMessage message={message} currentUser={currentUser} />;
     }
     return <p className="whitespace-pre-wrap">{message.content}</p>;
   };
@@ -408,6 +423,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isMedia = !!(message.metadata?.mediaUrl || message.metadata?.mimetype);
+    const isFromMe = message.sender?.id === currentUser?.id;
+    const hasContent = message.content && message.content.trim() !== '';
 
     return (
         <React.Fragment key={message.id}>
@@ -431,7 +448,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             ) : (
              <div
                 className={`group flex items-end gap-3 animate-in fade-in ${
-                  message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
+                  isFromMe ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
                 {message.sender && (
@@ -442,9 +459,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
 
                 <div
-                  className={`flex items-center gap-2 ${ message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'}`}
+                  className={`flex items-center gap-2 ${ isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
                 >
-                    {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
+                    {isFromMe && message.status !== 'deleted' && (
                         <div className="flex-shrink-0">
                              <AlertDialog>
                                 <DropdownMenu>
@@ -479,38 +496,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     )}
                 
                     <div
-                    className={cn(
-                        "max-w-xl break-words",
-                        isMedia && !message.content ? "p-0 bg-transparent shadow-none" : "rounded-xl px-4 py-3 text-sm shadow-md",
-                        message.sender?.id === currentUser?.id
-                        ? 'rounded-br-none bg-primary text-primary-foreground'
-                        : 'rounded-bl-none bg-card',
-                        message.status === 'deleted' ? 'bg-secondary/50 border' : ''
-                    )}
+                        className={cn("max-w-xl break-words",
+                            !isMedia && "rounded-xl px-4 py-3 text-sm shadow-md",
+                            !isMedia && (isFromMe ? 'rounded-br-none bg-primary text-primary-foreground' : 'rounded-bl-none bg-card'),
+                            message.status === 'deleted' && 'bg-secondary/50 border rounded-xl px-4 py-3 text-sm'
+                        )}
                     >
                         {renderMessageContent(message)}
+                        
                         {!isMedia && (
-                            <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
-                                message.sender?.id === currentUser.id
-                                    ? 'text-primary-foreground/70'
-                                    : 'text-muted-foreground'
-                                }`}>
-                                <span>{message.timestamp}</span>
-                                {message.from_me && message.status !== 'deleted' && (
-                                    message.api_message_status === 'READ'
-                                    ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                                    : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                    ? <CheckCheck className="h-4 w-4" />
-                                    : <Check className="h-4 w-4" />
-                                )}
-                            </div>
-                        )}
-                         {isMedia && message.content && (
-                            <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
-                                message.sender?.id === currentUser.id
-                                    ? 'text-primary-foreground/70'
-                                    : 'text-muted-foreground'
-                                }`}>
+                            <div className={cn("flex items-center justify-end gap-1 mt-2 text-xs", isFromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
                                 <span>{message.timestamp}</span>
                                 {message.from_me && message.status !== 'deleted' && (
                                     message.api_message_status === 'READ'
@@ -523,6 +518,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         )}
                     </div>
                 </div>
+                 {isMedia && (
+                    <div className={cn("flex items-center gap-1 text-xs text-muted-foreground", isFromMe ? "mr-10" : "ml-10")}>
+                        <span>{message.timestamp}</span>
+                        {isFromMe && message.status !== 'deleted' && (
+                            message.api_message_status === 'READ'
+                            ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                            : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                            ? <CheckCheck className="h-4 w-4 text-muted-foreground" />
+                            : <Check className="h-4 w-4 text-muted-foreground" />
+                        )}
+                    </div>
+                 )}
               </div>
             )}
         </React.Fragment>
