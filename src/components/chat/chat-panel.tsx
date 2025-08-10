@@ -197,7 +197,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const [selectedAiModel, setSelectedAiModel] = useState('googleai/gemini-2.0-flash');
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const { toast } = useToast();
@@ -206,8 +205,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   useEffect(() => {
         if (sendState.success) {
-            formRef.current?.reset();
-            setNewMessage('');
             onActionSuccess();
         } else if (sendState.error) {
             toast({ title: 'Erro ao Enviar Mensagem', description: sendState.error, variant: 'destructive' });
@@ -334,7 +331,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const handleFormSubmit = async (formData: FormData) => {
     if (mediaFiles.length > 0) {
-        // Handle media sending
         if (!chat) return;
         const caption = formData.get('content') as string;
         const mediaData = mediaFiles.map(mf => ({
@@ -344,25 +340,32 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             mediatype: mf.mediatype,
         }));
         
+        // Clear inputs immediately for better UX
+        const currentMediaFiles = [...mediaFiles];
+        setMediaFiles([]);
+        setNewMessage('');
+
         const result = await sendMediaAction(chat.id, caption, mediaData);
         if (result.success) {
-            setMediaFiles([]);
-            setNewMessage('');
             onActionSuccess();
         } else {
             toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+            // Restore files on failure
+            setMediaFiles(currentMediaFiles);
         }
     } else {
         // Handle text message sending
         sendFormAction(formData);
+        // Clear input immediately for better UX
+        setNewMessage('');
     }
   };
 
   const renderMessageContent = (message: Message) => {
     if (message.status === 'deleted') {
-      return <p className="whitespace-pre-wrap">🗑️ Mensagem apagada</p>;
+      return <p className="whitespace-pre-wrap italic text-muted-foreground">🗑️ Mensagem apagada</p>;
     }
-    if (message.metadata?.mediaUrl) {
+    if (message.metadata?.mediaUrl || message.metadata?.mimetype) {
       return <MediaMessage message={message} />;
     }
     return <p className="whitespace-pre-wrap">{message.content}</p>;
@@ -447,19 +450,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         message.sender?.id === currentUser?.id
                         ? 'rounded-br-none bg-primary text-primary-foreground'
                         : 'rounded-bl-none bg-card'
-                    } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
+                    } ${message.status === 'deleted' ? 'bg-secondary/50 border' : ''}`}
                     >
                         {renderMessageContent(message)}
-                        <div className={`flex items-center justify-end gap-1 mt-2 ${
+                        <div className={`flex items-center justify-end gap-1 mt-2 text-xs ${
                             message.sender?.id === currentUser.id
                                 ? 'text-primary-foreground/70'
                                 : 'text-muted-foreground'
                             }`}>
-                            <p className="text-xs">{message.timestamp}</p>
-                            {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
+                            <span>{message.timestamp}</span>
+                            {message.from_me && message.status !== 'deleted' && (
                                 message.api_message_status === 'READ'
                                 ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                                : message.api_message_status === 'DELIVERED'
+                                : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
                                 ? <CheckCheck className="h-4 w-4" />
                                 : <Check className="h-4 w-4" />
                             )}
@@ -549,8 +552,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                 <div className="flex items-center gap-4 mt-2">
                      <form
-                        ref={formRef}
-                        action={handleFormSubmit}
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            handleFormSubmit(new FormData(e.currentTarget));
+                        }}
                         className="relative flex-1"
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
@@ -561,6 +566,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
                             disabled={isAiAgentActive}
+                            autoComplete="off"
                         />
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
                             <Button type="button" variant="ghost" size="icon" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>

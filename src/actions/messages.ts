@@ -56,7 +56,7 @@ export async function sendMessageAction(
         }
         const apiConfig = apiConfigRes.rows[0];
 
-        // 2. Send message via Evolution API with the corrected payload
+        // 2. Send message via Evolution API
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
             apiConfig,
@@ -69,7 +69,7 @@ export async function sendMessageAction(
             }
         );
 
-        // 3. Save the message to our database
+        // 3. Save the message to our database using the API response
         await client.query(
             `INSERT INTO messages (
                 workspace_id,
@@ -79,9 +79,10 @@ export async function sendMessageAction(
                 content,
                 from_me,
                 message_id_from_api,
-                api_message_status
-             ) VALUES ($1, $2, $3, 'text', $4, true, $5, 'SENT')`,
-            [workspace_id, chatId, currentUserId, content, apiResponse?.key?.id]
+                api_message_status,
+                instance_name
+             ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7)`,
+            [workspace_id, chatId, currentUserId, content, apiResponse?.key?.id, apiResponse?.status, instanceName]
         );
 
         await client.query('COMMIT');
@@ -89,7 +90,7 @@ export async function sendMessageAction(
         revalidatePath(`/api/chats/${workspace_id}`);
         revalidatePath('/', 'layout');
 
-        return { success: true, error: null };
+        return { success: true };
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -151,13 +152,14 @@ export async function sendMediaAction(
                 number: remoteJid,
                 mediaMessage: {
                     mediatype: file.mediatype,
-                    media: file.base64,
-                    mimetype: file.mimetype,
+                    media: `data:${file.mimetype};base64,${file.base64}`,
                     fileName: file.filename,
-                    caption: caption,
                 },
+                options: {
+                    caption: caption
+                }
             };
-
+            
             const apiResponse = await fetchEvolutionAPI(
                 `/message/sendMedia/${instanceName}`,
                 apiConfig,
@@ -174,9 +176,18 @@ export async function sendMediaAction(
             await client.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, sender_id, type, content, from_me,
-                    message_id_from_api, api_message_status, metadata
-                 ) VALUES ($1, $2, $3, 'text', $4, true, $5, 'SENT', $6)`,
-                [workspace_id, chatId, currentUserId, dbContent, apiResponse?.key?.id, { original_filename: file.filename, mimetype: file.mimetype }]
+                    message_id_from_api, api_message_status, metadata, instance_name
+                 ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8)`,
+                [
+                    workspace_id, 
+                    chatId, 
+                    currentUserId, 
+                    dbContent, 
+                    apiResponse?.key?.id, 
+                    apiResponse?.status, 
+                    { original_filename: file.filename, mimetype: file.mimetype, caption: caption },
+                    instanceName
+                ]
             );
         }
 
