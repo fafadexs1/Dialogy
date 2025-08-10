@@ -344,3 +344,90 @@ export async function disconnectInstance(instanceName: string, config: Evolution
         return { status: 'disconnected' };
     }
 }
+
+export async function markMessagesAsReadAction(
+    instanceName: string, 
+    messagesToRead: { remoteJid: string; fromMe: boolean; id: string }[]
+): Promise<{ success: boolean; error?: string }> {
+    if (!instanceName || messagesToRead.length === 0) {
+        return { success: false, error: "Dados insuficientes para marcar mensagens como lidas." };
+    }
+
+    try {
+        // We need the workspaceId to get the API config. Let's get it from the instance name.
+        const instanceRes = await db.query(`
+            SELECT c.workspace_id, c.api_url, c.api_key 
+            FROM evolution_api_instances i
+            JOIN evolution_api_configs c ON i.config_id = c.id
+            WHERE i.name = $1
+        `, [instanceName]);
+
+        if (instanceRes.rowCount === 0) {
+            return { success: false, error: "Instância ou configuração da API não encontrada." };
+        }
+        const { api_url, api_key } = instanceRes.rows[0];
+        const apiConfig = { api_url, api_key };
+
+        await fetchEvolutionAPI(`/chat/markMessageAsRead/${instanceName}`, apiConfig, {
+            method: 'POST',
+            body: JSON.stringify({ readMessages: messagesToRead })
+        });
+
+        return { success: true };
+    } catch (error: any) {
+        console.error(`[EVO_ACTION_MARK_READ] Erro ao marcar mensagens como lidas para a instância ${instanceName}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+
+export async function deleteMessageAction(
+    instanceName: string,
+    messageId: string, // This is the DB message ID
+): Promise<{ success: boolean, error?: string }> {
+     if (!instanceName || !messageId) {
+        return { success: false, error: "Dados insuficientes para apagar a mensagem." };
+    }
+    
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+
+        const msgRes = await client.query('SELECT message_id_from_api, from_me, chat_id FROM messages WHERE id = $1', [messageId]);
+        if (msgRes.rowCount === 0) {
+            throw new Error("Mensagem não encontrada no banco de dados.");
+        }
+        const { message_id_from_api: apiMessageId, from_me: fromMe, chat_id } = msgRes.rows[0];
+        
+        const chatRes = await client.query('SELECT c.workspace_id, ct.phone_number_jid as remoteJid FROM chats c JOIN contacts ct ON c.contact_id = ct.id WHERE c.id = $1', [chat_id]);
+        if (chatRes.rowCount === 0) {
+             throw new Error("Chat não encontrado.");
+        }
+        const { workspace_id, remotejid: remoteJid } = chatRes.rows[0];
+        
+        const configRes = await client.query('SELECT api_url, api_key FROM evolution_api_configs WHERE workspace_id = $1', [workspace_id]);
+        if (configRes.rowCount === 0) {
+            throw new Error("Configuração da API não encontrada.");
+        }
+
+        const apiConfig = configRes.rows[0];
+        
+        await fetchEvolutionAPI(`/chat/deleteMessageForEveryone/${instanceName}`, apiConfig, {
+            method: 'DELETE',
+            body: JSON.stringify({ id: apiMessageId, remoteJid, fromMe })
+        });
+        
+        await client.query("UPDATE messages SET status = 'deleted', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
+
+        await client.query('COMMIT');
+        revalidatePath(`/api/chats/${workspace_id}`);
+        return { success: true };
+
+    } catch (error: any) {
+        await client.query('ROLLBACK');
+        console.error(`[EVO_ACTION_DELETE_MSG] Erro ao apagar mensagem ${messageId}:`, error);
+        return { success: false, error: error.message };
+    } finally {
+        client.release();
+    }
+}

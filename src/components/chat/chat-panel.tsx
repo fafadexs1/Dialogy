@@ -1,12 +1,12 @@
 
 'use client';
 
-import React, { useActionState } from 'react';
+import React, { useActionState, useEffect, useRef } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2 } from 'lucide-react';
 import { type Chat, type Message, type User, Tag } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -21,7 +21,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
-
+import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 interface ChatPanelProps {
   chat: Chat | null;
@@ -124,6 +141,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         id: `msg-${Date.now()}`,
         content: newMessage,
         type: 'text',
+        status: 'default',
         chat_id: chat.id,
         sender: currentUser,
         workspace_id: chat.workspace_id,
@@ -145,7 +163,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }, [messages]);
 
-  const chatHistoryForAI = messages.map(m => `${m.sender?.name}: ${m.content}`).join('\n');
+  const chatHistoryForAI = messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
   const lastCustomerMessage = messages.filter(m => m.sender?.id !== currentUser?.id).pop();
 
 
@@ -171,6 +189,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                            id: `msg-ai-${Date.now()}`,
                            content: result.response,
                            type: 'text',
+                           status: 'default',
                            chat_id: chat.id,
                            sender: chat.agent,
                            workspace_id: chat.workspace_id,
@@ -197,6 +216,38 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser?.id]);
+  
+  // Mark messages as read effect
+  React.useEffect(() => {
+      if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
+
+      const unreadMessages = messages.filter(m => m.sender?.id === chat.contact.id && m.api_message_status !== 'READ' && m.message_id_from_api);
+      
+      if (unreadMessages.length > 0) {
+          const messagesToMark = unreadMessages.map(m => ({
+              remoteJid: chat.contact.phone_number_jid!,
+              fromMe: false, // Messages from contact are not fromMe
+              id: m.message_id_from_api!
+          }));
+          
+          markMessagesAsReadAction(chat.instance_name, messagesToMark);
+      }
+  }, [messages, chat]);
+  
+  const handleDeleteMessage = async (messageId: string, instanceName?: string) => {
+    if (!instanceName) {
+        toast({ title: "Erro", description: "Não foi possível determinar a instância da mensagem.", variant: "destructive"});
+        return;
+    }
+    const result = await deleteMessageAction(messageId, instanceName);
+    if(result.error) {
+      toast({ title: "Erro ao apagar mensagem", description: result.error, variant: "destructive"});
+    } else {
+      toast({ title: "Mensagem apagada com sucesso!"});
+      onActionSuccess(); // Re-fetch data
+    }
+  }
+
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
     const prevMessage = messages[index - 1];
@@ -223,33 +274,70 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 </div>
             ) : (
              <div
-                className={`flex items-end gap-3 animate-in fade-in ${
+                className={`flex items-end gap-3 animate-in fade-in group ${
                   message.sender?.id === currentUser?.id ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
-                {message.sender && (
+                {message.sender ? (
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={message.sender.avatar} alt={message.sender.name} data-ai-hint="person" />
                       <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                     </Avatar>
+                ) : <div className="w-8"></div> }
+
+                {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
+                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                         <AlertDialog>
+                             <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                        <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                     <AlertDialogTrigger asChild>
+                                        <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
+                                            <Trash2 className="mr-2 h-4 w-4" />
+                                            Apagar para todos
+                                        </DropdownMenuItem>
+                                     </AlertDialogTrigger>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                     </div>
                 )}
+               
                 <div
                   className={`max-w-xl rounded-xl px-4 py-3 text-sm shadow-md ${
                     message.sender?.id === currentUser?.id
                       ? 'rounded-br-none bg-primary text-primary-foreground'
                       : 'rounded-bl-none bg-card'
-                  }`}
+                  } ${message.status === 'deleted' ? 'bg-secondary/50 border italic' : ''}`}
                 >
-                  <p>{message.content}</p>
+                  <p>{message.status === 'deleted' ? '🗑️ Mensagem apagada' : message.content}</p>
                    <div className={`flex items-center justify-end gap-1 mt-2 ${
                       message.sender?.id === currentUser?.id
                         ? 'text-primary-foreground/70'
                         : 'text-muted-foreground'
                     }`}>
                       <p className="text-xs">{message.timestamp}</p>
-                      {message.sender?.id === currentUser.id && (
+                      {message.sender?.id === currentUser.id && message.status !== 'deleted' && (
                           message.api_message_status === 'READ'
                           ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                          : message.api_message_status === 'DELIVERED'
+                          ? <CheckCheck className="h-4 w-4" />
                           : <Check className="h-4 w-4" />
                       )}
                     </div>
@@ -305,10 +393,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             {messages.map(renderMessageWithSeparator)}
              {isAiThinking && (
                 <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={chat.agent?.avatar} alt={chat.agent?.name} data-ai-hint="person" />
-                      <AvatarFallback>{chat.agent?.name?.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    {chat.agent ? (
+                        <Avatar className="h-8 w-8">
+                        <AvatarImage src={chat.agent.avatar} alt={chat.agent.name} data-ai-hint="person" />
+                        <AvatarFallback>{chat.agent.name?.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                    ): <div className="w-8"></div>}
                     <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
                         <div className="flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" />

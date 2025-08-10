@@ -111,6 +111,7 @@ export type Message = {
   sender: MessageSender;
   content: string;
   type: 'text' | 'system';
+  status: 'default' | 'deleted';
   metadata?: any;
   timestamp: string;
   createdAt: string;
@@ -119,6 +120,8 @@ export type Message = {
   workspace_id: string;
   instance_name?: string;
   source_from_api?: string;
+  message_id_from_api?: string;
+  from_me?: boolean;
   api_message_status?: string;
 };
 

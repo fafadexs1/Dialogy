@@ -53,6 +53,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TABLE IF EXISTS public.users CASCADE;',
         'DROP TYPE IF EXISTS public.chat_status_enum;',
         'DROP TYPE IF EXISTS public.message_type_enum;',
+        'DROP TYPE IF EXISTS public.message_status_enum;',
     ];
     
     for (const query of teardownQueries) {
@@ -63,6 +64,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     const setupQueries = [
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
       `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
+      `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
       
       `CREATE TABLE public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -197,6 +199,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
           sender_id UUID,
           type message_type_enum DEFAULT 'text'::message_type_enum,
+          status message_status_enum DEFAULT 'default'::message_status_enum,
           content TEXT,
           metadata JSONB,
           created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -359,5 +362,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
-    
