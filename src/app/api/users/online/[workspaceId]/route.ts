@@ -14,7 +14,7 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { workspaceId } = params;
+  const workspaceId = params.workspaceId;
   if (!workspaceId) {
     return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });
   }
