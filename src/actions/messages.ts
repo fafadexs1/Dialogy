@@ -154,7 +154,7 @@ export async function sendMediaAction(
                 mediatype: file.mediatype,
                 media: `data:${file.mimetype};base64,${file.base64}`,
                 fileName: file.filename,
-                caption: caption
+                caption: caption || ' ' // Ensure caption is not empty
             };
             
             const apiResponse = await fetchEvolutionAPI(
