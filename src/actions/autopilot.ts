@@ -49,11 +49,13 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
 
     try {
         const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
+        
+        // This is not an error, it just means no config has been created yet.
+        // The setup trigger should have created one, but we can handle it gracefully.
         if (configRes.rowCount === 0) {
-            // This is not an error, it just means no config has been created yet.
-            // The setup trigger should have created one, but we can handle it gracefully.
             return { config: null, rules: [] };
         }
+        
         const config = configRes.rows[0];
 
         const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1', [config.id]);
@@ -80,8 +82,8 @@ export async function saveAutopilotConfig(
     const workspaceId = formData.get('workspaceId') as string;
     const configId = formData.get('configId') as string;
 
-    if (!workspaceId || !configId) {
-        return { success: false, error: 'IDs de Workspace e Configuração são obrigatórios.' };
+    if (!workspaceId) {
+        return { success: false, error: 'ID de Workspace é obrigatório.' };
     }
 
     // Permission Check: Admin or has specific edit permission
@@ -89,8 +91,29 @@ export async function saveAutopilotConfig(
     if (!isAdmin && !await hasPermission(session.user.id, workspaceId, 'autopilot:edit')) {
         return { success: false, error: "Você não tem permissão para editar as configurações." };
     }
+    
+    const client = await db.connect();
 
     try {
+        await client.query('BEGIN');
+        
+        let currentConfigId = configId;
+
+        // If configId is not present, it means we might need to create a config first
+        if (!currentConfigId) {
+            const existingConfig = await client.query('SELECT id FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
+            if (existingConfig.rowCount > 0) {
+                currentConfigId = existingConfig.rows[0].id;
+            } else {
+                // This will create a new config with default values if it doesn't exist
+                const newConfigRes = await client.query(
+                    'INSERT INTO autopilot_configs (workspace_id) VALUES ($1) RETURNING id',
+                    [workspaceId]
+                );
+                currentConfigId = newConfigRes.rows[0].id;
+            }
+        }
+        
         const fieldsToUpdate: { [key: string]: any } = {};
         if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = formData.get('geminiApiKey');
         if (formData.has('aiModel')) fieldsToUpdate.ai_model = formData.get('aiModel');
@@ -98,6 +121,7 @@ export async function saveAutopilotConfig(
         
         const fieldNames = Object.keys(fieldsToUpdate);
         if (fieldNames.length === 0) {
+            await client.query('COMMIT');
             return { success: true }; // Nothing to update
         }
 
@@ -110,13 +134,18 @@ export async function saveAutopilotConfig(
             WHERE id = $${values.length + 1} AND workspace_id = $${values.length + 2}
         `;
         
-        await db.query(query, [...values, configId, workspaceId]);
+        await client.query(query, [...values, currentConfigId, workspaceId]);
 
+        await client.query('COMMIT');
+        
         revalidatePath('/autopilot');
         return { success: true };
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('[SAVE_AUTOPILOT_CONFIG]', error);
         return { success: false, error: "Falha ao salvar as configurações no banco de dados." };
+    } finally {
+        client.release();
     }
 }

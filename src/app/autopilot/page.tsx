@@ -250,14 +250,16 @@ export default function AutopilotPage() {
         setLoading(true);
         getAutopilotConfig(user.activeWorkspaceId)
             .then(data => {
-                if (data.config) {
-                    setConfig(data.config);
-                    setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
-                    setGeminiApiKey(data.config.gemini_api_key || '');
-                    setKnowledgeBase(data.config.knowledge_base || '');
-                    setInstances(data.rules || []);
-                } else if (data.error) {
+                if (data.error) {
                     toast({ title: "Erro ao carregar configurações", description: data.error, variant: 'destructive' });
+                } else {
+                    setConfig(data.config);
+                    setInstances(data.rules || []);
+                    if (data.config) {
+                        setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
+                        setGeminiApiKey(data.config.gemini_api_key || '');
+                        setKnowledgeBase(data.config.knowledge_base || '');
+                    }
                 }
             })
             .finally(() => setLoading(false));
