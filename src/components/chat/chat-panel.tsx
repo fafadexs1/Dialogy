@@ -149,7 +149,7 @@ function formatWhatsappText(text: string): string {
     }
 
     // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}}</code></pre>`);
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
 
     // Then, format other elements, avoiding what's inside <code>
     safeText = safeText
@@ -305,54 +305,52 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }, [initialMessages, isAiThinking]);
 
-  const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
   useEffect(() => {
     const runAiAgent = async () => {
-        // Condition to run: autopilot is on, there is a last message, it's from the customer, and there's an assigned agent.
-        if (isAiAgentActive && lastMessage && chat?.agent?.id && lastMessage.sender?.id !== currentUser.id) {
-            setIsAiThinking(true);
-            try {
-                const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+        if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id) {
+            return;
+        }
 
-                const result = await generateAgentResponse({
-                    customerMessage: lastMessage.content,
-                    chatHistory: chatHistoryForAI,
-                    rules: activeRules,
-                    knowledgeBase: "", 
-                    model: selectedAiModel,
-                });
-                
-                if (result && result.response) {
-                    const sendResult = await sendAutomatedMessageAction(
-                        chat.id,
-                        result.response,
-                        chat.agent.id
-                    );
-                    if(sendResult.success) {
-                        onActionSuccess();
-                    } else {
-                        throw new Error(sendResult.error);
-                    }
+        setIsAiThinking(true);
+        try {
+            const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+            const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+
+            const result = await generateAgentResponse({
+                customerMessage: lastMessage.content,
+                chatHistory: chatHistoryForAI,
+                rules: activeRules,
+                knowledgeBase: "", 
+                model: selectedAiModel,
+            });
+            
+            if (result && result.response) {
+                const sendResult = await sendAutomatedMessageAction(
+                    chat.id,
+                    result.response,
+                    chat.agent.id
+                );
+                if (sendResult.success) {
+                    onActionSuccess();
+                } else {
+                    throw new Error(sendResult.error);
                 }
-
-            } catch (error: any) {
-                 console.error('Error generating AI agent response:', error);
-                 toast({
-                    title: 'Erro do Piloto Automático',
-                    description: error.message || 'Não foi possível enviar a resposta automática.',
-                    variant: 'destructive',
-                });
-            } finally {
-                setIsAiThinking(false);
             }
+        } catch (error: any) {
+             console.error('Error generating AI agent response:', error);
+             toast({
+                title: 'Erro do Piloto Automático',
+                description: error.message || 'Não foi possível enviar a resposta automática.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsAiThinking(false);
         }
     };
 
-    if (isAiAgentActive) {
-      runAiAgent();
-    }
+    runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastMessage?.id, isAiAgentActive, chat?.id]);
   
@@ -584,7 +582,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                     <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                          {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0 self-start">
                                 <AlertDialog>
@@ -632,7 +630,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             ) : renderMessageContent(message)}
                         </div>
                     </div>
-                    <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                    <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
                         <span className="mx-1">{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                             message.api_message_status === 'READ'
@@ -681,7 +679,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <Button variant="ghost" size="icon">
               <FileDown className="h-5 w-5"/>
           </Button>
-          <ChatSummary chatHistory={chatHistoryForAI} />
+          <ChatSummary chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')} />
           <Button variant="ghost" size="icon">
               <MoreVertical className="h-5 w-5"/>
           </Button>
@@ -723,7 +721,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 {!isAiAgentActive && mediaFiles.length === 0 && (
                     <SmartReplies 
                         customerMessage={lastMessage?.content || ''}
-                        chatHistory={chatHistoryForAI}
+                        chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         onSelectReply={(reply) => setNewMessage(reply)}
                     />
                 )}
