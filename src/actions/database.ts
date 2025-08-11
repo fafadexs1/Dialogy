@@ -32,6 +32,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.autopilot_rules CASCADE;',
+        'DROP TABLE IF EXISTS public.autopilot_configs CASCADE;',
         'DROP TABLE IF EXISTS public.contact_tags CASCADE;',
         'DROP TABLE IF EXISTS public.tags CASCADE;',
         'DROP TABLE IF EXISTS public.business_hours CASCADE;',
@@ -231,6 +233,26 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           webhook_url TEXT
       );`,
 
+      `CREATE TABLE public.autopilot_configs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          gemini_api_key TEXT,
+          ai_model TEXT,
+          knowledge_base TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(workspace_id)
+      );`,
+
+      `CREATE TABLE public.autopilot_rules (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        config_id UUID NOT NULL REFERENCES public.autopilot_configs(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        action JSONB NOT NULL,
+        enabled BOOLEAN DEFAULT TRUE
+      );`,
+
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO ${appUser};`,
@@ -284,6 +306,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         DECLARE
           admin_role_id UUID;
           member_role_id UUID;
+          autopilot_config_id UUID;
         BEGIN
           -- Cria o papel de Administrador para o novo workspace
           INSERT INTO public.roles (workspace_id, name, description, is_default)
@@ -302,12 +325,26 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           -- Atribui permissões básicas ao papel de Membro
           INSERT INTO public.role_permissions (role_id, permission_id)
           SELECT member_role_id, id FROM public.permissions
-          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit');
+          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view');
           
           -- Atribui o papel de Administrador ao criador do workspace
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
           VALUES (NEW.owner_id, NEW.id, admin_role_id);
           
+          -- Cria uma configuração padrão para o Autopilot
+          INSERT INTO public.autopilot_configs (workspace_id, ai_model, knowledge_base)
+          VALUES(NEW.id, 'googleai/gemini-2.0-flash', 'Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.')
+          RETURNING id INTO autopilot_config_id;
+
+          -- Cria uma regra de exemplo para o Autopilot
+          INSERT INTO public.autopilot_rules (config_id, name, trigger, action, enabled)
+          VALUES (autopilot_config_id, 
+            'Saudação Inicial', 
+            'O cliente envia a primeira mensagem, como "oi" ou "olá".',
+            '{ "type": "reply", "value": "Olá! Bem-vindo ao nosso canal de atendimento. Como posso ajudar?" }',
+            TRUE
+          );
+
           RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;`,

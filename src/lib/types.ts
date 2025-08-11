@@ -1,5 +1,6 @@
 
 
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -231,6 +232,16 @@ export interface NexusFlowInstance {
   action: Action;
   enabled: boolean;
   model?: string;
+}
+
+export interface AutopilotConfig {
+    id: string;
+    workspace_id: string;
+    gemini_api_key: string | null;
+    ai_model: string | null;
+    knowledge_base: string | null;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface EvolutionApiConfig {
