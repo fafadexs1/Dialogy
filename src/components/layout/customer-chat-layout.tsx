@@ -53,24 +53,35 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
         setChats(latestChats);
 
-        // Preserve selection if possible, otherwise select the first chat in the new list
+        // This is the key logic change. We need to smartly update the selected chat
+        // to preserve the full message history we already have.
         setSelectedChat(currentSelectedChat => {
-            if (currentSelectedChat) {
-                const updatedSelectedChat = latestChats.find(c => c.id === currentSelectedChat.id);
-                // If the selected chat is still in the list, keep it selected.
-                if (updatedSelectedChat) {
-                    return updatedSelectedChat;
-                }
+            if (!currentSelectedChat) {
+                 // If nothing was selected, try to select a default chat
+                const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+                if (atendimentoChat) return atendimentoChat;
+                const geraisChat = latestChats.find(c => c.status === 'gerais');
+                if (geraisChat) return geraisChat;
+                return latestChats.length > 0 ? latestChats[0] : null;
             }
-            // If no chat is selected, or the selected chat is no longer in the list,
-            // select the first one from the appropriate category.
-            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-            if (atendimentoChat) return atendimentoChat;
 
-            const geraisChat = latestChats.find(c => c.status === 'gerais');
-            if (geraisChat) return geraisChat;
-            
-            return latestChats.length > 0 ? latestChats[0] : null;
+            // Find the corresponding chat in the new data
+            const updatedSelectedChatInList = latestChats.find(c => c.id === currentSelectedChat.id);
+
+            if (updatedSelectedChatInList) {
+                // IMPORTANT: Preserve the existing message history, only update chat metadata.
+                // The API now returns the full history in `updatedSelectedChatInList.messages`,
+                // so we can just use that.
+                return updatedSelectedChatInList;
+            } else {
+                 // The previously selected chat is no longer in the list (e.g., archived, deleted)
+                 // Select a new default chat.
+                const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+                if (atendimentoChat) return atendimentoChat;
+                const geraisChat = latestChats.find(c => c.status === 'gerais');
+                if (geraisChat) return geraisChat;
+                return latestChats.length > 0 ? latestChats[0] : null;
+            }
         });
 
     }, [currentUser.activeWorkspaceId, currentUser.id]);
