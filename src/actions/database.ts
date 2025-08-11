@@ -308,7 +308,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           member_role_id UUID;
           autopilot_config_id UUID;
         BEGIN
-          -- Cria o papel de Administrador para o novo workspace
+          -- Cria o papel de Administrador para o novo workspace (não é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
           RETURNING id INTO admin_role_id;
@@ -317,7 +317,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           INSERT INTO public.role_permissions (role_id, permission_id)
           SELECT admin_role_id, id FROM public.permissions;
 
-          -- Cria o papel de Membro para o novo workspace
+          -- Cria o papel de Membro para o novo workspace (este é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Membro', 'Acesso às funcionalidades principais, mas não pode gerenciar configurações.', TRUE)
           RETURNING id INTO member_role_id;
@@ -327,7 +327,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           SELECT member_role_id, id FROM public.permissions
           WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view');
           
-          -- Atribui o papel de Administrador ao criador do workspace
+          -- Atribui o papel de Administrador (com todas as permissões) ao criador do workspace
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
           VALUES (NEW.owner_id, NEW.id, admin_role_id);
           
