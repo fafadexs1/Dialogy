@@ -144,9 +144,8 @@ function AutomationForm({
         return;
     }
 
-    const ruleToSave = {
-      // Use existing ID for updates, generate a new one for creations
-      id: instance?.id || `rule-${Date.now()}-${Math.random()}`,
+    const ruleToSave: Omit<NexusFlowInstance, 'enabled'> = {
+      id: instance?.id || null, 
       name,
       trigger,
       action,
@@ -230,7 +229,7 @@ function AutomationForm({
                         placeholder={'{\n  "customerId": "{{contact.id}}",\n  "message": "{{customerMessage}}"\n}'}
                     />
                     <p className="text-xs text-muted-foreground">
-                        Use a sintaxe {`{{variável}}`} para inserir dados dinâmicos do chat, como {`{{contact.id}}`} ou {`{{customerMessage}}`}.
+                        Use a sintaxe {{variável}} para inserir dados dinâmicos do chat, como {{contact.id}} ou {{customerMessage}}.
                     </p>
                 </div>
             </div>

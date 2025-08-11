@@ -124,34 +124,39 @@ export async function saveAutopilotRule(
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
-    
+
     try {
-        // Validação básica
         if (!configId || !rule.name || !rule.trigger || !rule.action) {
             return { success: false, error: 'Dados da regra incompletos.' };
         }
         
-        // Garante que a 'action' seja uma string JSON para o DB
         const actionJson = JSON.stringify(rule.action);
 
-        // Lógica de Upsert
-        const query = `
-            INSERT INTO autopilot_rules (id, config_id, name, trigger, action)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (id) DO UPDATE 
-            SET name = $3, trigger = $4, action = $5
-        `;
-        
-        await db.query(query, [rule.id, configId, rule.name, rule.trigger, actionJson]);
+        if (rule.id) {
+            // Update existing rule
+            console.log(`[SAVE_AUTOPILOT_RULE] Atualizando regra ID: ${rule.id}`);
+            await db.query(
+                `UPDATE autopilot_rules SET name = $1, trigger = $2, action = $3 WHERE id = $4 AND config_id = $5`,
+                [rule.name, rule.trigger, actionJson, rule.id, configId]
+            );
+        } else {
+            // Create new rule - o ID será gerado pelo banco de dados (gen_random_uuid())
+            console.log(`[SAVE_AUTOPILOT_RULE] Criando nova regra para config ID: ${configId}`);
+            await db.query(
+                `INSERT INTO autopilot_rules (config_id, name, trigger, action) VALUES ($1, $2, $3, $4)`,
+                [configId, rule.name, rule.trigger, actionJson]
+            );
+        }
         
         revalidatePath('/autopilot');
         return { success: true };
 
     } catch (error) {
-        console.error('[SAVE_AUTOPILOT_RULE] Erro:', error);
+        console.error('[SAVE_AUTOPILOT_RULE] Erro detalhado:', error);
         return { success: false, error: 'Falha ao salvar a regra no servidor.' };
     }
 }
+
 
 export async function deleteAutopilotRule(ruleId: string): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
