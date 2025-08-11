@@ -65,7 +65,7 @@ async function internalSendMessage(
             apiConfig,
             {
                 method: 'POST',
-                body: JSON.stringify({ number: remoteJid, text: content }),
+                body: JSON.stringify({ number: remoteJid, options: { presence: 'composing', delay: 1200}, textMessage: { text: content } }),
             }
         );
         
@@ -144,11 +144,17 @@ export async function sendMediaAction(
         for (const file of mediaFiles) {
             const apiPayload = {
                 number: remoteJid,
-                mediatype: file.mediatype,
-                mimetype: file.mimetype,
-                media: file.base64,
-                fileName: file.filename,
-                caption: caption || ' ', // Ensure caption is at least a space
+                options: {
+                    delay: 1200,
+                    presence: 'uploading'
+                },
+                mediaMessage: {
+                    mediatype: file.mediatype,
+                    mimetype: file.mimetype,
+                    media: file.base64,
+                    fileName: file.filename,
+                    caption: caption || ' ', // Ensure caption is at least a space
+                }
             };
             
             const apiResponse = await fetchEvolutionAPI(

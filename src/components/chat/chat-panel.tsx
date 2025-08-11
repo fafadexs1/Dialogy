@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
+import { sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -285,12 +285,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
-  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [isAiTyping, setIsAiTyping] = useState(false);
   const [selectedAiModel, setSelectedAiModel] = useState('googleai/gemini-2.0-flash');
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentEditableRef = useRef<HTMLElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const processedMessageIds = useRef(new Set());
   
   const { toast } = useToast();
@@ -303,53 +304,61 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             viewport.scrollTop = viewport.scrollHeight;
         }
     }
-  }, [initialMessages, isAiThinking]);
+  }, [initialMessages]);
 
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
-  useEffect(() => {
-    const runAiAgent = async () => {
-        if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id) {
-            return;
-        }
+  const runAiAgent = async () => {
+    if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id || isAiTyping) {
+        return;
+    }
 
-        setIsAiThinking(true);
-        try {
-            const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
-            const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+    try {
+        const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+        const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
-            const result = await generateAgentResponse({
-                customerMessage: lastMessage.content,
-                chatHistory: chatHistoryForAI,
-                rules: activeRules,
-                knowledgeBase: "", 
-                model: selectedAiModel,
-            });
+        const result = await generateAgentResponse({
+            customerMessage: lastMessage.content,
+            chatHistory: chatHistoryForAI,
+            rules: activeRules,
+            knowledgeBase: "", 
+            model: selectedAiModel,
+        });
+        
+        if (result && result.response) {
+            setIsAiTyping(true);
+            const textToType = result.response;
             
-            if (result && result.response) {
-                const sendResult = await sendAutomatedMessageAction(
-                    chat.id,
-                    result.response,
-                    chat.agent.id
-                );
-                if (sendResult.success) {
-                    onActionSuccess();
-                } else {
-                    throw new Error(sendResult.error);
+            // Simulate typing
+            for (let i = 0; i <= textToType.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+                const typedText = textToType.substring(0, i);
+                setNewMessage(typedText);
+                if (contentEditableRef.current) {
+                    contentEditableRef.current.innerHTML = typedText;
                 }
             }
-        } catch (error: any) {
-             console.error('Error generating AI agent response:', error);
-             toast({
-                title: 'Erro do Piloto Automático',
-                description: error.message || 'Não foi possível enviar a resposta automática.',
-                variant: 'destructive',
-            });
-        } finally {
-            setIsAiThinking(false);
-        }
-    };
 
+            // Wait a bit, then submit the form
+            await new Promise(resolve => setTimeout(resolve, 200));
+            if(formRef.current) {
+                formRef.current.requestSubmit();
+            }
+
+        }
+    } catch (error: any) {
+         console.error('Error generating AI agent response:', error);
+         toast({
+            title: 'Erro do Piloto Automático',
+            description: error.message || 'Não foi possível enviar a resposta automática.',
+            variant: 'destructive',
+        });
+    } finally {
+        setIsAiTyping(false);
+    }
+  };
+
+  useEffect(() => {
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastMessage?.id, isAiAgentActive, chat?.id]);
@@ -690,24 +699,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
             {initialMessages.map(renderMessageWithSeparator)}
-            {isAiThinking && (
-              <div className="flex items-start gap-3 animate-in fade-in">
-                {chat.agent ? (
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={chat.agent.avatar} alt={chat.agent.name || ''} data-ai-hint="person" />
-                    <AvatarFallback>{chat.agent.name?.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                ) : <div className="w-8" />}
-                <div className="flex flex-col items-start">
-                    <div className={cn("break-words rounded-xl shadow-md p-3 max-w-lg bg-card")}>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Avaliando regras...</span>
-                      </div>
-                    </div>
-                </div>
-              </div>
-            )}
           </div>
         </ScrollArea>
       </div>
@@ -718,7 +709,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 {mediaFiles.length > 0 && (
                     <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
                 )}
-                {!isAiAgentActive && mediaFiles.length === 0 && (
+                {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
                         customerMessage={lastMessage?.content || ''}
                         chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
@@ -727,6 +718,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                 <div className="space-y-2">
                      <form
+                        ref={formRef}
                         onSubmit={(e) => {
                             e.preventDefault();
                             handleFormSubmit(new FormData(e.currentTarget));
@@ -739,7 +731,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 <ContentEditable
                                     innerRef={contentEditableRef}
                                     html={newMessage}
-                                    disabled={isAiAgentActive}
+                                    disabled={isAiAgentActive || isAiTyping}
                                     onChange={(e) => setNewMessage(e.target.value)}
                                     className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                     tagName="div"
@@ -754,7 +746,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             <div className="absolute right-2 bottom-2.5 flex items-center">
                                 <Popover>
                                     <PopoverTrigger asChild>
-                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiAgentActive}><Smile className="h-5 w-5" /></Button>
+                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiAgentActive || isAiTyping}><Smile className="h-5 w-5" /></Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0 border-none mb-2">
                                         <EmojiPicker onEmojiClick={onEmojiClick} />
@@ -773,7 +765,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     variant="ghost"
                                     size="icon"
                                     className="h-8 w-8"
-                                    disabled={isAiAgentActive}
+                                    disabled={isAiAgentActive || isAiTyping}
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     <Paperclip className="h-5 w-5" />
@@ -788,6 +780,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             id="ai-agent-switch"
                             checked={isAiAgentActive}
                             onCheckedChange={setIsAiAgentActive}
+                            disabled={isAiTyping}
                         />
                         <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
                     </div>
