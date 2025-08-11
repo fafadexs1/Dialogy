@@ -61,10 +61,12 @@ const AgentResponseOutputSchema = z.object({
   response: z
     .string()
     .optional()
+    .nullable()
     .describe('The generated response to be sent to the customer. This could be a direct text reply or the result from a webhook.'),
   triggeredRule: z
     .string()
     .optional()
+    .nullable()
     .describe('The name of the rule that was triggered.'),
 });
 export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
