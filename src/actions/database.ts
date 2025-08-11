@@ -32,6 +32,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.autopilot_usage_logs CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_rules CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_configs CASCADE;',
         'DROP TABLE IF EXISTS public.contact_tags CASCADE;',
@@ -255,6 +256,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         enabled BOOLEAN DEFAULT TRUE
       );`,
 
+      `CREATE TABLE public.autopilot_usage_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        config_id UUID NOT NULL REFERENCES public.autopilot_configs(id) ON DELETE CASCADE,
+        rule_name TEXT,
+        flow_name TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        input_tokens INT NOT NULL,
+        output_tokens INT NOT NULL,
+        total_tokens INT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );`,
+
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO ${appUser};`,
@@ -417,5 +430,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
+
+    
 
     

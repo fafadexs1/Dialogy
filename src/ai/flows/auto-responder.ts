@@ -7,13 +7,14 @@
  *
  * - generateAgentResponse - A function that evaluates a customer message and generates a response.
  * - AgentResponseInput - The input type for the generateAgentResponse function.
- * - AgentResponseOutput - The output type for the generateAgentResponse function.
+ * - AgentResponseOutput - The return type for the generateAgentResponse function.
  */
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import type { NexusFlowInstance, Action } from '@/lib/types';
+import type { NexusFlowInstance, Action, AutopilotConfig } from '@/lib/types';
 import { makeHttpRequestTool } from '../tools/webhook-tool';
+import { logAutopilotUsage } from '@/actions/autopilot';
 
 // Define a schema for a single automation rule
 const ActionSchema = z.union([
@@ -37,6 +38,7 @@ const AutomationRuleSchema = z.object({
 });
 
 const AgentResponseInputSchema = z.object({
+  config: z.any().describe("The autopilot config object from the database."), // Using `any` to avoid circular dependency issues.
   chatId: z.string().describe("The unique identifier for the current chat."),
   customerMessage: z
     .string()
@@ -75,6 +77,7 @@ export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 // We need to pass the rules in a format that the prompt can use.
 // The input to the flow will be slightly different from the input to the prompt.
 interface AutoResponderFlowInput {
+    config: AutopilotConfig,
     chatId: string;
     customerMessage: string;
     chatHistory?: string;
@@ -85,7 +88,7 @@ interface AutoResponderFlowInput {
 }
 
 export async function generateAgentResponse(input: AutoResponderFlowInput): Promise<AgentResponseOutput> {
-    const promptInput = {
+    const promptInput: AgentResponseInput = {
         ...input,
         rules: input.rules.map(r => ({
             name: r.name,
@@ -150,9 +153,24 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
+    const model = input.model || 'googleai/gemini-2.0-flash';
     // The model is passed directly in the options object to the prompt.
-    const { output } = await prompt(input, { model: input.model });
+    const result = await prompt(input, { model });
+    const output = result.output;
     
+    // Log usage
+    if (result.usage) {
+        await logAutopilotUsage({
+            configId: input.config.id,
+            flowName: 'autoResponderFlow',
+            modelName: model,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            totalTokens: result.usage.totalTokens,
+            ruleName: output?.triggeredRule ?? undefined,
+        });
+    }
+
     // Only return a response if the AI decided a rule was triggered or it could answer.
     // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
@@ -162,3 +180,5 @@ const autoResponderFlow = ai.defineFlow(
     return {};
   }
 );
+
+    

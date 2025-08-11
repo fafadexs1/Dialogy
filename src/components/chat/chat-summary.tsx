@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -9,9 +10,10 @@ import { useToast } from '@/hooks/use-toast';
 
 interface ChatSummaryProps {
   chatHistory: string;
+  workspaceId: string;
 }
 
-export default function ChatSummary({ chatHistory }: ChatSummaryProps) {
+export default function ChatSummary({ chatHistory, workspaceId }: ChatSummaryProps) {
   const [summary, setSummary] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -26,7 +28,7 @@ export default function ChatSummary({ chatHistory }: ChatSummaryProps) {
     setIsLoading(true);
     setIsOpen(true);
     try {
-      const result = await summarizeChat({ chatHistory });
+      const result = await summarizeChat({ chatHistory, workspaceId });
       setSummary(result.summary);
     } catch (error) {
       console.error('Error summarizing chat:', error);
@@ -69,3 +71,5 @@ export default function ChatSummary({ chatHistory }: ChatSummaryProps) {
     </Sheet>
   );
 }
+
+    

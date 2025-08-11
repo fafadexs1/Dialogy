@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -8,10 +9,11 @@ import { Sparkles, Loader2 } from 'lucide-react';
 interface SmartRepliesProps {
   customerMessage: string;
   chatHistory: string;
+  workspaceId: string;
   onSelectReply: (reply: string) => void;
 }
 
-export default function SmartReplies({ customerMessage, chatHistory, onSelectReply }: SmartRepliesProps) {
+export default function SmartReplies({ customerMessage, chatHistory, workspaceId, onSelectReply }: SmartRepliesProps) {
   const [replies, setReplies] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const lastMessageRef = useRef(customerMessage);
@@ -24,7 +26,7 @@ export default function SmartReplies({ customerMessage, chatHistory, onSelectRep
       setIsLoading(true);
       setReplies([]);
       try {
-        const result = await generateSmartReplies({ customerMessage, chatHistory });
+        const result = await generateSmartReplies({ customerMessage, chatHistory, workspaceId });
         setReplies(result.suggestedReplies);
       } catch (error) {
         console.error('Error generating smart replies:', error);
@@ -35,7 +37,7 @@ export default function SmartReplies({ customerMessage, chatHistory, onSelectRep
     };
 
     fetchReplies();
-  }, [customerMessage, chatHistory]);
+  }, [customerMessage, chatHistory, workspaceId]);
 
   if (isLoading) {
     return (
@@ -67,3 +69,5 @@ export default function SmartReplies({ customerMessage, chatHistory, onSelectRep
     </div>
   );
 }
+
+    

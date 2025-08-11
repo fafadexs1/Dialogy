@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -10,6 +11,11 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import { logAutopilotUsage } from '@/actions/autopilot';
+import { db } from '@/lib/db';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+
 
 const SmartRepliesInputSchema = z.object({
   customerMessage: z
@@ -19,6 +25,7 @@ const SmartRepliesInputSchema = z.object({
     .string()
     .optional()
     .describe('The history of the chat between the agent and customer.'),
+  workspaceId: z.string().describe("The ID of the current workspace to find the config."),
 });
 export type SmartRepliesInput = z.infer<typeof SmartRepliesInputSchema>;
 
@@ -30,8 +37,29 @@ const SmartRepliesOutputSchema = z.object({
 export type SmartRepliesOutput = z.infer<typeof SmartRepliesOutputSchema>;
 
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
-  return generateSmartRepliesFlow(input);
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    throw new Error("User not authenticated.");
+  }
+  const userId = session.user.id;
+
+  const configRes = await db.query(
+    'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',
+    [input.workspaceId, userId]
+  );
+  if (configRes.rowCount === 0) {
+    throw new Error("Autopilot config not found for this user and workspace.");
+  }
+  const config = configRes.rows[0];
+
+  const flowInput = { ...input, config };
+  return generateSmartRepliesFlow(flowInput);
 }
+
+const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
+  config: z.any(),
+});
+
 
 const prompt = ai.definePrompt({
   name: 'smartRepliesPrompt',
@@ -51,11 +79,32 @@ const prompt = ai.definePrompt({
 const generateSmartRepliesFlow = ai.defineFlow(
   {
     name: 'generateSmartRepliesFlow',
-    inputSchema: SmartRepliesInputSchema,
+    inputSchema: SmartRepliesFlowInputSchema,
     outputSchema: SmartRepliesOutputSchema,
   },
-  async input => {
-    const {output} = await prompt(input);
-    return output!;
+  async (input) => {
+    const model = input.config?.ai_model || 'googleai/gemini-2.0-flash';
+    const result = await prompt({
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        workspaceId: input.workspaceId
+    }, { model });
+    const output = result.output!;
+
+    // Log usage
+    if (result.usage && input.config) {
+        await logAutopilotUsage({
+            configId: input.config.id,
+            flowName: 'generateSmartRepliesFlow',
+            modelName: model,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            totalTokens: result.usage.totalTokens,
+        });
+    }
+
+    return output;
   }
 );
+
+    

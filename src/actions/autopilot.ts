@@ -185,3 +185,31 @@ export async function toggleAutopilotRule(ruleId: string, enabled: boolean): Pro
         return { success: false, error: 'Falha ao alterar o status da regra.' };
     }
 }
+
+
+interface UsageLogData {
+    configId: string;
+    flowName: string;
+    modelName: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    ruleName?: string;
+}
+
+export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
+    try {
+        await db.query(
+            `INSERT INTO autopilot_usage_logs 
+             (config_id, flow_name, model_name, input_tokens, output_tokens, total_tokens, rule_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [data.configId, data.flowName, data.modelName, data.inputTokens, data.outputTokens, data.totalTokens, data.ruleName]
+        );
+        console.log(`[LOG_USAGE] Usage logged for flow ${data.flowName} with model ${data.modelName}. Total Tokens: ${data.totalTokens}`);
+    } catch (error) {
+        console.error('[LOG_USAGE] Failed to log autopilot usage:', error);
+        // We don't throw an error here because logging failure should not break the main flow.
+    }
+}
+
+    

@@ -405,6 +405,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         }
 
         const result = await generateAgentResponse({
+            config: autopilotConfig,
             chatId: chat.id,
             customerMessage: lastMessage.content || '',
             chatHistory: chatHistoryForAI,
@@ -798,7 +799,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <Button variant="ghost" size="icon">
               <FileDown className="h-5 w-5"/>
           </Button>
-          <ChatSummary chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')} />
+          <ChatSummary 
+            chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+            workspaceId={currentUser.activeWorkspaceId!} 
+          />
           <Button variant="ghost" size="icon">
               <MoreVertical className="h-5 w-5"/>
           </Button>
@@ -824,6 +828,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     <SmartReplies 
                         customerMessage={initialMessages[initialMessages.length - 1]?.content || ''}
                         chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+                        workspaceId={currentUser.activeWorkspaceId!}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
                           if(contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
@@ -907,3 +912,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
