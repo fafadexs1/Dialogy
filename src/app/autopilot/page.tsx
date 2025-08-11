@@ -1,8 +1,7 @@
 
-
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, NexusFlowInstance } from '@/lib/types';
 import { nexusFlowInstances as mockInstances } from '@/lib/mock-data';
@@ -16,6 +15,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -68,20 +77,106 @@ const chartConfig = {
   },
 }
 
+function AutomationForm({
+  onSave,
+  onClose,
+  instance,
+}: {
+  onSave: (instance: NexusFlowInstance) => void;
+  onClose: () => void;
+  instance?: NexusFlowInstance | null;
+}) {
+  const [name, setName] = useState(instance?.name || '');
+  const [trigger, setTrigger] = useState(instance?.trigger || '');
+  const [action, setAction] = useState(instance?.action || '');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({
+      id: instance?.id || `inst-${Date.now()}`,
+      name,
+      trigger,
+      action,
+      enabled: instance?.enabled ?? true,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <DialogHeader>
+        <DialogTitle>{instance ? 'Editar Automação' : 'Adicionar Nova Automação'}</DialogTitle>
+        <DialogDescription>
+          Defina o gatilho e a ação que o agente de IA deve executar.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="py-4 space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="rule-name">Nome da Automação</Label>
+          <Input id="rule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Dúvida sobre Fatura" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="rule-trigger">QUANDO o cliente disser algo como...</Label>
+          <Textarea id="rule-trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="Ex: 'Não recebi minha fatura' ou 'Qual o valor do meu boleto?'" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="rule-action">ENTÃO o agente deve responder com...</Label>
+          <Textarea id="rule-action" value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex: 'Para questões de fatura, estou te transferindo para o setor financeiro.'" />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button type="submit">Salvar Automação</Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
 
 export default function AutopilotPage() {
     const user = useAuth();
     const [instances, setInstances] = useState<NexusFlowInstance[]>(mockInstances);
     const [aiModel, setAiModel] = useState<string>('googleai/gemini-2.0-flash');
     const [knowledgeBase, setKnowledgeBase] = useState('');
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingInstance, setEditingInstance] = useState<NexusFlowInstance | null>(null);
 
-    // These would come from a billing service or usage metrics
     const estimatedMonthlyCost = 12.50;
     const currentMonthCost = 4.75;
     const executionsThisMonth = 950;
     const tokensThisMonth = 254000;
     
     const selectedModelInfo = modelInfo[aiModel];
+
+    const handleSaveInstance = (instanceToSave: NexusFlowInstance) => {
+        setInstances(prev => {
+            const exists = prev.some(i => i.id === instanceToSave.id);
+            if (exists) {
+                return prev.map(i => (i.id === instanceToSave.id ? instanceToSave : i));
+            }
+            return [...prev, instanceToSave];
+        });
+        setIsModalOpen(false);
+        setEditingInstance(null);
+    };
+
+    const handleEditClick = (instance: NexusFlowInstance) => {
+        setEditingInstance(instance);
+        setIsModalOpen(true);
+    };
+
+    const handleAddNewClick = () => {
+        setEditingInstance(null);
+        setIsModalOpen(true);
+    };
+
+    const handleRemoveInstance = (id: string) => {
+        setInstances(prev => prev.filter(i => i.id !== id));
+    };
+
+    const handleToggleEnabled = (id: string, enabled: boolean) => {
+        setInstances(prev => prev.map(i => (i.id === id ? { ...i, enabled } : i)));
+    };
+
 
     if (!user) {
         return (
@@ -99,7 +194,7 @@ export default function AutopilotPage() {
                         <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Piloto Automático</h1>
                         <p className="text-muted-foreground">Crie e gerencie seu agente de IA para responder e agir por você.</p>
                     </div>
-                    <Button>
+                    <Button onClick={handleAddNewClick}>
                         <Plus className="mr-2 h-4 w-4" />
                         Adicionar Automação
                     </Button>
@@ -226,6 +321,17 @@ export default function AutopilotPage() {
                             </Card>
                         </div>
                     </div>
+                    
+                    <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+                        <DialogContent>
+                            <AutomationForm 
+                                instance={editingInstance}
+                                onSave={handleSaveInstance}
+                                onClose={() => setIsModalOpen(false)}
+                            />
+                        </DialogContent>
+                    </Dialog>
+
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <Card>
@@ -258,11 +364,12 @@ export default function AutopilotPage() {
                             </CardHeader>
                              <CardContent className="space-y-4">
                                 {instances.map(instance => (
-                                    <div key={instance.id} className="p-3 border rounded-lg bg-background relative group">
-                                         <div className="absolute top-2 right-2 flex items-center gap-1">
+                                    <div key={instance.id} className="p-4 border rounded-lg bg-background relative group">
+                                         <div className="absolute top-3 right-3 flex items-center gap-1">
                                             <Switch
                                                 id={`status-${instance.id}`}
                                                 checked={instance.enabled}
+                                                onCheckedChange={(checked) => handleToggleEnabled(instance.id, checked)}
                                                 className='opacity-0 group-hover:opacity-100 transition-opacity'
                                             />
                                             <DropdownMenu>
@@ -272,18 +379,24 @@ export default function AutopilotPage() {
                                                     </Button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem><Edit className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
-                                                    <DropdownMenuItem className="text-destructive"><Trash2 className="mr-2 h-4 w-4" />Remover</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleEditClick(instance)}><Edit className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-destructive" onClick={() => handleRemoveInstance(instance.id)}><Trash2 className="mr-2 h-4 w-4" />Remover</DropdownMenuItem>
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         </div>
                                         <p className="text-sm font-semibold pr-20">{instance.name}</p>
                                         <div className="mt-2 space-y-2 text-xs">
-                                            <p><span className="font-semibold text-muted-foreground">QUANDO:</span> {instance.trigger}</p>
-                                            <p><span className="font-semibold text-muted-foreground">ENTÃO:</span> {instance.action}</p>
+                                            <p className='text-muted-foreground'><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
+                                            <p className='text-muted-foreground'><span className="font-semibold text-foreground">ENTÃO:</span> {instance.action}</p>
                                         </div>
                                     </div>
                                 ))}
+                                {instances.length === 0 && (
+                                     <div className="text-center p-6 border-2 border-dashed rounded-lg">
+                                        <p className="text-muted-foreground">Nenhuma automação criada.</p>
+                                        <Button variant="link" onClick={handleAddNewClick}>Adicionar a primeira automação</Button>
+                                     </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
@@ -292,3 +405,5 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
+
+    
