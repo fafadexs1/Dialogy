@@ -70,6 +70,13 @@ async function internalSendMessage(
         }
         const apiConfig = apiConfigRes.rows[0];
 
+        // Corrige o JID se for do tipo @lid para @s.whatsapp.net
+        const correctedRemoteJid = remoteJid.endsWith('@lid') 
+            ? remoteJid.replace('@lid', '@s.whatsapp.net') 
+            : remoteJid;
+        
+        console.log(`[SEND_MESSAGE_ACTION] JID Original: ${remoteJid}, JID Corrigido: ${correctedRemoteJid}`);
+
         // 2. Enviar mensagem via API da Evolution com o payload simples
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
@@ -77,7 +84,7 @@ async function internalSendMessage(
             {
                 method: 'POST',
                 body: JSON.stringify({
-                    number: remoteJid,
+                    number: correctedRemoteJid,
                     text: content,
                 }),
             }
@@ -155,9 +162,14 @@ export async function sendMediaAction(
         if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
         const apiConfig = apiConfigRes.rows[0];
 
+        // Corrige o JID se for do tipo @lid para @s.whatsapp.net
+        const correctedRemoteJid = remoteJid.endsWith('@lid') 
+            ? remoteJid.replace('@lid', '@s.whatsapp.net') 
+            : remoteJid;
+
         for (const file of mediaFiles) {
              const apiPayload = {
-                number: remoteJid,
+                number: correctedRemoteJid,
                 mediatype: file.mediatype,
                 mimetype: file.mimetype,
                 media: file.base64,
