@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -149,7 +148,7 @@ function formatWhatsappText(text: string): string {
     }
 
     // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}</code></pre>`);
 
     // Then, format other elements, avoiding what's inside <code>
     safeText = safeText
@@ -309,39 +308,29 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
   const handleSendMessage = async (content: string) => {
-    if (!chat || !chat.agent) return;
+    if (!chat) return;
 
-    // Ação para o Piloto Automático
-    if (isAiAgentActive) {
-        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent.id);
+    if (mediaFiles.length > 0) {
+        const mediaData = mediaFiles.map(mf => ({
+            base64: mf.base64,
+            mimetype: mf.type,
+            filename: mf.name,
+            mediatype: mf.mediatype,
+            thumbnail: mf.thumbnail,
+        }));
+        const result = await sendMediaAction(chat.id, content, mediaData);
+         if (result.success) {
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+        }
+    } else {
+        if (!content.trim()) return;
+        const result = await sendAgentMessageAction(chat.id, content);
         if (result.success) {
             onActionSuccess();
         } else {
-            toast({ title: 'Erro do Piloto Automático', description: result.error, variant: 'destructive' });
-        }
-    } else { // Ação para o agente humano
-        if (mediaFiles.length > 0) {
-            const mediaData = mediaFiles.map(mf => ({
-                base64: mf.base64,
-                mimetype: mf.type,
-                filename: mf.name,
-                mediatype: mf.mediatype,
-                thumbnail: mf.thumbnail,
-            }));
-            const result = await sendMediaAction(chat.id, content, mediaData);
-             if (result.success) {
-                onActionSuccess();
-            } else {
-                toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
-            }
-        } else {
-            if (!content.trim()) return;
-            const result = await sendAgentMessageAction(chat.id, content);
-            if (result.success) {
-                onActionSuccess();
-            } else {
-                toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
-            }
+            toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
         }
     }
 
@@ -351,7 +340,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 };
 
 
-  const runAiAgent = async () => {
+ const runAiAgent = async () => {
     // Conditions to run the agent
     if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id || isAiTyping) {
         return;
@@ -376,12 +365,24 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             // Simulate typing in the textbox
             for (let i = 0; i <= textToType.length; i++) {
                 await new Promise(resolve => setTimeout(resolve, 50));
-                setNewMessage(textToType.substring(0, i));
+                if(contentEditableRef.current) {
+                    contentEditableRef.current.innerHTML = textToType.substring(0, i);
+                    setNewMessage(textToType.substring(0, i)); // Also update state
+                }
             }
 
             // Wait a bit, then send the message
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await handleSendMessage(textToType);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
+
+            if (sendResult.success) {
+                onActionSuccess();
+            } else {
+                toast({ title: 'Erro do Piloto Automático', description: sendResult.error, variant: 'destructive' });
+            }
+             setNewMessage('');
+            if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
         }
     } catch (error: any) {
          console.error('Error generating AI agent response:', error);
@@ -399,7 +400,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   useEffect(() => {
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage?.id, isAiAgentActive, chat?.id]);
+  }, [lastMessage?.id, chat?.id]);
   
   // Mark messages as read effect
   useEffect(() => {
@@ -505,7 +506,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         }
         
         return {
-            id: `${file.name}-${file.lastModified}`,
+            id: `${'\'\'\''}${file.name}-${file.lastModified}${'\'\'\''}`,
             file: file,
             name: file.name,
             type: file.type,
@@ -591,7 +592,20 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                     <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row' : 'flex-row-reverse')}>
+                         <div
+                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
+                                isDeleted 
+                                    ? 'bg-secondary/50 border'
+                                    : (isFromMe 
+                                        ? 'bg-primary text-primary-foreground' 
+                                        : 'bg-card')
+                            )}
+                        >
+                            {isDeleted ? (
+                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                            ) : renderMessageContent(message)}
+                        </div>
                          {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0 self-start">
                                 <AlertDialog>
@@ -625,19 +639,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 </AlertDialog>
                             </div>
                         )}
-                        <div
-                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
-                                isDeleted 
-                                    ? 'bg-secondary/50 border'
-                                    : (isFromMe 
-                                        ? 'bg-primary text-primary-foreground' 
-                                        : 'bg-card')
-                            )}
-                        >
-                            {isDeleted ? (
-                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
-                            ) : renderMessageContent(message)}
-                        </div>
                     </div>
                     <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
                         <span className="mx-1">{message.timestamp}</span>
@@ -688,7 +689,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <Button variant="ghost" size="icon">
               <FileDown className="h-5 w-5"/>
           </Button>
-          <ChatSummary chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')} />
+          <ChatSummary chatHistory={initialMessages.map(m => `${'\'\'\''}${m.sender?.name || 'System'}: ${m.content}${'\'\'\''}`).join('\n')} />
           <Button variant="ghost" size="icon">
               <MoreVertical className="h-5 w-5"/>
           </Button>
@@ -712,7 +713,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
                         customerMessage={lastMessage?.content || ''}
-                        chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+                        chatHistory={initialMessages.map(m => `${'\'\'\''}${m.sender?.name || 'System'}: ${m.content}${'\'\'\''}`).join('\n')}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
                           if(contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
@@ -722,10 +723,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 <div className="space-y-2">
                      <form
                         ref={formRef}
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            handleFormSubmit(new FormData(e.currentTarget));
-                        }}
+                        action={handleFormSubmit}
                     >
                         <input type="hidden" name="chatId" value={chat.id} />
                          <div className="relative overflow-hidden">
@@ -734,7 +732,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 <ContentEditable
                                     innerRef={contentEditableRef}
                                     html={newMessage}
-                                    disabled={isAiAgentActive || isAiTyping}
+                                    disabled={isAiTyping}
                                     onChange={(e) => setNewMessage(e.target.value)}
                                     className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                     tagName="div"
@@ -749,7 +747,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             <div className="absolute right-2 bottom-2.5 flex items-center">
                                 <Popover>
                                     <PopoverTrigger asChild>
-                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiAgentActive || isAiTyping}><Smile className="h-5 w-5" /></Button>
+                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0 border-none mb-2">
                                         <EmojiPicker onEmojiClick={onEmojiClick} />
@@ -768,12 +766,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     variant="ghost"
                                     size="icon"
                                     className="h-8 w-8"
-                                    disabled={isAiAgentActive || isAiTyping}
+                                    disabled={isAiTyping}
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     <Paperclip className="h-5 w-5" />
                                 </Button>
-                                <SendMessageButton disabled={mediaFiles.length === 0 && !htmlToWhatsappMarkdown(newMessage).trim()} />
+                                <SendMessageButton disabled={mediaFiles.length === 0 && !htmlToWhatsappMarkdown(newMessage).trim() || isAiTyping} />
                             </div>
                         </div>
                     </form>
@@ -786,6 +784,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             disabled={isAiTyping}
                         />
                         <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
+                         {isAiTyping && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                     </div>
                 </div>
             </footer>
