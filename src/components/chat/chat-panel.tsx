@@ -96,13 +96,13 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select onValueChange={(value) => setReasonTagId(value)}>
+                             <Select onValueChange={setReasonTagId} value={reasonTagId || ''}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {reasons.map(reason => (
-                                        <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
+                                        <SelectItem key={reason.id} value={reason.value}>{reason.label}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

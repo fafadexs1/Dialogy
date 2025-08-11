@@ -194,7 +194,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
-          close_reason_tag_id UUID REFERENCES public.tags(id),
+          close_reason_tag_id TEXT,
           close_notes TEXT
       );`,
 
