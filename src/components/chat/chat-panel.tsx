@@ -77,7 +77,7 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
-    const [state, formAction] = useActionState(closeChatAction.bind(null, chat.id), { success: false, error: undefined });
+    const [state, formAction] = useActionState(closeChatAction, { success: false, error: undefined });
     const [isOpen, setIsOpen] = React.useState(false);
     const { toast } = useToast();
 
@@ -90,6 +90,9 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
             toast({ title: "Erro ao encerrar", description: state.error, variant: 'destructive'});
         }
     }, [state, toast, onActionSuccess]);
+    
+    // Bind the chatId to the form action
+    const actionWithChatId = formAction.bind(null, chat.id);
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -99,7 +102,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                 </Button>
             </DialogTrigger>
             <DialogContent>
-                <form action={formAction}>
+                <form action={actionWithChatId}>
                     <DialogHeader>
                         <DialogTitle>Encerrar Atendimento</DialogTitle>
                         <DialogDescription>
@@ -148,7 +151,7 @@ function formatWhatsappText(text: string): string {
     }
 
     // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}</code></pre>`);
 
     // Then, format other elements, avoiding what's inside <code>
     safeText = safeText
