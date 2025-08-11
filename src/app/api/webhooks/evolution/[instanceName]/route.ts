@@ -50,7 +50,6 @@ export async function POST(
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
     
-    // Normalize data to always be an array
     const contactsToUpdate = Array.isArray(data) ? data : [data];
 
     if (contactsToUpdate.length === 0 || !contactsToUpdate[0]?.remoteJid) {
@@ -145,16 +144,11 @@ async function handleMessagesUpsert(payload: any) {
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
     if (messageType) {
         switch (messageType) {
-            case 'imageMessage':
-            case 'videoMessage':
-            case 'audioMessage':
-            case 'documentMessage':
+            case 'imageMessage': case 'videoMessage': case 'audioMessage': case 'documentMessage':
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.fileName = messageDetails?.fileName;
                 break;
-            case 'conversation':
-            case 'extendedTextMessage':
-                break;
+            case 'conversation': case 'extendedTextMessage': break;
             default:
                 console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
                 return;
@@ -168,80 +162,66 @@ async function handleMessagesUpsert(payload: any) {
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
     const contactJid = key.remoteJid;
-
+    
+    const client = await db.connect();
     try {
-        const query = `
-            WITH ins_ws AS (
-                SELECT ec.workspace_id 
-                FROM evolution_api_instances AS ei
-                JOIN evolution_api_configs AS ec ON ei.config_id = ec.id
-                WHERE ei.name = $1
-            ),
-            upsert_contact AS (
-                INSERT INTO contacts (workspace_id, name, phone_number_jid)
-                SELECT workspace_id, $2, $3 FROM ins_ws
-                ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
-                RETURNING id, workspace_id
-            ),
-            target_chat AS (
-                SELECT c.id, c.workspace_id, c.contact_id
-                FROM (
-                    SELECT c.id, c.workspace_id, c.contact_id, c.status,
-                           ROW_NUMBER() OVER(PARTITION BY c.contact_id ORDER BY c.status = 'atendimentos' DESC, c.status = 'gerais' DESC, c.closed_at DESC NULLS FIRST, c.assigned_at DESC NULLS FIRST) as rn
-                    FROM chats c
-                    JOIN upsert_contact uc ON c.workspace_id = uc.workspace_id AND c.contact_id = uc.id
-                ) AS ranked_chats
-                WHERE rn = 1 AND status IN ('gerais', 'atendimentos')
-            ),
-            new_chat AS (
-                INSERT INTO chats (workspace_id, contact_id, status)
-                SELECT uc.workspace_id, uc.id, 'gerais'::chat_status_enum
-                FROM upsert_contact uc
-                WHERE NOT EXISTS (SELECT 1 FROM target_chat)
-                RETURNING id, workspace_id, contact_id
-            )
-            INSERT INTO messages (
+        await client.query('BEGIN');
+
+        // 1. Obter o workspaceId
+        const instanceRes = await client.query(
+            `SELECT ec.workspace_id FROM evolution_api_instances AS ei
+             JOIN evolution_api_configs AS ec ON ei.config_id = ec.id WHERE ei.name = $1`, [instanceName]
+        );
+        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
+        const workspaceId = instanceRes.rows[0].workspace_id;
+
+        // 2. Criar ou atualizar o contato
+        const contactRes = await client.query(
+            `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3)
+             ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
+             RETURNING id`, [workspaceId, pushName || contactJid, contactJid]
+        );
+        const contactId = contactRes.rows[0].id;
+        
+        // 3. Encontrar um chat ativo ou criar um novo
+        let chatRes = await client.query(
+            `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
+             ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactId]
+        );
+        
+        let chatId: string;
+        if (chatRes.rowCount > 0) {
+            chatId = chatRes.rows[0].id;
+        } else {
+            const newChatRes = await client.query(
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
+                [workspaceId, contactId]
+            );
+            chatId = newChatRes.rows[0].id;
+        }
+
+        // 4. Inserir a mensagem
+        await client.query(
+            `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
                 created_at, message_id_from_api, sender_from_api, instance_name,
                 status_from_api, source_from_api, server_url, from_me,
                 api_message_status, raw_payload
-            )
-            SELECT
-                tc.workspace_id,
-                tc.id,
-                uc.id, -- sender_id is the contact id
-                'text'::message_type_enum,
-                $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14
-            FROM upsert_contact uc,
-                 (SELECT id, workspace_id, contact_id FROM target_chat UNION ALL SELECT id, workspace_id, contact_id FROM new_chat) AS tc;
-        `;
-        
-        await db.query(query, [
-            instanceName, // $1
-            pushName || contactJid, // $2
-            contactJid, // $3
-            content, // $4
-            JSON.stringify(metadata), // $5
-            key.id, // $6
-            sender, // $7
-            instanceName, // $8
-            data.status, // $9
-            data.source, // $10
-            parsedUrl, // $11
-            key.fromMe, // $12
-            data.status?.toUpperCase(), // $13
-            JSON.stringify(payload) // $14
-        ]);
-        
-        const instanceRes = await db.query(`SELECT ec.workspace_id FROM evolution_api_instances AS ei JOIN evolution_api_configs AS ec ON ei.config_id = ec.id WHERE ei.name = $1`, [instanceName]);
-        if(instanceRes.rowCount > 0) {
-            revalidatePath(`/api/chats/${instanceRes.rows[0].workspace_id}`);
-        }
+             ) VALUES ($1, $2, $3, 'text'::message_type_enum, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            [
+                workspaceId, chatId, contactId, content, JSON.stringify(metadata), key.id, sender,
+                instanceName, data.status, data.source, parsedUrl, key.fromMe,
+                data.status?.toUpperCase(), JSON.stringify(payload)
+            ]
+        );
 
+        await client.query('COMMIT');
+        revalidatePath(`/api/chats/${workspaceId}`);
 
     } catch (error) {
-        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem com CTE:', error);
+        await client.query('ROLLBACK');
+        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
+    } finally {
+        client.release();
     }
 }
-
-    
