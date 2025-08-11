@@ -164,85 +164,87 @@ function AutomationForm({
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <DialogHeader>
-        <DialogTitle>{instance ? 'Editar Automação' : 'Adicionar Nova Automação'}</DialogTitle>
-        <DialogDescription>
-          Defina o gatilho e a ação que o agente de IA deve executar.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto p-1">
-        <div className="space-y-2">
-          <Label htmlFor="rule-name">Nome da Automação</Label>
-          <Input id="rule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Verificar status do pedido" />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="rule-trigger">QUANDO o cliente disser algo como...</Label>
-          <Textarea id="rule-trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="Ex: 'Qual o status do meu pedido?' ou 'Onde está minha encomenda?'" />
-        </div>
-        
-        <Separator />
+    <>
+      <form onSubmit={handleSubmit}>
+        <DialogHeader>
+          <DialogTitle>{instance ? 'Editar Automação' : 'Adicionar Nova Automação'}</DialogTitle>
+          <DialogDescription>
+            Defina o gatilho e a ação que o agente de IA deve executar.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto p-1">
+          <div className="space-y-2">
+            <Label htmlFor="rule-name">Nome da Automação</Label>
+            <Input id="rule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Verificar status do pedido" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="rule-trigger">QUANDO o cliente disser algo como...</Label>
+            <Textarea id="rule-trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="Ex: 'Qual o status do meu pedido?' ou 'Onde está minha encomenda?'" />
+          </div>
+          
+          <Separator />
 
-        <div className="space-y-2">
-          <Label>ENTÃO o agente deve...</Label>
-            <Select value={actionType} onValueChange={(value) => setActionType(value as ActionType)}>
-                <SelectTrigger>
-                    <SelectValue placeholder="Selecione um tipo de ação" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="reply"><div className="flex items-center gap-2"><MessageCircle/> Responder com Texto</div></SelectItem>
-                    <SelectItem value="webhook"><div className="flex items-center gap-2"><Webhook/> Chamar Webhook (HTTP Request)</div></SelectItem>
-                </SelectContent>
-            </Select>
-        </div>
+          <div className="space-y-2">
+            <Label>ENTÃO o agente deve...</Label>
+              <Select value={actionType} onValueChange={(value) => setActionType(value as ActionType)}>
+                  <SelectTrigger>
+                      <SelectValue placeholder="Selecione um tipo de ação" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="reply"><div className="flex items-center gap-2"><MessageCircle/> Responder com Texto</div></SelectItem>
+                      <SelectItem value="webhook"><div className="flex items-center gap-2"><Webhook/> Chamar Webhook (HTTP Request)</div></SelectItem>
+                  </SelectContent>
+              </Select>
+          </div>
 
-        {actionType === 'reply' ? (
-            <div className="space-y-2 animate-in fade-in-50">
-                <Label htmlFor="rule-action-value">Texto da Resposta</Label>
-                <Textarea id="rule-action-value" value={actionValue} onChange={(e) => setActionValue(e.target.value)} placeholder="Ex: 'Verificando o status do seu pedido...'" />
-            </div>
-        ) : (
-            <div className="space-y-4 p-4 border rounded-lg bg-secondary/50 animate-in fade-in-50">
-                <div className="space-y-2">
-                    <Label htmlFor="webhook-url">URL do Webhook</Label>
-                    <Input id="webhook-url" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://api.meusistema.com/pedido" />
-                </div>
-                <div className="space-y-2">
-                    <Label htmlFor="webhook-method">Método</Label>
-                    <Select value={webhookMethod} onValueChange={setWebhookMethod}>
-                        <SelectTrigger id="webhook-method">
-                            <SelectValue placeholder="Selecione o método" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="POST">POST</SelectItem>
-                            <SelectItem value="GET">GET</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div className="space-y-2">
-                    <Label htmlFor="webhook-body">Corpo (Body) da Requisição (JSON)</Label>
-                    <Textarea 
-                        id="webhook-body"
-                        className="font-code"
-                        value={webhookBody}
-                        onChange={(e) => setWebhookBody(e.target.value)}
-                        placeholder={'{\n  "customerId": "{{contact.id}}",\n  "message": "{{customerMessage}}"\n}'}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                        Use a sintaxe {{variável}} para inserir dados dinâmicos do chat, como {{contact.id}} ou {{customerMessage}}.
-                    </p>
-                </div>
-            </div>
-        )}
-      </div>
-      <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button type="submit" disabled={isSubmitting}>
-             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Salvar Automação
-        </Button>
-      </DialogFooter>
-    </form>
+          {actionType === 'reply' ? (
+              <div className="space-y-2 animate-in fade-in-50">
+                  <Label htmlFor="rule-action-value">Texto da Resposta</Label>
+                  <Textarea id="rule-action-value" value={actionValue} onChange={(e) => setActionValue(e.target.value)} placeholder="Ex: 'Verificando o status do seu pedido...'" />
+              </div>
+          ) : (
+              <div className="space-y-4 p-4 border rounded-lg bg-secondary/50 animate-in fade-in-50">
+                  <div className="space-y-2">
+                      <Label htmlFor="webhook-url">URL do Webhook</Label>
+                      <Input id="webhook-url" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://api.meusistema.com/pedido" />
+                  </div>
+                  <div className="space-y-2">
+                      <Label htmlFor="webhook-method">Método</Label>
+                      <Select value={webhookMethod} onValueChange={setWebhookMethod}>
+                          <SelectTrigger id="webhook-method">
+                              <SelectValue placeholder="Selecione o método" />
+                          </SelectTrigger>
+                          <SelectContent>
+                              <SelectItem value="POST">POST</SelectItem>
+                              <SelectItem value="GET">GET</SelectItem>
+                          </SelectContent>
+                      </Select>
+                  </div>
+                  <div className="space-y-2">
+                      <Label htmlFor="webhook-body">Corpo (Body) da Requisição (JSON)</Label>
+                      <Textarea 
+                          id="webhook-body"
+                          className="font-code"
+                          value={webhookBody}
+                          onChange={(e) => setWebhookBody(e.target.value)}
+                          placeholder={'{\\n  "customerId": "{{contact.id}}",\\n  "message": "{{customerMessage}}"\\n}'}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                          Use a sintaxe {`{{variável}}`} para inserir dados dinâmicos do chat, como {`{{contact.id}}`} ou {`{{customerMessage}}`}.
+                      </p>
+                  </div>
+              </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Salvar Automação
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
   );
 }
 
