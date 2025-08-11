@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand, History } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand, History, Eye, EyeOff } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -283,8 +283,9 @@ function FormattingToolbar() {
 
 function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void }) {
     const [isAssigning, setIsAssigning] = useState(false);
+    const [isPeeking, setIsPeeking] = useState(false);
 
-    const handleClick = async () => {
+    const handleTakeOwnershipClick = async () => {
         setIsAssigning(true);
         try {
             await onTakeOwnership();
@@ -294,18 +295,30 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     };
 
     return (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card/80 backdrop-blur-sm p-6">
-            <div className="text-center">
+        <div className={cn(
+            "absolute inset-0 z-10 flex flex-col items-center justify-center p-6 transition-all",
+            isPeeking ? "bg-card/30 backdrop-blur-none" : "bg-card/80 backdrop-blur-sm"
+        )}>
+            <div className={cn("text-center transition-opacity", { "opacity-0 pointer-events-none": isPeeking })}>
                 <div className="inline-block p-4 bg-primary/10 rounded-full mb-4">
                     <Hand className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold">Atendimento Disponível</h3>
                 <p className="text-muted-foreground mt-1 mb-6">Este chat está na fila geral e aguardando um atendente.</p>
-                <Button size="lg" onClick={handleClick} disabled={isAssigning}>
+                <Button size="lg" onClick={handleTakeOwnershipClick} disabled={isAssigning}>
                     {isAssigning && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
                     Assumir este Atendimento
                 </Button>
             </div>
+            
+            <Button 
+                variant="outline" 
+                className="absolute bottom-6" 
+                onClick={() => setIsPeeking(!isPeeking)}
+            >
+                {isPeeking ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+                {isPeeking ? "Ocultar Mensagens" : "Ver Mensagens"}
+            </Button>
         </div>
     );
 }
