@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code } from 'lucide-react';
-import { type Chat, type Message, type User, Tag, MessageMetadata } from '@/lib/types';
+import { type Chat, type Message, type User, Tag, MessageMetadata, Contact } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -296,7 +296,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const { toast } = useToast();
   
   const handleAiSwitchChange = (checked: boolean) => {
-    console.log(`[AUTOPILOT] Piloto Automático ${checked ? 'ativado' : 'desativado'}.`);
+    console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
     setIsAiAgentActive(checked);
   };
 
@@ -346,6 +346,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             rules: activeRules,
             knowledgeBase: "", 
             model: selectedAiModel,
+            contact: chat.contact as Contact
         });
 
         console.log('[AUTOPILOT] Resposta da IA recebida:', result);
@@ -380,7 +381,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     } catch (error: any) {
          console.error('Erro ao gerar resposta da IA:', error);
          toast({
-            title: 'Erro do Piloto Automático',
+            title: 'Erro do Agente de IA',
             description: error.message || 'Não foi possível gerar a resposta automática.',
             variant: 'destructive',
         });
@@ -800,7 +801,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             onCheckedChange={handleAiSwitchChange}
                             disabled={isAiTyping}
                         />
-                        <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
+                        <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Agente de IA</Label>
                          {isAiTyping && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                     </div>
                 </div>

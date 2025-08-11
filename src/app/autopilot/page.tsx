@@ -3,12 +3,12 @@
 
 import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, NexusFlowInstance } from '@/lib/types';
+import type { User, NexusFlowInstance, Action, ActionType } from '@/lib/types';
 import { nexusFlowInstances as mockInstances } from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Zap, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound, Loader2, MessageCircle, Webhook } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,10 +88,30 @@ function AutomationForm({
 }) {
   const [name, setName] = useState(instance?.name || '');
   const [trigger, setTrigger] = useState(instance?.trigger || '');
-  const [action, setAction] = useState(instance?.action || '');
-
+  const [actionType, setActionType] = useState<ActionType>(instance?.action.type || 'reply');
+  const [actionValue, setActionValue] = useState(instance?.action.type === 'reply' ? instance.action.value : '');
+  const [webhookUrl, setWebhookUrl] = useState(instance?.action.type === 'webhook' ? instance.action.url || '' : '');
+  const [webhookMethod, setWebhookMethod] = useState(instance?.action.type === 'webhook' ? instance.action.method || 'POST' : 'POST');
+  const [webhookBody, setWebhookBody] = useState(instance?.action.type === 'webhook' ? JSON.stringify(instance.action.body, null, 2) || '' : '');
+  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    let action: Action;
+
+    if (actionType === 'webhook') {
+        action = {
+            type: 'webhook',
+            url: webhookUrl,
+            method: webhookMethod,
+            body: webhookBody ? JSON.parse(webhookBody) : undefined,
+        };
+    } else {
+        action = {
+            type: 'reply',
+            value: actionValue,
+        };
+    }
+
     onSave({
       id: instance?.id || `inst-${Date.now()}`,
       name,
@@ -109,19 +129,69 @@ function AutomationForm({
           Defina o gatilho e a ação que o agente de IA deve executar.
         </DialogDescription>
       </DialogHeader>
-      <div className="py-4 space-y-4">
+      <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto p-1">
         <div className="space-y-2">
           <Label htmlFor="rule-name">Nome da Automação</Label>
-          <Input id="rule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Dúvida sobre Fatura" />
+          <Input id="rule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Verificar status do pedido" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="rule-trigger">QUANDO o cliente disser algo como...</Label>
-          <Textarea id="rule-trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="Ex: 'Não recebi minha fatura' ou 'Qual o valor do meu boleto?'" />
+          <Textarea id="rule-trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="Ex: 'Qual o status do meu pedido?' ou 'Onde está minha encomenda?'" />
         </div>
+        
+        <Separator />
+
         <div className="space-y-2">
-          <Label htmlFor="rule-action">ENTÃO o agente deve responder com...</Label>
-          <Textarea id="rule-action" value={action} onChange={(e) => setAction(e.target.value)} placeholder="Ex: 'Para questões de fatura, estou te transferindo para o setor financeiro.'" />
+           <Label>ENTÃO o agente deve...</Label>
+            <Select value={actionType} onValueChange={(value) => setActionType(value as ActionType)}>
+                <SelectTrigger>
+                    <SelectValue placeholder="Selecione um tipo de ação" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="reply"><div className='flex items-center gap-2'><MessageCircle/> Responder com Texto</div></SelectItem>
+                    <SelectItem value="webhook"><div className='flex items-center gap-2'><Webhook/> Chamar Webhook (HTTP Request)</div></SelectItem>
+                </SelectContent>
+            </Select>
         </div>
+
+        {actionType === 'reply' ? (
+            <div className="space-y-2 animate-in fade-in-50">
+                <Label htmlFor="rule-action-value">Texto da Resposta</Label>
+                <Textarea id="rule-action-value" value={actionValue} onChange={(e) => setActionValue(e.target.value)} placeholder="Ex: 'Verificando o status do seu pedido...'" />
+            </div>
+        ) : (
+            <div className="space-y-4 p-4 border rounded-lg bg-secondary/50 animate-in fade-in-50">
+                <div className="space-y-2">
+                    <Label htmlFor="webhook-url">URL do Webhook</Label>
+                    <Input id="webhook-url" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://api.meusistema.com/pedido" />
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="webhook-method">Método</Label>
+                     <Select value={webhookMethod} onValueChange={setWebhookMethod}>
+                        <SelectTrigger id="webhook-method">
+                            <SelectValue placeholder="Selecione o método" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="POST">POST</SelectItem>
+                            <SelectItem value="GET">GET</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="webhook-body">Corpo (Body) da Requisição (JSON)</Label>
+                    <Textarea 
+                        id="webhook-body"
+                        className='font-code'
+                        value={webhookBody}
+                        onChange={(e) => setWebhookBody(e.target.value)}
+                        placeholder={'{\n  "customerId": "{{contact.id}}",\n  "message": "{{customerMessage}}"\n}'}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Use a sintaxe `{{variável}}` para inserir dados dinâmicos do chat, como `{{contact.id}}` ou `{{customerMessage}}`.
+                    </p>
+                </div>
+            </div>
+        )}
       </div>
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
@@ -191,7 +261,7 @@ export default function AutopilotPage() {
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Piloto Automático</h1>
+                        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Agente de IA</h1>
                         <p className="text-muted-foreground">Crie e gerencie seu agente de IA para responder e agir por você.</p>
                     </div>
                     <Button onClick={handleAddNewClick}>
@@ -205,7 +275,7 @@ export default function AutopilotPage() {
                         <Card className="lg:col-span-8">
                             <CardHeader>
                                 <CardTitle>Visão Geral de Custos e Uso</CardTitle>
-                                <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Piloto Automático.</CardDescription>
+                                <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Agente de IA.</CardDescription>
                             </CardHeader>
                             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-4">
@@ -323,7 +393,7 @@ export default function AutopilotPage() {
                     </div>
                     
                     <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                        <DialogContent>
+                        <DialogContent className="max-w-2xl">
                             <AutomationForm 
                                 instance={editingInstance}
                                 onSave={handleSaveInstance}
@@ -387,7 +457,18 @@ export default function AutopilotPage() {
                                         <p className="text-sm font-semibold pr-20">{instance.name}</p>
                                         <div className="mt-2 space-y-2 text-xs">
                                             <p className='text-muted-foreground'><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
-                                            <p className='text-muted-foreground'><span className="font-semibold text-foreground">ENTÃO:</span> {instance.action}</p>
+                                            <div className='text-muted-foreground flex items-start gap-1.5'>
+                                              <span className="font-semibold text-foreground shrink-0">ENTÃO:</span> 
+                                              {instance.action.type === 'reply' ? (
+                                                  <span>{instance.action.value}</span>
+                                              ) : (
+                                                  <div className='flex items-center gap-1.5'>
+                                                    <Webhook className='h-3 w-3'/>
+                                                    <span className='font-mono text-xs bg-muted px-1 py-0.5 rounded'>{instance.action.method}</span>
+                                                    <span className='truncate'>{instance.action.url}</span>
+                                                  </div>
+                                              )}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -405,5 +486,3 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
-
-    

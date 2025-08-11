@@ -11,14 +11,28 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import type { NexusFlowInstance } from '@/lib/types';
-import { db } from '@/lib/db';
+import type { NexusFlowInstance, Action } from '@/lib/types';
+import { makeHttpRequestTool } from '../tools/webhook-tool';
 
 // Define a schema for a single automation rule
+const ActionSchema = z.union([
+  z.object({
+    type: z.literal('reply'),
+    value: z.string().describe('The text response to send to the user.'),
+  }),
+  z.object({
+    type: z.literal('webhook'),
+    url: z.string().url().describe('The URL to send the HTTP request to.'),
+    method: z.enum(['GET', 'POST']).default('POST'),
+    body: z.record(z.any()).optional().describe('The JSON body for the request. You can use Handlebars variables like {{contact.id}}.'),
+  }),
+]);
+
+
 const AutomationRuleSchema = z.object({
   name: z.string().describe('The name of the automation rule.'),
   trigger: z.string().describe('The condition that triggers the automation.'),
-  action: z.string().describe('The response to be sent if the trigger condition is met.'),
+  action: ActionSchema,
 });
 
 const AgentResponseInputSchema = z.object({
@@ -36,14 +50,17 @@ const AgentResponseInputSchema = z.object({
     .optional()
     .describe('A collection of texts, examples, and instructions that the AI should use as a knowledge base to formulate its answers.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
+  contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
+    .describe('The contact details of the customer.'),
 });
+
 export type AgentResponseInput = z.infer<typeof AgentResponseInputSchema>;
 
 const AgentResponseOutputSchema = z.object({
   response: z
     .string()
     .optional()
-    .describe('The generated response to be sent to the customer. This should only be present if a rule was triggered or the AI generated a response.'),
+    .describe('The generated response to be sent to the customer. This could be a direct text reply or the result from a webhook.'),
   triggeredRule: z
     .string()
     .optional()
@@ -61,27 +78,35 @@ interface AutoResponderFlowInput {
     rules: NexusFlowInstance[];
     knowledgeBase?: string;
     model?: string;
+    contact: { id: string; name: string; email?: string; };
 }
 
 export async function generateAgentResponse(input: AutoResponderFlowInput): Promise<AgentResponseOutput> {
-  const promptInput = {
-      ...input,
-      rules: input.rules.map(r => ({ name: r.name, trigger: r.trigger, action: r.action }))
-  };
-  return autoResponderFlow(promptInput);
+    const promptInput = {
+        ...input,
+        rules: input.rules.map(r => ({
+            name: r.name,
+            trigger: r.trigger,
+            action: r.action,
+        })),
+    };
+    return autoResponderFlow(promptInput);
 }
 
 // --- Agent Prompt ---
 
 const prompt = ai.definePrompt({
   name: 'autoResponderPrompt',
+  tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
   prompt: `Você é 'Dialogy', um assistente de IA especialista em atendimento ao cliente. Seu objetivo é resolver o problema do cliente de forma eficiente, precisa e cortês.
 
 Siga esta hierarquia de métodos para gerar uma resposta:
 
-1.  **Regras de Automação (Prioridade Máxima)**: Avalie a mensagem do cliente em relação às "Regras de Automação". Use seu raciocínio para ver se a *intenção* da mensagem corresponde claramente a um gatilho. Se uma regra for acionada, você DEVE retornar a "ação" exata daquela regra no campo 'response' e o nome da regra em 'triggeredRule'.
+1.  **Regras de Automação (Prioridade Máxima)**: Avalie a mensagem do cliente em relação às "Regras de Automação". Use seu raciocínio para ver se a *intenção* da mensagem corresponde claramente a um gatilho.
+    - Se uma regra for acionada e a ação for do tipo 'reply', você DEVE retornar o "value" exato daquela ação no campo 'response' e o nome da regra em 'triggeredRule'.
+    - Se a regra for do tipo 'webhook', você DEVE usar a ferramenta 'makeHttpRequestTool' para executar a chamada. Passe a 'url', 'method', e 'body' da regra para a ferramenta. A resposta da ferramenta será o seu 'response' final.
 
 2.  **Base de Conhecimento**: Se nenhuma regra for aplicável, consulte a "Base de Conhecimento" para encontrar informações relevantes para responder à pergunta do cliente.
 
@@ -99,8 +124,11 @@ Siga esta hierarquia de métodos para gerar uma resposta:
 {{#each rules}}
 - Nome da Regra: "{{name}}"
   - Gatilho: "{{trigger}}"
-  - Ação: "{{action}}"
+  - Ação: {{json action}}
 {{/each}}
+---
+**DADOS DO CONTATO ATUAL (Para usar em variáveis no body do webhook)**:
+{{json contact}}
 ---
 **HISTÓRICO DO CHAT (Para contexto)**:
 {{{chatHistory}}}

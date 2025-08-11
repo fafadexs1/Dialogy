@@ -210,11 +210,25 @@ export interface Integration {
   href?: string;
 }
 
+export type ActionType = 'reply' | 'webhook';
+
+export type Action = 
+  | {
+      type: 'reply';
+      value: string;
+    }
+  | {
+      type: 'webhook';
+      url: string;
+      method: 'GET' | 'POST';
+      body?: Record<string, any>;
+    };
+
 export interface NexusFlowInstance {
   id: string;
   name: string;
   trigger: string;
-  action: string;
+  action: Action;
   enabled: boolean;
   model?: string;
 }

@@ -247,13 +247,13 @@ export const getContactById = (id: string) => contacts.find(c => c.id === id);
 export const integrations: Integration[] = [
   { 
     id: 'nexusflow', 
-    name: 'NexusFlow', 
+    name: 'Agente de IA', 
     description: 'Controle fluxos de atendimento complexos e envie dados para webhooks externos através de um agente de automação.', 
     iconUrl: 'https://placehold.co/48x48.png', 
     tag: 'Automação', 
     tagType: 'primary', 
     status: 'active',
-    href: '/integrations/nexusflow'
+    href: '/autopilot'
   },
   {
     id: 'evolution-api',
@@ -283,7 +283,10 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
     id: 'nfi-1', 
     name: 'Aviso de Instabilidade', 
     trigger: 'Cliente menciona que o sistema está "fora do ar", "lento" ou "instável".',
-    action: 'Peço desculpas pelo transtorno. Estamos cientes de uma instabilidade temporária em nossos servidores e a equipe de engenharia já está trabalhando para normalizar o serviço o mais rápido possível.',
+    action: {
+      type: 'reply',
+      value: 'Peço desculpas pelo transtorno. Estamos cientes de uma instabilidade temporária e a engenharia já está trabalhando para normalizar o serviço.'
+    },
     enabled: true,
     model: 'googleai/gemini-2.0-flash',
   },
@@ -291,15 +294,27 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
     id: 'nfi-2', 
     name: 'Dúvida sobre Fatura', 
     trigger: 'Cliente pergunta sobre a "fatura", "boleto" ou "pagamento".',
-    action: 'Entendi. Para que eu possa ajudar com sua dúvida financeira, estou transferindo seu atendimento para um especialista do nosso time financeiro, ok?',
+    action: {
+      type: 'reply',
+      value: 'Entendi. Para que eu possa ajudar com sua dúvida financeira, estou transferindo seu atendimento para um especialista do nosso time financeiro, ok?'
+    },
     enabled: true,
     model: 'googleai/gemini-2.0-flash',
   },
   { 
     id: 'nfi-3', 
-    name: 'Cancelamento de Conta', 
-    trigger: 'Cliente expressa o desejo de "cancelar a conta" ou "encerrar o serviço".',
-    action: 'Lamento ouvir que você deseja cancelar. Antes de prosseguir, poderia me dizer o motivo? Seu feedback é muito importante para nós. Se preferir, posso transferir para um especialista que pode cuidar do processo de cancelamento para você.',
+    name: 'Registrar Lead no CRM', 
+    trigger: 'Cliente demonstra interesse em comprar ou pede um orçamento.',
+    action: {
+        type: 'webhook',
+        url: 'https://api.crm.com/leads',
+        method: 'POST',
+        body: {
+            name: '{{contact.name}}',
+            email: '{{contact.email}}',
+            source: 'Dialogy Chat'
+        }
+    },
     enabled: false,
     model: 'googleai/gemini-2.0-flash',
   },
