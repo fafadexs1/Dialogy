@@ -105,7 +105,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // 3. Fetch chats and order them by the most recent message, also fetching the source and instance name of the last message.
+    // 3. Fetch chats visible to the current user (Gerais, Atendimentos, and their own Encerrados)
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -130,10 +130,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-        WHERE c.workspace_id = $1
+        WHERE c.workspace_id = $1 AND (
+            c.status IN ('gerais', 'atendimentos') OR 
+            (c.status = 'encerrados' AND c.agent_id = $2)
+        )
         GROUP BY c.id, lm.source_from_api, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
-    `, [workspaceId]);
+    `, [workspaceId, userId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
@@ -149,7 +152,9 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
 
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
-        const contactIds = chats.map(c => c.contact.id);
+        // Fetch the complete message history for all contacts present in the visible chats.
+        const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
+        
         const messageRes = await db.query(`
             SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id
             FROM messages m
@@ -186,6 +191,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             });
         });
 
+        // Assign the full history to each chat object for that contact
         chats.forEach(chat => {
           chat.messages = messagesByContact[chat.contact.id] || [];
         });
