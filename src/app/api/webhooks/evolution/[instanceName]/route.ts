@@ -50,10 +50,11 @@ export async function POST(
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
     
+    // The payload for contacts.update can be an object or an array of objects
     const contactsToUpdate = Array.isArray(data) ? data : [data];
 
     if (contactsToUpdate.length === 0 || !contactsToUpdate[0]?.remoteJid) {
-        console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar.');
+        console.log(`[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar para instância ${instanceName}. Payload:`, JSON.stringify(data));
         return;
     }
 
@@ -186,7 +187,7 @@ async function handleMessagesUpsert(payload: any) {
         // 3. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
             `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
-             ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactId]
+             ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactId]
         );
         
         let chatId: string;

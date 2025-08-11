@@ -191,6 +191,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           agent_id UUID REFERENCES public.users(id),
           status chat_status_enum DEFAULT 'gerais'::chat_status_enum,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
           close_reason_tag_id UUID REFERENCES public.tags(id),
