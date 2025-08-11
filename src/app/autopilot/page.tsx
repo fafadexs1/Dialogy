@@ -122,14 +122,13 @@ function AutomationForm({
   };
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{instance ? 'Editar Automação' : 'Adicionar Nova Automação'}</DialogTitle>
-        <DialogDescription>
-          Defina o gatilho e a ação que o agente de IA deve executar.
-        </DialogDescription>
-      </DialogHeader>
       <form onSubmit={handleSubmit}>
+        <DialogHeader>
+          <DialogTitle>{instance ? 'Editar Automação' : 'Adicionar Nova Automação'}</DialogTitle>
+          <DialogDescription>
+            Defina o gatilho e a ação que o agente de IA deve executar.
+          </DialogDescription>
+        </DialogHeader>
         <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto p-1">
           <div className="space-y-2">
             <Label htmlFor="rule-name">Nome da Automação</Label>
@@ -199,7 +198,6 @@ function AutomationForm({
           <Button type="submit">Salvar Automação</Button>
         </DialogFooter>
       </form>
-    </>
   );
 }
 
@@ -502,3 +500,4 @@ export default function AutopilotPage() {
     );
 
     
+}
