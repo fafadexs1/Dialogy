@@ -37,10 +37,13 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const [chats, setChats] = useState<Chat[]>(initialChats);
   const [loading, setLoading] = useState(true);
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
+  const [showFullHistory, setShowFullHistory] = useState(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSetSelectedChat = (chat: Chat) => {
     setSelectedChat(chat);
+    // When changing chats, always default to showing the full history for context
+    setShowFullHistory(true);
   };
   
   // Function to fetch and update data, memoized with useCallback
@@ -101,6 +104,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             clearInterval(pollingIntervalRef.current);
         }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialChats, currentUser.activeWorkspaceId, currentUser.id, updateData]);
 
 
@@ -151,6 +155,8 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         currentUser={currentUser} 
         onActionSuccess={updateData}
         closeReasons={closeReasons}
+        showFullHistory={showFullHistory}
+        setShowFullHistory={setShowFullHistory}
       />
       <ContactPanel chat={selectedChat} onTransferSuccess={updateData} />
     </div>

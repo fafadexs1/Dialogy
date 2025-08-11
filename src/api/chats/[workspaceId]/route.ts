@@ -55,11 +55,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // Updated query to correctly fetch chats:
-    // - All 'gerais' (general queue)
-    // - All 'atendimentos' (active chats)
-    // - All 'encerrados' (closed chats)
-    // This removes the agent-specific filter on closed chats.
+    // Updated query to correctly fetch chats, including all 'encerrados' and active chats for the user.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT

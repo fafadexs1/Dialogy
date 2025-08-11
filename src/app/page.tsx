@@ -130,10 +130,10 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos', 'encerrados') OR c.agent_id = $2)
+        WHERE c.workspace_id = $1
         GROUP BY c.id, lm.source_from_api, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
-    `, [workspaceId, userId]);
+    `, [workspaceId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
@@ -154,9 +154,9 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id
             FROM messages m
             JOIN chats c ON m.chat_id = c.id
-            WHERE c.contact_id = ANY($1::uuid[])
+            WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
             ORDER BY m.created_at ASC
-        `, [contactIds]);
+        `, [contactIds, workspaceId]);
 
         const messagesByContact: { [key: string]: Message[] } = {};
         messageRes.rows.forEach(m => {

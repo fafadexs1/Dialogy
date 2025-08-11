@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand, History } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -47,6 +47,7 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 
 interface ChatPanelProps {
@@ -55,19 +56,21 @@ interface ChatPanelProps {
   currentUser: User;
   onActionSuccess: () => void;
   closeReasons: Tag[];
+  showFullHistory: boolean;
+  setShowFullHistory: (show: boolean) => void;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [isOpen, setIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [reasonTagValue, setReasonTagValue] = React.useState<string | null>(null);
+    const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const result = await closeChatAction(chat.id, reasonTagValue, notes);
+        const result = await closeChatAction(chat.id, reasonTagId, notes);
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
             setIsOpen(false);
@@ -96,7 +99,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select onValueChange={setReasonTagValue} value={reasonTagValue || ''}>
+                             <Select onValueChange={setReasonTagId} value={reasonTagId || ''}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
@@ -307,7 +310,7 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
+export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
@@ -322,6 +325,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const processedMessageIds = useRef(new Set());
   
   const { toast } = useToast();
+
+  const messagesToDisplay = showFullHistory
+    ? initialMessages
+    : initialMessages.filter(m => m.chat_id === chat?.id);
   
   const handleAiSwitchChange = (checked: boolean) => {
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
@@ -633,7 +640,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
-    const prevMessage = initialMessages[index - 1];
+    const prevMessage = messagesToDisplay[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isFromMe = message.sender?.id === currentUser?.id;
@@ -760,6 +767,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <h2 className="font-semibold">{chat.contact.name}</h2>
         </div>
         <div className="flex items-center gap-2">
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button variant={showFullHistory ? "secondary" : "ghost"} size="icon" onClick={() => setShowFullHistory(!showFullHistory)}>
+                           <History className="h-5 w-5"/>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>{showFullHistory ? 'Mostrar apenas a conversa atual' : 'Mostrar histórico completo'}</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
           {isChatOpen && isChatAssigned && (
             <CloseChatDialog chat={chat} onActionSuccess={onActionSuccess} reasons={closeReasons} />
           )}
@@ -776,7 +795,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
       <div className="flex-1 overflow-y-auto relative" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
-            {initialMessages.map(renderMessageWithSeparator)}
+            {messagesToDisplay.map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>
         {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
@@ -875,5 +894,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
