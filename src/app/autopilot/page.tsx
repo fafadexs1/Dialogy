@@ -501,5 +501,3 @@ export default function AutopilotPage() {
 
     
 }
-
-    
