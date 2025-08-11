@@ -164,7 +164,7 @@ export async function sendMediaAction(
                     mimetype: file.mimetype,
                     media: file.base64,
                     fileName: file.filename,
-                    caption: caption || ' ', // Ensure caption is at least a space
+                    caption: caption || '', // Ensure caption is always a string, even if empty
                 }
             };
             

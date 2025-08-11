@@ -23,7 +23,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -311,14 +311,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
   const handleSendMessage = async (content: string, metadata?: MessageMetadata) => {
-    if (!chat) return;
+    if (!chat || !chat.agent) {
+        console.error("Chat ou agente do chat não definido para enviar mensagem.");
+        return;
+    };
 
     if (mediaFiles.length > 0) {
         // This part remains unchanged for now, as AI doesn't send media.
     } else {
         if (!content.trim()) return;
         // Use the automated message action for the AI
-        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent!.id);
+        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent.id);
         if (result.success) {
             onActionSuccess();
         } else {
