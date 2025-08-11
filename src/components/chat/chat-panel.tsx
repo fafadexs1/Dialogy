@@ -60,14 +60,14 @@ interface ChatPanelProps {
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [isOpen, setIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [reasonTagId, setReasonTagId] = React.useState('');
+    const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const result = await closeChatAction(chat.id, reasonTagId || null, notes || null);
+        const result = await closeChatAction(chat.id, reasonTagId, notes);
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
             setIsOpen(false);
@@ -96,7 +96,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select name="reasonTagId" onValueChange={setReasonTagId}>
+                             <Select onValueChange={(value) => setReasonTagId(value)}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
@@ -109,7 +109,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
-                            <Textarea id="close-notes" name="notes" placeholder="Adicione uma observação sobre o encerramento..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+                            <Textarea id="close-notes" placeholder="Adicione uma observação sobre o encerramento..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                         </div>
                     </div>
                     <DialogFooter>

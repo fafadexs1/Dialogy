@@ -211,7 +211,7 @@ export async function closeChatAction(
                 close_reason_tag_id = $1,
                 close_notes = $2
              WHERE id = $3`,
-            [reasonTagId || null, notes || null, chatId]
+            [reasonTagId, notes, chatId]
         );
         
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
@@ -237,7 +237,8 @@ export async function closeChatAction(
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Erro ao encerrar atendimento:", error);
-        return { success: false, error: "Falha no servidor ao encerrar o atendimento." };
+        const errorMessage = error instanceof Error ? `Erro ao encerrar atendimento: ${error.message}` : "Falha no servidor ao encerrar o atendimento.";
+        return { success: false, error: errorMessage };
     } finally {
         client.release();
     }
