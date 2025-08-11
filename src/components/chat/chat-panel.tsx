@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useActionState, useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -57,43 +57,27 @@ interface ChatPanelProps {
   closeReasons: Tag[];
 }
 
-function CloseChatButton() {
-    const { pending } = useFormStatus();
-    return (
-        <Button type="submit" variant="destructive" disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Encerrar Atendimento
-        </Button>
-    )
-}
-
-function SendMessageButton({ disabled }: { disabled?: boolean }) {
-    const { pending } = useFormStatus();
-    return (
-        <Button type="submit" size="sm" className='h-8' disabled={pending || disabled}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        </Button>
-    )
-}
-
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
-    const [state, formAction] = useActionState(closeChatAction, { success: false, error: undefined });
     const [isOpen, setIsOpen] = React.useState(false);
+    const [isSubmitting, setIsSubmitting] = React.useState(false);
+    const [reasonTagId, setReasonTagId] = React.useState('');
+    const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
 
-    React.useEffect(() => {
-        if(state.success) {
-            toast({ title: "Atendimento encerrado com sucesso!"});
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const result = await closeChatAction(chat.id, reasonTagId || null, notes || null);
+        if (result.success) {
+            toast({ title: "Atendimento encerrado com sucesso!" });
             setIsOpen(false);
             onActionSuccess();
-        } else if (state.error) {
-            toast({ title: "Erro ao encerrar", description: state.error, variant: 'destructive'});
+        } else {
+            toast({ title: "Erro ao encerrar", description: result.error, variant: 'destructive' });
         }
-    }, [state, toast, onActionSuccess]);
+        setIsSubmitting(false);
+    };
     
-    // Bind the chatId to the form action
-    const actionWithChatId = formAction.bind(null, chat.id);
-
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
@@ -102,7 +86,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                 </Button>
             </DialogTrigger>
             <DialogContent>
-                <form action={actionWithChatId}>
+                <form onSubmit={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Encerrar Atendimento</DialogTitle>
                         <DialogDescription>
@@ -112,7 +96,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select name="reasonTagId">
+                             <Select name="reasonTagId" onValueChange={setReasonTagId}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
@@ -125,16 +109,28 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
-                            <Textarea id="close-notes" name="notes" placeholder="Adicione uma observação sobre o encerramento..." />
+                            <Textarea id="close-notes" name="notes" placeholder="Adicione uma observação sobre o encerramento..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                         </div>
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
-                        <CloseChatButton />
+                        <Button type="submit" variant="destructive" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Encerrar Atendimento
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>
         </Dialog>
+    )
+}
+
+function SendMessageButton({ disabled }: { disabled?: boolean }) {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" size="sm" className='h-8' disabled={pending || disabled}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
     )
 }
 

@@ -177,8 +177,8 @@ export async function transferChatAction(
 
 export async function closeChatAction(
     chatId: string,
-    prevState: any,
-    formData: FormData
+    reasonTagId: string | null,
+    notes: string | null
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !session?.user?.name) {
@@ -187,9 +187,6 @@ export async function closeChatAction(
 
     const currentAgentId = session.user.id;
     const currentAgentName = session.user.name;
-
-    const reasonTagId = formData.get('reasonTagId') as string;
-    const notes = formData.get('notes') as string;
 
     if (!chatId) {
         return { success: false, error: "ID do chat é obrigatório." };
