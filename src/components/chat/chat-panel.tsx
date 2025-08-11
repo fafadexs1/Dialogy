@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
+import { sendAgentMessageAction, sendMediaAction, sendAutomatedMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -308,12 +308,57 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
+  const handleSendMessage = async (content: string) => {
+    if (!chat || !chat.agent) return;
+
+    // Ação para o Piloto Automático
+    if (isAiAgentActive) {
+        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent.id);
+        if (result.success) {
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro do Piloto Automático', description: result.error, variant: 'destructive' });
+        }
+    } else { // Ação para o agente humano
+        if (mediaFiles.length > 0) {
+            const mediaData = mediaFiles.map(mf => ({
+                base64: mf.base64,
+                mimetype: mf.type,
+                filename: mf.name,
+                mediatype: mf.mediatype,
+                thumbnail: mf.thumbnail,
+            }));
+            const result = await sendMediaAction(chat.id, content, mediaData);
+             if (result.success) {
+                onActionSuccess();
+            } else {
+                toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+            }
+        } else {
+            if (!content.trim()) return;
+            const result = await sendAgentMessageAction(chat.id, content);
+            if (result.success) {
+                onActionSuccess();
+            } else {
+                toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
+            }
+        }
+    }
+
+    setMediaFiles([]);
+    setNewMessage('');
+    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+};
+
+
   const runAiAgent = async () => {
+    // Conditions to run the agent
     if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id || isAiTyping) {
         return;
     }
 
     try {
+        setIsAiTyping(true);
         const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
@@ -326,37 +371,30 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         });
         
         if (result && result.response) {
-            setIsAiTyping(true);
             const textToType = result.response;
             
-            // Simulate typing
+            // Simulate typing in the textbox
             for (let i = 0; i <= textToType.length; i++) {
                 await new Promise(resolve => setTimeout(resolve, 50));
-                const typedText = textToType.substring(0, i);
-                setNewMessage(typedText);
-                if (contentEditableRef.current) {
-                    contentEditableRef.current.innerHTML = typedText;
-                }
+                setNewMessage(textToType.substring(0, i));
             }
 
-            // Wait a bit, then submit the form
+            // Wait a bit, then send the message
             await new Promise(resolve => setTimeout(resolve, 200));
-            if(formRef.current) {
-                formRef.current.requestSubmit();
-            }
-
+            await handleSendMessage(textToType);
         }
     } catch (error: any) {
          console.error('Error generating AI agent response:', error);
          toast({
             title: 'Erro do Piloto Automático',
-            description: error.message || 'Não foi possível enviar a resposta automática.',
+            description: error.message || 'Não foi possível gerar a resposta automática.',
             variant: 'destructive',
         });
     } finally {
         setIsAiTyping(false);
     }
   };
+
 
   useEffect(() => {
     runAiAgent();
@@ -391,6 +429,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   useEffect(() => {
     // Reset the processed messages set when the chat changes
     processedMessageIds.current.clear();
+    // Also reset AI typing state
+    setIsAiTyping(false);
   }, [chat?.id]);
   
   const handleDeleteMessage = async (messageId: string, instanceName?: string) => {
@@ -495,48 +535,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const handleFormSubmit = async (formData: FormData) => {
-    if (!chat) return;
-
     const plainTextContent = htmlToWhatsappMarkdown(newMessage);
-    
-    const currentMediaFiles = [...mediaFiles];
-    const currentMessage = newMessage;
-    
-    // Immediately clear the input fields for a better UX
-    setMediaFiles([]);
-    setNewMessage('');
-    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-
-
-    if (currentMediaFiles.length > 0) {
-        const mediaData = currentMediaFiles.map(mf => ({
-            base64: mf.base64,
-            mimetype: mf.type,
-            filename: mf.name,
-            mediatype: mf.mediatype,
-            thumbnail: mf.thumbnail,
-        }));
-        
-        const result = await sendMediaAction(chat.id, plainTextContent, mediaData);
-        if (result.success) {
-            onActionSuccess();
-        } else {
-            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
-            // Restore files on failure
-            setMediaFiles(currentMediaFiles);
-        }
-    } else {
-        if (!plainTextContent.trim()) return;
-        const result = await sendAgentMessageAction(chat.id, plainTextContent);
-        if (result.success) {
-            onActionSuccess();
-        } else {
-             toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
-             // Restore message on failure
-             setNewMessage(currentMessage);
-             if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
-        }
-    }
+    handleSendMessage(plainTextContent);
   };
 
   const renderMessageContent = (message: Message) => {
@@ -591,7 +591,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                     <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                          {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0 self-start">
                                 <AlertDialog>
@@ -713,7 +713,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     <SmartReplies 
                         customerMessage={lastMessage?.content || ''}
                         chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
-                        onSelectReply={(reply) => setNewMessage(reply)}
+                        onSelectReply={(reply) => {
+                          setNewMessage(reply);
+                          if(contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
+                        }}
                     />
                 )}
                 <div className="space-y-2">
