@@ -51,9 +51,12 @@ export async function POST(
 }
 
 async function handleContactsUpdate(payload: any) {
-    const { instance: instanceName, data: contactsToUpdate } = payload;
+    const { instance: instanceName, data } = payload;
+    
+    // Normalize data to always be an array
+    const contactsToUpdate = Array.isArray(data) ? data : [data];
 
-    if (!Array.isArray(contactsToUpdate) || contactsToUpdate.length === 0) {
+    if (contactsToUpdate.length === 0) {
         console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar.');
         return;
     }
@@ -78,12 +81,11 @@ async function handleContactsUpdate(payload: any) {
         const workspaceId = instanceRes.rows[0].workspace_id;
 
         for (const contactData of contactsToUpdate) {
-            const { remoteJid, profilePicUrl } = contactData;
-            if (remoteJid && profilePicUrl) {
-                console.log(`[WEBHOOK_CONTACT_UPDATE] Atualizando avatar para JID: ${remoteJid}`);
+            if (contactData && contactData.remoteJid && contactData.profilePicUrl) {
+                console.log(`[WEBHOOK_CONTACT_UPDATE] Atualizando avatar para JID: ${contactData.remoteJid}`);
                 await client.query(
                     `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
-                    [profilePicUrl, remoteJid, workspaceId]
+                    [contactData.profilePicUrl, contactData.remoteJid, workspaceId]
                 );
             }
         }
@@ -192,6 +194,14 @@ async function handleMessagesUpsert(payload: any) {
                     agent_id = NULL
                 WHERE chats.status = 'encerrados'::chat_status_enum
                 RETURNING id, workspace_id, contact_id
+            ),
+            get_chat AS (
+                SELECT id, workspace_id, contact_id FROM upsert_chat
+                UNION ALL
+                SELECT c.id, c.workspace_id, c.contact_id
+                FROM chats c, upsert_contact uc
+                WHERE c.workspace_id = uc.workspace_id AND c.contact_id = uc.id
+                AND NOT EXISTS (SELECT 1 FROM upsert_chat)
             )
             INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
@@ -200,12 +210,12 @@ async function handleMessagesUpsert(payload: any) {
                 api_message_status, raw_payload
             )
             SELECT
-                uc.workspace_id,
-                uc.id,
-                uc.contact_id,
+                gc.workspace_id,
+                gc.id,
+                gc.contact_id,
                 'text'::message_type_enum,
                 $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14
-            FROM upsert_chat uc;
+            FROM get_chat gc;
         `;
         
         await db.query(query, [
