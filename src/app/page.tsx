@@ -149,22 +149,24 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
 
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
+        const contactIds = chats.map(c => c.contact.id);
         const messageRes = await db.query(`
-            SELECT id, content, created_at, chat_id, sender_id, workspace_id, instance_name, source_from_api, type, status, metadata, api_message_status, message_id_from_api, from_me
-            FROM messages
-            WHERE chat_id = ANY($1::uuid[])
-            ORDER BY created_at ASC
-        `, [chats.map(c => c.id)]);
+            SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id
+            FROM messages m
+            JOIN chats c ON m.chat_id = c.id
+            WHERE c.contact_id = ANY($1::uuid[])
+            ORDER BY m.created_at ASC
+        `, [contactIds]);
 
-        const messagesByChat: { [key: string]: Message[] } = {};
+        const messagesByContact: { [key: string]: Message[] } = {};
         messageRes.rows.forEach(m => {
-            if (!messagesByChat[m.chat_id]) {
-                messagesByChat[m.chat_id] = [];
+            if (!messagesByContact[m.contact_id]) {
+                messagesByContact[m.contact_id] = [];
             }
             const createdAtDate = new Date(m.created_at);
             const zonedDate = toZonedTime(createdAtDate, timeZone);
             
-            messagesByChat[m.chat_id].push({
+            messagesByContact[m.contact_id].push({
                 id: m.id,
                 chat_id: m.chat_id,
                 workspace_id: m.workspace_id,
@@ -185,7 +187,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         });
 
         chats.forEach(chat => {
-          chat.messages = messagesByChat[chat.id] || [];
+          chat.messages = messagesByContact[chat.contact.id] || [];
         });
     }
 
