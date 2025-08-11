@@ -23,7 +23,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAgentMessageAction, sendMediaAction, sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAgentMessageAction, sendAutomatedMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -290,11 +290,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentEditableRef = useRef<HTMLElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const processedMessageIds = useRef(new Set());
   
   const { toast } = useToast();
   
+  const handleAiSwitchChange = (checked: boolean) => {
+    console.log(`Piloto Automático ${checked ? 'ativado' : 'desativado'}.`);
+    setIsAiAgentActive(checked);
+  };
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -339,9 +342,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 };
 
-
  const runAiAgent = async () => {
-    // Conditions to run the agent
     if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id || isAiTyping) {
         return;
     }
@@ -362,16 +363,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (result && result.response) {
             const textToType = result.response;
             
-            // Simulate typing in the textbox
             for (let i = 0; i <= textToType.length; i++) {
                 await new Promise(resolve => setTimeout(resolve, 50));
                 if(contentEditableRef.current) {
                     contentEditableRef.current.innerHTML = textToType.substring(0, i);
-                    setNewMessage(textToType.substring(0, i)); // Also update state
+                    setNewMessage(textToType.substring(0, i));
                 }
             }
 
-            // Wait a bit, then send the message
             await new Promise(resolve => setTimeout(resolve, 500));
             const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
 
@@ -382,7 +381,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             }
              setNewMessage('');
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-
         }
     } catch (error: any) {
          console.error('Error generating AI agent response:', error);
@@ -398,9 +396,11 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   useEffect(() => {
-    runAiAgent();
+    if (isAiAgentActive && lastMessage && lastMessage.sender?.id !== currentUser.id) {
+      runAiAgent();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage?.id, chat?.id]);
+  }, [lastMessage?.id, isAiAgentActive, chat?.id]);
   
   // Mark messages as read effect
   useEffect(() => {
@@ -422,15 +422,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           
         markMessagesAsReadAction(chat.instance_name, messagesToMark);
 
-        // Add the IDs of these messages to the processed set
         unreadMessages.forEach(m => processedMessageIds.current.add(m.id));
     }
   }, [initialMessages, chat]);
 
   useEffect(() => {
-    // Reset the processed messages set when the chat changes
     processedMessageIds.current.clear();
-    // Also reset AI typing state
     setIsAiTyping(false);
   }, [chat?.id]);
   
@@ -444,7 +441,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
       toast({ title: "Erro ao apagar mensagem", description: result.error, variant: "destructive"});
     } else {
       toast({ title: "Mensagem apagada com sucesso!"});
-      onActionSuccess(); // Re-fetch data
+      onActionSuccess();
     }
   }
 
@@ -456,7 +453,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         video.playsInline = true;
 
         video.onloadeddata = () => {
-            // seek to 1 second
             video.currentTime = 1;
         };
         
@@ -469,13 +465,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 resolve(canvas.toDataURL('image/jpeg'));
             } else {
-                resolve(''); // resolve with empty string if context fails
+                resolve('');
             }
             URL.revokeObjectURL(video.src);
         };
 
         video.onerror = () => {
-            resolve(''); // resolve with empty string on error
+            resolve('');
             URL.revokeObjectURL(video.src);
         }
         
@@ -531,7 +527,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           .replace(/<strike>(.*?)<\/strike>/g, '~$1~')
           .replace(/<br>/g, '\n')
           .replace(/&nbsp;/g, ' ')
-          .replace(/<[^>]*>/g, ''); // Remove remaining HTML tags
+          .replace(/<[^>]*>/g, '');
   };
 
 
@@ -592,7 +588,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row' : 'flex-row-reverse')}>
+                     <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                          <div
                             className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
                                 isDeleted 
@@ -721,10 +717,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form
-                        ref={formRef}
-                        action={handleFormSubmit}
-                    >
+                     <form action={handleFormSubmit}>
                         <input type="hidden" name="chatId" value={chat.id} />
                          <div className="relative overflow-hidden">
                             <div className='border rounded-lg'>
@@ -739,7 +732,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
-                                            handleFormSubmit(new FormData(e.currentTarget.form!));
+                                            if (e.currentTarget.closest('form')) {
+                                               handleFormSubmit(new FormData(e.currentTarget.closest('form')!));
+                                            }
                                         }
                                     }}
                                 />
@@ -780,7 +775,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         <Switch
                             id="ai-agent-switch"
                             checked={isAiAgentActive}
-                            onCheckedChange={setIsAiAgentActive}
+                            onCheckedChange={handleAiSwitchChange}
                             disabled={isAiTyping}
                         />
                         <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Piloto Automático</Label>
