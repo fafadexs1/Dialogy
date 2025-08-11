@@ -50,9 +50,9 @@ async function internalSendMessage(
 
         const { workspace_id, status: chatStatus, agent_id: currentAgentId, remoteJid, instanceName } = chatInfoRes.rows[0];
 
-        // 1.5. NEW LOGIC: Assign agent if the chat is in 'gerais' and has no agent
+        // Atribui o agente se o chat estiver na fila 'gerais' e ainda não tiver um.
         if (chatStatus === 'gerais' && !currentAgentId) {
-            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} is 'gerais'. Assigning agent ${senderId}.`);
+            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} é 'gerais'. Atribuindo agente ${senderId}.`);
             await client.query(
                 `UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2`,
                 [senderId, chatId]
@@ -70,7 +70,7 @@ async function internalSendMessage(
         }
         const apiConfig = apiConfigRes.rows[0];
 
-        // 2. Enviar mensagem via API da Evolution
+        // 2. Enviar mensagem via API da Evolution com o payload simples
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
             apiConfig,
@@ -78,7 +78,7 @@ async function internalSendMessage(
                 method: 'POST',
                 body: JSON.stringify({
                     number: remoteJid,
-                    text: content
+                    text: content,
                 }),
             }
         );
@@ -117,8 +117,8 @@ export async function sendMediaAction(
         base64: string;
         mimetype: string;
         filename: string;
-        mediatype: 'image' | 'video' | 'document';
-        thumbnail?: string; // Add thumbnail here
+        mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string; 
     }[]
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
@@ -156,7 +156,7 @@ export async function sendMediaAction(
         const apiConfig = apiConfigRes.rows[0];
 
         for (const file of mediaFiles) {
-            const apiPayload = {
+             const apiPayload = {
                 number: remoteJid,
                 options: {
                     delay: 1200,
@@ -167,7 +167,7 @@ export async function sendMediaAction(
                     mimetype: file.mimetype,
                     media: file.base64,
                     fileName: file.filename,
-                    caption: caption || '', // Ensure caption is always a string, even if empty
+                    caption: caption || '',
                 }
             };
             
@@ -179,9 +179,10 @@ export async function sendMediaAction(
 
             const dbContent = caption || '';
             let dbMetadata: MessageMetadata = {
-                thumbnail: file.thumbnail, // Pass the thumbnail
+                thumbnail: file.thumbnail,
             };
 
+            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {

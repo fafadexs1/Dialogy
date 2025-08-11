@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useActionState, useEffect, useRef, useState } from 'react';
@@ -310,31 +311,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
-  const handleSendMessage = async (content: string, metadata?: MessageMetadata) => {
-    if (!chat || !chat.agent) {
-        console.error("Chat ou agente do chat não definido para enviar mensagem.");
-        return;
-    };
-
-    if (mediaFiles.length > 0) {
-        // This part remains unchanged for now, as AI doesn't send media.
-    } else {
-        if (!content.trim()) return;
-        // Use the automated message action for the AI
-        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent.id);
-        if (result.success) {
-            onActionSuccess();
-        } else {
-            toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
-        }
-    }
-
-    setMediaFiles([]);
-    setNewMessage('');
-    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-  };
-
-
  const runAiAgent = async () => {
     const conditions = {
         isAiAgentActive,
@@ -388,7 +364,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             await new Promise(resolve => setTimeout(resolve, 500));
             console.log('[AUTOPILOT] Enviando mensagem automática...');
             
-            await handleSendMessage(textToType, { sentBy: 'autopilot' });
+            if (chat && chat.agent) {
+                const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
+                 if (sendResult.success) {
+                    onActionSuccess();
+                } else {
+                    toast({ title: 'Erro ao Enviar Mensagem', description: sendResult.error, variant: 'destructive' });
+                }
+            }
             
             setNewMessage('');
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
@@ -553,7 +536,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             mediatype: mf.mediatype,
             thumbnail: mf.thumbnail,
         }));
-        const result = await sendMediaAction(chat.id, plainTextContent, mediaData);
+        const result = await sendMediaAction(chat.id, plainTextContent, mediaData as any);
          if (result.success) {
             onActionSuccess();
         } else {
