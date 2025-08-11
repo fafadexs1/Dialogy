@@ -149,7 +149,7 @@ function formatWhatsappText(text: string): string {
     }
 
     // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}</code></pre>`);
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
 
     // Then, format other elements, avoiding what's inside <code>
     safeText = safeText
@@ -355,24 +355,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }, [initialMessages]);
 
-  const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
+  const runAiAgent = useCallback(async () => {
+    const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
- const runAiAgent = useCallback(async () => {
-    const conditions = {
-        isAiAgentActive,
-        chatExists: !!chat,
-        isFromContact: lastMessage?.sender?.id !== currentUser.id,
-        notSentByAi: !lastMessage?.metadata?.sentBy,
-        isAiTyping: isAiTyping
-    };
+    if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
+        return;
+    }
 
-    const shouldRun = conditions.isAiAgentActive &&
-                      conditions.chatExists &&
-                      conditions.isFromContact &&
-                      conditions.notSentByAi &&
-                      !conditions.isAiTyping &&
-                      lastMessage &&
-                      autopilotConfig;
+    const shouldRun = isAiAgentActive &&
+                      !!chat &&
+                      lastMessage?.sender?.id !== currentUser.id &&
+                      !lastMessage?.metadata?.sentBy &&
+                      !isAiTyping &&
+                      lastMessage;
 
     if (!shouldRun) {
         return;
@@ -380,10 +375,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
     try {
         setIsAiTyping(true);
+        processedMessageIds.current.add(lastMessage.id);
         console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
         const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         
         const activeRules = autopilotRules.filter(rule => rule.enabled);
+
+        if (!autopilotConfig) {
+            console.warn("[AUTOPILOT] Configuração do piloto automático não carregada. Abortando.");
+            return;
+        }
 
         const result = await generateAgentResponse({
             chatId: chat.id,
@@ -413,7 +414,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             console.log('[AUTOPILOT] Enviando mensagem automática...');
             
             if (chat) {
-                // If the chat is in the general queue, the AI takes ownership.
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
                 const sendResult = await sendAutomatedMessageAction(chat.id, textToType, agentIdForMessage);
                  if (sendResult.success) {
@@ -436,12 +436,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     } finally {
         setIsAiTyping(false);
     }
-  }, [isAiAgentActive, chat, lastMessage, currentUser.id, isAiTyping, initialMessages, autopilotRules, autopilotConfig, onActionSuccess, toast]);
+  }, [isAiAgentActive, chat, initialMessages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
 
 
   useEffect(() => {
     runAiAgent();
-  }, [runAiAgent]);
+  }, [runAiAgent, initialMessages]);
   
   // Mark messages as read effect
   useEffect(() => {
@@ -543,7 +543,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         }
         
         return {
-            id: `${'\'\'\''}${file.name}-${file.lastModified}${'\'\'\''}`,
+            id: `${file.name}-${file.lastModified}`,
             file: file,
             name: file.name,
             type: file.type,
@@ -768,7 +768,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <Button variant="ghost" size="icon">
               <FileDown className="h-5 w-5"/>
           </Button>
-          <ChatSummary chatHistory={initialMessages.map(m => `${'\'\'\''}${m.sender?.name || 'System'}: ${m.content}${'\'\'\''}`).join('\n')} />
+          <ChatSummary chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')} />
           <Button variant="ghost" size="icon">
               <MoreVertical className="h-5 w-5"/>
           </Button>
@@ -792,8 +792,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
-                        customerMessage={lastMessage?.content || ''}
-                        chatHistory={initialMessages.map(m => `${'\'\'\''}${m.sender?.name || 'System'}: ${m.content}${'\'\'\''}`).join('\n')}
+                        customerMessage={initialMessages[initialMessages.length - 1]?.content || ''}
+                        chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
                           if(contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
