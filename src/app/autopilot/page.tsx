@@ -34,7 +34,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { getAutopilotConfig, saveAutopilotConfig } from '@/actions/autopilot';
+import { getAutopilotConfig, saveAutopilotConfig, saveAutopilotRule, deleteAutopilotRule, toggleAutopilotRule } from '@/actions/autopilot';
 import { useFormStatus } from 'react-dom';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -98,11 +98,13 @@ function SaveButton({ children }: { children: React.ReactNode }) {
 }
 
 function AutomationForm({
-  onSave,
+  configId,
+  onSuccess,
   onClose,
   instance,
 }: {
-  onSave: (instance: NexusFlowInstance) => void;
+  configId: string;
+  onSuccess: () => void;
   onClose: () => void;
   instance?: NexusFlowInstance | null;
 }) {
@@ -113,33 +115,52 @@ function AutomationForm({
   const [webhookUrl, setWebhookUrl] = useState(instance?.action.type === 'webhook' ? instance.action.url || '' : '');
   const [webhookMethod, setWebhookMethod] = useState(instance?.action.type === 'webhook' ? instance.action.method || 'POST' : 'POST');
   const [webhookBody, setWebhookBody] = useState(instance?.action.type === 'webhook' ? JSON.stringify(instance.action.body, null, 2) || '' : '');
-  
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    
     let action: Action;
 
-    if (actionType === 'webhook') {
-        action = {
-            type: 'webhook',
-            url: webhookUrl,
-            method: webhookMethod,
-            body: webhookBody ? JSON.parse(webhookBody) : undefined,
-        };
-    } else {
-        action = {
-            type: 'reply',
-            value: actionValue,
-        };
+    try {
+        if (actionType === 'webhook') {
+            action = {
+                type: 'webhook',
+                url: webhookUrl,
+                method: webhookMethod,
+                body: webhookBody ? JSON.parse(webhookBody) : undefined,
+            };
+        } else {
+            action = {
+                type: 'reply',
+                value: actionValue,
+            };
+        }
+    } catch (error) {
+        toast({ title: 'Erro de Formato', description: 'O corpo (body) do webhook não é um JSON válido.', variant: 'destructive'});
+        setIsSubmitting(false);
+        return;
     }
 
-    onSave({
-      id: instance?.id || `inst-${Date.now()}`,
+    const ruleToSave = {
+      id: instance?.id || `rule-${Date.now()}`,
       name,
       trigger,
       action,
-      enabled: instance?.enabled ?? true,
-      model: 'googleai/gemini-2.0-flash',
-    });
+    };
+    
+    const result = await saveAutopilotRule(configId, ruleToSave);
+
+    if (result.success) {
+        toast({ title: "Regra Salva!", description: "Sua automação foi salva com sucesso."});
+        onSuccess();
+    } else {
+        toast({ title: "Erro ao Salvar Regra", description: result.error, variant: 'destructive'});
+    }
+    
+    setIsSubmitting(false);
   };
 
   return (
@@ -216,7 +237,10 @@ function AutomationForm({
       </div>
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button type="submit">Salvar Automação</Button>
+        <Button type="submit" disabled={isSubmitting}>
+             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Salvar Automação
+        </Button>
       </DialogFooter>
     </form>
   );
@@ -244,25 +268,32 @@ export default function AutopilotPage() {
     
     const [saveState, saveAction] = useActionState(saveAutopilotConfig, { success: false });
 
-    useEffect(() => {
+    const fetchData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
 
         setLoading(true);
-        getAutopilotConfig(user.activeWorkspaceId)
-            .then(data => {
-                if (data.error) {
-                    toast({ title: "Erro ao carregar configurações", description: data.error, variant: 'destructive' });
-                } else {
-                    setConfig(data.config);
-                    setInstances(data.rules || []);
-                    if (data.config) {
-                        setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
-                        setGeminiApiKey(data.config.gemini_api_key || '');
-                        setKnowledgeBase(data.config.knowledge_base || '');
-                    }
+        try {
+            const data = await getAutopilotConfig(user.activeWorkspaceId);
+            if (data.error) {
+                toast({ title: "Erro ao carregar configurações", description: data.error, variant: 'destructive' });
+            } else {
+                setConfig(data.config);
+                setInstances(data.rules || []);
+                if (data.config) {
+                    setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
+                    setGeminiApiKey(data.config.gemini_api_key || '');
+                    setKnowledgeBase(data.config.knowledge_base || '');
                 }
-            })
-            .finally(() => setLoading(false));
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [user?.activeWorkspaceId, toast]);
+
+    useEffect(() => {
+        if (user?.activeWorkspaceId) {
+            fetchData();
+        }
 
         setLoadingStats(true);
         const timer = setTimeout(() => {
@@ -272,28 +303,22 @@ export default function AutopilotPage() {
 
         return () => clearTimeout(timer);
 
-    }, [user?.activeWorkspaceId, toast]);
+    }, [user?.activeWorkspaceId, fetchData]);
 
     useEffect(() => {
         if (saveState.success) {
             toast({ title: 'Configurações Salvas!', description: 'Suas alterações foram salvas com sucesso.'});
+            fetchData();
         } else if (saveState.error) {
             toast({ title: 'Erro ao Salvar', description: saveState.error, variant: 'destructive'});
         }
-    }, [saveState, toast]);
+    }, [saveState, toast, fetchData]);
 
-    const handleSaveInstance = (instanceToSave: NexusFlowInstance) => {
-        // TODO: convert to server action
-        setInstances(prev => {
-            const exists = prev.some(i => i.id === instanceToSave.id);
-            if (exists) {
-                return prev.map(i => (i.id === instanceToSave.id ? instanceToSave : i));
-            }
-            return [...prev, instanceToSave];
-        });
+    const handleSaveSuccess = () => {
         setIsModalOpen(false);
         setEditingInstance(null);
-    };
+        fetchData();
+    }
 
     const handleEditClick = (instance: NexusFlowInstance) => {
         setEditingInstance(instance);
@@ -301,18 +326,32 @@ export default function AutopilotPage() {
     };
 
     const handleAddNewClick = () => {
+        if (!config?.id) {
+            toast({ title: 'Ação Necessária', description: 'Por favor, salve as configurações (Chave API ou Modelo) primeiro para obter um ID de configuração antes de adicionar uma regra.', variant: 'default' });
+            return;
+        }
         setEditingInstance(null);
         setIsModalOpen(true);
     };
 
-    const handleRemoveInstance = (id: string) => {
-        // TODO: convert to server action
-        setInstances(prev => prev.filter(i => i.id !== id));
+    const handleRemoveInstance = async (id: string) => {
+        const result = await deleteAutopilotRule(id);
+        if (result.success) {
+            toast({ title: "Regra Removida!" });
+            fetchData();
+        } else {
+            toast({ title: "Erro ao Remover", description: result.error, variant: 'destructive' });
+        }
     };
 
-    const handleToggleEnabled = (id: string, enabled: boolean) => {
-        // TODO: convert to server action
-        setInstances(prev => prev.map(i => (i.id === id ? { ...i, enabled } : i)));
+    const handleToggleEnabled = async (id: string, enabled: boolean) => {
+        const result = await toggleAutopilotRule(id, enabled);
+        if (result.success) {
+            toast({ title: `Regra ${enabled ? 'ativada' : 'desativada'}.` });
+            fetchData();
+        } else {
+            toast({ title: "Erro ao Atualizar", description: result.error, variant: 'destructive' });
+        }
     };
     
     const selectedModelInfo = modelInfo[aiModel];
@@ -486,11 +525,14 @@ export default function AutopilotPage() {
                         
                         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                             <DialogContent className="max-w-2xl">
-                                <AutomationForm 
-                                    instance={editingInstance}
-                                    onSave={handleSaveInstance}
-                                    onClose={() => setIsModalOpen(false)}
-                                />
+                                {config?.id && (
+                                    <AutomationForm 
+                                        configId={config.id}
+                                        instance={editingInstance}
+                                        onSuccess={handleSaveSuccess}
+                                        onClose={() => setIsModalOpen(false)}
+                                    />
+                                )}
                             </DialogContent>
                         </Dialog>
 
@@ -537,11 +579,10 @@ export default function AutopilotPage() {
                                                     id={`status-${instance.id}`}
                                                     checked={instance.enabled}
                                                     onCheckedChange={(checked) => handleToggleEnabled(instance.id, checked)}
-                                                    className="opacity-0 group-hover:opacity-100 transition-opacity"
                                                 />
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7">
                                                             <MoreVertical className="h-4 w-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
