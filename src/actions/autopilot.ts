@@ -21,12 +21,6 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
 }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { config: null, rules: null, error: "Usuário não autenticado." };
-    const userId = session.user.id;
-
-    // Temporarily removed for debugging. The primary goal is to let the try/catch run.
-    // if (!await isWorkspaceMember(userId, workspaceId)) {
-    //     return { config: null, rules: null, error: "Acesso não autorizado." };
-    // }
 
     try {
         const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
@@ -37,6 +31,7 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
         
         const config = configRes.rows[0];
 
+        // TODO: Implement rule fetching from the database
         const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1', [config.id]);
         const rules = rulesRes.rows.map(r => ({ ...r, action: JSON.parse(r.action) }));
 
@@ -57,71 +52,48 @@ export async function saveAutopilotConfig(
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
+    const userId = session.user.id;
 
     const workspaceId = formData.get('workspaceId') as string;
-    const configId = formData.get('configId') as string;
-
     if (!workspaceId) {
         return { success: false, error: 'ID de Workspace é obrigatório.' };
     }
-    
-    // Acesso é permitido se o usuário for um membro do workspace.
-    if (!await isWorkspaceMember(session.user.id, workspaceId)) {
+
+    if (!await isWorkspaceMember(userId, workspaceId)) {
         return { success: false, error: "Você não tem permissão para editar as configurações." };
     }
     
-    const client = await db.connect();
-
     try {
-        await client.query('BEGIN');
-        
-        let currentConfigId = configId;
-
-        if (!currentConfigId) {
-            const existingConfig = await client.query('SELECT id FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
-            if (existingConfig.rowCount > 0) {
-                currentConfigId = existingConfig.rows[0].id;
-            } else {
-                const newConfigRes = await client.query(
-                    'INSERT INTO autopilot_configs (workspace_id) VALUES ($1) RETURNING id',
-                    [workspaceId]
-                );
-                currentConfigId = newConfigRes.rows[0].id;
-            }
-        }
-        
         const fieldsToUpdate: { [key: string]: any } = {};
-        if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = formData.get('geminiApiKey');
+        if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = formData.get('geminiApiKey') || null;
         if (formData.has('aiModel')) fieldsToUpdate.ai_model = formData.get('aiModel');
         if (formData.has('knowledgeBase')) fieldsToUpdate.knowledge_base = formData.get('knowledgeBase');
         
         const fieldNames = Object.keys(fieldsToUpdate);
         if (fieldNames.length === 0) {
-            await client.query('COMMIT');
-            return { success: true }; 
+            return { success: true, error: "Nenhum campo para atualizar." }; 
         }
 
-        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 1}`).join(', ');
-        const values = Object.values(fieldsToUpdate);
+        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 2}`).join(', ');
+        const values = fieldNames.map(key => fieldsToUpdate[key]);
 
-        const query = `
-            UPDATE autopilot_configs
-            SET ${setClauses}, updated_at = NOW()
-            WHERE id = $${values.length + 1} AND workspace_id = $${values.length + 2}
+        const upsertQuery = `
+            INSERT INTO autopilot_configs (workspace_id, ${fieldNames.join(', ')})
+            VALUES ($1, ${fieldNames.map((_, i) => `$${i + 2}`).join(', ')})
+            ON CONFLICT (workspace_id)
+            DO UPDATE SET 
+                ${setClauses},
+                updated_at = NOW()
+            WHERE autopilot_configs.workspace_id = $1;
         `;
         
-        await client.query(query, [...values, currentConfigId, workspaceId]);
-
-        await client.query('COMMIT');
+        await db.query(upsertQuery, [workspaceId, ...values]);
         
         revalidatePath('/autopilot');
         return { success: true };
 
     } catch (error) {
-        await client.query('ROLLBACK');
         console.error('[SAVE_AUTOPILOT_CONFIG]', error);
         return { success: false, error: "Falha ao salvar as configurações no banco de dados." };
-    } finally {
-        client.release();
     }
 }
