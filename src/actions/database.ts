@@ -235,13 +235,12 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE public.autopilot_configs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE UNIQUE,
           gemini_api_key TEXT,
           ai_model TEXT,
           knowledge_base TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW(),
-          UNIQUE(workspace_id)
+          updated_at TIMESTAMPTZ DEFAULT NOW()
       );`,
 
       `CREATE TABLE public.autopilot_rules (
