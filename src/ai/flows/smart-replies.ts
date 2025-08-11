@@ -36,6 +36,12 @@ const SmartRepliesOutputSchema = z.object({
 });
 export type SmartRepliesOutput = z.infer<typeof SmartRepliesOutputSchema>;
 
+// Extend the input schema for the flow to include the config object.
+const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
+  config: z.any(),
+});
+
+
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -47,18 +53,16 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
     'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',
     [input.workspaceId, userId]
   );
-  if (configRes.rowCount === 0) {
-    throw new Error("Autopilot config not found for this user and workspace.");
-  }
-  const config = configRes.rows[0];
-
+  
+  // Use a default config if none is found to avoid breaking smart replies
+  const config = configRes.rows.length > 0 
+    ? configRes.rows[0]
+    : { id: 'default', ai_model: 'googleai/gemini-2.0-flash' };
+  
+  // Pass the full input including config to the flow
   const flowInput = { ...input, config };
   return generateSmartRepliesFlow(flowInput);
 }
-
-const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
-  config: z.any(),
-});
 
 
 const prompt = ai.definePrompt({
@@ -84,15 +88,13 @@ const generateSmartRepliesFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.config?.ai_model || 'googleai/gemini-2.0-flash';
-    const result = await prompt({
-        customerMessage: input.customerMessage,
-        chatHistory: input.chatHistory,
-        workspaceId: input.workspaceId
-    }, { model });
+    // The prompt only receives the fields defined in its own input schema.
+    const promptInput = SmartRepliesInputSchema.parse(input);
+    const result = await prompt(promptInput, { model });
     const output = result.output!;
 
     // Log usage
-    if (result.usage && input.config) {
+    if (result.usage && input.config && input.config.id !== 'default') {
         await logAutopilotUsage({
             configId: input.config.id,
             flowName: 'generateSmartRepliesFlow',
@@ -106,5 +108,3 @@ const generateSmartRepliesFlow = ai.defineFlow(
     return output;
   }
 );
-
-    

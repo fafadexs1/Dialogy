@@ -30,6 +30,12 @@ const SummarizeChatOutputSchema = z.object({
 
 export type SummarizeChatOutput = z.infer<typeof SummarizeChatOutputSchema>;
 
+// Extend the input schema for the flow to include the config object.
+const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
+  config: z.any(),
+});
+
+
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -41,18 +47,17 @@ export async function summarizeChat(input: SummarizeChatInput): Promise<Summariz
     'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',
     [input.workspaceId, userId]
   );
-  if (configRes.rowCount === 0) {
-    throw new Error("Autopilot config not found for this user and workspace.");
-  }
-  const config = configRes.rows[0];
+  
+  // Use a default config if none is found to avoid breaking summarization
+  const config = configRes.rows.length > 0 
+    ? configRes.rows[0]
+    : { id: 'default', ai_model: 'googleai/gemini-2.0-flash' };
 
+  // Pass the full input including config to the flow
   const flowInput = { ...input, config };
   return summarizeChatFlow(flowInput);
 }
 
-const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
-  config: z.any(),
-});
 
 const summarizeChatPrompt = ai.definePrompt({
   name: 'summarizeChatPrompt',
@@ -69,11 +74,13 @@ const summarizeChatFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.config?.ai_model || 'googleai/gemini-2.0-flash';
-    const result = await summarizeChatPrompt({ chatHistory: input.chatHistory }, { model });
+    // The prompt only receives the fields defined in its own input schema.
+    const promptInput = SummarizeChatInputSchema.parse(input);
+    const result = await summarizeChatPrompt(promptInput, { model });
     const output = result.output!;
 
      // Log usage
-    if (result.usage && input.config) {
+    if (result.usage && input.config && input.config.id !== 'default') {
         await logAutopilotUsage({
             configId: input.config.id,
             flowName: 'summarizeChatFlow',
@@ -87,5 +94,3 @@ const summarizeChatFlow = ai.defineFlow(
     return output;
   }
 );
-
-    

@@ -38,7 +38,6 @@ const AutomationRuleSchema = z.object({
 });
 
 const AgentResponseInputSchema = z.object({
-  config: z.any().describe("The autopilot config object from the database."), // Using `any` to avoid circular dependency issues.
   chatId: z.string().describe("The unique identifier for the current chat."),
   customerMessage: z
     .string()
@@ -73,30 +72,27 @@ const AgentResponseOutputSchema = z.object({
 });
 export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 
+// We create a new input schema for the Flow that includes the config object.
+const AutoResponderFlowInputSchema = AgentResponseInputSchema.extend({
+    config: z.any().describe("The autopilot config object from the database."),
+});
 
-// We need to pass the rules in a format that the prompt can use.
-// The input to the flow will be slightly different from the input to the prompt.
-interface AutoResponderFlowInput {
-    config: AutopilotConfig,
-    chatId: string;
-    customerMessage: string;
-    chatHistory?: string;
-    rules: NexusFlowInstance[];
-    knowledgeBase?: string;
-    model?: string;
-    contact: { id: string; name: string; email?: string; };
-}
-
-export async function generateAgentResponse(input: AutoResponderFlowInput): Promise<AgentResponseOutput> {
+export async function generateAgentResponse(input: z.infer<typeof AutoResponderFlowInputSchema>): Promise<AgentResponseOutput> {
     const promptInput: AgentResponseInput = {
-        ...input,
+        chatId: input.chatId,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
         rules: input.rules.map(r => ({
             name: r.name,
             trigger: r.trigger,
             action: r.action,
         })),
+        knowledgeBase: input.knowledgeBase,
+        model: input.model,
+        contact: input.contact,
     };
-    return autoResponderFlow(promptInput);
+    // We pass the full input (including config) to the flow
+    return autoResponderFlow(input);
 }
 
 // --- Agent Prompt ---
@@ -149,13 +145,15 @@ Agora, avalie e responda.`,
 const autoResponderFlow = ai.defineFlow(
   {
     name: 'autoResponderFlow',
-    inputSchema: AgentResponseInputSchema,
+    inputSchema: AutoResponderFlowInputSchema,
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
     const model = input.model || 'googleai/gemini-2.0-flash';
     // The model is passed directly in the options object to the prompt.
-    const result = await prompt(input, { model });
+    // The prompt only receives the fields defined in its own input schema.
+    const promptInput = AgentResponseInputSchema.parse(input);
+    const result = await prompt(promptInput, { model });
     const output = result.output;
     
     // Log usage
@@ -180,5 +178,3 @@ const autoResponderFlow = ai.defineFlow(
     return {};
   }
 );
-
-    
