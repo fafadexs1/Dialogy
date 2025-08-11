@@ -34,6 +34,8 @@ async function internalSendMessage(
         const chatInfoRes = await client.query(
             `SELECT
                 c.workspace_id,
+                c.status,
+                c.agent_id,
                 ct.phone_number_jid as "remoteJid",
                 (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
              FROM chats c
@@ -46,7 +48,16 @@ async function internalSendMessage(
             throw new Error('Chat não encontrado.');
         }
 
-        const { workspace_id, remoteJid, instanceName } = chatInfoRes.rows[0];
+        const { workspace_id, status: chatStatus, agent_id: currentAgentId, remoteJid, instanceName } = chatInfoRes.rows[0];
+
+        // 1.5. NEW LOGIC: Assign agent if the chat is in 'gerais' and has no agent
+        if (chatStatus === 'gerais' && !currentAgentId) {
+            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} is 'gerais'. Assigning agent ${senderId}.`);
+            await client.query(
+                `UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2`,
+                [senderId, chatId]
+            );
+        }
 
         if (!remoteJid || !instanceName) {
             throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');

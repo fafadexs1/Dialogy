@@ -8,7 +8,6 @@ import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 import { mockTags } from '@/lib/mock-data'; // Assuming tags are fetched/mocked somewhere
-import { assignChatToAgentAction } from '@/actions/chats';
 
 interface CustomerChatLayoutProps {
     initialChats: Chat[];
@@ -103,23 +102,6 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         }
     };
   }, [initialChats, currentUser.activeWorkspaceId, currentUser.id, updateData]);
-
-  // Effect to assign agent when a 'gerais' chat is selected
-  useEffect(() => {
-    const assignAgentIfNeeded = async () => {
-        if (selectedChat && selectedChat.status === 'gerais' && !selectedChat.agent) {
-            console.log(`[ASSIGN_AGENT_EFFECT] Chat ${selectedChat.id} é 'gerais' e sem agente. Atribuindo...`);
-            const result = await assignChatToAgentAction(selectedChat.id);
-            if (result.success) {
-                // Re-fetch data to get the updated chat status and agent
-                await updateData();
-            } else {
-                console.error(`Falha ao atribuir o chat ${selectedChat.id}:`, result.error);
-            }
-        }
-    };
-    assignAgentIfNeeded();
-  }, [selectedChat, updateData]);
 
 
   if (loading) {

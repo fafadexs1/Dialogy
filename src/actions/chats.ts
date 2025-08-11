@@ -16,6 +16,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     return res.rowCount > 0;
 }
 
+// NOTE: This action is no longer called directly from the frontend,
+// but its logic has been integrated into the message sending process.
+// It remains here as a potential utility function for future use.
 export async function assignChatToAgentAction(chatId: string): Promise<{ success: boolean, error?: string}> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
