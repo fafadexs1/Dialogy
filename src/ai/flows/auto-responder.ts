@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -151,6 +152,7 @@ const autoResponderFlow = ai.defineFlow(
     const { output } = await prompt(input, { model: input.model });
     
     // Only return a response if the AI decided a rule was triggered or it could answer.
+    // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
         return output;
     }
