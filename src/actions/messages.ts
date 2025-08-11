@@ -9,18 +9,32 @@ import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { MessageMetadata } from '@/lib/types';
 
-export async function sendMessageAction(
-    prevState: any,
-    formData: FormData,
+
+/**
+ * Ação genérica para enviar uma mensagem de texto.
+ * Pode ser chamada tanto por formulários (agentes) quanto por automações (Piloto Automático).
+ * @param input - Um objeto FormData ou um objeto com os dados da mensagem.
+ * @returns Um objeto com o resultado da operação.
+ */
+async function internalSendMessage(
+    input: FormData | { chatId: string; content: string; senderId: string }
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
-    const currentUserId = session.user.id;
+    let chatId: string, content: string, currentUserId: string;
 
-    const content = formData.get('content') as string;
-    const chatId = formData.get('chatId') as string;
+    // Determina se a chamada veio de um formulário ou de uma automação
+    if (input instanceof FormData) {
+        if (!session?.user?.id) {
+            return { success: false, error: 'Usuário não autenticado.' };
+        }
+        chatId = input.get('chatId') as string;
+        content = input.get('content') as string;
+        currentUserId = session.user.id;
+    } else {
+        chatId = input.chatId;
+        content = input.content;
+        currentUserId = input.senderId; // Para o Piloto Automático, o "sender" é o agente responsável pelo chat
+    }
 
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -30,7 +44,7 @@ export async function sendMessageAction(
     try {
         await client.query('BEGIN');
 
-        // 1. Get chat, contact, instance, and API config info
+        // 1. Obter informações do chat, contato, instância e API
         const chatInfoRes = await client.query(
             `SELECT
                 c.workspace_id,
@@ -59,31 +73,21 @@ export async function sendMessageAction(
         }
         const apiConfig = apiConfigRes.rows[0];
 
-        // 2. Send message via Evolution API with the corrected payload
+        // 2. Enviar mensagem via API da Evolution
         const apiResponse = await fetchEvolutionAPI(
             `/message/sendText/${instanceName}`,
             apiConfig,
             {
                 method: 'POST',
-                body: JSON.stringify({
-                    number: remoteJid,
-                    text: content,
-                }),
+                body: JSON.stringify({ number: remoteJid, text: content }),
             }
         );
         
-        // 3. Save the message to our database using the API response
+        // 3. Salvar a mensagem no nosso banco de dados
         await client.query(
             `INSERT INTO messages (
-                workspace_id,
-                chat_id,
-                sender_id,
-                type,
-                content,
-                from_me,
-                message_id_from_api,
-                api_message_status,
-                instance_name
+                workspace_id, chat_id, sender_id, type, content, from_me,
+                message_id_from_api, api_message_status, instance_name
              ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7)`,
             [workspace_id, chatId, currentUserId, content, apiResponse?.key?.id, 'SENT', instanceName]
         );
@@ -103,6 +107,22 @@ export async function sendMessageAction(
     } finally {
         client.release();
     }
+}
+
+
+export async function sendMessageAction(
+    prevState: any,
+    formData: FormData,
+): Promise<{ success: boolean; error?: string }> {
+   return internalSendMessage(formData);
+}
+
+export async function sendAutomatedMessageAction(
+    chatId: string,
+    content: string,
+    agentId: string
+): Promise<{ success: boolean; error?: string }> {
+    return internalSendMessage({ chatId, content, senderId: agentId });
 }
 
 

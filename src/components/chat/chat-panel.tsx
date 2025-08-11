@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendMessageAction, sendMediaAction } from '@/actions/messages';
+import { sendMessageAction, sendMediaAction, sendAutomatedMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -138,12 +138,27 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 
 function formatWhatsappText(text: string): string {
     if (!text) return '';
-    return text
-        .replace(/\*(.*?)\*/g, '<b>$1</b>')         // Bold
-        .replace(/_(.*?)_/g, '<i>$1</i>')         // Italic
-        .replace(/~(.*?)~/g, '<s>$1</s>')         // Strikethrough
-        .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>') // Code block
-        .replace(/`(.*?)`/g, '<code>$1</code>');      // Inline code
+    // Escape HTML to prevent XSS, except for our allowed tags
+    const escapeHtml = (unsafe: string) => {
+        return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+    }
+
+    // First, handle code blocks to prevent inner formatting
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
+
+    // Then, format other elements, avoiding what's inside <code>
+    safeText = safeText
+        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>')         // Bold
+        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>')         // Italic
+        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>')         // Strikethrough
+        .replace(/(?<!<pre><code>)`(.*?)`(?!<\/code><\/pre>)/g, '<code>$1</code>');      // Inline code
+
+    return safeText.replace(/\n/g, '<br />'); // Handle newlines
 }
 
 function MediaMessage({ message }: { message: Message }) {
@@ -320,15 +335,23 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     });
                     
                     if (result && result.response && chat.agent?.id) {
-                        // TODO: Send AI message through an action
-                        console.log("AI would have sent:", result.response);
+                        const sendResult = await sendAutomatedMessageAction(
+                            chat.id,
+                            result.response,
+                            chat.agent.id
+                        );
+                        if(sendResult.success) {
+                            onActionSuccess();
+                        } else {
+                            throw new Error(sendResult.error);
+                        }
                     }
 
-                } catch (error) {
+                } catch (error: any) {
                      console.error('Error generating AI agent response:', error);
                      toast({
-                        title: 'Erro do Agente IA',
-                        description: 'Não foi possível avaliar as regras de automação. Tente novamente.',
+                        title: 'Erro do Piloto Automático',
+                        description: error.message || 'Não foi possível enviar a resposta automática.',
                         variant: 'destructive',
                     });
                 } finally {
@@ -380,7 +403,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         video.playsInline = true;
 
         video.onloadeddata = () => {
-            // Seek to a specific time, e.g., 1 second
             video.currentTime = 1;
         };
         
@@ -389,16 +411,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
-            if (!ctx) return reject(new Error('Could not get canvas context'));
+            if (!ctx) {
+                URL.revokeObjectURL(video.src);
+                return reject(new Error('Could not get canvas context'));
+            }
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const dataUrl = canvas.toDataURL('image/jpeg');
-            video.src = ''; // Clean up
+            URL.revokeObjectURL(video.src); // Clean up
             resolve(dataUrl);
         };
 
         video.onerror = (e) => {
             console.error("Video load error:", e);
-            video.src = ''; // Clean up
+            URL.revokeObjectURL(video.src); // Clean up
             reject(new Error("Failed to load video for thumbnail generation"));
         }
         
@@ -550,7 +575,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                    <div className={cn("flex items-end gap-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                    <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                         <div
                             className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
                                 isDeleted 
@@ -565,7 +590,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                             ) : renderMessageContent(message)}
                         </div>
                          {isFromMe && !isDeleted && (
-                            <div className="flex-shrink-0">
+                            <div className="flex-shrink-0 self-start">
                                 <AlertDialog>
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
@@ -659,18 +684,20 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <div className="space-y-1 p-6">
             {initialMessages.map(renderMessageWithSeparator)}
             {isAiThinking && (
-              <div className="flex items-end gap-3 flex-row-reverse animate-in fade-in">
+              <div className="flex items-start gap-3 animate-in fade-in">
                 {chat.agent ? (
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={chat.agent.avatar} alt={chat.agent.name || ''} data-ai-hint="person" />
                     <AvatarFallback>{chat.agent.name?.charAt(0)}</AvatarFallback>
                   </Avatar>
                 ) : <div className="w-8" />}
-                <div className="max-w-xl rounded-xl px-4 py-3 text-sm shadow-md rounded-br-none bg-primary text-primary-foreground">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Avaliando regras...</span>
-                  </div>
+                <div className="flex flex-col items-start">
+                    <div className={cn("break-words rounded-xl shadow-md p-3 max-w-lg bg-card")}>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Avaliando regras...</span>
+                      </div>
+                    </div>
                 </div>
               </div>
             )}
