@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendAgentMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -149,7 +149,7 @@ function formatWhatsappText(text: string): string {
     }
 
     // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${escapeHtml(p1)}</code></pre>`);
+    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}}</code></pre>`);
 
     // Then, format other elements, avoiding what's inside <code>
     safeText = safeText
@@ -349,9 +349,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             }
         }
     };
-    runAiAgent();
+
+    if (isAiAgentActive) {
+      runAiAgent();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage?.id]); // Re-run only when the last message ID changes.
+  }, [lastMessage?.id, isAiAgentActive, chat?.id]);
   
   // Mark messages as read effect
   useEffect(() => {
