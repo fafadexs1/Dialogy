@@ -72,34 +72,26 @@ const prompt = ai.definePrompt({
   name: 'autoResponderPrompt',
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `You are an AI assistant that evaluates a customer support conversation against a set of automation rules and a knowledge base.
-  Your task is to determine if the customer's latest message triggers any of the provided rules OR can be answered using the knowledge base.
+  prompt: `You are an AI assistant. Your task is to determine if the "Customer's Latest Message" triggers any of the provided "Automation Rules".
+  Use reasoning to determine if the customer's intent matches the rule's trigger. The match does not need to be literal.
 
-  DECISION HIERARCHY:
-  1.  **Analyze Knowledge Base First:** Before checking rules, determine if you can answer the customer's question directly and confidently using ONLY the provided "Knowledge Base". If you can, formulate a helpful response based on that knowledge and provide it in the 'response' field.
-  2.  **Evaluate Rules:** If the Knowledge Base does not provide a direct answer, then proceed to evaluate the "Automation Rules". Compare the customer's message against each rule's "trigger" description.
-  3.  **Rule Triggered:** If you find a clear match for a rule, your output MUST be the exact "action" text from the matched rule, and you must set the 'triggeredRule' field to the name of that rule.
-  4.  **No Match:** If NO rule is triggered and the Knowledge Base is insufficient, you MUST return an empty 'response' field. Do not try to answer the customer's question yourself outside of the provided context.
+  - If a rule is triggered, you MUST output the exact "action" text from that rule in the 'response' field and the rule's name in the 'triggeredRule' field.
+  - If NO rule is triggered, you MUST return an empty response. Do not invent answers.
 
-  Knowledge Base:
-  ---
-  {{{knowledgeBase}}}
-  ---
-
-  Automation Rules to evaluate:
+  Automation Rules:
   {{#each rules}}
   - Rule Name: "{{name}}"
     - Trigger: "{{trigger}}"
     - Action: "{{action}}"
   {{/each}}
 
-  Chat History:
+  Chat History (for context):
   {{{chatHistory}}}
-  
+
   Customer's Latest Message:
   {{{customerMessage}}}
-  
-  Now, evaluate and generate the response if a condition is met.`,
+
+  Now, evaluate and respond.`,
 });
 
 
@@ -112,7 +104,7 @@ const autoResponderFlow = ai.defineFlow(
   async (input) => {
     // The model is passed directly in the options object to the prompt.
     const { output } = await prompt(input, { model: input.model });
-
+    
     // Only return a response if the AI decided a rule was triggered or it could answer from the knowledge base.
     if (output?.response && output.response.trim() !== '') {
         return output;
