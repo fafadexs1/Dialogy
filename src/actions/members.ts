@@ -2,7 +2,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import type { WorkspaceMember } from '@/lib/types';
+import type { Role, WorkspaceMember } from '@/lib/types';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
@@ -34,6 +34,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
                 u.email,
                 u.avatar_url,
                 u.online,
+                r.id as role_id,
                 r.name as role_name,
                 uwr.created_at,
                 t.name as team_name
@@ -52,6 +53,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
             email: row.email,
             avatar: row.avatar_url,
             online: row.online,
+            roleId: row.role_id,
             role: row.role_name || 'N/A',
             team: row.team_name || 'Nenhuma',
             memberSince: row.created_at ? new Date(row.created_at).toLocaleDateString('pt-BR', { year: 'numeric', month: 'short' }) : 'N/A',
@@ -92,5 +94,43 @@ export async function removeMemberAction(memberId: string, workspaceId: string):
     } catch (error) {
         console.error("Erro ao remover membro:", error);
         return { success: false, error: "Falha ao remover o membro do banco de dados." };
+    }
+}
+
+export async function updateMemberRoleAction(
+    prevState: any,
+    formData: FormData
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    const memberId = formData.get('memberId') as string;
+    const workspaceId = formData.get('workspaceId') as string;
+    const newRoleId = formData.get('roleId') as string;
+
+    if (!memberId || !workspaceId || !newRoleId) {
+        return { success: false, error: "Dados insuficientes para atualizar a função." };
+    }
+
+    if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+        return { success: false, error: "Você não tem permissão para alterar funções de membros." };
+    }
+    
+    // Prevent changing role of the workspace owner
+    const workspaceOwnerCheck = await db.query('SELECT owner_id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (workspaceOwnerCheck.rows[0]?.owner_id === memberId) {
+        return { success: false, error: "Não é possível alterar a função do proprietário do workspace." };
+    }
+
+    try {
+        await db.query(
+            'UPDATE user_workspace_roles SET role_id = $1 WHERE user_id = $2 AND workspace_id = $3',
+            [newRoleId, memberId, workspaceId]
+        );
+        revalidatePath('/team/members');
+        return { success: true };
+    } catch (error) {
+        console.error("Erro ao atualizar função do membro:", error);
+        return { success: false, error: "Falha ao atualizar a função no banco de dados." };
     }
 }

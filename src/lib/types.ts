@@ -51,6 +51,7 @@ export type WorkspaceMember = {
   email: string;
   avatar: string;
   online: boolean;
+  roleId: string;
   role: string;
   team: string;
   memberSince: string;

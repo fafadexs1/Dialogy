@@ -1,12 +1,13 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users } from 'lucide-react';
-import type { WorkspaceMember } from '@/lib/types';
-import { getWorkspaceMembers, removeMemberAction } from '@/actions/members';
+import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save } from 'lucide-react';
+import type { Role, WorkspaceMember } from '@/lib/types';
+import { getWorkspaceMembers, removeMemberAction, updateMemberRoleAction } from '@/actions/members';
+import { getRolesAndPermissions } from '@/actions/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -29,10 +30,82 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+  DialogDescription,
+  DialogClose
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
+import { useFormStatus } from 'react-dom';
 
-function MemberActions({ member, workspaceId, onMutate }: { member: WorkspaceMember, workspaceId: string, onMutate: () => void }) {
+function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void, children: React.ReactNode }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [state, formAction] = useActionState(updateMemberRoleAction, { success: false, error: undefined });
+
+    useEffect(() => {
+        if(state.success) {
+            toast({ title: "Função Atualizada!", description: `A função de ${member.name} foi alterada.`});
+            setIsOpen(false);
+            onMutate();
+        } else if (state.error) {
+            toast({ title: "Erro ao Atualizar", description: state.error, variant: 'destructive'});
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state]);
+
+    return (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>{children}</DialogTrigger>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Editar Função de {member.name}</DialogTitle>
+                    <DialogDescription>Selecione a nova função para este membro.</DialogDescription>
+                </DialogHeader>
+                 <form action={formAction}>
+                    <input type="hidden" name="memberId" value={member.id} />
+                    <input type="hidden" name="workspaceId" value={workspaceId} />
+                    <div className="py-4">
+                        <Label htmlFor="role">Função</Label>
+                        <Select name="roleId" defaultValue={member.roleId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Selecione uma função" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {roles.map(role => (
+                                    <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                        <SubmitButton />
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+function SubmitButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Save className="mr-2 h-4 w-4"/> Salvar
+        </Button>
+    )
+}
+
+function MemberActions({ member, workspaceId, roles, onMutate }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void }) {
     
     const handleRemoveMember = async () => {
         const result = await removeMemberAction(member.id, workspaceId);
@@ -53,10 +126,12 @@ function MemberActions({ member, workspaceId, onMutate }: { member: WorkspaceMem
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                    <DropdownMenuItem disabled>
-                        <Edit className="mr-2 h-4 w-4" />
-                        Editar Função
-                    </DropdownMenuItem>
+                    <EditRoleDialog member={member} workspaceId={workspaceId} roles={roles} onMutate={onMutate}>
+                        <DropdownMenuItem onSelect={e => e.preventDefault()}>
+                            <Edit className="mr-2 h-4 w-4" />
+                            Editar Função
+                        </DropdownMenuItem>
+                    </EditRoleDialog>
                     <DropdownMenuItem disabled>
                         <BarChart className="mr-2 h-4 w-4" />
                         Ver Histórico de Uso
@@ -90,6 +165,7 @@ function MemberActions({ member, workspaceId, onMutate }: { member: WorkspaceMem
 export default function ManageMembersPage() {
     const user = useAuth();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -98,13 +174,23 @@ export default function ManageMembersPage() {
         setLoading(true);
         setError(null);
         try {
-            const { members, error: fetchError } = await getWorkspaceMembers(user.activeWorkspaceId);
-            if (fetchError) {
-                throw new Error(fetchError);
+            const [membersResult, rolesResult] = await Promise.all([
+                getWorkspaceMembers(user.activeWorkspaceId),
+                getRolesAndPermissions(user.activeWorkspaceId)
+            ]);
+
+            if (membersResult.error) {
+                throw new Error(membersResult.error);
             }
-            setMembers(members || []);
+            setMembers(membersResult.members || []);
+
+            if (rolesResult.error) {
+                throw new Error(rolesResult.error);
+            }
+            setRoles(rolesResult.roles || []);
+
         } catch (err: any) {
-            setError(err.message || "Não foi possível buscar os membros.");
+            setError(err.message || "Não foi possível buscar os dados.");
         } finally {
             setLoading(false);
         }
@@ -205,7 +291,7 @@ export default function ManageMembersPage() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                   {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} onMutate={fetchData} />}
+                                                   {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={fetchData} />}
                                                 </TableCell>
                                             </TableRow>
                                         ))}
