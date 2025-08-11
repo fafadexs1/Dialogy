@@ -131,6 +131,9 @@ export async function saveAutopilotRule(
             return { success: false, error: 'Dados da regra incompletos.' };
         }
         
+        // Garante que a 'action' seja uma string JSON para o DB
+        const actionJson = JSON.stringify(rule.action);
+
         // Lógica de Upsert
         const query = `
             INSERT INTO autopilot_rules (id, config_id, name, trigger, action)
@@ -139,7 +142,7 @@ export async function saveAutopilotRule(
             SET name = $3, trigger = $4, action = $5
         `;
         
-        await db.query(query, [rule.id, configId, rule.name, rule.trigger, rule.action]);
+        await db.query(query, [rule.id, configId, rule.name, rule.trigger, actionJson]);
         
         revalidatePath('/autopilot');
         return { success: true };

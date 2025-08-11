@@ -145,7 +145,8 @@ function AutomationForm({
     }
 
     const ruleToSave = {
-      id: instance?.id || `rule-${Date.now()}`,
+      // Use existing ID for updates, generate a new one for creations
+      id: instance?.id || `rule-${Date.now()}-${Math.random()}`,
       name,
       trigger,
       action,
