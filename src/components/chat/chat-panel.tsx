@@ -60,14 +60,14 @@ interface ChatPanelProps {
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [isOpen, setIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
+    const [reasonTagValue, setReasonTagValue] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const result = await closeChatAction(chat.id, reasonTagId, notes);
+        const result = await closeChatAction(chat.id, reasonTagValue, notes);
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
             setIsOpen(false);
@@ -96,7 +96,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select onValueChange={setReasonTagId} value={reasonTagId || ''}>
+                             <Select onValueChange={setReasonTagValue} value={reasonTagValue || ''}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
@@ -875,3 +875,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
