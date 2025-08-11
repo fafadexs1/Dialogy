@@ -110,10 +110,8 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    // Use the model specified in the input, or default to the globally configured one.
-    const model = input.model ? ai.model(input.model) : undefined;
-    
-    const { output } = await prompt(input, { model });
+    // The model is passed directly in the options object to the prompt.
+    const { output } = await prompt(input, { model: input.model });
 
     // Only return a response if the AI decided a rule was triggered or it could answer from the knowledge base.
     if (output?.response && output.response.trim() !== '') {
