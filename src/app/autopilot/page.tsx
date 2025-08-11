@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
@@ -33,6 +34,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/use-auth';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 
 
 type ModelInfo = {
@@ -61,12 +63,12 @@ const modelInfo: Record<string, ModelInfo> = {
 }
 
 const chartData = [
-  { month: "Jan", executions: 186 },
-  { month: "Fev", executions: 305 },
-  { month: "Mar", executions: 237 },
-  { month: "Abr", executions: 73 },
-  { month: "Mai", executions: 209 },
-  { month: "Jun", executions: 214 },
+  { month: "Jan", executions: 0 },
+  { month: "Fev", executions: 0 },
+  { month: "Mar", executions: 0 },
+  { month: "Abr", executions: 0 },
+  { month: "Mai", executions: 0 },
+  { month: "Jun", executions: 0 },
 ]
 
 const chartConfig = {
@@ -74,6 +76,13 @@ const chartConfig = {
     label: "Execuções",
     color: "hsl(var(--primary))",
   },
+}
+
+interface UsageStats {
+    executions: number;
+    tokens: number;
+    currentCost: number;
+    estimatedCost: number;
 }
 
 function AutomationForm({
@@ -208,16 +217,31 @@ export default function AutopilotPage() {
     const [aiModel, setAiModel] = useState<string>('googleai/gemini-2.0-flash');
     const [knowledgeBase, setKnowledgeBase] = useState('');
     const [geminiApiKey, setGeminiApiKey] = useState('');
+    const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+    const [loadingStats, setLoadingStats] = useState(true);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingInstance, setEditingInstance] = useState<NexusFlowInstance | null>(null);
-
-    const estimatedMonthlyCost = 12.50;
-    const currentMonthCost = 4.75;
-    const executionsThisMonth = 950;
-    const tokensThisMonth = 254000;
     
     const selectedModelInfo = modelInfo[aiModel];
+
+    useEffect(() => {
+        // Simulate fetching real usage data
+        setLoadingStats(true);
+        const timer = setTimeout(() => {
+            // In a real app, this would be an API call.
+            // For now, we'll set it to zero to show the component is ready for real data.
+            setUsageStats({
+                executions: 0,
+                tokens: 0,
+                currentCost: 0,
+                estimatedCost: 0,
+            });
+            setLoadingStats(false);
+        }, 1500);
+
+        return () => clearTimeout(timer);
+    }, []);
 
     const handleSaveInstance = (instanceToSave: NexusFlowInstance) => {
         setInstances(prev => {
@@ -287,36 +311,45 @@ export default function AutopilotPage() {
                             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-4">
                                     <h3 className="font-semibold text-muted-foreground">Métricas do Mês Atual</h3>
+                                    {loadingStats ? (
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <Skeleton className="h-24" />
+                                            <Skeleton className="h-24" />
+                                            <Skeleton className="h-24" />
+                                            <Skeleton className="h-24" />
+                                        </div>
+                                    ) : (
                                     <div className="grid grid-cols-2 gap-4 text-center">
                                         <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <BrainCircuit className="h-6 w-6 text-primary"/>
-                                                {executionsThisMonth.toLocaleString('pt-BR')}
+                                                {usageStats?.executions.toLocaleString('pt-BR') || 'N/A'}
                                             </p>
                                         </div>
                                          <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <BrainCircuit className="h-6 w-6 text-purple-500"/>
-                                                {Math.round(tokensThisMonth / 1000)}k
+                                                {usageStats?.tokens ? `${Math.round(usageStats.tokens / 1000)}k` : 'N/A'}
                                             </p>
                                         </div>
                                         <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Custo Atual</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <DollarSign className="h-6 w-6 text-green-500"/>
-                                                {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                {usageStats?.currentCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'N/A'}
                                             </p>
                                         </div>
                                         <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Custo Estimado</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <DollarSign className="h-6 w-6 text-amber-500"/>
-                                                {estimatedMonthlyCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                {usageStats?.estimatedCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'N/A'}
                                             </p>
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                                 <div className="space-y-4">
                                     <h3 className="font-semibold text-muted-foreground">Execuções nos Últimos 6 Meses</h3>
