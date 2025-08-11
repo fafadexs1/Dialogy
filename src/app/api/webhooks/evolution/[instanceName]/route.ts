@@ -183,25 +183,21 @@ async function handleMessagesUpsert(payload: any) {
                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
                 RETURNING id, workspace_id
             ),
-            active_chat AS (
-                SELECT c.id, c.workspace_id, c.contact_id
-                FROM chats c, upsert_contact uc
-                WHERE c.workspace_id = uc.workspace_id 
-                AND c.contact_id = uc.id 
-                AND c.status IN ('gerais', 'atendimentos')
-                LIMIT 1
+            target_chat AS (
+                SELECT id, workspace_id, contact_id FROM (
+                    SELECT c.id, c.workspace_id, c.contact_id,
+                           ROW_NUMBER() OVER(PARTITION BY c.contact_id ORDER BY c.status = 'atendimentos' DESC, c.status = 'gerais' DESC, c.closed_at DESC NULLS FIRST, c.assigned_at DESC NULLS FIRST) as rn
+                    FROM chats c
+                    JOIN upsert_contact uc ON c.workspace_id = uc.workspace_id AND c.contact_id = uc.id
+                ) AS ranked_chats
+                WHERE rn = 1 AND status IN ('gerais', 'atendimentos')
             ),
             new_chat AS (
                 INSERT INTO chats (workspace_id, contact_id, status)
                 SELECT uc.workspace_id, uc.id, 'gerais'::chat_status_enum
                 FROM upsert_contact uc
-                WHERE NOT EXISTS (SELECT 1 FROM active_chat)
+                WHERE NOT EXISTS (SELECT 1 FROM target_chat)
                 RETURNING id, workspace_id, contact_id
-            ),
-            target_chat AS (
-                SELECT id, workspace_id, contact_id FROM active_chat
-                UNION ALL
-                SELECT id, workspace_id, contact_id FROM new_chat
             )
             INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
@@ -212,10 +208,11 @@ async function handleMessagesUpsert(payload: any) {
             SELECT
                 tc.workspace_id,
                 tc.id,
-                tc.contact_id,
+                uc.id, -- sender_id is the contact id
                 'text'::message_type_enum,
                 $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14
-            FROM target_chat tc;
+            FROM upsert_contact uc,
+                 (SELECT id, workspace_id, contact_id FROM target_chat UNION ALL SELECT id, workspace_id, contact_id FROM new_chat) AS tc;
         `;
         
         await db.query(query, [
