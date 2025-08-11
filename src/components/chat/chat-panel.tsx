@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendMessageAction, sendMediaAction, sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -291,10 +291,11 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentEditableRef = useRef<HTMLElement>(null);
+  const processedMessageIds = useRef(new Set());
   
   const { toast } = useToast();
   
-  const [sendState, sendFormAction] = useActionState(sendMessageAction, { success: false, error: null });
+  const [sendState, sendFormAction] = useActionState(sendAutomatedMessageAction, { success: false, error: null });
 
   useEffect(() => {
         if (sendState.success) {
@@ -330,7 +331,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                         customerMessage: lastCustomerMessage.content,
                         chatHistory: chatHistoryForAI,
                         rules: activeRules,
-                        knowledgeBase: "", // mockKnowledgeBase was here
+                        knowledgeBase: "", 
                         model: selectedAiModel,
                     });
                     
@@ -366,20 +367,33 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   
   // Mark messages as read effect
   useEffect(() => {
-      if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
+    if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
 
-      const unreadMessages = initialMessages.filter(m => m.sender?.id === chat.contact.id && m.api_message_status !== 'READ' && m.message_id_from_api);
+    const unreadMessages = initialMessages.filter(m => 
+        m.sender?.id === chat.contact.id && 
+        m.api_message_status !== 'READ' && 
+        m.message_id_from_api &&
+        !processedMessageIds.current.has(m.id) // Check if not already processed
+    );
       
-      if (unreadMessages.length > 0) {
-          const messagesToMark = unreadMessages.map(m => ({
-              remoteJid: chat.contact.phone_number_jid!,
-              fromMe: false, // Messages from contact are not fromMe
-              id: m.message_id_from_api!
-          }));
+    if (unreadMessages.length > 0) {
+        const messagesToMark = unreadMessages.map(m => ({
+            remoteJid: chat.contact.phone_number_jid!,
+            fromMe: false,
+            id: m.message_id_from_api!
+        }));
           
-          markMessagesAsReadAction(chat.instance_name, messagesToMark);
-      }
+        markMessagesAsReadAction(chat.instance_name, messagesToMark);
+
+        // Add the IDs of these messages to the processed set
+        unreadMessages.forEach(m => processedMessageIds.current.add(m.id));
+    }
   }, [initialMessages, chat]);
+
+  useEffect(() => {
+    // Reset the processed messages set when the chat changes
+    processedMessageIds.current.clear();
+  }, [chat?.id]);
   
   const handleDeleteMessage = async (messageId: string, instanceName?: string) => {
     if (!instanceName) {
@@ -395,14 +409,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     }
   }
 
-  const generateVideoThumbnail = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+  const generateVideoThumbnail = async (file: File): Promise<string> => {
+    return new Promise((resolve) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.muted = true;
         video.playsInline = true;
 
         video.onloadeddata = () => {
+            // seek to 1 second
             video.currentTime = 1;
         };
         
@@ -411,20 +426,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                URL.revokeObjectURL(video.src);
-                return reject(new Error('Could not get canvas context'));
+            if (ctx) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg'));
+            } else {
+                resolve(''); // resolve with empty string if context fails
             }
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg');
-            URL.revokeObjectURL(video.src); // Clean up
-            resolve(dataUrl);
+            URL.revokeObjectURL(video.src);
         };
 
-        video.onerror = (e) => {
-            console.error("Video load error:", e);
-            URL.revokeObjectURL(video.src); // Clean up
-            reject(new Error("Failed to load video for thumbnail generation"));
+        video.onerror = () => {
+            resolve(''); // resolve with empty string on error
+            URL.revokeObjectURL(video.src);
         }
         
         video.src = URL.createObjectURL(file);
@@ -450,11 +463,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (file.type.startsWith('image/')) mediatype = 'image';
         if (file.type.startsWith('video/')) {
             mediatype = 'video';
-            try {
-                thumbnail = await generateVideoThumbnail(file);
-            } catch (error) {
-                console.error("Error generating video thumbnail:", error);
-            }
+            thumbnail = await generateVideoThumbnail(file);
         }
         
         return {
@@ -488,13 +497,21 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const handleFormSubmit = async (formData: FormData) => {
-    const plainTextContent = htmlToWhatsappMarkdown(newMessage);
-    formData.set('content', plainTextContent);
+    if (!chat) return;
 
-    if (mediaFiles.length > 0) {
-        if (!chat) return;
-        const caption = plainTextContent;
-        const mediaData = mediaFiles.map(mf => ({
+    const plainTextContent = htmlToWhatsappMarkdown(newMessage);
+    
+    const currentMediaFiles = [...mediaFiles];
+    const currentMessage = newMessage;
+    
+    // Immediately clear the input fields for a better UX
+    setMediaFiles([]);
+    setNewMessage('');
+    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
+
+    if (currentMediaFiles.length > 0) {
+        const mediaData = currentMediaFiles.map(mf => ({
             base64: mf.base64,
             mimetype: mf.type,
             filename: mf.name,
@@ -502,24 +519,25 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             thumbnail: mf.thumbnail,
         }));
         
-        const currentMediaFiles = [...mediaFiles];
-        setMediaFiles([]);
-        setNewMessage('');
-        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-
-
-        const result = await sendMediaAction(chat.id, caption, mediaData);
+        const result = await sendMediaAction(chat.id, plainTextContent, mediaData);
         if (result.success) {
             onActionSuccess();
         } else {
             toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+            // Restore files on failure
             setMediaFiles(currentMediaFiles);
         }
     } else {
         if (!plainTextContent.trim()) return;
-        sendFormAction(formData);
-        setNewMessage('');
-        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+        const result = await sendAutomatedMessageAction(chat.id, plainTextContent, currentUser.id);
+        if (result.success) {
+            onActionSuccess();
+        } else {
+             toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
+             // Restore message on failure
+             setNewMessage(currentMessage);
+             if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
+        }
     }
   };
 
@@ -575,7 +593,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                    <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                         <div
                             className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
                                 isDeleted 
