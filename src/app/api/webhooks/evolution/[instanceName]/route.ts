@@ -112,151 +112,127 @@ async function handleMessagesUpdate(payload: any) {
 
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
     
-    const client = await db.connect();
     try {
-        await client.query(
+        await db.query(
             `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2`,
             [status.toUpperCase(), keyId]
         );
         console.log(`[WEBHOOK_MSG_UPDATE] Status da mensagem ${keyId} atualizado com sucesso.`);
     } catch (error) {
         console.error('[WEBHOOK_MSG_UPDATE] Erro ao atualizar status da mensagem:', error);
-    } finally {
-        client.release();
     }
 }
 
 async function handleMessagesUpsert(payload: any) {
-  const { instance: instanceName, data, sender, server_url } = payload;
+    const { instance: instanceName, data, sender, server_url } = payload;
 
-  if (!data || !data.key || !data.message) {
-    console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
-    return;
-  }
-  
-  const { key, pushName, message, messageType } = data;
-
-  if (key.fromMe) {
-    console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
-    return;
-  }
-
-  let content = '';
-  let metadata: any = {};
-  
-  const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
-  
-  // A legenda é o content principal para mídias
-  content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
-  
-  if (message.mediaUrl) {
-      metadata.mediaUrl = message.mediaUrl;
-  }
-
-  if (messageType) {
-    switch (messageType) {
-      case 'imageMessage':
-      case 'videoMessage':
-      case 'audioMessage':
-      case 'documentMessage':
-        metadata.mimetype = messageDetails?.mimetype;
-        metadata.fileName = messageDetails?.fileName;
-        break;
-      case 'conversation':
-      case 'extendedTextMessage':
-        // No special metadata needed
-        break;
-      default:
-        console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
+    if (!data || !data.key || !data.message) {
+        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
         return;
     }
-  }
 
-  if (!content.trim() && !metadata.mediaUrl) {
-    console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
-    return;
-  }
+    const { key, pushName, message, messageType } = data;
 
-  const parsedUrl = server_url ? new URL(server_url).hostname : null;
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const instanceRes = await client.query(
-      `SELECT ec.workspace_id 
-       FROM evolution_api_instances AS ei
-       JOIN evolution_api_configs AS ec ON ei.config_id = ec.id
-       WHERE ei.name = $1`,
-      [instanceName]
-    );
-
-    if (instanceRes.rows.length === 0) {
-      throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
-    }
-    const workspaceId = instanceRes.rows[0].workspace_id;
-
-    const contactJid = key.remoteJid;
-    let contactRes = await client.query('SELECT id FROM contacts WHERE phone_number_jid = $1 AND workspace_id = $2', [contactJid, workspaceId]);
-    let contactId;
-
-    if (contactRes.rows.length === 0) {
-      const newContactRes = await client.query(
-        'INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id',
-        [workspaceId, pushName || contactJid, contactJid]
-      );
-      contactId = newContactRes.rows[0].id;
-    } else {
-      contactId = contactRes.rows[0].id;
+    if (key.fromMe) {
+        console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
+        return;
     }
 
-    let chatRes = await client.query('SELECT id, status FROM chats WHERE contact_id = $1 AND workspace_id = $2', [contactId, workspaceId]);
-    let chatId;
-    let chatStatus;
+    let content = '';
+    let metadata: any = {};
+    const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
 
-    if (chatRes.rows.length === 0) {
-      const newChatRes = await client.query(
-        'INSERT INTO chats (workspace_id, contact_id) VALUES ($1, $2) RETURNING id, status',
-        [workspaceId, contactId]
-      );
-      chatId = newChatRes.rows[0].id;
-      chatStatus = newChatRes.rows[0].status;
-    } else {
-      chatId = chatRes.rows[0].id;
-      chatStatus = chatRes.rows[0].status;
-      if (chatStatus === 'encerrados') {
-        await client.query(
-            "UPDATE chats SET status = 'gerais' WHERE id = $1",
-            [chatId]
-        );
-      }
+    content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
+    if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
+    if (messageType) {
+        switch (messageType) {
+            case 'imageMessage':
+            case 'videoMessage':
+            case 'audioMessage':
+            case 'documentMessage':
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'conversation':
+            case 'extendedTextMessage':
+                break;
+            default:
+                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
+                return;
+        }
     }
 
-    const messageTimestamp = new Date();
-
-    await client.query(
-      `INSERT INTO messages (
-        workspace_id, chat_id, sender_id, type, content, metadata,
-        created_at, message_id_from_api, sender_from_api, instance_name,
-        status_from_api, source_from_api, server_url, from_me,
-        api_message_status, raw_payload
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-      [
-        workspaceId, chatId, contactId, 'text', content, metadata,
-        messageTimestamp, key.id, sender, instanceName,
-        data.status, data.source, parsedUrl, key.fromMe,
-        data.status?.toUpperCase(), payload
-      ]
-    );
-
-    await client.query('COMMIT');
+    if (!content.trim() && !metadata.mediaUrl) {
+        console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
+        return;
+    }
     
-    revalidatePath(`/api/chats/${workspaceId}`);
+    const parsedUrl = server_url ? new URL(server_url).hostname : null;
+    const contactJid = key.remoteJid;
 
-  } catch (error) {
-    console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
-    await client.query('ROLLBACK');
-  } finally {
-    client.release();
-  }
+    try {
+        const query = `
+            WITH ins_ws AS (
+                SELECT ec.workspace_id 
+                FROM evolution_api_instances AS ei
+                JOIN evolution_api_configs AS ec ON ei.config_id = ec.id
+                WHERE ei.name = $1
+            ),
+            upsert_contact AS (
+                INSERT INTO contacts (workspace_id, name, phone_number_jid)
+                SELECT workspace_id, $2, $3 FROM ins_ws
+                ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
+                RETURNING id, workspace_id
+            ),
+            upsert_chat AS (
+                INSERT INTO chats (workspace_id, contact_id, status)
+                SELECT workspace_id, id, 'gerais'::chat_status_enum FROM upsert_contact
+                ON CONFLICT (workspace_id, contact_id) DO UPDATE SET status =
+                    CASE
+                        WHEN chats.status = 'encerrados'::chat_status_enum THEN 'gerais'::chat_status_enum
+                        ELSE chats.status
+                    END
+                RETURNING id, workspace_id, contact_id
+            )
+            INSERT INTO messages (
+                workspace_id, chat_id, sender_id, type, content, metadata,
+                created_at, message_id_from_api, sender_from_api, instance_name,
+                status_from_api, source_from_api, server_url, from_me,
+                api_message_status, raw_payload
+            )
+            SELECT
+                uc.workspace_id,
+                uc.id,
+                uc.contact_id,
+                'text'::message_type_enum,
+                $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14
+            FROM upsert_chat uc;
+        `;
+        
+        await db.query(query, [
+            instanceName, // $1
+            pushName || contactJid, // $2
+            contactJid, // $3
+            content, // $4
+            JSON.stringify(metadata), // $5
+            key.id, // $6
+            sender, // $7
+            instanceName, // $8
+            data.status, // $9
+            data.source, // $10
+            parsedUrl, // $11
+            key.fromMe, // $12
+            data.status?.toUpperCase(), // $13
+            JSON.stringify(payload) // $14
+        ]);
+        
+        const instanceRes = await db.query(`SELECT ec.workspace_id FROM evolution_api_instances AS ei JOIN evolution_api_configs AS ec ON ei.config_id = ec.id WHERE ei.name = $1`, [instanceName]);
+        if(instanceRes.rowCount > 0) {
+            revalidatePath(`/api/chats/${instanceRes.rows[0].workspace_id}`);
+        }
+
+
+    } catch (error) {
+        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem com CTE:', error);
+    }
 }
