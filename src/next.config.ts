@@ -3,10 +3,6 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  compress: false,
-  experimental: {
-    serverActions: true,
-  },
   typescript: {
     // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
     ignoreBuildErrors: true,
@@ -19,11 +15,14 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
-        port: '',
-        pathname: '/**',
+        hostname: '**',
       },
+      {
+        protocol: 'http',
+        hostname: '**',
+      }
     ],
+     domains: ['localhost'],
   },
   webpack: (config, { isServer }) => {
     // Esta configuração é crucial. Ela instrui o Webpack a não tentar empacotar

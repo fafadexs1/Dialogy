@@ -3,9 +3,6 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  experimental: {
-    serverActions: true,
-  },
   typescript: {
     // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
     ignoreBuildErrors: true,
