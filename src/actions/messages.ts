@@ -224,14 +224,13 @@ export async function sendMediaAction(
 export async function sendAgentMessageAction(
     chatId: string,
     content: string,
-    metadata?: MessageMetadata
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
 
-    return internalSendMessage(chatId, content, session.user.id, metadata);
+    return internalSendMessage(chatId, content, session.user.id);
 }
 
 /**

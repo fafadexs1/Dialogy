@@ -23,7 +23,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAgentMessageAction, sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -310,26 +310,15 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, metadata?: MessageMetadata) => {
     if (!chat) return;
 
     if (mediaFiles.length > 0) {
-        const mediaData = mediaFiles.map(mf => ({
-            base64: mf.base64,
-            mimetype: mf.type,
-            filename: mf.name,
-            mediatype: mf.mediatype,
-            thumbnail: mf.thumbnail,
-        }));
-        const result = await sendMediaAction(chat.id, content, mediaData);
-         if (result.success) {
-            onActionSuccess();
-        } else {
-            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
-        }
+        // This part remains unchanged for now, as AI doesn't send media.
     } else {
         if (!content.trim()) return;
-        const result = await sendAgentMessageAction(chat.id, content);
+        // Use the automated message action for the AI
+        const result = await sendAutomatedMessageAction(chat.id, content, chat.agent!.id);
         if (result.success) {
             onActionSuccess();
         } else {
@@ -340,16 +329,34 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     setMediaFiles([]);
     setNewMessage('');
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-};
+  };
+
 
  const runAiAgent = async () => {
-    if (!isAiAgentActive || !chat || !lastMessage || !chat.agent || lastMessage.sender?.id === currentUser.id || isAiTyping) {
+    const conditions = {
+        isAiAgentActive,
+        chatExists: !!chat,
+        agentAssigned: !!chat?.agent,
+        lastMessageExists: !!lastMessage,
+        isFromContact: lastMessage?.sender?.id !== currentUser.id,
+        isAiTyping: isAiTyping
+    };
+
+    const shouldRun = conditions.isAiAgentActive &&
+                      conditions.chatExists &&
+                      conditions.agentAssigned &&
+                      conditions.lastMessageExists &&
+                      conditions.isFromContact &&
+                      !conditions.isAiTyping;
+
+    if (!shouldRun) {
+        console.log('[AUTOPILOT] AI não executado. Condições:', conditions);
         return;
     }
 
     try {
         setIsAiTyping(true);
-        console.log('[AUTOPILOT] Verifying message:', lastMessage.content);
+        console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
         const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
@@ -361,11 +368,11 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             model: selectedAiModel,
         });
 
-        console.log('[AUTOPILOT] AI Response received:', result);
+        console.log('[AUTOPILOT] Resposta da IA recebida:', result);
         
         if (result && result.response) {
             const textToType = result.response;
-            console.log('[AUTOPILOT] AI generated response text:', textToType);
+            console.log('[AUTOPILOT] Resposta gerada pela IA:', textToType);
             
             for (let i = 0; i <= textToType.length; i++) {
                 await new Promise(resolve => setTimeout(resolve, 50));
@@ -376,22 +383,18 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             }
 
             await new Promise(resolve => setTimeout(resolve, 500));
-            console.log('[AUTOPILOT] Sending automated message...');
-            const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
-
-            if (sendResult.success) {
-                onActionSuccess();
-            } else {
-                toast({ title: 'Erro do Piloto Automático', description: sendResult.error, variant: 'destructive' });
-            }
-             setNewMessage('');
+            console.log('[AUTOPILOT] Enviando mensagem automática...');
+            
+            await handleSendMessage(textToType, { sentBy: 'autopilot' });
+            
+            setNewMessage('');
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
         }
     } catch (error: any) {
-         console.error('Error generating AI agent response:', error);
+         console.error('Erro ao gerar resposta da IA:', error);
          toast({
             title: 'Erro do Piloto Automático',
-            description: error.message || 'Não foi possível gerar la resposta automática.',
+            description: error.message || 'Não foi possível gerar a resposta automática.',
             variant: 'destructive',
         });
     } finally {
@@ -401,9 +404,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   useEffect(() => {
-    if (isAiAgentActive && lastMessage && lastMessage.sender?.id !== currentUser.id) {
-      runAiAgent();
-    }
+    runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastMessage?.id, isAiAgentActive, chat?.id]);
   
@@ -537,9 +538,38 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const handleFormSubmit = async (formData: FormData) => {
+    if (!chat) return;
+
     const plainTextContent = htmlToWhatsappMarkdown(newMessage);
-    handleSendMessage(plainTextContent);
-  };
+
+    if (mediaFiles.length > 0) {
+        const mediaData = mediaFiles.map(mf => ({
+            base64: mf.base64,
+            mimetype: mf.type,
+            filename: mf.name,
+            mediatype: mf.mediatype,
+            thumbnail: mf.thumbnail,
+        }));
+        const result = await sendMediaAction(chat.id, plainTextContent, mediaData);
+         if (result.success) {
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+        }
+    } else {
+        if (!plainTextContent.trim()) return;
+        const result = await sendAgentMessageAction(chat.id, plainTextContent);
+        if (result.success) {
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
+        }
+    }
+
+    setMediaFiles([]);
+    setNewMessage('');
+    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+};
 
   const renderMessageContent = (message: Message) => {
     const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
