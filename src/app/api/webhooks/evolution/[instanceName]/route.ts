@@ -190,6 +190,7 @@ async function handleMessagesUpsert(payload: any) {
                 ON CONFLICT (workspace_id, contact_id) DO UPDATE SET 
                     status = 'gerais'::chat_status_enum,
                     agent_id = NULL
+                WHERE chats.status = 'encerrados'::chat_status_enum
                 RETURNING id, workspace_id, contact_id
             )
             INSERT INTO messages (
