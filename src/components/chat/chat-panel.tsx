@@ -362,12 +362,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         isAiAgentActive,
         chatExists: !!chat,
         isFromContact: lastMessage?.sender?.id !== currentUser.id,
+        notSentByAi: !lastMessage?.metadata?.sentBy,
         isAiTyping: isAiTyping
     };
 
     const shouldRun = conditions.isAiAgentActive &&
                       conditions.chatExists &&
                       conditions.isFromContact &&
+                      conditions.notSentByAi &&
                       !conditions.isAiTyping &&
                       lastMessage &&
                       autopilotConfig;
@@ -410,8 +412,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             await new Promise(resolve => setTimeout(resolve, 500));
             console.log('[AUTOPILOT] Enviando mensagem automática...');
             
-            if (chat && chat.agent) {
-                const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
+            if (chat) {
+                // If the chat is in the general queue, the AI takes ownership.
+                const agentIdForMessage = chat.agent?.id || currentUser.id;
+                const sendResult = await sendAutomatedMessageAction(chat.id, textToType, agentIdForMessage);
                  if (sendResult.success) {
                     onActionSuccess();
                 } else {
