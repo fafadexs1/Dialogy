@@ -71,81 +71,40 @@ export async function generateAgentResponse(input: AutoResponderFlowInput): Prom
   return autoResponderFlow(promptInput);
 }
 
-// --- Agent Tools ---
-
-const getCustomerDetailsTool = ai.defineTool(
-    {
-        name: 'getCustomerDetails',
-        description: 'Get details about the customer, such as their name, email, and company, using the chat ID.',
-        inputSchema: z.object({ chatId: z.string() }),
-        outputSchema: z.object({
-            name: z.string(),
-            email: z.string().optional(),
-            company: z.string().optional(),
-        }),
-    },
-    async ({ chatId }) => {
-        console.log(`[AUTOPILOT_TOOL] Executando getCustomerDetails para o chat: ${chatId}`);
-        const chatRes = await db.query(
-            `SELECT 
-                ct.name, 
-                ct.email,
-                -- Mock company name for now, as it's not in the contacts table.
-                'InnovateTech' as company
-             FROM chats c
-             JOIN contacts ct ON c.contact_id = ct.id
-             WHERE c.id = $1`,
-            [chatId]
-        );
-
-        if (chatRes.rowCount === 0) {
-            console.log(`[AUTOPILOT_TOOL] Nenhum contato encontrado para o chat: ${chatId}`);
-            return { name: 'Cliente não encontrado' };
-        }
-        
-        console.log(`[AUTOPILOT_TOOL] Detalhes encontrados:`, chatRes.rows[0]);
-        return chatRes.rows[0];
-    }
-);
-
-
 // --- Agent Prompt ---
 
 const prompt = ai.definePrompt({
   name: 'autoResponderPrompt',
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  tools: [getCustomerDetailsTool],
-  prompt: `You are an AI customer service agent. Your goal is to resolve the customer's issue efficiently and courteously.
+  prompt: `Você é 'Dialogy', um assistente de IA prestativo. Seu objetivo é resolver o problema do cliente de forma eficiente e cortês.
 
-You have a hierarchy of methods to generate a response. Follow this order strictly:
+Você tem uma hierarquia de métodos para gerar uma resposta. Siga esta ordem estritamente:
 
-1.  **Tools**: First, analyze the "Customer's Latest Message". If the customer is asking for information that a tool can provide (like their own name or details), you MUST use the available tool. Formulate a helpful response based on the tool's output.
+1.  **Regras de Automação**: Primeiro, avalie a mensagem do cliente em relação às "Regras de Automação".
+    - Use seu raciocínio para ver se a *intenção* da mensagem do cliente corresponde ao gatilho de uma regra. A correspondência não precisa ser literal.
+    - Se uma regra for acionada, você DEVE retornar a "ação" exata daquela regra no campo 'response' e o nome da regra no campo 'triggeredRule'.
 
-2.  **Automation Rules**: If no tool is appropriate, evaluate the message against the "Automation Rules".
-    - Use your reasoning to see if the customer's *intent* matches a rule's trigger. The match does not need to be literal.
-    - If a rule is triggered, you MUST output the exact "action" text from that rule in the 'response' field and the rule's name in the 'triggeredRule' field.
+2.  **Conhecimento Geral**: Se nenhuma regra for apropriada, use seu conhecimento geral e o "Histórico do Chat" para fornecer uma resposta útil e conversacional. Isso inclui responder a perguntas simples como "qual o seu nome?".
 
-3.  **General Knowledge**: If no rules or tools are appropriate, use the "Chat History" for context and your general knowledge to provide a helpful, conversational response.
+**IMPORTANTE**:
+- Se você não puder ajudar ou nenhuma regra for acionada, você DEVE retornar uma resposta vazia. Não invente respostas.
+- Use o "Histórico do Chat" fornecido para entender o contexto da conversa e evitar repetir perguntas.
 
-**IMPORTANT**:
-- If you cannot help or no rule is triggered, you MUST return an empty response. Do not invent answers.
-- Use the provided "Chat History" to understand the context of the conversation and avoid repeating questions.
-
-**Automation Rules**:
+**Regras de Automação**:
 {{#each rules}}
-- Rule Name: "{{name}}"
-  - Trigger: "{{trigger}}"
-  - Action: "{{action}}"
+- Nome da Regra: "{{name}}"
+  - Gatilho: "{{trigger}}"
+  - Ação: "{{action}}"
 {{/each}}
 
-**Chat History (for context)**:
+**Histórico do Chat (para contexto)**:
 {{{chatHistory}}}
 
-**Customer's Latest Message**:
+**Última Mensagem do Cliente**:
 {{{customerMessage}}}
 
-Now, evaluate and respond.`,
+Agora, avalie e responda.`,
 });
 
 
