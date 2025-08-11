@@ -340,6 +340,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
         const result = await generateAgentResponse({
+            chatId: chat.id,
             customerMessage: lastMessage.content,
             chatHistory: chatHistoryForAI,
             rules: activeRules,
