@@ -186,9 +186,14 @@ export async function closeChatAction(
 
     const currentAgentId = session.user.id;
     const currentAgentName = session.user.name;
-    const chatId = formData.get('chatId') as string;
-    const reasonTagId = formData.get('reasonTagId') as string;
-    const notes = formData.get('notes') as string;
+
+    // Correctly extract form data, handling potential prefixes from Next.js
+    let chatId, reasonTagId, notes;
+    for(const [key, value] of formData.entries()) {
+        if (key.endsWith('chatId')) chatId = value as string;
+        if (key.endsWith('reasonTagId')) reasonTagId = value as string;
+        if (key.endsWith('notes')) notes = value as string;
+    }
 
     if (!chatId) {
         return { success: false, error: "ID do chat é obrigatório." };
@@ -244,5 +249,3 @@ export async function closeChatAction(
         client.release();
     }
 }
-
-    
