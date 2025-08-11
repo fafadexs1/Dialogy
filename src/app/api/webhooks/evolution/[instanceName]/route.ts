@@ -1,3 +1,4 @@
+
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -239,7 +240,7 @@ async function handleMessagesUpsert(payload: any) {
         created_at, message_id_from_api, sender_from_api, instance_name,
         status_from_api, source_from_api, server_url, from_me,
         api_message_status, raw_payload
-      ) VALUES ($1, $2, $3, 'text', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         workspaceId, chatId, contactId, 'text', content, metadata,
         messageTimestamp, key.id, sender, instanceName,
