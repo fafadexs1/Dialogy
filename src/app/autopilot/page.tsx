@@ -339,10 +339,7 @@ export default function AutopilotPage() {
                     </Button>
                 </header>
                 <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                    <form action={saveAction}>
-                        <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
-                        <input type="hidden" name="configId" value={config?.id || ''} />
-                        
+                    
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
                             <Card className="lg:col-span-8">
                                 <CardHeader>
@@ -415,70 +412,74 @@ export default function AutopilotPage() {
                                 </CardContent>
                             </Card>
                             <div className="lg:col-span-4 space-y-6">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Agente</CardTitle>
-                                        <CardDescription>Selecione o "cérebro" do seu agente de IA.</CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="ai-model">Modelo de IA</Label>
-                                            <Select name="aiModel" value={aiModel} onValueChange={setAiModel}>
-                                                <SelectTrigger id="ai-model">
-                                                    <SelectValue placeholder="Selecione um modelo" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
-                                                    <SelectItem value="googleai/gemini-1.5-pro">Gemini 1.5 Pro (Avançado)</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                            {selectedModelInfo && (
-                                                <div className="pt-2 space-y-3 animate-in fade-in-50">
-                                                    <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
-                                                    <div className="grid grid-cols-2 gap-3 text-center">
-                                                        <div className="p-2 border rounded-lg">
-                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
-                                                            <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                                <form action={saveAction}>
+                                    <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
+                                    <input type="hidden" name="configId" value={config?.id || ''} />
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Agente</CardTitle>
+                                            <CardDescription>Selecione o "cérebro" do seu agente de IA.</CardDescription>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="ai-model">Modelo de IA</Label>
+                                                <Select name="aiModel" value={aiModel} onValueChange={setAiModel}>
+                                                    <SelectTrigger id="ai-model">
+                                                        <SelectValue placeholder="Selecione um modelo" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
+                                                        <SelectItem value="googleai/gemini-1.5-pro">Gemini 1.5 Pro (Avançado)</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                {selectedModelInfo && (
+                                                    <div className="pt-2 space-y-3 animate-in fade-in-50">
+                                                        <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
+                                                        <div className="grid grid-cols-2 gap-3 text-center">
+                                                            <div className="p-2 border rounded-lg">
+                                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
+                                                                <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                                                            </div>
+                                                            <div className="p-2 border rounded-lg">
+                                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
+                                                                <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                            </div>
                                                         </div>
-                                                        <div className="p-2 border rounded-lg">
-                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
-                                                            <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                        <div className="p-2 border rounded-lg text-center">
+                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
+                                                            <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
                                                         </div>
+                                                        <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
                                                     </div>
-                                                    <div className="p-2 border rounded-lg text-center">
-                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
-                                                        <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
-                                                    </div>
-                                                    <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2"><KeyRound/> Credenciais da API Gemini</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="gemini-api-key">Sua Chave de API</Label>
-                                            <Input 
-                                                id="gemini-api-key"
-                                                name="geminiApiKey" 
-                                                type="password" 
-                                                placeholder="••••••••••••••••••••••••••" 
-                                                value={geminiApiKey}
-                                                onChange={(e) => setGeminiApiKey(e.target.value)}
-                                            />
-                                            <p className="text-xs text-muted-foreground pt-1">Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
-                                        </div>
-                                    </CardContent>
-                                    <CardFooter>
-                                        <SaveButton>
-                                            <Save className='mr-2 h-4 w-4'/> Salvar Chave & Modelo
-                                        </SaveButton>
-                                    </CardFooter>
-                                </Card>
+                                                )}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card className="mt-6">
+                                        <CardHeader>
+                                            <CardTitle className="flex items-center gap-2"><KeyRound/> Credenciais da API Gemini</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="gemini-api-key">Sua Chave de API</Label>
+                                                <Input 
+                                                    id="gemini-api-key"
+                                                    name="geminiApiKey" 
+                                                    type="password" 
+                                                    placeholder="••••••••••••••••••••••••••" 
+                                                    value={geminiApiKey}
+                                                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                                                />
+                                                <p className="text-xs text-muted-foreground pt-1">Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
+                                            </div>
+                                        </CardContent>
+                                        <CardFooter>
+                                            <SaveButton>
+                                                <Save className='mr-2 h-4 w-4'/> Salvar Chave & Modelo
+                                            </SaveButton>
+                                        </CardFooter>
+                                    </Card>
+                                </form>
                             </div>
                         </div>
                         
@@ -493,29 +494,33 @@ export default function AutopilotPage() {
                         </Dialog>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>Base de Conhecimento do Agente</CardTitle>
-                                    <CardDescription>
-                                        Forneça ao agente de IA o contexto sobre seu negócio, produtos e políticas.
-                                        Ele usará esse conhecimento para responder às perguntas dos clientes de forma precisa.
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <Textarea 
-                                        name="knowledgeBase"
-                                        placeholder="Exemplo: Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. O prazo para devoluções é de 7 dias úteis..."
-                                        className="min-h-[200px]"
-                                        value={knowledgeBase}
-                                        onChange={(e) => setKnowledgeBase(e.target.value)}
-                                    />
-                                </CardContent>
-                                <CardFooter>
-                                     <SaveButton>
-                                        <Save className='mr-2 h-4 w-4'/> Salvar Base de Conhecimento
-                                    </SaveButton>
-                                </CardFooter>
-                            </Card>
+                            <form action={saveAction}>
+                                <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
+                                <input type="hidden" name="configId" value={config?.id || ''} />
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Base de Conhecimento do Agente</CardTitle>
+                                        <CardDescription>
+                                            Forneça ao agente de IA o contexto sobre seu negócio, produtos e políticas.
+                                            Ele usará esse conhecimento para responder às perguntas dos clientes de forma precisa.
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <Textarea 
+                                            name="knowledgeBase"
+                                            placeholder="Exemplo: Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. O prazo para devoluções é de 7 dias úteis..."
+                                            className="min-h-[200px]"
+                                            value={knowledgeBase}
+                                            onChange={(e) => setKnowledgeBase(e.target.value)}
+                                        />
+                                    </CardContent>
+                                    <CardFooter>
+                                        <SaveButton>
+                                            <Save className='mr-2 h-4 w-4'/> Salvar Base de Conhecimento
+                                        </SaveButton>
+                                    </CardFooter>
+                                </Card>
+                            </form>
 
                             <Card>
                                 <CardHeader>
@@ -573,7 +578,6 @@ export default function AutopilotPage() {
                                 </CardContent>
                             </Card>
                         </div>
-                    </form>
                 </main>
             </div>
         </MainLayout>

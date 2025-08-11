@@ -61,12 +61,9 @@ export async function saveAutopilotConfig(
 
     const workspaceId = formData.get('workspaceId') as string;
     const configId = formData.get('configId') as string;
-    const geminiApiKey = formData.get('geminiApiKey') as string;
-    const aiModel = formData.get('aiModel') as string;
-    const knowledgeBase = formData.get('knowledgeBase') as string;
 
-    if (!workspaceId) {
-        return { success: false, error: 'ID do Workspace é obrigatório.' };
+    if (!workspaceId || !configId) {
+        return { success: false, error: 'IDs de Workspace e Configuração são obrigatórios.' };
     }
 
     if (!await hasPermission(session.user.id, workspaceId, 'autopilot:edit')) {
@@ -74,16 +71,26 @@ export async function saveAutopilotConfig(
     }
 
     try {
+        const fieldsToUpdate: { [key: string]: any } = {};
+        if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = formData.get('geminiApiKey');
+        if (formData.has('aiModel')) fieldsToUpdate.ai_model = formData.get('aiModel');
+        if (formData.has('knowledgeBase')) fieldsToUpdate.knowledge_base = formData.get('knowledgeBase');
+        
+        const fieldNames = Object.keys(fieldsToUpdate);
+        if (fieldNames.length === 0) {
+            return { success: true }; // Nothing to update
+        }
+
+        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 1}`).join(', ');
+        const values = Object.values(fieldsToUpdate);
+
         const query = `
             UPDATE autopilot_configs
-            SET
-                gemini_api_key = $1,
-                ai_model = $2,
-                knowledge_base = $3,
-                updated_at = NOW()
-            WHERE id = $4 AND workspace_id = $5
+            SET ${setClauses}, updated_at = NOW()
+            WHERE id = $${values.length + 1} AND workspace_id = $${values.length + 2}
         `;
-        await db.query(query, [geminiApiKey, aiModel, knowledgeBase, configId, workspaceId]);
+        
+        await db.query(query, [...values, configId, workspaceId]);
 
         revalidatePath('/autopilot');
         return { success: true };
