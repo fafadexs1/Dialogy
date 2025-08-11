@@ -2,15 +2,14 @@
 
 'use client';
 
-import React, { useActionState, useEffect, useRef, useState } from 'react';
+import React, { useActionState, useEffect, useRef, useState, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand } from 'lucide-react';
-import { type Chat, type Message, type User, Tag, MessageMetadata, Contact } from '@/lib/types';
-import { nexusFlowInstances } from '@/lib/mock-data';
+import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -25,6 +24,7 @@ import { closeChatAction, assignChatToSelfAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
+import { getAutopilotConfig } from '@/actions/autopilot';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -314,7 +314,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
   const [isAiTyping, setIsAiTyping] = useState(false);
-  const [selectedAiModel, setSelectedAiModel] = useState('googleai/gemini-2.0-flash');
+  
+  const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
+  const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -327,6 +329,22 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
     setIsAiAgentActive(checked);
   };
+  
+  const fetchAutopilotData = useCallback(async () => {
+    if (!currentUser.activeWorkspaceId) return;
+    const data = await getAutopilotConfig(currentUser.activeWorkspaceId);
+    if (!data.error) {
+        setAutopilotConfig(data.config);
+        setAutopilotRules(data.rules || []);
+    } else {
+        console.error("Failed to fetch autopilot config:", data.error);
+    }
+  }, [currentUser.activeWorkspaceId]);
+
+  useEffect(() => {
+    fetchAutopilotData();
+  }, [fetchAutopilotData]);
+
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -339,7 +357,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
- const runAiAgent = async () => {
+ const runAiAgent = useCallback(async () => {
     const conditions = {
         isAiAgentActive,
         chatExists: !!chat,
@@ -351,7 +369,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                       conditions.chatExists &&
                       conditions.isFromContact &&
                       !conditions.isAiTyping &&
-                      lastMessage;
+                      lastMessage &&
+                      autopilotConfig;
 
     if (!shouldRun) {
         return;
@@ -361,15 +380,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         setIsAiTyping(true);
         console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
         const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
-        const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+        
+        const activeRules = autopilotRules.filter(rule => rule.enabled);
 
         const result = await generateAgentResponse({
             chatId: chat.id,
-            customerMessage: lastMessage.content,
+            customerMessage: lastMessage.content || '',
             chatHistory: chatHistoryForAI,
             rules: activeRules,
-            knowledgeBase: "", 
-            model: selectedAiModel,
+            knowledgeBase: autopilotConfig?.knowledge_base || "", 
+            model: autopilotConfig?.ai_model || 'googleai/gemini-2.0-flash',
             contact: chat.contact as Contact
         });
 
@@ -412,13 +432,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     } finally {
         setIsAiTyping(false);
     }
-  };
+  }, [isAiAgentActive, chat, lastMessage, currentUser.id, isAiTyping, initialMessages, autopilotRules, autopilotConfig, onActionSuccess, toast]);
 
 
   useEffect(() => {
     runAiAgent();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage?.id, isAiAgentActive, chat?.id]);
+  }, [runAiAgent]);
   
   // Mark messages as read effect
   useEffect(() => {
