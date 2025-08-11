@@ -118,15 +118,13 @@ const prompt = ai.definePrompt({
   tools: [getCustomerDetailsTool],
   prompt: `You are an AI customer service agent. Your goal is to resolve the customer's issue efficiently and courteously.
 
-You have three methods to generate a response, in this order of priority:
+You have a hierarchy of methods to generate a response. Follow this order strictly:
 
-1.  **Automation Rules**: First, evaluate the "Customer's Latest Message" against the "Automation Rules".
+1.  **Tools**: First, analyze the "Customer's Latest Message". If the customer is asking for information that a tool can provide (like their own name or details), you MUST use the available tool. Formulate a helpful response based on the tool's output.
+
+2.  **Automation Rules**: If no tool is appropriate, evaluate the message against the "Automation Rules".
     - Use your reasoning to see if the customer's *intent* matches a rule's trigger. The match does not need to be literal.
     - If a rule is triggered, you MUST output the exact "action" text from that rule in the 'response' field and the rule's name in the 'triggeredRule' field.
-
-2.  **Tools**: If no automation rule is triggered, consider if you need more information to give a good answer.
-    - You have access to tools. If the user asks who they are, or you need their details to answer a question, use the 'getCustomerDetails' tool.
-    - After using a tool, formulate a helpful response based on the information you received.
 
 3.  **General Knowledge**: If no rules or tools are appropriate, use the "Chat History" for context and your general knowledge to provide a helpful, conversational response.
 
