@@ -77,7 +77,7 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
-    const [state, formAction] = useActionState(closeChatAction, { success: false });
+    const [state, formAction] = useActionState(closeChatAction.bind(null, chat.id), { success: false, error: undefined });
     const [isOpen, setIsOpen] = React.useState(false);
     const { toast } = useToast();
 
@@ -100,7 +100,6 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
             </DialogTrigger>
             <DialogContent>
                 <form action={formAction}>
-                    <input type="hidden" name="chatId" value={chat.id} />
                     <DialogHeader>
                         <DialogTitle>Encerrar Atendimento</DialogTitle>
                         <DialogDescription>
