@@ -53,7 +53,7 @@ async function handleContactsUpdate(payload: any) {
     // Normalize data to always be an array
     const contactsToUpdate = Array.isArray(data) ? data : [data];
 
-    if (contactsToUpdate.length === 0) {
+    if (contactsToUpdate.length === 0 || !contactsToUpdate[0]?.remoteJid) {
         console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar.');
         return;
     }
@@ -184,8 +184,9 @@ async function handleMessagesUpsert(payload: any) {
                 RETURNING id, workspace_id
             ),
             target_chat AS (
-                SELECT id, workspace_id, contact_id FROM (
-                    SELECT c.id, c.workspace_id, c.contact_id,
+                SELECT c.id, c.workspace_id, c.contact_id
+                FROM (
+                    SELECT c.id, c.workspace_id, c.contact_id, c.status,
                            ROW_NUMBER() OVER(PARTITION BY c.contact_id ORDER BY c.status = 'atendimentos' DESC, c.status = 'gerais' DESC, c.closed_at DESC NULLS FIRST, c.assigned_at DESC NULLS FIRST) as rn
                     FROM chats c
                     JOIN upsert_contact uc ON c.workspace_id = uc.workspace_id AND c.contact_id = uc.id
