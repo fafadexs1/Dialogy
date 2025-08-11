@@ -295,7 +295,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const { toast } = useToast();
   
   const handleAiSwitchChange = (checked: boolean) => {
-    console.log(`Piloto Automático ${checked ? 'ativado' : 'desativado'}.`);
+    console.log(`[AUTOPILOT] Piloto Automático ${checked ? 'ativado' : 'desativado'}.`);
     setIsAiAgentActive(checked);
   };
 
@@ -349,6 +349,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
     try {
         setIsAiTyping(true);
+        console.log('[AUTOPILOT] Verifying message:', lastMessage.content);
         const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
@@ -359,9 +360,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             knowledgeBase: "", 
             model: selectedAiModel,
         });
+
+        console.log('[AUTOPILOT] AI Response received:', result);
         
         if (result && result.response) {
             const textToType = result.response;
+            console.log('[AUTOPILOT] AI generated response text:', textToType);
             
             for (let i = 0; i <= textToType.length; i++) {
                 await new Promise(resolve => setTimeout(resolve, 50));
@@ -372,6 +376,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             }
 
             await new Promise(resolve => setTimeout(resolve, 500));
+            console.log('[AUTOPILOT] Sending automated message...');
             const sendResult = await sendAutomatedMessageAction(chat.id, textToType, chat.agent.id);
 
             if (sendResult.success) {
@@ -386,7 +391,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
          console.error('Error generating AI agent response:', error);
          toast({
             title: 'Erro do Piloto Automático',
-            description: error.message || 'Não foi possível gerar a resposta automática.',
+            description: error.message || 'Não foi possível gerar la resposta automática.',
             variant: 'destructive',
         });
     } finally {
