@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
@@ -118,6 +117,7 @@ function AutomationForm({
       trigger,
       action,
       enabled: instance?.enabled ?? true,
+      model: 'googleai/gemini-2.0-flash',
     });
   };
 
@@ -148,8 +148,8 @@ function AutomationForm({
                     <SelectValue placeholder="Selecione um tipo de ação" />
                 </SelectTrigger>
                 <SelectContent>
-                    <SelectItem value="reply"><div className='flex items-center gap-2'><MessageCircle/> Responder com Texto</div></SelectItem>
-                    <SelectItem value="webhook"><div className='flex items-center gap-2'><Webhook/> Chamar Webhook (HTTP Request)</div></SelectItem>
+                    <SelectItem value="reply"><div className="flex items-center gap-2"><MessageCircle/> Responder com Texto</div></SelectItem>
+                    <SelectItem value="webhook"><div className="flex items-center gap-2"><Webhook/> Chamar Webhook (HTTP Request)</div></SelectItem>
                 </SelectContent>
             </Select>
         </div>
@@ -181,13 +181,13 @@ function AutomationForm({
                     <Label htmlFor="webhook-body">Corpo (Body) da Requisição (JSON)</Label>
                     <Textarea 
                         id="webhook-body"
-                        className='font-code'
+                        className="font-code"
                         value={webhookBody}
                         onChange={(e) => setWebhookBody(e.target.value)}
-                        placeholder={'{\\n  "customerId": "{{contact.id}}",\\n  "message": "{{customerMessage}}"\\n}'}
+                        placeholder={'{\n  "customerId": "{{contact.id}}",\n  "message": "{{customerMessage}}"\n}'}
                     />
                     <p className="text-xs text-muted-foreground">
-                        Use a sintaxe `{{variável}}` para inserir dados dinâmicos do chat, como `{{contact.id}}` ou `{{customerMessage}}`.
+                        Use a sintaxe {`{{variável}}`} para inserir dados dinâmicos do chat, como {`{{contact.id}}`} ou {`{{customerMessage}}`}.
                     </p>
                 </div>
             </div>
@@ -288,28 +288,28 @@ export default function AutopilotPage() {
                                 <div className="space-y-4">
                                     <h3 className="font-semibold text-muted-foreground">Métricas do Mês Atual</h3>
                                     <div className="grid grid-cols-2 gap-4 text-center">
-                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <BrainCircuit className="h-6 w-6 text-primary"/>
                                                 {executionsThisMonth.toLocaleString('pt-BR')}
                                             </p>
                                         </div>
-                                         <div className='p-4 rounded-lg bg-secondary/50'>
+                                         <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <BrainCircuit className="h-6 w-6 text-purple-500"/>
                                                 {Math.round(tokensThisMonth / 1000)}k
                                             </p>
                                         </div>
-                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Custo Atual</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <DollarSign className="h-6 w-6 text-green-500"/>
                                                 {currentMonthCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                             </p>
                                         </div>
-                                        <div className='p-4 rounded-lg bg-secondary/50'>
+                                        <div className="p-4 rounded-lg bg-secondary/50">
                                             <p className="text-sm text-muted-foreground font-semibold">Custo Estimado</p>
                                             <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                 <DollarSign className="h-6 w-6 text-amber-500"/>
@@ -363,16 +363,16 @@ export default function AutopilotPage() {
                                                 <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
                                                 <div className="grid grid-cols-2 gap-3 text-center">
                                                     <div className="p-2 border rounded-lg">
-                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className='text-green-500'/> Entrada</p>
+                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
                                                         <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
                                                     </div>
                                                     <div className="p-2 border rounded-lg">
-                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className='text-blue-500'/> Saída</p>
+                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
                                                         <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
                                                     </div>
                                                 </div>
                                                 <div className="p-2 border rounded-lg text-center">
-                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className='text-purple-500'/> Janela de Contexto</p>
+                                                    <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
                                                     <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
                                                 </div>
                                                 <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
@@ -395,7 +395,7 @@ export default function AutopilotPage() {
                                             value={geminiApiKey}
                                             onChange={(e) => setGeminiApiKey(e.target.value)}
                                         />
-                                        <p className='text-xs text-muted-foreground pt-1'>Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
+                                        <p className="text-xs text-muted-foreground pt-1">Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
                                     </div>
                                 </CardContent>
                                 <CardFooter>
@@ -453,7 +453,7 @@ export default function AutopilotPage() {
                                                 id={`status-${instance.id}`}
                                                 checked={instance.enabled}
                                                 onCheckedChange={(checked) => handleToggleEnabled(instance.id, checked)}
-                                                className='opacity-0 group-hover:opacity-100 transition-opacity'
+                                                className="opacity-0 group-hover:opacity-100 transition-opacity"
                                             />
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
@@ -469,16 +469,16 @@ export default function AutopilotPage() {
                                         </div>
                                         <p className="text-sm font-semibold pr-20">{instance.name}</p>
                                         <div className="mt-2 space-y-2 text-xs">
-                                            <p className='text-muted-foreground'><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
-                                            <div className='text-muted-foreground flex items-start gap-1.5'>
+                                            <p className="text-muted-foreground"><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
+                                            <div className="text-muted-foreground flex items-start gap-1.5">
                                               <span className="font-semibold text-foreground shrink-0">ENTÃO:</span> 
                                               {instance.action.type === 'reply' ? (
                                                   <span>{instance.action.value}</span>
                                               ) : (
-                                                  <div className='flex items-center gap-1.5'>
-                                                    <Webhook className='h-3 w-3'/>
-                                                    <span className='font-mono text-xs bg-muted px-1 py-0.5 rounded'>{instance.action.method}</span>
-                                                    <span className='truncate'>{instance.action.url}</span>
+                                                  <div className="flex items-center gap-1.5">
+                                                    <Webhook className="h-3 w-3"/>
+                                                    <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{instance.action.method}</span>
+                                                    <span className="truncate">{instance.action.url}</span>
                                                   </div>
                                               )}
                                             </div>
@@ -498,6 +498,4 @@ export default function AutopilotPage() {
             </div>
         </MainLayout>
     );
-
-    
 }
