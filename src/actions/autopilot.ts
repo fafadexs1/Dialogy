@@ -43,7 +43,7 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
         return { config, rules };
 
     } catch (error) {
-        console.error('[GET_AUTOPILOT_CONFIG]', error);
+        console.error('[GET_AUTOPILOT_CONFIG] Erro detalhado:', error);
         return { config: null, rules: null, error: 'Falha ao buscar configurações do banco de dados.'};
     }
 }
