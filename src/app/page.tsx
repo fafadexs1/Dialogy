@@ -130,7 +130,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'encerrados') OR c.agent_id = $2)
+        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos') OR c.agent_id = $2)
         GROUP BY c.id, lm.source_from_api, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId, userId]);

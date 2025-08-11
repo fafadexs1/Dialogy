@@ -112,6 +112,7 @@ export type MessageMetadata = {
     mimetype?: string;
     fileName?: string;
     thumbnail?: string; // Base64 encoded thumbnail
+    sentBy?: 'autopilot' | 'agent';
 }
 
 export type Message = {

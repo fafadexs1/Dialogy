@@ -19,7 +19,8 @@ import type { MessageMetadata } from '@/lib/types';
 async function internalSendMessage(
     chatId: string,
     content: string,
-    senderId: string // The user ID of the sender (could be an agent or the system for automated messages)
+    senderId: string, // The user ID of the sender (could be an agent or the system for automated messages)
+    metadata?: MessageMetadata
 ): Promise<{ success: boolean; error?: string }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -72,9 +73,9 @@ async function internalSendMessage(
         await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, from_me,
-                message_id_from_api, api_message_status, instance_name
-             ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7)`,
-            [workspace_id, chatId, senderId, content, apiResponse?.key?.id, 'SENT', instanceName]
+                message_id_from_api, api_message_status, instance_name, metadata
+             ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8)`,
+            [workspace_id, chatId, senderId, content, apiResponse?.key?.id, 'SENT', instanceName, metadata || null]
         );
 
         await client.query('COMMIT');
@@ -215,17 +216,16 @@ export async function sendMediaAction(
  * It gets the senderId from the session.
  */
 export async function sendAgentMessageAction(
-    prevState: any,
-    formData: FormData,
+    chatId: string,
+    content: string,
+    metadata?: MessageMetadata
 ): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
-    const chatId = formData.get('chatId') as string;
-    const content = formData.get('content') as string;
 
-    return internalSendMessage(chatId, content, session.user.id);
+    return internalSendMessage(chatId, content, session.user.id, metadata);
 }
 
 /**
@@ -237,5 +237,5 @@ export async function sendAutomatedMessageAction(
     content: string,
     agentId: string
 ): Promise<{ success: boolean; error?: string }> {
-    return internalSendMessage(chatId, content, agentId);
+    return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }

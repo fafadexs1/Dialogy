@@ -24,7 +24,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAgentMessageAction } from '@/actions/messages';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -295,15 +295,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   
   const { toast } = useToast();
   
-  const [sendState, sendFormAction] = useActionState(sendAutomatedMessageAction, { success: false, error: null });
-
-  useEffect(() => {
-        if (sendState.success) {
-            onActionSuccess();
-        } else if (sendState.error) {
-            toast({ title: 'Erro ao Enviar Mensagem', description: sendState.error, variant: 'destructive' });
-        }
-    }, [sendState, toast, onActionSuccess]);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -312,58 +303,55 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             viewport.scrollTop = viewport.scrollHeight;
         }
     }
-  }, [initialMessages]);
+  }, [initialMessages, isAiThinking]);
 
   const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
-  const lastCustomerMessage = initialMessages.filter(m => m.sender?.id !== currentUser?.id).pop();
-
+  const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
 
   useEffect(() => {
     const runAiAgent = async () => {
-        if (isAiAgentActive && lastCustomerMessage && chat && lastCustomerMessage.sender?.id !== currentUser.id) {
-            const lastMessageInState = initialMessages[initialMessages.length - 1];
-            if (lastMessageInState.sender?.id === lastCustomerMessage.sender?.id) {
-                setIsAiThinking(true);
-                try {
-                    const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
+        // Condition to run: autopilot is on, there is a last message, it's from the customer, and there's an assigned agent.
+        if (isAiAgentActive && lastMessage && chat?.agent?.id && lastMessage.sender?.id !== currentUser.id) {
+            setIsAiThinking(true);
+            try {
+                const activeRules = nexusFlowInstances.filter(rule => rule.enabled);
 
-                    const result = await generateAgentResponse({
-                        customerMessage: lastCustomerMessage.content,
-                        chatHistory: chatHistoryForAI,
-                        rules: activeRules,
-                        knowledgeBase: "", 
-                        model: selectedAiModel,
-                    });
-                    
-                    if (result && result.response && chat.agent?.id) {
-                        const sendResult = await sendAutomatedMessageAction(
-                            chat.id,
-                            result.response,
-                            chat.agent.id
-                        );
-                        if(sendResult.success) {
-                            onActionSuccess();
-                        } else {
-                            throw new Error(sendResult.error);
-                        }
+                const result = await generateAgentResponse({
+                    customerMessage: lastMessage.content,
+                    chatHistory: chatHistoryForAI,
+                    rules: activeRules,
+                    knowledgeBase: "", 
+                    model: selectedAiModel,
+                });
+                
+                if (result && result.response) {
+                    const sendResult = await sendAutomatedMessageAction(
+                        chat.id,
+                        result.response,
+                        chat.agent.id
+                    );
+                    if(sendResult.success) {
+                        onActionSuccess();
+                    } else {
+                        throw new Error(sendResult.error);
                     }
-
-                } catch (error: any) {
-                     console.error('Error generating AI agent response:', error);
-                     toast({
-                        title: 'Erro do Piloto Automático',
-                        description: error.message || 'Não foi possível enviar a resposta automática.',
-                        variant: 'destructive',
-                    });
-                } finally {
-                    setIsAiThinking(false);
                 }
+
+            } catch (error: any) {
+                 console.error('Error generating AI agent response:', error);
+                 toast({
+                    title: 'Erro do Piloto Automático',
+                    description: error.message || 'Não foi possível enviar a resposta automática.',
+                    variant: 'destructive',
+                });
+            } finally {
+                setIsAiThinking(false);
             }
         }
     };
     runAiAgent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessages, isAiAgentActive, lastCustomerMessage, chatHistoryForAI, toast, selectedAiModel, chat, currentUser.id]);
+  }, [lastMessage?.id]); // Re-run only when the last message ID changes.
   
   // Mark messages as read effect
   useEffect(() => {
@@ -529,7 +517,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         }
     } else {
         if (!plainTextContent.trim()) return;
-        const result = await sendAutomatedMessageAction(chat.id, plainTextContent, currentUser.id);
+        const result = await sendAgentMessageAction(chat.id, plainTextContent);
         if (result.success) {
             onActionSuccess();
         } else {
@@ -593,20 +581,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </Avatar>
                 )}
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                     <div className={cn("flex items-end gap-1.5", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
-                        <div
-                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
-                                isDeleted 
-                                    ? 'bg-secondary/50 border'
-                                    : (isFromMe 
-                                        ? 'bg-primary text-primary-foreground' 
-                                        : 'bg-card')
-                            )}
-                        >
-                            {isDeleted ? (
-                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
-                            ) : renderMessageContent(message)}
-                        </div>
+                     <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                          {isFromMe && !isDeleted && (
                             <div className="flex-shrink-0 self-start">
                                 <AlertDialog>
@@ -640,6 +615,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 </AlertDialog>
                             </div>
                         )}
+                        <div
+                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
+                                isDeleted 
+                                    ? 'bg-secondary/50 border'
+                                    : (isFromMe 
+                                        ? 'bg-primary text-primary-foreground' 
+                                        : 'bg-card')
+                            )}
+                        >
+                            {isDeleted ? (
+                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                            ) : renderMessageContent(message)}
+                        </div>
                     </div>
                     <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                         <span className="mx-1">{message.timestamp}</span>
@@ -731,7 +719,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                 {!isAiAgentActive && mediaFiles.length === 0 && (
                     <SmartReplies 
-                        customerMessage={lastCustomerMessage?.content || ''}
+                        customerMessage={lastMessage?.content || ''}
                         chatHistory={chatHistoryForAI}
                         onSelectReply={(reply) => setNewMessage(reply)}
                     />
