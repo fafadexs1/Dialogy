@@ -158,17 +158,11 @@ export async function sendMediaAction(
         for (const file of mediaFiles) {
              const apiPayload = {
                 number: remoteJid,
-                options: {
-                    delay: 1200,
-                    presence: 'uploading'
-                },
-                mediaMessage: {
-                    mediatype: file.mediatype,
-                    mimetype: file.mimetype,
-                    media: file.base64,
-                    fileName: file.filename,
-                    caption: caption || '',
-                }
+                mediatype: file.mediatype,
+                mimetype: file.mimetype,
+                media: file.base64,
+                fileName: file.filename,
+                caption: caption || '',
             };
             
             const apiResponse = await fetchEvolutionAPI(
