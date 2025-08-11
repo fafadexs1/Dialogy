@@ -416,7 +416,6 @@ export default function AutopilotPage() {
                             <div className="lg:col-span-4 space-y-6">
                                 <form action={saveAction}>
                                     <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
-                                    <input type="hidden" name="configId" value={config?.id || ''} />
                                     <Card>
                                         <CardHeader>
                                             <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Agente</CardTitle>
@@ -498,7 +497,6 @@ export default function AutopilotPage() {
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <form action={saveAction}>
                                 <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
-                                <input type="hidden" name="configId" value={config?.id || ''} />
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>Base de Conhecimento do Agente</CardTitle>

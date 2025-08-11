@@ -235,12 +235,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE public.autopilot_configs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE UNIQUE,
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           gemini_api_key TEXT,
           ai_model TEXT,
           knowledge_base TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW()
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(workspace_id, user_id)
       );`,
 
       `CREATE TABLE public.autopilot_rules (
@@ -330,12 +332,12 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
           VALUES (NEW.owner_id, NEW.id, admin_role_id);
           
-          -- Cria uma configuração padrão para o Autopilot
-          INSERT INTO public.autopilot_configs (workspace_id, ai_model, knowledge_base)
-          VALUES(NEW.id, 'googleai/gemini-2.0-flash', 'Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.')
+          -- Cria uma configuração padrão do Autopilot para o dono do workspace
+          INSERT INTO public.autopilot_configs (workspace_id, user_id, ai_model, knowledge_base)
+          VALUES(NEW.id, NEW.owner_id, 'googleai/gemini-2.0-flash', 'Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.')
           RETURNING id INTO autopilot_config_id;
 
-          -- Cria uma regra de exemplo para o Autopilot
+          -- Cria uma regra de exemplo para o Autopilot do dono
           INSERT INTO public.autopilot_rules (config_id, name, trigger, action, enabled)
           VALUES (autopilot_config_id, 
             'Saudação Inicial', 
