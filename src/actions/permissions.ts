@@ -62,18 +62,18 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
 
     try {
         // First, get the workspaceId from the role
-        const roleRes = await db.query('SELECT workspace_id, is_default FROM roles WHERE id = $1', [roleId]);
+        const roleRes = await db.query('SELECT workspace_id, name, is_default FROM roles WHERE id = $1', [roleId]);
         if (roleRes.rowCount === 0) {
             return { success: false, error: "Papel não encontrado." };
         }
-        const { workspace_id: workspaceId, is_default: isDefault } = roleRes.rows[0];
+        const { workspace_id: workspaceId, name, is_default: isDefault } = roleRes.rows[0];
         
         if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
             return { success: false, error: "Você não tem permissão para editar papéis." };
         }
 
-        if (isDefault) {
-            return { success: false, error: "Não é possível alterar as permissões de papéis padrão." };
+        if (name === 'Administrador') {
+            return { success: false, error: "Não é possível alterar as permissões do papel de Administrador." };
         }
 
         if (enabled) {
@@ -141,9 +141,9 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
         return { success: false, error: "Você não tem permissão para editar papéis." };
     }
     
-    const roleCheck = await db.query('SELECT is_default FROM roles WHERE id = $1', [roleId]);
-    if (roleCheck.rows[0]?.is_default) {
-        return { success: false, error: "Não é possível editar papéis padrão." };
+    const roleCheck = await db.query('SELECT name FROM roles WHERE id = $1', [roleId]);
+    if (roleCheck.rows[0]?.name === 'Administrador') {
+        return { success: false, error: "Não é possível editar o papel de Administrador." };
     }
 
     try {
@@ -168,10 +168,9 @@ export async function deleteRoleAction(roleId: string, workspaceId: string): Pro
     }
     
     try {
-        // Check if role is default
-        const roleCheck = await db.query('SELECT is_default FROM roles WHERE id = $1', [roleId]);
-        if (roleCheck.rows[0]?.is_default) {
-            return { success: false, error: "Não é possível remover papéis padrão." };
+        const roleCheck = await db.query('SELECT name, is_default FROM roles WHERE id = $1', [roleId]);
+        if (roleCheck.rows[0]?.name === 'Administrador' || roleCheck.rows[0]?.is_default) {
+            return { success: false, error: "Não é possível remover papéis padrão ou o papel de Administrador." };
         }
 
         // Check if role has users assigned

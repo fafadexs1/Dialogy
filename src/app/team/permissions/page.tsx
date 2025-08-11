@@ -162,6 +162,7 @@ function PermissionsMatrix({
                                         <th key={role.id} className="text-center min-w-48">
                                             <div className='flex items-center justify-center gap-2'>
                                                 {role.name}
+                                                {role.name !== 'Administrador' && (
                                                 <Dialog>
                                                      <DropdownMenu>
                                                         <DropdownMenuTrigger asChild>
@@ -199,6 +200,7 @@ function PermissionsMatrix({
                                                         <RoleForm workspaceId={workspaceId} onSuccess={onMutate} initialData={role} action={updateRoleAction} />
                                                     </DialogContent>
                                                 </Dialog>
+                                                )}
                                             </div>
                                         </th>
                                     ))}
@@ -224,7 +226,7 @@ function PermissionsMatrix({
                                                             checked={role.permissions.some(p => p.id === permission.id)}
                                                             onCheckedChange={(checked) => handlePermissionChange(role.id, permission.id, !!checked)}
                                                             id={`${role.id}-${permission.id}`}
-                                                            disabled={role.is_default && permission.id.startsWith('permissions:')}
+                                                            disabled={role.name === 'Administrador'}
                                                         />
                                                     </td>
                                                 ))}
