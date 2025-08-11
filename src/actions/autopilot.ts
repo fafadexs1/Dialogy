@@ -7,7 +7,18 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import type { AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 
-// Helper function to check for admin permissions
+// Helper function to check for admin role
+async function isWorkspaceAdmin(userId: string, workspaceId: string): Promise<boolean> {
+    const res = await db.query(`
+        SELECT 1
+        FROM user_workspace_roles uwr
+        JOIN roles r ON uwr.role_id = r.id
+        WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND r.name = 'Administrador'
+    `, [userId, workspaceId]);
+    return res.rowCount > 0;
+}
+
+// Helper function to check for a specific permission
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
         SELECT 1
@@ -26,15 +37,22 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
 }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { config: null, rules: null, error: "Usuário não autenticado." };
+    const userId = session.user.id;
 
-    if (!await hasPermission(session.user.id, workspaceId, 'autopilot:view')) {
+    // First check if user is an admin, which bypasses specific permission checks
+    const isAdmin = await isWorkspaceAdmin(userId, workspaceId);
+    
+    // If not an admin, check for specific permission
+    if (!isAdmin && !await hasPermission(userId, workspaceId, 'autopilot:view')) {
         return { config: null, rules: null, error: "Acesso não autorizado." };
     }
 
     try {
         const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
         if (configRes.rowCount === 0) {
-            return { config: null, rules: [], error: "Nenhuma configuração encontrada." };
+            // This is not an error, it just means no config has been created yet.
+            // The setup trigger should have created one, but we can handle it gracefully.
+            return { config: null, rules: [] };
         }
         const config = configRes.rows[0];
 
@@ -66,7 +84,9 @@ export async function saveAutopilotConfig(
         return { success: false, error: 'IDs de Workspace e Configuração são obrigatórios.' };
     }
 
-    if (!await hasPermission(session.user.id, workspaceId, 'autopilot:edit')) {
+    // Permission Check: Admin or has specific edit permission
+    const isAdmin = await isWorkspaceAdmin(session.user.id, workspaceId);
+    if (!isAdmin && !await hasPermission(session.user.id, workspaceId, 'autopilot:edit')) {
         return { success: false, error: "Você não tem permissão para editar as configurações." };
     }
 
