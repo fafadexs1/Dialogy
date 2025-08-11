@@ -27,8 +27,6 @@ export function LoginForm() {
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
 
-    console.log(`--- [LOGIN_FORM] Tentando fazer login para: ${email} ---`);
-
     try {
       const result = await signIn('credentials', {
         redirect: false, // Manusearemos o redirecionamento manualmente
@@ -37,18 +35,13 @@ export function LoginForm() {
         callbackUrl,
       });
 
-      console.log('[LOGIN_FORM] Resultado do signIn:', result);
-
       if (result?.error) {
         console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
         setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
         setLoading(false);
       } else if (result?.ok) {
-        console.log('[LOGIN_FORM] Login bem-sucedido. Redirecionando...');
         router.push(result.url || callbackUrl);
       } else {
-        // Este caso pode acontecer se a requisição falhar sem um erro explícito do next-auth
-        // por exemplo, devido a um problema de rede ou uma extensão bloqueando.
         console.error('[LOGIN_FORM] A requisição de login falhou sem um erro específico do NextAuth.');
         setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
         setLoading(false);
