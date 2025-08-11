@@ -16,6 +16,31 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     return res.rowCount > 0;
 }
 
+export async function assignChatToAgentAction(chatId: string): Promise<{ success: boolean, error?: string}> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+        return { success: false, error: "Usuário não autenticado." };
+    }
+    const currentAgentId = session.user.id;
+
+    if (!chatId) {
+        return { success: false, error: "ID do Chat é obrigatório." };
+    }
+
+    try {
+        await db.query(
+            "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND agent_id IS NULL",
+            [currentAgentId, chatId]
+        );
+        console.log(`[ASSIGN_CHAT] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
+        return { success: true };
+    } catch (error) {
+        console.error("Erro ao atribuir chat:", error);
+        return { success: false, error: "Falha no servidor ao atribuir o atendimento." };
+    }
+}
+
+
 export async function transferChatAction(
     input: { chatId: string; teamId?: string; agentId?: string }
 ): Promise<{ success: boolean; error?: string }> {
