@@ -4,6 +4,7 @@
 import { db } from '@/lib/db';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { revalidatePath } from 'next/cache';
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -16,10 +17,11 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     return res.rowCount > 0;
 }
 
-// NOTE: This action is no longer called directly from the frontend,
-// but its logic has been integrated into the message sending process.
-// It remains here as a potential utility function for future use.
-export async function assignChatToAgentAction(chatId: string): Promise<{ success: boolean, error?: string}> {
+/**
+ * Atribui o chat atual ao agente logado.
+ * Esta ação é chamada pelo botão "Assumir Atendimento".
+ */
+export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
         return { success: false, error: "Usuário não autenticado." };
@@ -31,15 +33,22 @@ export async function assignChatToAgentAction(chatId: string): Promise<{ success
     }
 
     try {
-        await db.query(
+        const result = await db.query(
             "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND agent_id IS NULL",
             [currentAgentId, chatId]
         );
-        console.log(`[ASSIGN_CHAT] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
+
+        if (result.rowCount === 0) {
+            // Isso pode acontecer se outro agente assumiu o chat milissegundos antes.
+            return { success: false, error: "Este atendimento já foi assumido por outro agente." };
+        }
+
+        console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
+        revalidatePath('/', 'layout');
         return { success: true };
     } catch (error) {
-        console.error("Erro ao atribuir chat:", error);
-        return { success: false, error: "Falha no servidor ao atribuir o atendimento." };
+        console.error("Erro ao atribuir chat a si mesmo:", error);
+        return { success: false, error: "Falha no servidor ao tentar assumir o atendimento." };
     }
 }
 
@@ -153,6 +162,7 @@ export async function transferChatAction(
 
         await client.query('COMMIT');
         console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
+        revalidatePath('/', 'layout');
         return { success: true };
 
     } catch (error) {
@@ -224,6 +234,7 @@ export async function closeChatAction(
         ]);
 
         await client.query('COMMIT');
+        revalidatePath('/', 'layout');
         return { success: true };
     } catch (error) {
         await client.query('ROLLBACK');

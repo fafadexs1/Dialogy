@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code } from 'lucide-react';
+import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact } from '@/lib/types';
 import { nexusFlowInstances } from '@/lib/mock-data';
 import SmartReplies from './smart-replies';
@@ -21,7 +21,7 @@ import { Separator } from '../ui/separator';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
-import { closeChatAction } from '@/actions/chats';
+import { closeChatAction, assignChatToSelfAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
@@ -280,6 +280,34 @@ function FormattingToolbar() {
     )
 }
 
+function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void }) {
+    const [isAssigning, setIsAssigning] = useState(false);
+
+    const handleClick = async () => {
+        setIsAssigning(true);
+        try {
+            await onTakeOwnership();
+        } finally {
+            setIsAssigning(false);
+        }
+    };
+
+    return (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card/80 backdrop-blur-sm p-6">
+            <div className="text-center">
+                <div className="inline-block p-4 bg-primary/10 rounded-full mb-4">
+                    <Hand className="h-10 w-10 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold">Atendimento Disponível</h3>
+                <p className="text-muted-foreground mt-1 mb-6">Este chat está na fila geral e aguardando um atendente.</p>
+                <Button size="lg" onClick={handleClick} disabled={isAssigning}>
+                    {isAssigning && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+                    Assumir este Atendimento
+                </Button>
+            </div>
+        </div>
+    );
+}
 
 export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons }: ChatPanelProps) {
   const [newMessage, setNewMessage] = useState('');
@@ -315,21 +343,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const conditions = {
         isAiAgentActive,
         chatExists: !!chat,
-        agentAssigned: !!chat?.agent,
-        lastMessageExists: !!lastMessage,
         isFromContact: lastMessage?.sender?.id !== currentUser.id,
         isAiTyping: isAiTyping
     };
 
     const shouldRun = conditions.isAiAgentActive &&
                       conditions.chatExists &&
-                      conditions.agentAssigned &&
-                      conditions.lastMessageExists &&
                       conditions.isFromContact &&
-                      !conditions.isAiTyping;
+                      !conditions.isAiTyping &&
+                      lastMessage;
 
     if (!shouldRun) {
-        console.log('[AUTOPILOT] AI não executado. Condições:', conditions);
         return;
     }
 
@@ -559,6 +583,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 };
 
+  const handleTakeOwnership = async () => {
+    if (!chat) return;
+    const result = await assignChatToSelfAction(chat.id);
+    if (result.success) {
+        toast({ title: "Você assumiu o atendimento!" });
+        onActionSuccess();
+    } else {
+        toast({ title: "Erro ao assumir", description: result.error, variant: 'destructive' });
+    }
+  };
+
   const renderMessageContent = (message: Message) => {
     const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
     if (isMedia) {
@@ -690,6 +725,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   }
 
   const isChatOpen = chat.status !== 'encerrados';
+  const isChatAssigned = chat.agent && chat.agent.id === currentUser.id;
+  const isChatInGeneralQueue = chat.status === 'gerais';
 
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
@@ -702,7 +739,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
           <h2 className="font-semibold">{chat.contact.name}</h2>
         </div>
         <div className="flex items-center gap-2">
-          {isChatOpen && (
+          {isChatOpen && isChatAssigned && (
             <CloseChatDialog chat={chat} onActionSuccess={onActionSuccess} reasons={closeReasons} />
           )}
           <Button variant="ghost" size="icon">
@@ -715,16 +752,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto" >
+      <div className="flex-1 overflow-y-auto relative" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
             {initialMessages.map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>
+        {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
       </div>
 
 
-       {isChatOpen ? (
+       {isChatOpen && isChatAssigned ? (
             <footer className="border-t bg-card p-4 flex-shrink-0">
                 {mediaFiles.length > 0 && (
                     <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
@@ -808,7 +846,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             </footer>
        ) : (
             <footer className="border-t bg-card p-4 flex-shrink-0 text-center">
-                <p className='text-sm font-medium text-muted-foreground'>Este atendimento foi encerrado.</p>
+                <p className='text-sm font-medium text-muted-foreground'>{
+                  isChatInGeneralQueue ? "Este atendimento está aguardando um agente." : "Este atendimento foi encerrado."
+                }</p>
             </footer>
        )}
     </main>
