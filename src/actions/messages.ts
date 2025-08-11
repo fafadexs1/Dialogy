@@ -76,7 +76,11 @@ async function internalSendMessage(
             apiConfig,
             {
                 method: 'POST',
-                body: JSON.stringify({ number: remoteJid, options: { presence: 'composing', delay: 1200}, textMessage: { text: content } }),
+                body: JSON.stringify({
+                    number: remoteJid,
+                    options: { presence: 'composing', delay: 1200 },
+                    textMessage: { text: content }
+                }),
             }
         );
         
