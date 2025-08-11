@@ -325,7 +325,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           -- Atribui permissões básicas ao papel de Membro
           INSERT INTO public.role_permissions (role_id, permission_id)
           SELECT member_role_id, id FROM public.permissions
-          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view');
+          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view', 'autopilot:edit');
           
           -- Atribui o papel de Administrador (com todas as permissões) ao criador do workspace
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
