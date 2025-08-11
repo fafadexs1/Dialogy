@@ -194,8 +194,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
           close_reason_tag_id UUID REFERENCES public.tags(id),
-          close_notes TEXT,
-          UNIQUE(workspace_id, contact_id)
+          close_notes TEXT
       );`,
 
       `CREATE TABLE public.messages (

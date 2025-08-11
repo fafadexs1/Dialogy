@@ -35,9 +35,6 @@ export async function POST(
       await handleMessagesUpdate(payload);
     } else if (event === 'contacts.update') {
       await handleContactsUpdate(payload);
-    } else if (event === 'connection.update') {
-      console.log(`[WEBHOOK] Evento de conexão da instância ${instanceNameFromUrl}: ${payload.data?.state}`);
-      // Lógica futura para atualizar o status da instância no banco de dados pode ser adicionada aqui
     } else {
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
@@ -186,22 +183,25 @@ async function handleMessagesUpsert(payload: any) {
                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
                 RETURNING id, workspace_id
             ),
-            upsert_chat AS (
-                INSERT INTO chats (workspace_id, contact_id, status)
-                SELECT workspace_id, id, 'gerais'::chat_status_enum FROM upsert_contact
-                ON CONFLICT (workspace_id, contact_id) DO UPDATE SET 
-                    status = 'gerais'::chat_status_enum,
-                    agent_id = NULL
-                WHERE chats.status = 'encerrados'::chat_status_enum
-                RETURNING id, workspace_id, contact_id
-            ),
-            get_chat AS (
-                SELECT id, workspace_id, contact_id FROM upsert_chat
-                UNION ALL
+            active_chat AS (
                 SELECT c.id, c.workspace_id, c.contact_id
                 FROM chats c, upsert_contact uc
-                WHERE c.workspace_id = uc.workspace_id AND c.contact_id = uc.id
-                AND NOT EXISTS (SELECT 1 FROM upsert_chat)
+                WHERE c.workspace_id = uc.workspace_id 
+                AND c.contact_id = uc.id 
+                AND c.status IN ('gerais', 'atendimentos')
+                LIMIT 1
+            ),
+            new_chat AS (
+                INSERT INTO chats (workspace_id, contact_id, status)
+                SELECT uc.workspace_id, uc.id, 'gerais'::chat_status_enum
+                FROM upsert_contact uc
+                WHERE NOT EXISTS (SELECT 1 FROM active_chat)
+                RETURNING id, workspace_id, contact_id
+            ),
+            target_chat AS (
+                SELECT id, workspace_id, contact_id FROM active_chat
+                UNION ALL
+                SELECT id, workspace_id, contact_id FROM new_chat
             )
             INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
@@ -210,12 +210,12 @@ async function handleMessagesUpsert(payload: any) {
                 api_message_status, raw_payload
             )
             SELECT
-                gc.workspace_id,
-                gc.id,
-                gc.contact_id,
+                tc.workspace_id,
+                tc.id,
+                tc.contact_id,
                 'text'::message_type_enum,
                 $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14
-            FROM get_chat gc;
+            FROM target_chat tc;
         `;
         
         await db.query(query, [
