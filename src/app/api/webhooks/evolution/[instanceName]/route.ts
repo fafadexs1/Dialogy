@@ -50,11 +50,10 @@ export async function POST(
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
     
-    // The payload for contacts.update can be an object or an array of objects
     const contactsToUpdate = Array.isArray(data) ? data : [data];
 
     if (contactsToUpdate.length === 0 || !contactsToUpdate[0]?.remoteJid) {
-        console.log(`[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar para instância ${instanceName}. Payload:`, JSON.stringify(data));
+        console.log(`[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar na instância ${instanceName}. Payload:`, JSON.stringify(data));
         return;
     }
 
