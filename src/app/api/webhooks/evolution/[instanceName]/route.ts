@@ -243,3 +243,5 @@ async function handleMessagesUpsert(payload: any) {
         console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem com CTE:', error);
     }
 }
+
+    
