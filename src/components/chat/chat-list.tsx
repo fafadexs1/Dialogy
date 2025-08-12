@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -50,6 +49,7 @@ interface LastMessagePreviewProps {
 
 const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+  const charLimit = 50;
 
   const getIcon = () => {
     if (message.type === 'system') return null;
@@ -62,21 +62,32 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   const getTextContent = () => {
-    if (message.type === 'system') return message.content;
-    if (!isMedia) return message.content;
-    if (message.content) return message.content; // Caption for the media
-    const mimetype = message.metadata?.mimetype || '';
-    if (mimetype.startsWith('image/')) return 'Imagem';
-    if (mimetype.startsWith('video/')) return 'Vídeo';
-    if (mimetype.startsWith('audio/')) return 'Áudio';
-    if (message.metadata?.fileName) return message.metadata.fileName;
-    return 'Arquivo';
+    let text = '';
+    if (message.type === 'system') {
+        text = message.content;
+    } else if (!isMedia) {
+        text = message.content;
+    } else if (message.content) {
+        text = message.content; // Caption for the media
+    } else {
+        const mimetype = message.metadata?.mimetype || '';
+        if (mimetype.startsWith('image/')) text = 'Imagem';
+        else if (mimetype.startsWith('video/')) text = 'Vídeo';
+        else if (mimetype.startsWith('audio/')) text = 'Áudio';
+        else if (message.metadata?.fileName) text = message.metadata.fileName;
+        else text = 'Arquivo';
+    }
+    
+    if (text.length > charLimit) {
+        return text.substring(0, charLimit) + '...';
+    }
+    return text;
   };
 
   return (
     <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
       <div className="mt-0.5">{getIcon()}</div>
-      <p className="whitespace-normal break-words">
+      <p className="truncate">
         {getTextContent()}
       </p>
     </div>
