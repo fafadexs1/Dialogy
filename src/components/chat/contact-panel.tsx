@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { type Chat, type User, type Team, type OnlineAgent } from '@/lib/types';
+import { type Chat, type User, type Team, type OnlineAgent, Contact as ContactType } from '@/lib/types';
 import {
   Mail,
   Phone,
@@ -15,7 +15,8 @@ import {
   Server,
   Send,
   Loader2,
-  Users
+  Users,
+  Edit,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -31,10 +32,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { transferChatAction } from '@/actions/chats';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
+import { AddContactForm } from '../crm/add-contact-form';
 
 interface ContactPanelProps {
   chat: Chat | null;
   onTransferSuccess: () => void;
+  onContactUpdate: () => void;
 }
 
 function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransferSuccess: () => void }) {
@@ -74,7 +77,6 @@ function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransfe
         setIsTransferring(false);
     }
     
-    // Filter out the current user from the list of agents to transfer to
     const availableAgents = allOnlineAgents.filter(agent => agent.user.id !== currentUser?.id);
 
     return (
@@ -147,7 +149,16 @@ function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransfe
 }
 
 
-export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelProps) {
+export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  const handleSaveContact = (contact: ContactType) => {
+    // In a real app, this would be a server action
+    console.log("Saving contact from chat panel:", contact);
+    toast({ title: "Contato Atualizado!", description: `Os dados de ${contact.name} foram salvos.`});
+    setIsEditModalOpen(false);
+    onContactUpdate();
+  }
 
   if (!chat) {
     return (
@@ -174,6 +185,20 @@ export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelPr
     <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
       <div className="flex h-16 items-center justify-between border-b px-6 flex-shrink-0">
         <h3 className="font-semibold text-lg">Detalhes do Contato</h3>
+         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+            <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                    <Edit className="mr-2 h-4 w-4"/>
+                    Editar Contato
+                </Button>
+            </DialogTrigger>
+            <AddContactForm
+                isOpen={isEditModalOpen}
+                setIsOpen={setIsEditModalOpen}
+                contact={contact}
+                onSave={handleSaveContact}
+            />
+         </Dialog>
       </div>
       <div className="flex-1 overflow-y-auto p-6">
         
@@ -184,16 +209,6 @@ export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelPr
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
             <p className="text-sm text-muted-foreground">{businessProfile?.companyName}</p>
-            <div className="mt-4 flex items-center gap-2">
-                <Button variant="outline" size="sm">
-                    <Mail className="mr-2 h-4 w-4"/>
-                    E-mail
-                </Button>
-                 <Button variant="outline" size="sm">
-                    <Phone className="mr-2 h-4 w-4"/>
-                    Ligar
-                </Button>
-            </div>
           </div>
           
           <Separator className="my-6"/>
@@ -262,7 +277,7 @@ export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelPr
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                         <span className="flex items-center gap-2 font-semibold"><Briefcase className="h-4 w-4" /> Negócios</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile?.deals.length}</Badge>
+                        <Badge variant="secondary" className="text-xs">{businessProfile?.deals?.length || 0}</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">
@@ -286,7 +301,7 @@ export default function ContactPanel({ chat, onTransferSuccess }: ContactPanelPr
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                     <span className="flex items-center gap-2 font-semibold"><CheckSquare className="h-4 w-4" /> Tarefas</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile?.tasks.length}</Badge>
+                        <Badge variant="secondary" className="text-xs">{businessProfile?.tasks?.length || 0}</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">

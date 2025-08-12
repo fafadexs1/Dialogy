@@ -42,53 +42,41 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
 
   const handleSetSelectedChat = (chat: Chat) => {
     setSelectedChat(chat);
-    // When changing chats, always default to showing the full history for context
     setShowFullHistory(true);
   };
   
-  // Function to fetch and update data, memoized with useCallback
-    const updateData = useCallback(async () => {
-        if (!currentUser.activeWorkspaceId) return;
+  const updateData = useCallback(async () => {
+    if (!currentUser.activeWorkspaceId) return;
 
-        const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
-        setChats(latestChats);
+    const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
+    setChats(latestChats);
 
-        // This is the key logic change. We need to smartly update the selected chat
-        // to preserve the full message history we already have.
-        setSelectedChat(currentSelectedChat => {
-            if (!currentSelectedChat) {
-                 // If nothing was selected, try to select a default chat
-                const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-                if (atendimentoChat) return atendimentoChat;
-                const geraisChat = latestChats.find(c => c.status === 'gerais');
-                if (geraisChat) return geraisChat;
-                return latestChats.length > 0 ? latestChats[0] : null;
-            }
+    setSelectedChat(currentSelectedChat => {
+        if (!currentSelectedChat) {
+            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+            if (atendimentoChat) return atendimentoChat;
+            const geraisChat = latestChats.find(c => c.status === 'gerais');
+            if (geraisChat) return geraisChat;
+            return latestChats.length > 0 ? latestChats[0] : null;
+        }
 
-            // Find the corresponding chat in the new data
-            const updatedSelectedChatInList = latestChats.find(c => c.id === currentSelectedChat.id);
+        const updatedSelectedChatInList = latestChats.find(c => c.id === currentSelectedChat.id);
 
-            if (updatedSelectedChatInList) {
-                // IMPORTANT: Preserve the existing message history, only update chat metadata.
-                // The API now returns the full history in `updatedSelectedChatInList.messages`,
-                // so we can just use that.
-                return updatedSelectedChatInList;
-            } else {
-                 // The previously selected chat is no longer in the list (e.g., archived, deleted)
-                 // Select a new default chat.
-                const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-                if (atendimentoChat) return atendimentoChat;
-                const geraisChat = latestChats.find(c => c.status === 'gerais');
-                if (geraisChat) return geraisChat;
-                return latestChats.length > 0 ? latestChats[0] : null;
-            }
-        });
+        if (updatedSelectedChatInList) {
+            return updatedSelectedChatInList;
+        } else {
+            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+            if (atendimentoChat) return atendimentoChat;
+            const geraisChat = latestChats.find(c => c.status === 'gerais');
+            if (geraisChat) return geraisChat;
+            return latestChats.length > 0 ? latestChats[0] : null;
+        }
+    });
 
-    }, [currentUser.activeWorkspaceId, currentUser.id]);
+}, [currentUser.activeWorkspaceId, currentUser.id]);
 
 
    useEffect(() => {
-    // Fetch initial data and set loading states
     const initialLoad = async () => {
         setChats(initialChats);
         if (initialChats.length > 0) {
@@ -96,26 +84,22 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             const geraisChat = initialChats.find(c => c.status === 'gerais');
             handleSetSelectedChat(atendimentoChat || geraisChat || initialChats[0]);
         }
-        // TODO: Replace mockTags with a real API call to fetch tags for the workspace
         setCloseReasons(mockTags.filter(t => t.is_close_reason));
         setLoading(false);
 
-        // Start polling when component mounts and user is available
         if (currentUser.activeWorkspaceId) {
             if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = setInterval(updateData, 5000); // Poll every 5 seconds
+            pollingIntervalRef.current = setInterval(updateData, 5000); 
         }
     };
 
     initialLoad();
 
-    // Cleanup interval on component unmount
     return () => {
         if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
         }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialChats, currentUser.activeWorkspaceId, currentUser.id, updateData]);
 
 
@@ -169,7 +153,11 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
-      <ContactPanel chat={selectedChat} onTransferSuccess={updateData} />
+      <ContactPanel 
+        chat={selectedChat} 
+        onTransferSuccess={updateData}
+        onContactUpdate={updateData}
+      />
     </div>
   );
 }

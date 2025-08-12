@@ -39,7 +39,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
     } else {
       setFormData({});
     }
-  }, [contact]);
+  }, [contact, isOpen]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -52,15 +52,16 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const newContact: Contact = {
+    const newContactData: Contact = {
         id: contact?.id || `CRM${Date.now()}`,
-        workspace_id: 'ws-1', // Assuming a default workspace for now
+        workspace_id: contact?.workspace_id || '', 
         name: formData.name || '',
         firstName: (formData.name || '').split(' ')[0],
         lastName: (formData.name || '').split(' ').slice(1).join(' '),
-        avatar: `https://placehold.co/40x40.png?text=${((formData.name || '?').charAt(0)).toUpperCase()}`,
+        avatar: contact?.avatar || `https://placehold.co/40x40.png?text=${((formData.name || '?').charAt(0)).toUpperCase()}`,
         email: formData.email,
         phone: formData.phone,
+        phone_number_jid: contact?.phone_number_jid,
         businessProfile: {
             ...contact?.businessProfile,
             companyName: formData.businessProfile?.companyName,
@@ -69,11 +70,11 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
             currentProvider: formData.businessProfile?.currentProvider,
             tags: formData.businessProfile?.tags || [],
             deals: contact?.businessProfile?.deals || [],
-            tasks: contact?.businessProfile?.tasks || [],
+            tasks: contact?.businessİnterest?.tasks || [],
             activities: contact?.businessProfile?.activities || [],
         },
     };
-    onSave(newContact);
+    onSave(newContactData);
   }
 
   return (
@@ -111,7 +112,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
             <div className="space-y-4">
                 <div className="space-y-2">
                     <Label htmlFor="serviceInterest">Plano de Interesse</Label>
-                    <Select name="serviceInterest" value={formData.businessProfile?.serviceInterest || ''} onValueChange={(val) => handleSelectChange('serviceInterest', val)}>
+                    <Select name="serviceInterest" value={formData.businessProfile?.serviceInterest || 'none'} onValueChange={(val) => handleSelectChange('serviceInterest', val)}>
                         <SelectTrigger id="serviceInterest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="none">Nenhum</SelectItem>
