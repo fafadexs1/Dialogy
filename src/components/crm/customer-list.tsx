@@ -5,7 +5,6 @@ import React, { useState } from 'react';
 import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { type User, type Tag } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
@@ -15,14 +14,19 @@ import { Checkbox } from '../ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { mockTags, agents } from '@/lib/mock-data';
 import { Badge } from '../ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 
 interface CustomerListProps {
   customers: User[];
-  selectedCustomer: User | null;
-  onSelectCustomer: (customer: User) => void;
 }
 
-export default function CustomerList({ customers = [], selectedCustomer, onSelectCustomer }: CustomerListProps) {
+export default function CustomerList({ customers = [] }: CustomerListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('todos');
   const [tagFilter, setTagFilter] = useState('todos');
@@ -110,17 +114,16 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
                                 <TableHead>Proprietário</TableHead>
                                 <TableHead>Tags</TableHead>
                                 <TableHead className="text-center">Prioridade</TableHead>
+                                <TableHead className="text-center">Ações</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {filteredCustomers.map(customer => (
                                 <TableRow 
                                   key={customer.id} 
-                                  onClick={() => onSelectCustomer(customer)} 
                                   className="cursor-pointer"
-                                  data-state={selectedCustomer?.id === customer.id ? 'selected' : undefined}
                                 >
-                                    <TableCell><Checkbox checked={selectedCustomer?.id === customer.id} /></TableCell>
+                                    <TableCell><Checkbox /></TableCell>
                                     <TableCell>
                                         <div className="flex items-center gap-3">
                                             <Avatar className="h-8 w-8">
@@ -149,6 +152,21 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
                                               {customer.businessProfile.dialogPriorityScore}
                                           </Badge>
                                       )}
+                                    </TableCell>
+                                     <TableCell className="text-center">
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                                    <MoreHorizontal className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
+                                                <DropdownMenuItem>Editar Contato</DropdownMenuItem>
+                                                <DropdownMenuItem>Adicionar Atividade</DropdownMenuItem>
+                                                <DropdownMenuItem className="text-destructive">Excluir</DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
                                     </TableCell>
                                 </TableRow>
                             ))}
