@@ -1,7 +1,8 @@
 
+
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -20,62 +21,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { agents } from '@/lib/mock-data';
-import type { Contact } from '@/lib/types';
+import type { Contact, User } from '@/lib/types';
+import { useFormStatus } from 'react-dom';
+import { Loader2, Save } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle } from 'lucide-react';
+import { saveContactAction } from '@/actions/crm';
+import { toast } from '@/hooks/use-toast';
 
 interface AddContactFormProps {
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
-    onSave: (contact: Contact) => void;
+    onSave: () => void;
     contact: Contact | null;
+    workspaceId: string;
+    agents: User[];
 }
 
-export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContactFormProps) {
-  const [formData, setFormData] = useState<Partial<Contact>>({});
+function SaveButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Save className="mr-2 h-4 w-4" />
+            Salvar Contato
+        </Button>
+    )
+}
+
+export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId, agents }: AddContactFormProps) {
+  const [state, formAction] = useActionState(saveContactAction, { success: false, error: null });
 
   useEffect(() => {
-    if (contact) {
-      setFormData(contact);
-    } else {
-      setFormData({});
+    if (state.success) {
+        toast({ title: "Contato salvo!", description: "As informações do contato foram salvas com sucesso." });
+        onSave();
     }
-  }, [contact, isOpen]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-   const handleSelectChange = (name: string, value: string) => {
-    setFormData(prev => ({ ...prev, businessProfile: { ...(prev.businessProfile || {}), [name]: value } as any }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newContactData: Contact = {
-        id: contact?.id || `CRM${Date.now()}`,
-        workspace_id: contact?.workspace_id || '', 
-        name: formData.name || '',
-        firstName: (formData.name || '').split(' ')[0],
-        lastName: (formData.name || '').split(' ').slice(1).join(' '),
-        avatar: contact?.avatar || `https://placehold.co/40x40.png?text=${((formData.name || '?').charAt(0)).toUpperCase()}`,
-        email: formData.email,
-        phone: formData.phone,
-        phone_number_jid: contact?.phone_number_jid,
-        businessProfile: {
-            ...contact?.businessProfile,
-            companyName: formData.businessProfile?.companyName,
-            ownerId: formData.businessProfile?.ownerId,
-            serviceInterest: formData.businessProfile?.serviceInterest,
-            currentProvider: formData.businessProfile?.currentProvider,
-            tags: formData.businessProfile?.tags || [],
-            deals: contact?.businessProfile?.deals || [],
-            tasks: contact?.businessİnterest?.tasks || [],
-            activities: contact?.businessProfile?.activities || [],
-        },
-    };
-    onSave(newContactData);
-  }
+  }, [state, onSave]);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -83,37 +65,39 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
         <DialogHeader>
           <DialogTitle>{contact ? 'Editar Contato' : 'Criar Novo Contato'}</DialogTitle>
           <DialogDescription>
-            Preencha os detalhes abaixo para adicionar um novo contato ao seu CRM.
+            Preencha os detalhes abaixo para adicionar ou atualizar um contato no seu CRM.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
+        <form action={formAction}>
+            <input type="hidden" name="id" value={contact?.id || ''} />
+            <input type="hidden" name="workspaceId" value={workspaceId} />
             <div className="grid max-h-[70vh] grid-cols-1 gap-8 overflow-y-auto p-1 md:grid-cols-2">
             {/* Coluna da Esquerda */}
             <div className="space-y-4">
                 <div className="space-y-2">
-                <Label htmlFor="name">Nome Completo*</Label>
-                <Input id="name" name="name" placeholder="João da Silva" required value={formData.name || ''} onChange={handleChange} />
+                    <Label htmlFor="name">Nome Completo*</Label>
+                    <Input id="name" name="name" placeholder="João da Silva" required defaultValue={contact?.name || ''} />
                 </div>
                 <div className="space-y-2">
-                <Label htmlFor="email">E-mail</Label>
-                <Input id="email" name="email" type="email" placeholder="joao.silva@email.com" value={formData.email || ''} onChange={handleChange} />
+                    <Label htmlFor="email">E-mail</Label>
+                    <Input id="email" name="email" type="email" placeholder="joao.silva@email.com" defaultValue={contact?.email || ''}/>
                 </div>
                 <div className="space-y-2">
-                <Label htmlFor="phone">Telefone*</Label>
-                <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required value={formData.phone || ''} onChange={handleChange} />
+                    <Label htmlFor="phone">Telefone*</Label>
+                    <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required defaultValue={contact?.phone || ''}/>
                 </div>
-                <div className="space-y-2">
-                <Label htmlFor="companyName">Empresa (Opcional)</Label>
-                <Input id="companyName" name="companyName" placeholder="InnovateTech Soluções" value={formData.businessProfile?.companyName || ''} onChange={(e) => setFormData(p => ({...p, businessProfile: {...p.businessProfile, companyName: e.target.value} as any}))} />
+                 <div className="space-y-2">
+                    <Label htmlFor="address">Endereço Completo</Label>
+                    <Input id="address" name="address" placeholder="Rua, Número, Bairro, Cidade" defaultValue={contact?.address || ''}/>
                 </div>
             </div>
             
             {/* Coluna da Direita */}
             <div className="space-y-4">
                 <div className="space-y-2">
-                    <Label htmlFor="serviceInterest">Plano de Interesse</Label>
-                    <Select name="serviceInterest" value={formData.businessProfile?.serviceInterest || 'none'} onValueChange={(val) => handleSelectChange('serviceInterest', val)}>
-                        <SelectTrigger id="serviceInterest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
+                    <Label htmlFor="service_interest">Plano de Interesse</Label>
+                    <Select name="service_interest" defaultValue={contact?.service_interest || 'none'}>
+                        <SelectTrigger id="service_interest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="none">Nenhum</SelectItem>
                             <SelectItem value="Fibra 100MB">Fibra 100MB</SelectItem>
@@ -125,13 +109,13 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
                     </Select>
                 </div>
                 <div className="space-y-2">
-                    <Label htmlFor="currentProvider">Provedor Atual</Label>
-                    <Input id="currentProvider" name="currentProvider" placeholder="Ex: Vivo, Claro" value={formData.businessProfile?.currentProvider || ''} onChange={(e) => setFormData(p => ({...p, businessProfile: {...p.businessProfile, currentProvider: e.target.value} as any}))}/>
+                    <Label htmlFor="current_provider">Provedor Atual</Label>
+                    <Input id="current_provider" name="current_provider" placeholder="Ex: Vivo, Claro" defaultValue={contact?.current_provider || ''} />
                 </div>
                 <div className="space-y-2">
-                    <Label htmlFor="ownerId">Vendedor Responsável</Label>
-                    <Select name="ownerId" value={formData.businessProfile?.ownerId || ''} onValueChange={(val) => handleSelectChange('ownerId', val)}>
-                        <SelectTrigger id="ownerId"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
+                    <Label htmlFor="owner_id">Vendedor Responsável</Label>
+                    <Select name="owner_id" defaultValue={contact?.owner_id || ''}>
+                        <SelectTrigger id="owner_id"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
                         <SelectContent>
                             {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
                         </SelectContent>
@@ -139,9 +123,16 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
                 </div>
             </div>
             </div>
+             {state.error && (
+                <Alert variant="destructive" className="mt-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Erro ao Salvar</AlertTitle>
+                    <AlertDescription>{state.error}</AlertDescription>
+                </Alert>
+            )}
             <DialogFooter className="pt-6">
-            <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
-            <Button type="submit">Salvar Contato</Button>
+                <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                <SaveButton />
             </DialogFooter>
         </form>
       </DialogContent>

@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -32,6 +33,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.activities CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_usage_logs CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_rules CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_configs CASCADE;',
@@ -57,6 +59,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TYPE IF EXISTS public.chat_status_enum;',
         'DROP TYPE IF EXISTS public.message_type_enum;',
         'DROP TYPE IF EXISTS public.message_status_enum;',
+        'DROP TYPE IF EXISTS public.activity_type_enum;',
     ];
     
     for (const query of teardownQueries) {
@@ -68,6 +71,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
       `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
       `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
+      `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
       
       `CREATE TABLE public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -167,9 +171,22 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           email TEXT,
           phone TEXT,
           phone_number_jid TEXT,
+          address TEXT,
+          service_interest TEXT,
+          current_provider TEXT,
+          owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
           UNIQUE(workspace_id, phone_number_jid)
       );`,
       
+      `CREATE TABLE public.activities (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+        type activity_type_enum NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );`,
+
       `CREATE TABLE public.tags (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,

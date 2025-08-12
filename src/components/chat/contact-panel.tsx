@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { type Chat, type User, type Team, type OnlineAgent, Contact as ContactType } from '@/lib/types';
+import { type Chat, type User, type Team, Contact as ContactType } from '@/lib/types';
 import {
   Mail,
   Phone,
@@ -28,6 +29,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
+import { getWorkspaceUsers } from '@/actions/crm';
 import { useAuth } from '@/hooks/use-auth';
 import { transferChatAction } from '@/actions/chats';
 import { toast } from '@/hooks/use-toast';
@@ -151,14 +153,17 @@ function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransfe
 
 export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [agents, setAgents] = useState<User[]>([]);
+  const user = useAuth();
+  
+  useEffect(() => {
+    if(user?.activeWorkspaceId) {
+        getWorkspaceUsers(user.activeWorkspaceId).then(res => {
+            if(!res.error) setAgents(res.users || []);
+        });
+    }
+  }, [user?.activeWorkspaceId]);
 
-  const handleSaveContact = (contact: ContactType) => {
-    // In a real app, this would be a server action
-    console.log("Saving contact from chat panel:", contact);
-    toast({ title: "Contato Atualizado!", description: `Os dados de ${contact.name} foram salvos.`});
-    setIsEditModalOpen(false);
-    onContactUpdate();
-  }
 
   if (!chat) {
     return (
@@ -179,7 +184,6 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
 
   const { contact, agent } = chat;
   const { businessProfile } = contact;
-  const lastMessage = chat.messages[chat.messages.length - 1];
 
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
@@ -196,7 +200,9 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 isOpen={isEditModalOpen}
                 setIsOpen={setIsEditModalOpen}
                 contact={contact}
-                onSave={handleSaveContact}
+                onSave={onContactUpdate}
+                workspaceId={chat.workspace_id}
+                agents={agents}
             />
          </Dialog>
       </div>
@@ -208,7 +214,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
-            <p className="text-sm text-muted-foreground">{businessProfile?.companyName}</p>
+            <p className="text-sm text-muted-foreground">{contact.businessProfile?.companyName}</p>
           </div>
           
           <Separator className="my-6"/>
@@ -218,27 +224,25 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
             {contact.email && (
               <div className="flex items-center gap-3">
                 <Mail className="h-4 w-4 text-muted-foreground" />
-                <a href={`mailto:${contact.email}`} className="truncate hover:underline cursor-pointer">
-                  {contact.email}
-                </a>
+                <span>{contact.email}</span>
               </div>
             )}
-            {contact.phone_number_jid && (
+            {contact.phone && (
               <div className="flex items-center gap-3">
-                <Smartphone className="h-4 w-4 text-muted-foreground" />
-                <span>{contact.phone_number_jid}</span>
+                <Phone className="h-4 w-4 text-muted-foreground" />
+                <span>{contact.phone}</span>
               </div>
             )}
-            {lastMessage?.instance_name && (
+            {chat.instance_name && (
               <div className="flex items-center gap-3">
                 <Server className="h-4 w-4 text-muted-foreground" />
-                <span>Instância: {lastMessage.instance_name}</span>
+                <span>Instância: {chat.instance_name}</span>
               </div>
             )}
-             {businessProfile?.companyName && (
+             {contact.address && (
               <div className="flex items-center gap-3">
                 <Building className="h-4 w-4 text-muted-foreground" />
-                <span>{businessProfile.companyName}</span>
+                <span>{contact.address}</span>
               </div>
             )}
           </div>
@@ -307,7 +311,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 <CardContent className="p-0 space-y-3">
                     {businessProfile?.tasks && businessProfile.tasks.length > 0 ? (
                         businessProfile.tasks.map(task => (
-                            <div key={task.id} className="flex items-start gap-2 p-3 border rounded-lg bg-background text-sm">
+                            <div key={task.id} className="flex items-start gap-2 text-sm">
                             <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 ${task.completed ? 'text-primary' : 'text-muted-foreground'}`}/>
                             <p className={`font-medium ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.description}</p>
                             </div>

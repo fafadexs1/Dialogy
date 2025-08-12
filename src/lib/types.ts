@@ -62,14 +62,22 @@ export type Contact = {
   id: string;
   workspace_id: string;
   name: string;
-  avatar: string;
+  avatar?: string;
   email?: string;
   phone?: string;
   phone_number_jid?: string;
   lastSeen?: string;
   businessProfile?: BusinessProfile;
-  firstName: string;
-  lastName: string;
+  // Campos que podem não vir do DB diretamente mas são úteis no front
+  firstName?: string;
+  lastName?: string;
+  tags?: Tag[];
+  owner?: User;
+  last_activity?: string;
+  address?: string;
+  service_interest?: string;
+  current_provider?: string;
+  owner_id?: string;
 }
 
 export type OnlineAgent = {
@@ -113,9 +121,12 @@ export type Task = {
 };
 
 export type Activity = {
+    id?: string;
+    contact_id?: string;
     type: 'ligacao' | 'email' | 'whatsapp' | 'visita' | 'viabilidade' | 'contrato' | 'agendamento' | 'tentativa-contato' | 'nota';
     date: string;
     notes: string;
+    user_id?: string; // ID do agente que registrou
 }
 
 export type MessageSender = User | Contact | undefined;
@@ -191,7 +202,11 @@ export interface SelectableOption {
     color: string;
 }
 
-export interface Tag extends SelectableOption {
+export interface Tag {
+    id: string;
+    value: string;
+    label: string;
+    color: string;
     is_close_reason?: boolean;
 }
 

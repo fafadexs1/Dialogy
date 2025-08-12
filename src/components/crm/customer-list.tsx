@@ -1,27 +1,28 @@
 
+
 'use client';
 
-import React, { useState } from 'react';
-import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, MoreHorizontal } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, MoreHorizontal, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type Contact } from '@/lib/types';
+import { type Contact, Tag, User } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { mockTags, agents, contacts as mockContacts } from '@/lib/mock-data';
 import { Badge } from '../ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import CustomerProfile from './customer-profile';
 import { AddActivityForm } from './add-activity-form';
 import { LogAttemptForm } from './log-attempt-form';
-
-interface CustomerListProps {
-  customers: Contact[];
-}
+import { useAuth } from '@/hooks/use-auth';
+import { getContacts, getTags, getWorkspaceUsers, deleteContactAction } from '@/actions/crm';
+import { toast } from '@/hooks/use-toast';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => void }) {
   return (
@@ -35,14 +36,20 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
             <DropdownMenuItem onClick={() => onSelect('view', contact)}><Eye className="mr-2 h-4 w-4" /> Ver Detalhes</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneOff className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact);}}><Edit className="mr-2 h-4 w-4" /> Editar Contato</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem>
         </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-export default function CustomerList({ customers: initialCustomers = [] }: CustomerListProps) {
-  const [customers, setCustomers] = useState(initialCustomers);
+export default function CustomerList() {
+  const user = useAuth();
+  const [customers, setCustomers] = useState<Contact[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [agents, setAgents] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('todos');
   const [tagFilter, setTagFilter] = useState('todos');
@@ -59,8 +66,38 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
   const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   
+  const fetchData = React.useCallback(async () => {
+    if (!user?.activeWorkspaceId) return;
+    setLoading(true);
+    try {
+        const [contactsRes, tagsRes, agentsRes] = await Promise.all([
+            getContacts(user.activeWorkspaceId),
+            getTags(user.activeWorkspaceId),
+            getWorkspaceUsers(user.activeWorkspaceId)
+        ]);
 
-  const handleAction = (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
+        if (contactsRes.error) throw new Error(contactsRes.error);
+        setCustomers(contactsRes.contacts || []);
+
+        if (tagsRes.error) throw new Error(tagsRes.error);
+        setTags(tagsRes.tags || []);
+        
+        if (agentsRes.error) throw new Error(agentsRes.error);
+        setAgents(agentsRes.users || []);
+
+    } catch (error: any) {
+        toast({ title: "Erro ao carregar CRM", description: error.message, variant: 'destructive'});
+    } finally {
+        setLoading(false);
+    }
+  }, [user?.activeWorkspaceId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+
+  const handleAction = async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
     setSelectedContact(contact);
     switch (action) {
       case 'view':
@@ -78,28 +115,32 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
         break;
       case 'delete':
         if (window.confirm(`Tem certeza que deseja excluir o contato "${contact.name}"?`)) {
-          setCustomers(prev => prev.filter(c => c.id !== contact.id));
+            const result = await deleteContactAction(contact.id);
+            if(result.success) {
+                toast({ title: 'Contato excluído!'});
+                fetchData();
+            } else {
+                toast({ title: 'Erro ao excluir', description: result.error, variant: 'destructive'});
+            }
         }
         break;
     }
   };
-
-  const handleSaveContact = (contact: Contact) => {
-    if (editingContact) {
-      setCustomers(prev => prev.map(c => c.id === contact.id ? contact : c));
-    } else {
-      setCustomers(prev => [contact, ...prev]);
-    }
+  
+  const handleSaveSuccess = () => {
     setIsAddEditModalOpen(false);
     setEditingContact(null);
+    setIsActivityModalOpen(false);
+    setIsLogAttemptModalOpen(false);
+    fetchData(); // Re-fetch all data to reflect changes
   }
 
 
   const filteredCustomers = customers.filter((customer) => {
-      const searchString = `${customer.name} ${customer.email || ''} ${customer.businessProfile?.companyName || ''}`.toLowerCase();
+      const searchString = `${customer.name} ${customer.email || ''} ${customer.address || ''}`.toLowerCase();
       const matchesSearch = searchString.includes(searchTerm.toLowerCase());
-      const matchesOwner = ownerFilter === 'todos' || customer.businessProfile?.ownerId === ownerFilter;
-      const matchesTag = tagFilter === 'todos' || customer.businessProfile?.tags.some(t => t.value === tagFilter);
+      const matchesOwner = ownerFilter === 'todos' || customer.owner_id === ownerFilter;
+      const matchesTag = tagFilter === 'todos' || customer.tags?.some(t => t.value === tagFilter);
       return matchesSearch && matchesOwner && matchesTag;
   });
 
@@ -113,7 +154,7 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
   const endItem = Math.min(currentPage * itemsPerPage, filteredCustomers.length);
 
   const getTagStyle = (tagValue: string) => {
-      const tag = mockTags.find(t => t.value === tagValue);
+      const tag = tags.find(t => t.value === tagValue);
       return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
   };
   
@@ -121,6 +162,14 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
     setItemsPerPage(Number(value));
     setCurrentPage(1); // Reset to first page
   };
+
+  if (!user) {
+    return (
+        <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+        </div>
+    )
+  }
 
   return (
      <div className="flex-1 flex flex-col overflow-hidden">
@@ -145,7 +194,7 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="todos">Todas Tags</SelectItem>
-                            {mockTags.map(tag => (
+                            {tags.map(tag => (
                                  <SelectItem key={tag.id} value={tag.value}>
                                     <div className='flex items-center gap-2'>
                                         <span className='w-2 h-2 rounded-full' style={{backgroundColor: tag.color}}></span>
@@ -194,7 +243,13 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {paginatedCustomers.map(customer => (
+                            {loading ? (
+                                <TableRow>
+                                    <TableCell colSpan={8} className="h-24 text-center">
+                                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+                                    </TableCell>
+                                </TableRow>
+                            ) : paginatedCustomers.map(customer => (
                                 <TableRow 
                                   key={customer.id} 
                                 >
@@ -212,22 +267,24 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-xs">{customer.phone}</TableCell>
-                                    <TableCell className="text-xs">{customer.businessProfile?.ownerName || 'N/A'}</TableCell>
+                                    <TableCell className="text-xs">{customer.owner?.name || 'N/A'}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-wrap gap-1">
-                                            {customer.businessProfile?.tags.map(tag => (
+                                            {customer.tags?.map(tag => (
                                                 <Badge key={tag.id} style={getTagStyle(tag.value)}>{tag.label}</Badge>
                                             ))}
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-center">
-                                       {customer.businessProfile?.serviceInterest && (
+                                       {customer.service_interest && (
                                           <Badge variant={"secondary"}>
-                                              {customer.businessProfile.serviceInterest}
+                                              {customer.service_interest}
                                           </Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="text-center text-xs">{customer.businessProfile?.lastActivity}</TableCell>
+                                    <TableCell className="text-center text-xs">
+                                        {customer.last_activity ? format(new Date(customer.last_activity), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}
+                                    </TableCell>
                                      <TableCell className="text-center">
                                         <TableActions contact={customer} onSelect={handleAction} />
                                     </TableCell>
@@ -235,7 +292,7 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                             ))}
                         </TableBody>
                     </Table>
-                    {filteredCustomers.length === 0 && (
+                    {!loading && filteredCustomers.length === 0 && (
                         <div className="text-center p-6 text-sm text-muted-foreground">Nenhum contato encontrado.</div>
                     )}
                 </div>
@@ -271,12 +328,16 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
         </div>
         
         {/* Modals and Side Panels */}
-        <AddContactForm 
-            isOpen={isAddEditModalOpen}
-            setIsOpen={setIsAddEditModalOpen}
-            onSave={handleSaveContact}
-            contact={editingContact}
-        />
+        {user.activeWorkspaceId && (
+            <AddContactForm 
+                isOpen={isAddEditModalOpen}
+                setIsOpen={setIsAddEditModalOpen}
+                onSave={handleSaveSuccess}
+                contact={editingContact}
+                workspaceId={user.activeWorkspaceId}
+                agents={agents}
+            />
+        )}
         {selectedContact && (
             <>
                 <CustomerProfile 
@@ -284,20 +345,22 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                     isOpen={isProfileOpen}
                     setIsOpen={setIsProfileOpen}
                     onAction={handleAction}
+                    onMutate={fetchData}
                 />
                 <AddActivityForm
                     contact={selectedContact}
                     isOpen={isActivityModalOpen}
                     setIsOpen={setIsActivityModalOpen}
+                    onSave={handleSaveSuccess}
                 />
                  <LogAttemptForm
                     contact={selectedContact}
                     isOpen={isLogAttemptModalOpen}
                     setIsOpen={setIsLogAttemptModalOpen}
+                    onSave={handleSaveSuccess}
                 />
             </>
         )}
     </div>
   );
 }
-

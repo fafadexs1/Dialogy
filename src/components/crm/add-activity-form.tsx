@@ -1,7 +1,8 @@
 
+
 'use client';
 
-import React from 'react';
+import React, { useEffect, useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -21,21 +22,40 @@ import {
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import type { Contact } from '@/lib/types';
+import { useFormStatus } from 'react-dom';
+import { Loader2, Save } from 'lucide-react';
+import { addActivityAction } from '@/actions/crm';
+import { toast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle } from 'lucide-react';
 
 interface AddActivityFormProps {
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
     contact: Contact;
+    onSave: () => void;
 }
 
-export function AddActivityForm({ isOpen, setIsOpen, contact }: AddActivityFormProps) {
-  
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Here you would typically call a server action to save the activity
-    console.log('Activity form submitted for contact:', contact.id);
-    setIsOpen(false);
-  }
+function SubmitButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Save className="mr-2 h-4 w-4" />
+            Salvar Atividade
+        </Button>
+    )
+}
+
+export function AddActivityForm({ isOpen, setIsOpen, contact, onSave }: AddActivityFormProps) {
+  const [state, formAction] = useActionState(addActivityAction, { success: false, error: null });
+
+  useEffect(() => {
+    if (state.success) {
+        toast({ title: "Atividade registrada com sucesso!" });
+        onSave();
+    }
+  }, [state, onSave]);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -46,24 +66,25 @@ export function AddActivityForm({ isOpen, setIsOpen, contact }: AddActivityFormP
             Registre uma nova interação ou nota para este contato.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
+        <form action={formAction}>
+            <input type="hidden" name="contactId" value={contact.id} />
             <div className="modal-body space-y-4 py-4">
                 <div>
                 <Label htmlFor="activity-type">Tipo de Atividade*</Label>
-                <Select name="activityType" required defaultValue="nota">
+                <Select name="type" required defaultValue="nota">
                     <SelectTrigger id="activity-type">
                         <SelectValue placeholder="Selecione o tipo"/>
                     </SelectTrigger>
                     <SelectContent>
-                        <option value="ligacao">Ligação</option>
-                        <option value="email">Email</option>
-                        <option value="whatsapp">WhatsApp</option>
-                        <option value="visita">Visita Técnica/Comercial</option>
-                        <option value="viabilidade">Verificação Viabilidade</option>
-                        <option value="contrato">Envio Contrato</option>
-                        <option value="agendamento">Agendamento Instalação</option>
-                        <option value="tentativa-contato">Tentativa de Contato</option>
-                        <option value="nota">Nota Interna</option>
+                        <SelectItem value="ligacao">Ligação</SelectItem>
+                        <SelectItem value="email">Email</SelectItem>
+                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                        <SelectItem value="visita">Visita Técnica/Comercial</SelectItem>
+                        <SelectItem value="viabilidade">Verificação Viabilidade</SelectItem>
+                        <SelectItem value="contrato">Envio Contrato</SelectItem>
+                        <SelectItem value="agendamento">Agendamento Instalação</SelectItem>
+                        <SelectItem value="tentativa-contato">Tentativa de Contato</SelectItem>
+                        <SelectItem value="nota">Nota Interna</SelectItem>
                     </SelectContent>
                 </Select>
                 </div>
@@ -71,10 +92,17 @@ export function AddActivityForm({ isOpen, setIsOpen, contact }: AddActivityFormP
                     <Label htmlFor="activity-notes">Notas*</Label>
                     <Textarea id="activity-notes" name="notes" rows={4} required placeholder="Detalhes da atividade..."/>
                 </div>
+                 {state.error && (
+                    <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Erro</AlertTitle>
+                        <AlertDescription>{state.error}</AlertDescription>
+                    </Alert>
+                )}
             </div>
             <DialogFooter>
                 <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
-                <Button type="submit">Salvar Atividade</Button>
+                <SubmitButton />
             </DialogFooter>
         </form>
       </DialogContent>

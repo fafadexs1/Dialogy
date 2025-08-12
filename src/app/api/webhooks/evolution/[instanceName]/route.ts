@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -175,11 +176,12 @@ async function handleMessagesUpsert(payload: any) {
         if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
         const workspaceId = instanceRes.rows[0].workspace_id;
 
-        // 2. Criar ou atualizar o contato
+        // 2. Criar ou atualizar o contato. Adicionado `phone`
         const contactRes = await client.query(
-            `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3)
-             ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
-             RETURNING id`, [workspaceId, pushName || contactJid, contactJid]
+            `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (workspace_id, phone_number_jid) 
+             DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone
+             RETURNING id`, [workspaceId, pushName || contactJid, sender || contactJid, contactJid]
         );
         const contactId = contactRes.rows[0].id;
         

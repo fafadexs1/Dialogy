@@ -1,30 +1,45 @@
 
+
 'use client';
 
-import React from 'react';
-import type { Contact } from '@/lib/types';
+import React, { useEffect, useState } from 'react';
+import type { Contact, Tag } from '@/lib/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Separator } from '../ui/separator';
 import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as TagIcon, Globe, Clock } from 'lucide-react';
 import { Badge } from '../ui/badge';
-import { mockTags } from '@/lib/mock-data';
 import { ScrollArea } from '../ui/scroll-area';
+import { getTags } from '@/actions/crm';
+import { useAuth } from '@/hooks/use-auth';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 interface CustomerProfileProps {
     contact: Contact | null;
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
     onAction: (action: 'edit' | 'addActivity', contact: Contact) => void;
+    onMutate: () => void;
 }
 
-export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }: CustomerProfileProps) {
+export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, onMutate }: CustomerProfileProps) {
+    const user = useAuth();
+    const [tags, setTags] = useState<Tag[]>([]);
+    
+    useEffect(() => {
+        if(isOpen && user?.activeWorkspaceId) {
+            getTags(user.activeWorkspaceId).then(res => setTags(res.tags || []));
+            onMutate(); // Re-fetch data when panel opens
+        }
+    }, [isOpen, user?.activeWorkspaceId, onMutate]);
+    
     if (!contact) return null;
     const { businessProfile } = contact;
     
     const getTagStyle = (tagValue: string) => {
-        const tag = mockTags.find(t => t.value === tagValue);
+        const tag = tags.find(t => t.value === tagValue);
         return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
     };
 
@@ -33,7 +48,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
             <SheetContent className="sm:max-w-lg p-0">
                 <div className="flex flex-col h-full">
                     <SheetHeader className="p-6 border-b">
-                         <SheetTitle>Detalhes de {contact.name}</SheetTitle>
+                         <SheetTitle className='sr-only'>Detalhes de {contact.name}</SheetTitle>
                          <SheetDescription className="sr-only">Exibindo detalhes para {contact.name}.</SheetDescription>
                          <div className="flex items-center mb-4 pt-4">
                             <Avatar className="h-16 w-16 mr-4">
@@ -42,7 +57,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
                             </Avatar>
                             <div>
                                 <h2 className="text-xl font-bold">{contact.name}</h2>
-                                <p className="text-sm text-muted-foreground">{businessProfile?.companyName}</p>
+                                <p className="text-sm text-muted-foreground">{contact.businessProfile?.companyName}</p>
                             </div>
                         </div>
                          <div className="flex items-center gap-2">
@@ -64,7 +79,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
                                     {contact.email && (<div className="flex items-center gap-3"><Mail className="h-4 w-4 text-muted-foreground" /><span>{contact.email}</span></div>)}
                                     {contact.phone && (<div className="flex items-center gap-3"><Phone className="h-4 w-4 text-muted-foreground" /><span>{contact.phone}</span></div>)}
                                     {businessProfile?.website && (<div className="flex items-center gap-3"><Globe className="h-4 w-4 text-muted-foreground" /><span>{businessProfile.website}</span></div>)}
-                                    {businessProfile?.companyName && (<div className="flex items-center gap-3"><Building className="h-4 w-4 text-muted-foreground" /><span>{businessProfile.companyName}</span></div>)}
+                                    {contact.address && (<div className="flex items-center gap-3"><Building className="h-4 w-4 text-muted-foreground" /><span>{contact.address}</span></div>)}
                                 </div>
                             </section>
 
@@ -74,7 +89,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
                             <section>
                                 <h3 className="text-sm font-semibold text-primary mb-3">Etiquetas (Tags)</h3>
                                 <div className="flex flex-wrap gap-2">
-                                    {businessProfile?.tags.map(tag => (
+                                    {contact.tags?.map(tag => (
                                         <Badge key={tag.id} style={getTagStyle(tag.value)}>{tag.label}</Badge>
                                     ))}
                                 </div>
@@ -127,14 +142,14 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
                             <section>
                                 <h3 className="text-sm font-semibold text-primary mb-3">Histórico de Atividades</h3>
                                 <div className="space-y-3">
-                                    {businessProfile?.activities && businessProfile.activities.length > 0 ? (
-                                        businessProfile.activities.map((activity, index) => (
+                                    {contact.businessProfile?.activities && contact.businessProfile.activities.length > 0 ? (
+                                        contact.businessProfile.activities.map((activity, index) => (
                                             <div key={index} className="p-3 border rounded-lg bg-secondary/50 text-sm">
                                                 <p className="font-semibold capitalize">{activity.type.replace(/-/g, ' ')}</p>
                                                 <p className="text-muted-foreground mt-1">{activity.notes}</p>
                                                 <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
                                                     <Clock className="h-3 w-3" />
-                                                    <span>{new Date(activity.date).toLocaleDateString('pt-BR', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                                                    <span>{format(new Date(activity.date), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
                                                 </div>
                                             </div>
                                         ))

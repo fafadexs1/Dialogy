@@ -1,0 +1,208 @@
+
+
+'use server';
+
+import { db } from '@/lib/db';
+import type { Contact, Tag, User, Activity } from '@/lib/types';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { revalidatePath } from 'next/cache';
+
+
+async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
+    const res = await db.query(`
+        SELECT 1
+        FROM user_workspace_roles uwr
+        JOIN role_permissions rp ON uwr.role_id = rp.role_id
+        WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND rp.permission_id = $3
+    `, [userId, workspaceId, permission]);
+    return res.rowCount > 0;
+}
+
+
+export async function getContacts(workspaceId: string): Promise<{ contacts: Contact[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { contacts: null, error: "Usuário não autenticado." };
+
+    if (!await hasPermission(session.user.id, workspaceId, 'crm:view')) {
+         return { contacts: null, error: "Acesso não autorizado." };
+    }
+
+    try {
+        const res = await db.query(`
+            SELECT 
+                c.id, c.name, c.email, c.phone, c.avatar_url, c.address, c.service_interest, c.current_provider, c.owner_id,
+                u.full_name as owner_name,
+                (SELECT MAX(created_at) FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE contact_id = c.id)) as last_activity,
+                array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) FILTER (WHERE t.id IS NOT NULL) as tags
+            FROM contacts c
+            LEFT JOIN users u ON c.owner_id = u.id
+            LEFT JOIN contact_tags ct ON c.id = ct.contact_id
+            LEFT JOIN tags t ON ct.tag_id = t.id
+            WHERE c.workspace_id = $1
+            GROUP BY c.id, u.full_name
+            ORDER BY c.name ASC
+        `, [workspaceId]);
+
+        const contacts: Contact[] = res.rows.map(row => ({
+            ...row,
+            tags: row.tags?.map((tag: string) => {
+                const [id, label, value, color] = tag.split('::');
+                return { id, label, value, color };
+            }) || [],
+            owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined
+        }));
+
+        return { contacts };
+    } catch (error) {
+        console.error("[GET_CONTACTS] Error:", error);
+        return { contacts: null, error: "Falha ao buscar contatos." };
+    }
+}
+
+export async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    const workspaceId = formData.get('workspaceId') as string;
+    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+         return { success: false, error: "Você não tem permissão para editar contatos." };
+    }
+
+    const id = formData.get('id') as string;
+    const data = {
+        name: formData.get('name') as string,
+        email: formData.get('email') as string || null,
+        phone: formData.get('phone') as string,
+        address: formData.get('address') as string || null,
+        service_interest: formData.get('service_interest') as string || null,
+        current_provider: formData.get('current_provider') as string || null,
+        owner_id: formData.get('owner_id') as string || null,
+    };
+    
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        if (id) { // Update
+             await client.query(
+                `UPDATE contacts 
+                 SET name = $1, email = $2, phone = $3, address = $4, service_interest = $5, current_provider = $6, owner_id = $7
+                 WHERE id = $8 AND workspace_id = $9`,
+                [data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id, id, workspaceId]
+            );
+        } else { // Create
+            await client.query(
+                `INSERT INTO contacts (workspace_id, name, email, phone, address, service_interest, current_provider, owner_id) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [workspaceId, data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id]
+            );
+        }
+        await client.query('COMMIT');
+        revalidatePath('/crm');
+        return { success: true, error: null };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("[SAVE_CONTACT] Error:", error);
+        return { success: false, error: "Falha ao salvar contato no banco de dados." };
+    } finally {
+        client.release();
+    }
+}
+
+export async function deleteContactAction(contactId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    
+    const client = await db.connect();
+    try {
+        const contactRes = await client.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
+        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
+        const { workspace_id } = contactRes.rows[0];
+
+        if (!await hasPermission(session.user.id, workspace_id, 'crm:delete')) {
+            return { success: false, error: "Você não tem permissão para excluir contatos." };
+        }
+        
+        await client.query('DELETE FROM contacts WHERE id = $1', [contactId]);
+        revalidatePath('/crm');
+        return { success: true };
+    } catch(error) {
+        console.error("[DELETE_CONTACT] Error:", error);
+        return { success: false, error: "Falha ao excluir o contato." };
+    }
+}
+
+export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { tags: null, error: "Usuário não autenticado." };
+
+    try {
+        const res = await db.query('SELECT id, label, value, color, is_close_reason FROM tags WHERE workspace_id = $1', [workspaceId]);
+        return { tags: res.rows };
+    } catch (error) {
+        console.error("[GET_TAGS] Error:", error);
+        return { tags: null, error: "Falha ao buscar as etiquetas." };
+    }
+}
+
+export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { users: null, error: "Usuário não autenticado." };
+
+    try {
+        const res = await db.query(`
+            SELECT u.id, u.full_name as name, u.avatar_url as avatar, u.email
+            FROM users u
+            JOIN user_workspace_roles uwr ON u.id = uwr.user_id
+            WHERE uwr.workspace_id = $1
+            ORDER BY u.full_name
+        `, [workspaceId]);
+        return { users: res.rows };
+    } catch (error) {
+        console.error("[GET_WORKSPACE_USERS] Error:", error);
+        return { users: null, error: "Falha ao buscar usuários do workspace." };
+    }
+}
+
+
+export async function addActivityAction(
+    prevState: any,
+    formData: FormData
+): Promise<{ success: boolean; error?: string | null; }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    const contactId = formData.get('contactId') as string;
+    const activity: Omit<Activity, 'id'> = {
+        contact_id: contactId,
+        type: formData.get('type') as Activity['type'],
+        notes: formData.get('notes') as string,
+        date: new Date().toISOString(),
+        user_id: session.user.id,
+    };
+    
+    if(!contactId || !activity.type || !activity.notes) {
+        return { success: false, error: "Dados da atividade incompletos."}
+    }
+
+    try {
+        const contactRes = await db.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
+        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
+        const { workspace_id } = contactRes.rows[0];
+
+        if (!await hasPermission(session.user.id, workspace_id, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para adicionar atividades." };
+        }
+        
+        await db.query(
+            'INSERT INTO activities (contact_id, user_id, type, notes) VALUES ($1, $2, $3, $4)',
+            [activity.contact_id, activity.user_id, activity.type, activity.notes]
+        );
+
+        revalidatePath('/crm');
+        return { success: true, error: null };
+    } catch (error) {
+        console.error("[ADD_ACTIVITY] Error:", error);
+        return { success: false, error: "Falha ao registrar atividade." };
+    }
+}
