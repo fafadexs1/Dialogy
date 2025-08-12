@@ -108,7 +108,7 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
      <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-card shadow-sm p-4 border-b border-border flex-shrink-0">
             <div className="flex flex-wrap justify-between items-center gap-3">
-                <h1 className="text-xl font-semibold text-foreground">CRM Provedor ISP</h1>
+                <h1 className="text-xl font-semibold text-foreground">CRM</h1>
                 <div className="flex items-center space-x-3">
                      <Select value={ownerFilter} onValueChange={setOwnerFilter}>
                         <SelectTrigger className="text-xs h-9 w-auto md:w-[150px]">
