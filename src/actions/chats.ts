@@ -73,12 +73,17 @@ export async function transferChatAction(
     try {
         await client.query('BEGIN');
 
-        const chatRes = await client.query('SELECT workspace_id, agent_id as current_chat_agent_id FROM chats WHERE id = $1', [chatId]);
+        const chatRes = await client.query('SELECT workspace_id, agent_id as current_chat_agent_id, status FROM chats WHERE id = $1', [chatId]);
         if (chatRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return { success: false, error: "Conversa não encontrada." };
         }
-        const { workspace_id: workspaceId, current_chat_agent_id } = chatRes.rows[0];
+        const { workspace_id: workspaceId, current_chat_agent_id, status } = chatRes.rows[0];
+        
+        if (status === 'encerrados') {
+            await client.query('ROLLBACK');
+            return { success: false, error: "Não é possível transferir um atendimento que já foi encerrado." };
+        }
         
         if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
             await client.query('ROLLBACK');

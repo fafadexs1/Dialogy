@@ -42,7 +42,7 @@ interface ContactPanelProps {
   onContactUpdate: () => void;
 }
 
-function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransferSuccess: () => void }) {
+function TransferChatDialog({ chat, onTransferSuccess, disabled }: { chat: Chat, onTransferSuccess: () => void, disabled?: boolean }) {
     const currentUser = useAuth();
     const allOnlineAgents = usePresence();
     const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
@@ -84,7 +84,7 @@ function TransferChatDialog({ chat, onTransferSuccess }: { chat: Chat, onTransfe
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" disabled={disabled}>
                     <Send className="mr-2 h-4 w-4" />
                     Transferir
                 </Button>
@@ -253,7 +253,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                   <UserCheck className="h-4 w-4" />
                   Atendente Responsável
               </h4>
-               <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} />
+               <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
             </div>
 
             {agent && agent.id !== 'unknown' ? (
