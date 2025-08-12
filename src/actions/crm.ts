@@ -31,15 +31,18 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
     try {
         const res = await db.query(`
             SELECT 
-                c.*,
+                c.id, c.workspace_id, c.name, c.avatar_url, c.email, c.phone, c.phone_number_jid, c.address, 
+                c.service_interest, c.current_provider, c.owner_id, c.created_at,
                 (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
-                (SELECT MAX(m.created_at) FROM messages m JOIN chats ch ON m.chat_id = ch.id WHERE ch.contact_id = c.id) as last_activity,
-                (SELECT array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) 
-                 FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id) as tags
+                (SELECT MAX(a.date) FROM activities a WHERE a.contact_id = c.id) as last_activity,
+                COALESCE(
+                    (SELECT array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) 
+                     FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id),
+                    '{}'::text[]
+                ) as tags
             FROM contacts c
             WHERE c.workspace_id = $1
-            GROUP BY c.id
-            ORDER BY c.name ASC;
+            ORDER BY c.created_at DESC;
         `, [workspaceId]);
 
         const contacts: Contact[] = res.rows.map(row => ({
@@ -73,7 +76,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         email: formData.get('email') as string || null,
         phone: formData.get('phone') as string,
         address: formData.get('address') as string || null,
-        service_interest: formData.get('service_interest') as string || null,
+        service_interest: (formData.get('service_interest') as string) === 'none' ? null : (formData.get('service_interest') as string),
         current_provider: formData.get('current_provider') as string || null,
         owner_id: formData.get('owner_id') as string || null,
     };
@@ -113,20 +116,30 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
     
     const client = await db.connect();
     try {
+        await client.query('BEGIN');
         const contactRes = await client.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
         if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
         const { workspace_id } = contactRes.rows[0];
 
         if (!await hasPermission(session.user.id, workspace_id, 'crm:delete')) {
+            await client.query('ROLLBACK');
             return { success: false, error: "Você não tem permissão para excluir contatos." };
         }
         
+        // Adicionar lógica para remover dependências se necessário, por exemplo, contact_tags
+        await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
+        await client.query('DELETE FROM activities WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM contacts WHERE id = $1', [contactId]);
+        
+        await client.query('COMMIT');
         revalidatePath('/crm');
         return { success: true };
     } catch(error) {
+        await client.query('ROLLBACK');
         console.error("[DELETE_CONTACT] Error:", error);
         return { success: false, error: "Falha ao excluir o contato." };
+    } finally {
+      client.release();
     }
 }
 
@@ -171,10 +184,23 @@ export async function addActivityAction(
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const contactId = formData.get('contactId') as string;
+    
+    // Tratamento especial para o formulário de tentativa de contato
+    const outcome = formData.get('outcome') as string;
+    let notes = formData.get('notes') as string;
+    if (outcome) {
+        let formattedNotes = `Resultado: ${outcome.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
+        if (notes) {
+            formattedNotes += ` - Notas: ${notes}`;
+        }
+        notes = formattedNotes;
+    }
+
+
     const activity: Omit<Activity, 'id'> = {
         contact_id: contactId,
         type: formData.get('type') as Activity['type'],
-        notes: formData.get('notes') as string,
+        notes: notes,
         date: new Date().toISOString(),
         user_id: session.user.id,
     };
@@ -193,11 +219,12 @@ export async function addActivityAction(
         }
         
         await db.query(
-            'INSERT INTO activities (contact_id, user_id, type, notes) VALUES ($1, $2, $3, $4)',
-            [activity.contact_id, activity.user_id, activity.type, activity.notes]
+            'INSERT INTO activities (contact_id, user_id, type, notes, date) VALUES ($1, $2, $3, $4, $5)',
+            [activity.contact_id, activity.user_id, activity.type, activity.notes, activity.date]
         );
 
         revalidatePath('/crm');
+        revalidatePath(`/api/chats/${workspace_id}`);
         return { success: true, error: null };
     } catch (error) {
         console.error("[ADD_ACTIVITY] Error:", error);

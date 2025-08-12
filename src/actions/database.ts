@@ -175,6 +175,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           service_interest TEXT,
           current_provider TEXT,
           owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE(workspace_id, phone_number_jid)
       );`,
       
@@ -184,6 +185,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
         type activity_type_enum NOT NULL,
         notes TEXT,
+        date TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
 
@@ -447,7 +449,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
-    
-
-    

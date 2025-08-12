@@ -2,7 +2,7 @@
 
 'use client';
 
-import CrmLayout from '@/components/crm/crm-layout';
+import CustomerList from '@/components/crm/customer-list';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
 import { Loader2 } from 'lucide-react';
@@ -22,7 +22,9 @@ export default function CrmPage() {
 
   return (
     <MainLayout user={user}>
-        <CrmLayout />
+      <div className="flex flex-1 w-full min-h-0 bg-muted/40">
+        <CustomerList />
+      </div>
     </MainLayout>
   );
 }

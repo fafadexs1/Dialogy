@@ -117,6 +117,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                     <Select name="owner_id" defaultValue={contact?.owner_id || ''}>
                         <SelectTrigger id="owner_id"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
                         <SelectContent>
+                             <SelectItem value="">Nenhum</SelectItem>
                             {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
                         </SelectContent>
                     </Select>

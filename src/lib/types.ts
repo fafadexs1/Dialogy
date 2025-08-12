@@ -33,7 +33,6 @@ export type User = {
   last_active_workspace_id?: string;
   firstName: string;
   lastName: string;
-  businessProfile?: BusinessProfile;
   phone?: string;
   online?: boolean;
   memberSince?: string;
@@ -62,48 +61,32 @@ export type Contact = {
   id: string;
   workspace_id: string;
   name: string;
+  avatar_url?: string;
   avatar?: string;
   email?: string;
   phone?: string;
   phone_number_jid?: string;
   lastSeen?: string;
-  businessProfile?: BusinessProfile;
   // Campos que podem não vir do DB diretamente mas são úteis no front
   firstName?: string;
   lastName?: string;
   tags?: Tag[];
   owner?: User;
+  activities?: Activity[];
   last_activity?: string;
   address?: string;
   service_interest?: string;
   current_provider?: string;
   owner_id?: string;
+  created_at: string;
+  deals?: Deal[];
+  tasks?: Task[];
 }
 
 export type OnlineAgent = {
   user: User;
   joined_at: string;
 }
-
-export type BusinessProfile = {
-  workspaceId?: string;
-  companyName?: string;
-  website?: string;
-  industry?: string;
-  employees?: number;
-  deals: Deal[];
-  tasks: Task[];
-  tags: Tag[];
-  activities: Activity[];
-  customFields?: { [key: "string"]: any };
-  dialogPriorityScore?: number;
-  financialRiskScore?: number;
-  ownerId?: string;
-  ownerName?: string;
-  lastActivity?: string;
-  serviceInterest?: string;
-  currentProvider?: string;
-};
 
 export type Deal = {
   id: string;

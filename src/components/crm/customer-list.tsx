@@ -3,10 +3,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, MoreHorizontal, Loader2 } from 'lucide-react';
+import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, Edit, MoreHorizontal, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type Contact, Tag, User } from '@/lib/types';
+import { type Contact, Tag, User, Activity } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
@@ -36,7 +36,7 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
             <DropdownMenuItem onClick={() => onSelect('view', contact)}><Eye className="mr-2 h-4 w-4" /> Ver Detalhes</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneOff className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
-            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact);}}><Edit className="mr-2 h-4 w-4" /> Editar Contato</DropdownMenuItem>
+             <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact);}}><Edit className="mr-2 h-4 w-4" /> Editar Contato</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem>
         </DropdownMenuContent>
     </DropdownMenu>
