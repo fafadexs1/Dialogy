@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -78,7 +79,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
         else text = 'Arquivo';
     }
     
-    if (text.length > charLimit) {
+    if (text && text.length > charLimit) {
         return text.substring(0, charLimit) + '...';
     }
     return text;
