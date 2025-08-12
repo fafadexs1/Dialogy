@@ -234,7 +234,7 @@ export default function CustomerList() {
                             <TableRow>
                                 <TableHead className="w-12"><Checkbox /></TableHead>
                                 <TableHead>Nome</TableHead>
-                                <TableHead>Telefone</TableHead>
+                                <TableHead>JID do WhatsApp</TableHead>
                                 <TableHead>Vendedor</TableHead>
                                 <TableHead>Tags</TableHead>
                                 <TableHead className="text-center">Última Atividade</TableHead>
@@ -265,7 +265,7 @@ export default function CustomerList() {
                                             </div>
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-xs">{customer.phone}</TableCell>
+                                    <TableCell className="text-xs">{customer.phone_number_jid}</TableCell>
                                     <TableCell className="text-xs">{customer.owner?.name || 'N/A'}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-wrap gap-1">
