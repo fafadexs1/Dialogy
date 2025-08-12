@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
-import { FaWhatsapp } from 'react-icons/fa';
+import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 
 // --- Sub-componentes Fortemente Tipados ---
