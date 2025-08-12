@@ -10,7 +10,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -71,6 +70,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
             tags: formData.businessProfile?.tags || [],
             deals: contact?.businessProfile?.deals || [],
             tasks: contact?.businessProfile?.tasks || [],
+            activities: contact?.businessProfile?.activities || [],
         },
     };
     onSave(newContact);
