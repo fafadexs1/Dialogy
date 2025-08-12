@@ -113,10 +113,14 @@ export async function fetchEvolutionAPI(
             throw new Error(`Erro da API Evolution: ${response.statusText} - ${responseBodyText}`);
         }
         
-        if (response.headers.get("content-type")?.includes("application/json") && responseBodyText) {
+        // Verifica se a resposta é um JSON antes de tentar fazer o parse
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json") && responseBodyText) {
             return JSON.parse(responseBodyText);
         }
-        return;
+        // Retorna undefined ou o corpo do texto se não for JSON, dependendo da necessidade.
+        // Para a maioria dos casos da Evolution API, um corpo vazio em uma resposta 200 OK é sucesso.
+        return responseBodyText ? { text: responseBodyText } : undefined;
 
     } catch (error) {
         console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
@@ -230,7 +234,8 @@ export async function createEvolutionApiInstance(
             'CONTACTS_UPDATE',
             'CONTACTS_UPSERT',
             'MESSAGES_DELETE',
-            'MESSAGES_UPSERT'
+            'MESSAGES_UPSERT',
+            'MESSAGES_UPDATE'
         ]
     };
 
@@ -454,5 +459,3 @@ export async function deleteMessageAction(
         client.release();
     }
 }
-
-    

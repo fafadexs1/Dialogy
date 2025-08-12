@@ -4,6 +4,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
+import { fetchEvolutionAPI } from '@/actions/evolution-api';
+
 
 export async function POST(
     request: Request,
@@ -33,8 +35,6 @@ export async function POST(
       await handleMessagesUpsert(payload);
     } else if (event === 'messages.update') {
       await handleMessagesUpdate(payload);
-    } else if (event === 'contacts.update') {
-      await handleContactsUpdate(payload);
     } else {
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
@@ -46,57 +46,6 @@ export async function POST(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-async function handleContactsUpdate(payload: any) {
-    const { instance: instanceName, data } = payload;
-    
-    const contactsToUpdate = Array.isArray(data) ? data : [data];
-
-    if (contactsToUpdate.length === 0 || !contactsToUpdate[0]?.remoteJid) {
-        console.log(`[WEBHOOK_CONTACT_UPDATE] Payload inválido ou sem contatos para atualizar na instância ${instanceName}. Payload:`, JSON.stringify(data));
-        return;
-    }
-
-    console.log(`[WEBHOOK_CONTACT_UPDATE] Recebido evento de atualização para ${contactsToUpdate.length} contato(s) na instância ${instanceName}`);
-    
-    const client = await db.connect();
-    try {
-        await client.query('BEGIN');
-        
-        const instanceRes = await client.query(
-          `SELECT ec.workspace_id 
-           FROM evolution_api_instances AS ei
-           JOIN evolution_api_configs AS ec ON ei.config_id = ec.id
-           WHERE ei.name = $1`,
-          [instanceName]
-        );
-
-        if (instanceRes.rows.length === 0) {
-          throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
-        }
-        const workspaceId = instanceRes.rows[0].workspace_id;
-
-        for (const contactData of contactsToUpdate) {
-            if (contactData && contactData.remoteJid && contactData.profilePicUrl) {
-                console.log(`[WEBHOOK_CONTACT_UPDATE] Atualizando avatar para JID: ${contactData.remoteJid}`);
-                await client.query(
-                    `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
-                    [contactData.profilePicUrl, contactData.remoteJid, workspaceId]
-                );
-            }
-        }
-        
-        await client.query('COMMIT');
-        revalidatePath(`/api/chats/${workspaceId}`);
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('[WEBHOOK_CONTACT_UPDATE] Erro ao atualizar contatos:', error);
-    } finally {
-        client.release();
-    }
-}
-
 
 async function handleMessagesUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
@@ -162,29 +111,57 @@ async function handleMessagesUpsert(payload: any) {
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
     const contactJid = key.remoteJid;
-    // O campo 'sender' costuma ser o número limpo, enquanto o 'remoteJid' é o identificador completo.
     const contactPhone = sender || contactJid.split('@')[0];
     
     const client = await db.connect();
     try {
         await client.query('BEGIN');
 
-        // 1. Obter o workspaceId
+        // 1. Obter o workspaceId e a config da API
         const instanceRes = await client.query(
-            `SELECT ec.workspace_id FROM evolution_api_instances AS ei
-             JOIN evolution_api_configs AS ec ON ei.config_id = ec.id WHERE ei.name = $1`, [instanceName]
+            `SELECT ec.workspace_id, ec.api_url, ec.api_key 
+             FROM evolution_api_instances AS ei
+             JOIN evolution_api_configs AS ec ON ei.config_id = ec.id 
+             WHERE ei.name = $1`, [instanceName]
         );
-        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
-        const workspaceId = instanceRes.rows[0].workspace_id;
+        if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
+        
+        const { workspace_id: workspaceId, api_url, api_key } = instanceRes.rows[0];
+        const apiConfig = { api_url, api_key };
 
-        // 2. Criar ou atualizar o contato.
+
+        // 2. Criar ou encontrar o contato e buscar a foto de perfil.
         const contactRes = await client.query(
             `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
              ON CONFLICT (workspace_id, phone_number_jid) 
              DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone
-             RETURNING id`, [workspaceId, pushName || contactPhone, contactPhone, contactJid]
+             RETURNING id, avatar_url`, [workspaceId, pushName || contactPhone, contactPhone, contactJid]
         );
+        
         const contactId = contactRes.rows[0].id;
+        const currentAvatar = contactRes.rows[0].avatar_url;
+        
+        // Se o contato não tem avatar, busca na API.
+        if (!currentAvatar) {
+            try {
+                console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
+                const profilePicRes = await fetchEvolutionAPI(
+                    `/chat/fetchProfilePictureUrl/${instanceName}`,
+                    apiConfig,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({ number: contactJid }),
+                    }
+                );
+                if (profilePicRes?.profilePictureUrl) {
+                    await client.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
+                    console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
+                }
+            } catch (picError) {
+                // Não trava o fluxo principal se a busca da foto falhar.
+                console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
+            }
+        }
         
         // 3. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
