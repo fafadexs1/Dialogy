@@ -40,7 +40,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
                     '{}'::text[]
                 ) as tags_agg,
                 COALESCE(
-                    (SELECT json_agg(act.*) FROM (SELECT * FROM activities a WHERE a.contact_id = c.id ORDER BY a.date DESC) act),
+                    (SELECT json_agg(act.* ORDER BY act.date DESC) FROM activities act WHERE act.contact_id = c.id),
                     '[]'::json
                 ) as activities_agg
             FROM contacts c
@@ -74,7 +74,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
          return { success: false, error: "Você não tem permissão para editar contatos." };
     }
 
-    const id = formData.get('id') as string;
+    const id = formData.get('id') as string | null;
     let ownerId = formData.get('owner_id') as string;
     if (ownerId === 'unassigned') {
         ownerId = ''; // Set to empty string to be saved as NULL
@@ -90,9 +90,14 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         owner_id: ownerId || null,
     };
     
+    const tagIds = formData.getAll('tags') as string[];
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
+        
+        let contactId = id;
+        
         if (id) { // Update
              await client.query(
                 `UPDATE contacts 
@@ -101,12 +106,23 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
                 [data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id, id, workspaceId]
             );
         } else { // Create
-            await client.query(
+            const res = await client.query(
                 `INSERT INTO contacts (workspace_id, name, email, phone, address, service_interest, current_provider, owner_id) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
                 [workspaceId, data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id]
             );
+            contactId = res.rows[0].id;
         }
+
+        if (!contactId) throw new Error('Falha ao obter o ID do contato.');
+
+        // Update tags
+        await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
+        if(tagIds.length > 0) {
+            const tagValues = tagIds.map(tagId => `('${contactId}', '${tagId}')`).join(',');
+            await client.query(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ${tagValues}`);
+        }
+
         await client.query('COMMIT');
         revalidatePath('/crm');
         revalidatePath('/chat'); // revalidate chat in case contact info changed
@@ -136,7 +152,6 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
             return { success: false, error: "Você não tem permissão para excluir contatos." };
         }
         
-        // Adicionar lógica para remover dependências se necessário, por exemplo, contact_tags
         await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM activities WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM contacts WHERE id = $1', [contactId]);
@@ -153,18 +168,109 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
     }
 }
 
+// --- TAGS ACTIONS ---
+
 export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null, error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { tags: null, error: "Usuário não autenticado." };
 
     try {
-        const res = await db.query('SELECT id, label, value, color, is_close_reason FROM tags WHERE workspace_id = $1', [workspaceId]);
+        const res = await db.query('SELECT id, label, value, color, is_close_reason FROM tags WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
         return { tags: res.rows };
     } catch (error) {
         console.error("[GET_TAGS] Error:", error);
         return { tags: null, error: "Falha ao buscar as etiquetas." };
     }
 }
+
+export async function createTag(
+    workspaceId: string, 
+    label: string, 
+    color: string, 
+    isCloseReason: boolean
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    // Basic permission check
+    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+        return { success: false, error: "Você não tem permissão para criar etiquetas." };
+    }
+    
+    const value = label.trim().toLowerCase().replace(/\s+/g, '_');
+
+    try {
+        await db.query(
+            'INSERT INTO tags (workspace_id, label, value, color, is_close_reason) VALUES ($1, $2, $3, $4, $5)',
+            [workspaceId, label, value, color, isCloseReason]
+        );
+        revalidatePath('/crm');
+        return { success: true };
+    } catch (error) {
+        console.error("[CREATE_TAG] Error:", error);
+        return { success: false, error: "Falha ao criar etiqueta." };
+    }
+}
+
+
+export async function updateTag(
+    tagId: string, 
+    label: string, 
+    color: string, 
+    isCloseReason: boolean
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    try {
+        const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
+        if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
+        const workspaceId = tagRes.rows[0].workspace_id;
+
+        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para editar etiquetas." };
+        }
+        
+        const value = label.trim().toLowerCase().replace(/\s+/g, '_');
+
+        await db.query(
+            'UPDATE tags SET label = $1, value = $2, color = $3, is_close_reason = $4 WHERE id = $5',
+            [label, value, color, isCloseReason, tagId]
+        );
+        revalidatePath('/crm');
+        return { success: true };
+    } catch (error) {
+        console.error("[UPDATE_TAG] Error:", error);
+        return { success: false, error: "Falha ao atualizar etiqueta." };
+    }
+}
+
+
+export async function deleteTag(tagId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    try {
+        const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
+        if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
+        const workspaceId = tagRes.rows[0].workspace_id;
+
+        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para apagar etiquetas." };
+        }
+
+        await db.query('DELETE FROM tags WHERE id = $1', [tagId]);
+        revalidatePath('/crm');
+        return { success: true };
+    } catch (error) {
+        console.error("[DELETE_TAG] Error:", error);
+        return { success: false, error: "Falha ao apagar etiqueta." };
+    }
+}
+
+
+
+// --- END TAGS ---
 
 export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
     const session = await getServerSession(authOptions);
@@ -241,3 +347,5 @@ export async function addActivityAction(
         return { success: false, error: "Falha ao registrar atividade." };
     }
 }
+
+    

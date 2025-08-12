@@ -21,13 +21,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Contact, User } from '@/lib/types';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import type { Contact, User, Tag } from '@/lib/types';
 import { useFormStatus } from 'react-dom';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, Check, ChevronsUpDown, X } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { saveContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
+import { getTags } from '@/actions/crm';
+import { useAuth } from '@/hooks/use-auth';
+import { Badge } from '../ui/badge';
 
 interface AddContactFormProps {
     isOpen: boolean;
@@ -49,8 +54,83 @@ function SaveButton() {
     )
 }
 
+function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags: Tag[], initialSelectedTags?: Tag[]}) {
+    const [open, setOpen] = useState(false);
+    const [selectedTags, setSelectedTags] = useState<Tag[]>(initialSelectedTags || []);
+
+    const toggleTag = (tag: Tag) => {
+        setSelectedTags(prev => 
+            prev.some(t => t.id === tag.id) 
+                ? prev.filter(t => t.id !== tag.id) 
+                : [...prev, tag]
+        );
+    }
+    
+    return (
+         <Popover open={open} onOpenChange={setOpen}>
+            <input type="hidden" name="tags" value={selectedTags.map(t => t.id).join(',')} />
+            {selectedTags.map(tag => (
+                <input key={tag.id} type="hidden" name="tags" value={tag.id} />
+            ))}
+
+            <PopoverTrigger asChild>
+                <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={open}
+                className="w-full justify-between h-auto min-h-10"
+                >
+                <div className="flex flex-wrap gap-1">
+                    {selectedTags.length > 0 ? selectedTags.map(tag => (
+                        <Badge key={tag.id} style={{backgroundColor: tag.color}} className="text-white" onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+                            {tag.label}
+                            <X className="ml-1 h-3 w-3" />
+                        </Badge>
+                    )) : "Selecione as etiquetas..."}
+                </div>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                <Command>
+                    <CommandInput placeholder="Buscar etiqueta..." />
+                    <CommandList>
+                        <CommandEmpty>Nenhuma etiqueta encontrada.</CommandEmpty>
+                        <CommandGroup>
+                        {availableTags.map((tag) => (
+                            <CommandItem
+                                key={tag.id}
+                                value={tag.label}
+                                onSelect={() => toggleTag(tag)}
+                            >
+                            <Check
+                                className={`mr-2 h-4 w-4 ${selectedTags.some(t => t.id === tag.id) ? "opacity-100" : "opacity-0"}`}
+                            />
+                            {tag.label}
+                            </CommandItem>
+                        ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    )
+}
+
 export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId, agents }: AddContactFormProps) {
+  const user = useAuth();
   const [state, formAction] = useActionState(saveContactAction, { success: false, error: null });
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  
+  useEffect(() => {
+    if(user?.activeWorkspaceId) {
+        getTags(user.activeWorkspaceId).then(res => {
+            if (!res.error) {
+                setAvailableTags(res.tags || []);
+            }
+        });
+    }
+  }, [user?.activeWorkspaceId])
 
   useEffect(() => {
     if (state.success) {
@@ -122,6 +202,10 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                         </SelectContent>
                     </Select>
                 </div>
+                 <div className="space-y-2">
+                    <Label>Etiquetas (Tags)</Label>
+                    <MultiSelectTags availableTags={availableTags} initialSelectedTags={contact?.tags} />
+                </div>
             </div>
             </div>
              {state.error && (
@@ -140,3 +224,5 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     </Dialog>
   );
 }
+
+    

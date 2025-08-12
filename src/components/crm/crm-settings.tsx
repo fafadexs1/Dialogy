@@ -2,14 +2,13 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { CustomFieldDefinition, SelectableOption, Tag } from '@/lib/types';
 import { 
     mockCustomFieldDefinitions, 
     leadSources as mockLeadSources, 
     contactChannels as mockContactChannels, 
     jobTitles as mockJobTitles,
-    mockTags 
 } from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Trash2, Palette } from 'lucide-react';
+import { PlusCircle, Trash2, Palette, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -39,41 +38,53 @@ import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
+import { getTags, createTag, deleteTag } from '@/actions/crm';
+import { toast } from '@/hooks/use-toast';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({ 
     title, 
     options, 
-    setOptions 
+    setOptions,
+    onAdd,
+    onRemove
 }: { 
     title: string, 
-    options: (SelectableOption | Tag)[], 
-    setOptions: React.Dispatch<React.SetStateAction<(SelectableOption | Tag)[]>> 
+    options: Tag[], 
+    setOptions: React.Dispatch<React.SetStateAction<Tag[]>>,
+    onAdd: (label: string, color: string, isCloseReason: boolean) => Promise<any>,
+    onRemove: (id: string) => Promise<any>
 }) {
     const [newItemLabel, setNewItemLabel] = useState('');
     const [newItemColor, setNewItemColor] = useState('#cccccc');
     const [isCloseReason, setIsCloseReason] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleAddItem = (e: React.FormEvent) => {
+    const handleAddItem = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newItemLabel.trim()) return;
         
-        const newItem = {
-            id: newItemLabel.toLowerCase().replace(/\s+/g, '_') + Date.now(),
-            value: newItemLabel.toLowerCase().replace(/\s+/g, '_'),
-            label: newItemLabel,
-            color: newItemColor,
-            is_close_reason: title === "Etiquetas (Tags)" ? isCloseReason : undefined,
-        };
-        
-        setOptions([...options, newItem]);
-        setNewItemLabel('');
-        setNewItemColor('#cccccc');
-        setIsCloseReason(false);
+        setIsSubmitting(true);
+        const result = await onAdd(newItemLabel, newItemColor, isCloseReason);
+        if (result.success) {
+            setNewItemLabel('');
+            setNewItemColor('#cccccc');
+            setIsCloseReason(false);
+            toast({ title: 'Etiqueta Adicionada!'})
+        } else {
+            toast({ title: 'Erro ao Adicionar', description: result.error, variant: 'destructive'})
+        }
+        setIsSubmitting(false);
     };
 
-    const handleRemoveItem = (itemToRemove: SelectableOption | Tag) => {
-        setOptions(options.filter(item => item.id !== itemToRemove.id));
+    const handleRemoveItem = async (itemToRemove: Tag) => {
+        const result = await onRemove(itemToRemove.id);
+        if (result.success) {
+            toast({ title: 'Etiqueta Removida!'})
+        } else {
+            toast({ title: 'Erro ao Remover', description: result.error, variant: 'destructive'})
+        }
     };
 
     return (
@@ -107,7 +118,10 @@ function OptionsManager({
                                 />
                             </div>
                         </div>
-                        <Button type="submit" size="sm" className='h-9'>Adicionar</Button>
+                        <Button type="submit" size="sm" className='h-9' disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className='h-4 w-4 animate-spin mr-2' />}
+                            Adicionar
+                        </Button>
                     </div>
                     {title === "Etiquetas (Tags)" && (
                         <div className="flex items-center space-x-2">
@@ -151,16 +165,45 @@ function OptionsManager({
 
 
 export function CrmSettings({ children }: { children: React.ReactNode }) {
+  const user = useAuth();
   const [fields, setFields] = useState<CustomFieldDefinition[]>(mockCustomFieldDefinitions);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
 
-  const [leadSources, setLeadSources] = useState<SelectableOption[]>(mockLeadSources);
-  const [contactChannels, setContactChannels] = useState<SelectableOption[]>(mockContactChannels);
-  const [jobTitles, setJobTitles] = useState<SelectableOption[]>(mockJobTitles);
-  const [tags, setTags] = useState<Tag[]>(mockTags);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  const fetchTags = React.useCallback(async () => {
+    if (!user?.activeWorkspaceId) return;
+    setLoading(true);
+    const result = await getTags(user.activeWorkspaceId);
+    if (!result.error) {
+        setTags(result.tags || []);
+    }
+    setLoading(false);
+  }, [user?.activeWorkspaceId]);
+
+  useEffect(() => {
+    fetchTags();
+  }, [fetchTags]);
+
+  const handleAddTag = async (label: string, color: string, isCloseReason: boolean) => {
+    if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
+    const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason);
+    if (result.success) {
+        fetchTags(); // Re-fetch all tags
+    }
+    return result;
+  }
+  
+  const handleRemoveTag = async (tagId: string) => {
+    const result = await deleteTag(tagId);
+    if (result.success) {
+        fetchTags(); // Re-fetch all tags
+    }
+    return result;
+  }
 
   const handleAddField = (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,7 +257,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
         <div className="max-h-[70vh] overflow-y-auto p-1">
             <Tabs defaultValue="fields">
                 <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="fields">Campos Personalizados</TabsTrigger>
+                    <TabsTrigger value="fields" disabled>Campos Personalizados (Em breve)</TabsTrigger>
                     <TabsTrigger value="options">Etiquetas e Opções</TabsTrigger>
                 </TabsList>
                 <TabsContent value="fields">
@@ -313,10 +356,17 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                         <CardContent>
                           <ScrollArea className="h-[55vh]">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-1">
-                              <OptionsManager title="Etiquetas (Tags)" options={tags} setOptions={setTags as any} />
-                              <OptionsManager title="Cargos" options={jobTitles} setOptions={setJobTitles as any} />
-                              <OptionsManager title="Origem do Lead" options={leadSources} setOptions={setLeadSources as any} />
-                              <OptionsManager title="Canais de Contato" options={contactChannels} setOptions={setContactChannels as any} />
+                              {loading ? <Loader2 className="h-6 w-6 animate-spin"/> : (
+                                <>
+                                 <OptionsManager 
+                                    title="Etiquetas (Tags)" 
+                                    options={tags} 
+                                    setOptions={setTags}
+                                    onAdd={handleAddTag}
+                                    onRemove={handleRemoveTag}
+                                />
+                                </>
+                              )}
                             </div>
                           </ScrollArea>
                         </CardContent>
@@ -333,3 +383,5 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
     </Dialog>
   );
 }
+
+    
