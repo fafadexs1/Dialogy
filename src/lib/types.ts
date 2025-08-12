@@ -61,7 +61,7 @@ export type Contact = {
   id: string;
   workspace_id: string;
   name: string;
-  avatar_url?: string;
+  avatar?: string;
   email?: string;
   phone?: string;
   phone_number_jid?: string;
@@ -75,7 +75,7 @@ export type Contact = {
   last_activity?: string;
   address?: string;
   owner_id?: string;
-  created_at: string;
+  created_at?: string;
   custom_fields?: Record<string, any>;
 }
 

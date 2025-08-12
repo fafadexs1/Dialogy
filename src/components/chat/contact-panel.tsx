@@ -209,7 +209,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
         
           <div className="flex flex-col items-center text-center">
             <Avatar className="h-20 w-20 shrink-0 border">
-              <AvatarImage src={contact.avatar_url} alt={contact.name} data-ai-hint="person" />
+              <AvatarImage src={contact.avatar} alt={contact.name} data-ai-hint="person" />
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>

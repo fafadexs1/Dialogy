@@ -56,7 +56,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                         <SheetDescription className="sr-only">Exibindo detalhes para {contact.name}.</SheetDescription>
                          <div className="flex items-center mb-4 pt-4">
                             <Avatar className="h-16 w-16 mr-4">
-                                <AvatarImage src={contact.avatar_url} alt={contact.name} />
+                                <AvatarImage src={contact.avatar} alt={contact.name} />
                                 <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
                             </Avatar>
                             <div>

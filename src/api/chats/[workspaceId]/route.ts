@@ -43,7 +43,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             id: c.id,
             workspace_id: workspaceId,
             name: c.name,
-            avatar_url: c.avatar_url,
+            avatar: c.avatar_url,
             phone_number_jid: c.phone_number_jid,
             firstName: c.name.split(' ')[0] || '',
             lastName: c.name.split(' ').slice(1).join(' ') || '',
