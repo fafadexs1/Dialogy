@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import type { Contact, Tag, Activity } from '@/lib/types';
+import type { Contact, Tag, Activity, CustomFieldDefinition } from '@/lib/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
@@ -11,7 +11,7 @@ import { Separator } from '../ui/separator';
 import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as TagIcon, Globe, Clock } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
-import { getTags } from '@/actions/crm';
+import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
 import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -27,10 +27,12 @@ interface CustomerProfileProps {
 export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, onMutate }: CustomerProfileProps) {
     const user = useAuth();
     const [tags, setTags] = useState<Tag[]>([]);
+    const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefinition[]>([]);
     
     useEffect(() => {
         if(isOpen && user?.activeWorkspaceId) {
             getTags(user.activeWorkspaceId).then(res => setTags(res.tags || []));
+            getCustomFieldDefinitions(user.activeWorkspaceId).then(res => setCustomFieldDefs(res.fields || []));
             onMutate(); // Re-fetch data when panel opens
         }
     }, [isOpen, user?.activeWorkspaceId, onMutate]);
@@ -41,13 +43,16 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
         const tag = tags.find(t => t.value === tagValue);
         return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
     };
+    
+    const customFieldsToDisplay = customFieldDefs.filter(def => contact.custom_fields && contact.custom_fields[def.id]);
+
 
     return (
         <Sheet open={isOpen} onOpenChange={setIsOpen}>
             <SheetContent className="sm:max-w-lg p-0">
                 <div className="flex flex-col h-full">
                      <SheetHeader className="p-6 border-b">
-                        <SheetTitle>Detalhes de {contact.name}</SheetTitle>
+                        <SheetTitle className="sr-only">Detalhes de {contact.name}</SheetTitle>
                         <SheetDescription className="sr-only">Exibindo detalhes para {contact.name}.</SheetDescription>
                          <div className="flex items-center mb-4 pt-4">
                             <Avatar className="h-16 w-16 mr-4">
@@ -56,6 +61,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                             </Avatar>
                             <div>
                                 <h2 className="text-xl font-bold">{contact.name}</h2>
+                                {contact.owner && <p className='text-sm text-muted-foreground'>Proprietário: {contact.owner.name}</p>}
                             </div>
                         </div>
                          <div className="flex items-center gap-2">
@@ -96,6 +102,24 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                             </section>
                             
                             <Separator />
+
+                             {/* Custom Fields */}
+                             {customFieldsToDisplay.length > 0 && (
+                                <>
+                                <section>
+                                    <h3 className="text-sm font-semibold text-primary mb-3">Informações Adicionais</h3>
+                                    <div className="space-y-3 text-sm">
+                                        {customFieldsToDisplay.map(def => (
+                                            <div key={def.id} className="flex flex-col">
+                                                <span className="text-muted-foreground">{def.label}</span>
+                                                <span className="font-medium">{contact.custom_fields?.[def.id]}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                                <Separator />
+                                </>
+                             )}
                             
                              {/* Activity History */}
                             <section>

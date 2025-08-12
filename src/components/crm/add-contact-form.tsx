@@ -23,14 +23,14 @@ import {
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import type { Contact, User, Tag } from '@/lib/types';
+import type { Contact, User, Tag, CustomFieldDefinition } from '@/lib/types';
 import { useFormStatus } from 'react-dom';
 import { Loader2, Save, Check, ChevronsUpDown, X } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { saveContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
-import { getTags } from '@/actions/crm';
+import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
 import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '../ui/badge';
 
@@ -121,13 +121,15 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   const user = useAuth();
   const [state, formAction] = useActionState(saveContactAction, { success: false, error: null });
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   
   useEffect(() => {
     if(isOpen && user?.activeWorkspaceId) {
         getTags(user.activeWorkspaceId).then(res => {
-            if (!res.error) {
-                setAvailableTags(res.tags || []);
-            }
+            if (!res.error) setAvailableTags(res.tags || []);
+        });
+        getCustomFieldDefinitions(user.activeWorkspaceId).then(res => {
+            if (!res.error) setCustomFields(res.fields || []);
         });
     }
   }, [isOpen, user?.activeWorkspaceId])
@@ -138,6 +140,36 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
         onSave();
     }
   }, [state, onSave]);
+  
+  const renderCustomField = (field: CustomFieldDefinition) => {
+    const fieldName = `custom_field_${field.id}`;
+    const defaultValue = contact?.custom_fields?.[field.id] || '';
+
+    switch(field.type) {
+      case 'select':
+        return (
+          <div key={field.id} className="space-y-2">
+            <Label htmlFor={fieldName}>{field.label}</Label>
+            <Select name={fieldName} defaultValue={defaultValue}>
+              <SelectTrigger id={fieldName}><SelectValue placeholder={field.placeholder || 'Selecione...'} /></SelectTrigger>
+              <SelectContent>
+                {field.options?.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        );
+      default:
+        return (
+          <div key={field.id} className="space-y-2">
+            <Label htmlFor={fieldName}>{field.label}</Label>
+            <Input id={fieldName} name={fieldName} type={field.type} placeholder={field.placeholder} defaultValue={defaultValue} />
+          </div>
+        )
+    }
+  }
+
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -207,6 +239,15 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                     <MultiSelectTags availableTags={availableTags} initialSelectedTags={contact?.tags} />
                 </div>
             </div>
+            {/* Custom Fields Section */}
+            {customFields.length > 0 && (
+                <div className="md:col-span-2 space-y-4 pt-4 border-t">
+                    <h3 className="font-medium text-muted-foreground">Informações Adicionais</h3>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         {customFields.map(renderCustomField)}
+                    </div>
+                </div>
+            )}
             </div>
              {state.error && (
                 <Alert variant="destructive" className="mt-4">

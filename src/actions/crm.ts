@@ -3,7 +3,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import type { Contact, Tag, User, Activity } from '@/lib/types';
+import type { Contact, Tag, User, Activity, CustomFieldDefinition } from '@/lib/types';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
@@ -42,7 +42,14 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
                 COALESCE(
                     (SELECT json_agg(act.* ORDER BY act.date DESC) FROM activities act WHERE act.contact_id = c.id),
                     '[]'::json
-                ) as activities_agg
+                ) as activities_agg,
+                 COALESCE(
+                    (SELECT json_object_agg(cfd.id, cfv.value)
+                     FROM contact_custom_field_values cfv
+                     JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+                     WHERE cfv.contact_id = c.id),
+                    '{}'::json
+                ) as custom_fields
             FROM contacts c
             WHERE c.workspace_id = $1
             ORDER BY c.created_at DESC;
@@ -56,6 +63,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
             }) || [],
             owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
             activities: row.activities_agg || [],
+            custom_fields: row.custom_fields || {},
         }));
         
         return { contacts };
@@ -91,6 +99,15 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
     };
     
     const tagIds = formData.getAll('tags') as string[];
+    
+    const customFields: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+        if (key.startsWith('custom_field_')) {
+            const fieldId = key.replace('custom_field_', '');
+            customFields[fieldId] = value as string;
+        }
+    }
+
 
     const client = await db.connect();
     try {
@@ -122,6 +139,18 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
             const tagValues = tagIds.map(tagId => `('${contactId}', '${tagId}')`).join(',');
             await client.query(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ${tagValues}`);
         }
+        
+        // Update custom fields
+        await client.query('DELETE FROM contact_custom_field_values WHERE contact_id = $1', [contactId]);
+        for (const [fieldId, value] of Object.entries(customFields)) {
+             if (value) { // Only save if there's a value
+                await client.query(
+                    'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
+                    [contactId, fieldId, value]
+                );
+            }
+        }
+
 
         await client.query('COMMIT');
         revalidatePath('/crm');
@@ -154,6 +183,7 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
         
         await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM activities WHERE contact_id = $1', [contactId]);
+        await client.query('DELETE FROM contact_custom_field_values WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM contacts WHERE id = $1', [contactId]);
         
         await client.query('COMMIT');
@@ -271,6 +301,73 @@ export async function deleteTag(tagId: string): Promise<{ success: boolean; erro
 
 
 // --- END TAGS ---
+
+
+// --- CUSTOM FIELDS ---
+
+export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ fields: CustomFieldDefinition[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { fields: null, error: "Usuário não autenticado." };
+
+    try {
+        const res = await db.query('SELECT id, label, type, placeholder, options FROM custom_field_definitions WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
+        return { fields: res.rows };
+    } catch (error) {
+        console.error("[GET_CUSTOM_FIELDS] Error:", error);
+        return { fields: null, error: "Falha ao buscar os campos personalizados." };
+    }
+}
+
+export async function createCustomFieldDefinition(
+    workspaceId: string,
+    field: Omit<CustomFieldDefinition, 'id'>
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+        return { success: false, error: "Você não tem permissão para criar campos." };
+    }
+    
+    try {
+        await db.query(
+            'INSERT INTO custom_field_definitions (workspace_id, label, type, placeholder, options) VALUES ($1, $2, $3, $4, $5)',
+            [workspaceId, field.label, field.type, field.placeholder, JSON.stringify(field.options || [])]
+        );
+        revalidatePath('/crm');
+        return { success: true };
+    } catch (error) {
+        console.error("[CREATE_CUSTOM_FIELD] Error:", error);
+        return { success: false, error: "Falha ao criar campo personalizado." };
+    }
+}
+
+
+export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    try {
+        const fieldRes = await db.query('SELECT workspace_id FROM custom_field_definitions WHERE id = $1', [fieldId]);
+        if (fieldRes.rowCount === 0) return { success: false, error: "Campo não encontrado." };
+        const workspaceId = fieldRes.rows[0].workspace_id;
+
+        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para apagar campos." };
+        }
+
+        await db.query('DELETE FROM custom_field_definitions WHERE id = $1', [fieldId]);
+        revalidatePath('/crm');
+        return { success: true };
+    } catch (error) {
+        console.error("[DELETE_CUSTOM_FIELD] Error:", error);
+        return { success: false, error: "Falha ao apagar campo personalizado." };
+    }
+}
+
+
+// --- END CUSTOM FIELDS ---
+
 
 export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
     const session = await getServerSession(authOptions);

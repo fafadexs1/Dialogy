@@ -33,6 +33,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Limpando objetos de banco de dados existentes...');
     const teardownQueries = [
+        'DROP TABLE IF EXISTS public.contact_custom_field_values CASCADE;',
+        'DROP TABLE IF EXISTS public.custom_field_definitions CASCADE;',
         'DROP TABLE IF EXISTS public.activities CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_usage_logs CASCADE;',
         'DROP TABLE IF EXISTS public.autopilot_rules CASCADE;',
@@ -60,6 +62,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         'DROP TYPE IF EXISTS public.message_type_enum;',
         'DROP TYPE IF EXISTS public.message_status_enum;',
         'DROP TYPE IF EXISTS public.activity_type_enum;',
+        'DROP TYPE IF EXISTS public.custom_field_type_enum;',
     ];
     
     for (const query of teardownQueries) {
@@ -72,6 +75,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
       `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
       `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
+      `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
       
       `CREATE TABLE public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -203,6 +207,23 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
+      );`,
+      
+       `CREATE TABLE public.custom_field_definitions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+          label TEXT NOT NULL,
+          type custom_field_type_enum NOT NULL,
+          placeholder TEXT,
+          options JSONB, -- For select type
+          UNIQUE(workspace_id, label)
+      );`,
+
+      `CREATE TABLE public.contact_custom_field_values (
+          contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+          field_id UUID NOT NULL REFERENCES public.custom_field_definitions(id) ON DELETE CASCADE,
+          value TEXT NOT NULL,
+          PRIMARY KEY (contact_id, field_id)
       );`,
 
       `CREATE TABLE public.chats (

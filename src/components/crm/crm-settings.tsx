@@ -4,12 +4,6 @@
 
 import React, { useState, useEffect } from 'react';
 import type { CustomFieldDefinition, SelectableOption, Tag } from '@/lib/types';
-import { 
-    mockCustomFieldDefinitions, 
-    leadSources as mockLeadSources, 
-    contactChannels as mockContactChannels, 
-    jobTitles as mockJobTitles,
-} from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,20 +33,18 @@ import { ScrollArea } from '../ui/scroll-area';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
-import { getTags, createTag, deleteTag } from '@/actions/crm';
+import { getTags, createTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({ 
     title, 
     options, 
-    setOptions,
     onAdd,
     onRemove
 }: { 
     title: string, 
     options: Tag[], 
-    setOptions: React.Dispatch<React.SetStateAction<Tag[]>>,
     onAdd: (label: string, color: string, isCloseReason: boolean) => Promise<any>,
     onRemove: (id: string) => Promise<any>
 }) {
@@ -166,33 +158,38 @@ function OptionsManager({
 
 export function CrmSettings({ children }: { children: React.ReactNode }) {
   const user = useAuth();
-  const [fields, setFields] = useState<CustomFieldDefinition[]>(mockCustomFieldDefinitions);
+  const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
+  const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchTags = React.useCallback(async () => {
+  const fetchAllData = React.useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     setLoading(true);
-    const result = await getTags(user.activeWorkspaceId);
-    if (!result.error) {
-        setTags(result.tags || []);
-    }
+    const [tagsResult, fieldsResult] = await Promise.all([
+        getTags(user.activeWorkspaceId),
+        getCustomFieldDefinitions(user.activeWorkspaceId)
+    ]);
+    
+    if (!tagsResult.error) setTags(tagsResult.tags || []);
+    if (!fieldsResult.error) setFields(fieldsResult.fields || []);
+    
     setLoading(false);
   }, [user?.activeWorkspaceId]);
 
   useEffect(() => {
-    fetchTags();
-  }, [fetchTags]);
+    fetchAllData();
+  }, [fetchAllData]);
 
   const handleAddTag = async (label: string, color: string, isCloseReason: boolean) => {
     if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
     const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason);
     if (result.success) {
-        fetchTags(); // Re-fetch all tags
+        fetchAllData(); // Re-fetch all data
     }
     return result;
   }
@@ -200,14 +197,14 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
   const handleRemoveTag = async (tagId: string) => {
     const result = await deleteTag(tagId);
     if (result.success) {
-        fetchTags(); // Re-fetch all tags
+        fetchAllData(); // Re-fetch all data
     }
     return result;
   }
 
-  const handleAddField = (e: React.FormEvent) => {
+  const handleAddField = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFieldLabel.trim()) return;
+    if (!newFieldLabel.trim() || !user?.activeWorkspaceId) return;
 
     let options: SelectableOption[] | undefined;
     if (newFieldType === 'select' && newFieldOptions.trim()) {
@@ -218,27 +215,38 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                 id: `${value}-${index}`,
                 value: value,
                 label: trimmedOpt,
-                color: '#cccccc' // Default color for now
             };
         });
     }
 
-    const newField: CustomFieldDefinition = {
-      id: `custom_${newFieldLabel.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`,
+    const newField: Omit<CustomFieldDefinition, 'id'> = {
       label: newFieldLabel,
       type: newFieldType,
-      placeholder: `Insira ${newFieldLabel}...`,
+      placeholder: newFieldPlaceholder || `Insira ${newFieldLabel}...`,
       options: options,
     };
-
-    setFields([...fields, newField]);
-    setNewFieldLabel('');
-    setNewFieldType('text');
-    setNewFieldOptions('');
+    
+    const result = await createCustomFieldDefinition(user.activeWorkspaceId, newField);
+    if (result.success) {
+        toast({ title: 'Campo Criado!'})
+        setNewFieldLabel('');
+        setNewFieldType('text');
+        setNewFieldOptions('');
+        setNewFieldPlaceholder('');
+        fetchAllData();
+    } else {
+        toast({ title: 'Erro ao Criar Campo', description: result.error, variant: 'destructive' })
+    }
   };
 
-  const handleRemoveField = (id: string) => {
-    setFields(fields.filter(field => field.id !== id));
+  const handleRemoveField = async (id: string) => {
+    const result = await deleteCustomFieldDefinition(id);
+    if (result.success) {
+        toast({ title: 'Campo Removido!'})
+        fetchAllData();
+    } else {
+        toast({ title: 'Erro ao Remover Campo', description: result.error, variant: 'destructive' })
+    }
   };
 
 
@@ -257,7 +265,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
         <div className="max-h-[70vh] overflow-y-auto p-1">
             <Tabs defaultValue="fields">
                 <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="fields" disabled>Campos Personalizados (Em breve)</TabsTrigger>
+                    <TabsTrigger value="fields">Campos Personalizados</TabsTrigger>
                     <TabsTrigger value="options">Etiquetas e Opções</TabsTrigger>
                 </TabsList>
                 <TabsContent value="fields">
@@ -268,7 +276,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                     </CardHeader>
                     <CardContent>
                             <form onSubmit={handleAddField} className="flex flex-col gap-4 mb-6 p-4 border rounded-lg bg-secondary/30">
-                                <div className="flex items-end gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                                     <div className="flex-1 space-y-2">
                                         <Label htmlFor="field-label">Nome do Campo</Label>
                                         <Input 
@@ -282,7 +290,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                     <div className="space-y-2">
                                         <Label htmlFor="field-type">Tipo do Campo</Label>
                                         <Select value={newFieldType} onValueChange={(val) => setNewFieldType(val as CustomFieldDefinition['type'])}>
-                                            <SelectTrigger id="field-type" className="w-[180px] h-9">
+                                            <SelectTrigger id="field-type" className="h-9">
                                                 <SelectValue placeholder="Selecione o tipo" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -300,7 +308,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                         Adicionar
                                     </Button>
                                 </div>
-                                {newFieldType === 'select' && (
+                                {newFieldType === 'select' ? (
                                      <div className="space-y-2 animate-in fade-in-50">
                                         <Label htmlFor="field-options">Opções do Dropdown</Label>
                                         <Textarea
@@ -310,6 +318,16 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                             onChange={(e) => setNewFieldOptions(e.target.value)}
                                         />
                                         <p className="text-xs text-muted-foreground">Separe cada opção com uma vírgula.</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2 animate-in fade-in-50">
+                                        <Label htmlFor="field-placeholder">Texto de Exemplo (Placeholder)</Label>
+                                        <Input
+                                            id="field-placeholder"
+                                            placeholder="Ex: R$ 50.000"
+                                            value={newFieldPlaceholder}
+                                            onChange={(e) => setNewFieldPlaceholder(e.target.value)}
+                                        />
                                     </div>
                                 )}
                             </form>
@@ -357,15 +375,12 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                           <ScrollArea className="h-[55vh]">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-1">
                               {loading ? <Loader2 className="h-6 w-6 animate-spin"/> : (
-                                <>
                                  <OptionsManager 
                                     title="Etiquetas (Tags)" 
                                     options={tags} 
-                                    setOptions={setTags}
                                     onAdd={handleAddTag}
                                     onRemove={handleRemoveTag}
                                 />
-                                </>
                               )}
                             </div>
                           </ScrollArea>
@@ -383,5 +398,3 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
     </Dialog>
   );
 }
-
-    

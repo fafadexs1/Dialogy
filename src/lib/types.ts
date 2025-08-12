@@ -79,8 +79,7 @@ export type Contact = {
   current_provider?: string;
   owner_id?: string;
   created_at: string;
-  deals?: Deal[];
-  tasks?: Task[];
+  custom_fields?: Record<string, any>;
 }
 
 export type OnlineAgent = {
@@ -173,16 +172,16 @@ export type InternalMessage = {
 export type CustomFieldDefinition = {
     id: string;
     label: string;
-    type: HTMLInputTypeAttribute | 'select';
+    type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select';
     placeholder?: string;
-    options?: SelectableOption[];
+    options?: { id: string; value: string; label: string }[];
 };
 
 export interface SelectableOption {
     id: string;
     value: string;
     label: string;
-    color: string;
+    color?: string;
 }
 
 export interface Tag {
