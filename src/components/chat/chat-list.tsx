@@ -146,7 +146,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
-    <div className="flex w-full max-w-sm flex-col border-r bg-card">
+    <div className="flex w-full max-w-sm min-w-0 flex-col border-r bg-card">
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -182,8 +182,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </div>
 
       <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0">
-        <div className="p-2 flex-shrink-0">
-          <TabsList className="grid w-full grid-cols-3">
+        <div className="p-2 flex-shrink-0 overflow-hidden">
+          <TabsList className="grid w-full grid-cols-3 min-w-0">
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
             <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
             <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
