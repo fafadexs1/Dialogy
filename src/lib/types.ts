@@ -147,6 +147,7 @@ export type Chat = {
   assigned_at?: string;
   source?: string;
   instance_name?: string;
+  unreadCount?: number;
 };
 
 export type InternalChannel = {

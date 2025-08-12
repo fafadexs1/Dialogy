@@ -67,6 +67,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
             WHERE type = 'text' OR type IS NULL
+        ), UnreadCounts AS (
+            SELECT 
+                chat_id,
+                COUNT(*) as count
+            FROM messages
+            WHERE from_me = FALSE AND (api_message_status IS NULL OR api_message_status != 'READ')
+            GROUP BY chat_id
         )
         SELECT 
             c.id, 
@@ -77,12 +84,14 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.assigned_at,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
-            lm.instance_name
+            lm.instance_name,
+            uc.count as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
+        LEFT JOIN UnreadCounts uc ON c.id = uc.chat_id
         WHERE c.workspace_id = $1
-        GROUP BY c.id, lm.source_from_api, lm.instance_name
+        GROUP BY c.id, lm.source_from_api, lm.instance_name, uc.count
         ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId]);
 
@@ -96,6 +105,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         source: r.source,
         instance_name: r.instance_name,
         assigned_at: r.assigned_at,
+        unreadCount: r.unread_count ? parseInt(r.unread_count, 10) : 0,
     }));
 
     if (chats.length > 0) {

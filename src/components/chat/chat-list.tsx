@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -13,6 +14,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp } from 'react-icons/fa';
+import { Badge } from '../ui/badge';
 
 // --- Sub-componentes Fortemente Tipados ---
 
@@ -103,7 +105,6 @@ interface ChatListItemProps {
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect }) => {
     const lastMessage = chat.messages[chat.messages.length - 1];
-    const isFromWhatsApp = !!chat.instance_name;
 
     return (
         <div
@@ -117,7 +118,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
                 <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
-            {isFromWhatsApp && (
+            {!!chat.instance_name && (
                 <TooltipProvider>
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -134,15 +135,22 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
             )}
             </div>
             <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold truncate">{chat.contact.name}</p>
-                {lastMessage && (
-                <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
-                    {lastMessage.timestamp}
-                </p>
-                )}
-            </div>
-            {lastMessage && <LastMessagePreview message={lastMessage} />}
+                <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold truncate">{chat.contact.name}</p>
+                    {lastMessage && (
+                    <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                        {lastMessage.timestamp}
+                    </p>
+                    )}
+                </div>
+                <div className="flex items-center justify-between">
+                    {lastMessage && <LastMessagePreview message={lastMessage} />}
+                    {chat.unreadCount && chat.unreadCount > 0 && (
+                        <Badge className="h-5 w-5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
+                            {chat.unreadCount}
+                        </Badge>
+                    )}
+                </div>
             </div>
         </div>
     );
