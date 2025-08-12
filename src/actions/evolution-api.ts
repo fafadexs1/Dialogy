@@ -373,10 +373,14 @@ export async function markMessagesAsReadAction(
         const { api_url, api_key } = instanceRes.rows[0];
         const apiConfig = { api_url, api_key };
 
-        await fetchEvolutionAPI(`/chat/markMessageAsRead/${instanceName}`, apiConfig, {
+        await fetchEvolutionAPI(`/message/sendPresence/${instanceName}`, {
+            ...apiConfig,
             method: 'POST',
-            body: JSON.stringify({ readMessages: messagesToRead })
-        });
+            body: JSON.stringify({
+              number: messagesToRead[0].remoteJid,
+              presence: 'READ',
+            }),
+          });
 
         return { success: true };
     } catch (error: any) {
@@ -459,3 +463,5 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+    

@@ -911,3 +911,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
