@@ -118,7 +118,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 
         // Update tags
         await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
-        if(tagIds.length > 0) {
+        if(tagIds.length > 0 && tagIds[0]) {
             const tagValues = tagIds.map(tagId => `('${contactId}', '${tagId}')`).join(',');
             await client.query(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ${tagValues}`);
         }
@@ -347,5 +347,3 @@ export async function addActivityAction(
         return { success: false, error: "Falha ao registrar atividade." };
     }
 }
-
-    

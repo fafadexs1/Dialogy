@@ -68,7 +68,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
     
     return (
          <Popover open={open} onOpenChange={setOpen}>
-            <input type="hidden" name="tags" value={selectedTags.map(t => t.id).join(',')} />
+            {/* Hidden inputs to pass tag IDs to form action */}
             {selectedTags.map(tag => (
                 <input key={tag.id} type="hidden" name="tags" value={tag.id} />
             ))}
@@ -82,7 +82,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
                 >
                 <div className="flex flex-wrap gap-1">
                     {selectedTags.length > 0 ? selectedTags.map(tag => (
-                        <Badge key={tag.id} style={{backgroundColor: tag.color}} className="text-white" onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+                        <Badge key={tag.id} style={{backgroundColor: tag.color, color: tag.color.startsWith('#FEE') ? '#000' : '#fff'}} className="border-transparent" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
                             {tag.label}
                             <X className="ml-1 h-3 w-3" />
                         </Badge>
@@ -123,14 +123,14 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   
   useEffect(() => {
-    if(user?.activeWorkspaceId) {
+    if(isOpen && user?.activeWorkspaceId) {
         getTags(user.activeWorkspaceId).then(res => {
             if (!res.error) {
                 setAvailableTags(res.tags || []);
             }
         });
     }
-  }, [user?.activeWorkspaceId])
+  }, [isOpen, user?.activeWorkspaceId])
 
   useEffect(() => {
     if (state.success) {
@@ -224,5 +224,3 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     </Dialog>
   );
 }
-
-    
