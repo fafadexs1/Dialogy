@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight, Eye, PhoneSlash, PlusCircle, Trash2, MoreHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type User, type Tag, Contact } from '@/lib/types';
+import { type Contact } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
@@ -184,7 +184,7 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
                                     <TableCell>
                                         <div className="flex items-center gap-3">
                                             <Avatar className="h-8 w-8">
-                                                <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
+                                                <AvatarImage src={customer.avatar} alt={customer.name} />
                                                 <AvatarFallback>{customer.name.charAt(0)}</AvatarFallback>
                                             </Avatar>
                                             <div>
@@ -262,5 +262,3 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
     </div>
   );
 }
-
-    
