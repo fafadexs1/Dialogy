@@ -31,17 +31,15 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
     try {
         const res = await db.query(`
             SELECT 
-                c.id, c.name, c.email, c.phone, c.avatar_url, c.address, c.service_interest, c.current_provider, c.owner_id,
-                u.full_name as owner_name,
-                (SELECT MAX(created_at) FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE contact_id = c.id)) as last_activity,
-                array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) FILTER (WHERE t.id IS NOT NULL) as tags
+                c.*,
+                (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
+                (SELECT MAX(m.created_at) FROM messages m JOIN chats ch ON m.chat_id = ch.id WHERE ch.contact_id = c.id) as last_activity,
+                (SELECT array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) 
+                 FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id) as tags
             FROM contacts c
-            LEFT JOIN users u ON c.owner_id = u.id
-            LEFT JOIN contact_tags ct ON c.id = ct.contact_id
-            LEFT JOIN tags t ON ct.tag_id = t.id
             WHERE c.workspace_id = $1
-            GROUP BY c.id, u.full_name
-            ORDER BY c.name ASC
+            GROUP BY c.id
+            ORDER BY c.name ASC;
         `, [workspaceId]);
 
         const contacts: Contact[] = res.rows.map(row => ({
