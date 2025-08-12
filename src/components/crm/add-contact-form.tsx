@@ -114,10 +114,10 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor="owner_id">Vendedor Responsável</Label>
-                    <Select name="owner_id" defaultValue={contact?.owner_id || ''}>
+                    <Select name="owner_id" defaultValue={contact?.owner_id || 'unassigned'}>
                         <SelectTrigger id="owner_id"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
                         <SelectContent>
-                             <SelectItem value="">Nenhum</SelectItem>
+                             <SelectItem value="unassigned">Nenhum</SelectItem>
                             {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
                         </SelectContent>
                     </Select>

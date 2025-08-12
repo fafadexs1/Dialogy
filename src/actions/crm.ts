@@ -31,15 +31,18 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
     try {
         const res = await db.query(`
             SELECT 
-                c.id, c.workspace_id, c.name, c.avatar_url, c.email, c.phone, c.phone_number_jid, c.address, 
-                c.service_interest, c.current_provider, c.owner_id, c.created_at,
+                c.*,
                 (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
                 (SELECT MAX(a.date) FROM activities a WHERE a.contact_id = c.id) as last_activity,
                 COALESCE(
                     (SELECT array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) 
                      FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id),
                     '{}'::text[]
-                ) as tags
+                ) as tags_agg,
+                COALESCE(
+                    (SELECT json_agg(act.*) FROM (SELECT * FROM activities a WHERE a.contact_id = c.id ORDER BY a.date DESC) act),
+                    '[]'::json
+                ) as activities_agg
             FROM contacts c
             WHERE c.workspace_id = $1
             ORDER BY c.created_at DESC;
@@ -47,13 +50,14 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
 
         const contacts: Contact[] = res.rows.map(row => ({
             ...row,
-            tags: row.tags?.map((tag: string) => {
+            tags: row.tags_agg?.map((tag: string) => {
                 const [id, label, value, color] = tag.split('::');
                 return { id, label, value, color };
             }) || [],
-            owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined
+            owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
+            activities: row.activities_agg || [],
         }));
-
+        
         return { contacts };
     } catch (error) {
         console.error("[GET_CONTACTS] Error:", error);
@@ -71,6 +75,11 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
     }
 
     const id = formData.get('id') as string;
+    let ownerId = formData.get('owner_id') as string;
+    if (ownerId === 'unassigned') {
+        ownerId = ''; // Set to empty string to be saved as NULL
+    }
+    
     const data = {
         name: formData.get('name') as string,
         email: formData.get('email') as string || null,
@@ -78,7 +87,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         address: formData.get('address') as string || null,
         service_interest: (formData.get('service_interest') as string) === 'none' ? null : (formData.get('service_interest') as string),
         current_provider: formData.get('current_provider') as string || null,
-        owner_id: formData.get('owner_id') as string || null,
+        owner_id: ownerId || null,
     };
     
     const client = await db.connect();
@@ -100,6 +109,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         }
         await client.query('COMMIT');
         revalidatePath('/crm');
+        revalidatePath('/chat'); // revalidate chat in case contact info changed
         return { success: true, error: null };
     } catch (error) {
         await client.query('ROLLBACK');
