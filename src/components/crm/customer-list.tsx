@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight, Eye, PhoneSlash, PlusCircle, Trash2, MoreHorizontal } from 'lucide-react';
+import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, MoreHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type Contact } from '@/lib/types';
@@ -33,7 +33,7 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onSelect('view', contact)}><Eye className="mr-2 h-4 w-4" /> Ver Detalhes</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneSlash className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneOff className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem>
         </DropdownMenuContent>
