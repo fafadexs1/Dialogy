@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
-import { FaWhatsapp } from 'react-icons/fa6';
+import { FaWhatsapp } from 'react-icons/fa';
 
 // --- Sub-componentes Fortemente Tipados ---
 
@@ -85,7 +85,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
+    <div className="flex items-start gap-1.5 text-sm text-muted-foreground truncate">
       <div className="mt-0.5">{getIcon()}</div>
       <p className="truncate">
         {getTextContent()}
@@ -103,6 +103,7 @@ interface ChatListItemProps {
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect }) => {
     const lastMessage = chat.messages[chat.messages.length - 1];
+    const isFromWhatsApp = !!chat.instance_name;
 
     return (
         <div
@@ -116,7 +117,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
                 <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
-            {chat.source === 'whatsapp' && (
+            {isFromWhatsApp && (
                 <TooltipProvider>
                 <Tooltip>
                     <TooltipTrigger asChild>
