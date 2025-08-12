@@ -1,4 +1,5 @@
 
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -85,6 +86,7 @@ export type BusinessProfile = {
   deals: Deal[];
   tasks: Task[];
   tags: Tag[];
+  activities: Activity[];
   customFields?: { [key: "string"]: any };
   dialogPriorityScore?: number;
   financialRiskScore?: number;
@@ -177,8 +179,9 @@ export type InternalMessage = {
 export type CustomFieldDefinition = {
     id: string;
     label: string;
-    type: HTMLInputTypeAttribute;
+    type: HTMLInputTypeAttribute | 'select';
     placeholder?: string;
+    options?: SelectableOption[];
 };
 
 export interface SelectableOption {

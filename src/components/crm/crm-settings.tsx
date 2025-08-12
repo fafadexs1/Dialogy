@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState } from 'react';
@@ -36,6 +37,8 @@ import { HTMLInputTypeAttribute } from 'react';
 import { Checkbox } from '../ui/checkbox';
 import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
+import { Badge } from '../ui/badge';
+import { Textarea } from '../ui/textarea';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({ 
@@ -150,7 +153,8 @@ function OptionsManager({
 export function CrmSettings({ children }: { children: React.ReactNode }) {
   const [fields, setFields] = useState<CustomFieldDefinition[]>(mockCustomFieldDefinitions);
   const [newFieldLabel, setNewFieldLabel] = useState('');
-  const [newFieldType, setNewFieldType] = useState<HTMLInputTypeAttribute>('text');
+  const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
+  const [newFieldOptions, setNewFieldOptions] = useState('');
 
   const [leadSources, setLeadSources] = useState<SelectableOption[]>(mockLeadSources);
   const [contactChannels, setContactChannels] = useState<SelectableOption[]>(mockContactChannels);
@@ -162,16 +166,32 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     if (!newFieldLabel.trim()) return;
 
+    let options: SelectableOption[] | undefined;
+    if (newFieldType === 'select' && newFieldOptions.trim()) {
+        options = newFieldOptions.split(',').map((opt, index) => {
+            const trimmedOpt = opt.trim();
+            const value = trimmedOpt.toLowerCase().replace(/\s+/g, '_');
+            return {
+                id: `${value}-${index}`,
+                value: value,
+                label: trimmedOpt,
+                color: '#cccccc' // Default color for now
+            };
+        });
+    }
+
     const newField: CustomFieldDefinition = {
       id: `custom_${newFieldLabel.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`,
       label: newFieldLabel,
       type: newFieldType,
       placeholder: `Insira ${newFieldLabel}...`,
+      options: options,
     };
 
     setFields([...fields, newField]);
     setNewFieldLabel('');
     setNewFieldType('text');
+    setNewFieldOptions('');
   };
 
   const handleRemoveField = (id: string) => {
@@ -204,36 +224,51 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                          <CardDescription>Crie campos únicos para capturar informações essenciais para o seu negócio.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                            <form onSubmit={handleAddField} className="flex items-end gap-4 mb-6 p-4 border rounded-lg bg-secondary/30">
-                                <div className="flex-1 space-y-2">
-                                    <Label htmlFor="field-label">Nome do Campo</Label>
-                                    <Input 
-                                        id="field-label"
-                                        placeholder="Ex: Orçamento Anual"
-                                        value={newFieldLabel}
-                                        onChange={(e) => setNewFieldLabel(e.target.value)}
-                                        className="h-9"
-                                    />
+                            <form onSubmit={handleAddField} className="flex flex-col gap-4 mb-6 p-4 border rounded-lg bg-secondary/30">
+                                <div className="flex items-end gap-4">
+                                    <div className="flex-1 space-y-2">
+                                        <Label htmlFor="field-label">Nome do Campo</Label>
+                                        <Input 
+                                            id="field-label"
+                                            placeholder="Ex: Orçamento Anual"
+                                            value={newFieldLabel}
+                                            onChange={(e) => setNewFieldLabel(e.target.value)}
+                                            className="h-9"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="field-type">Tipo do Campo</Label>
+                                        <Select value={newFieldType} onValueChange={(val) => setNewFieldType(val as CustomFieldDefinition['type'])}>
+                                            <SelectTrigger id="field-type" className="w-[180px] h-9">
+                                                <SelectValue placeholder="Selecione o tipo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="text">Texto</SelectItem>
+                                                <SelectItem value="number">Número</SelectItem>
+                                                <SelectItem value="date">Data</SelectItem>
+                                                <SelectItem value="email">Email</SelectItem>
+                                                <SelectItem value="tel">Telefone</SelectItem>
+                                                <SelectItem value="select">Dropdown</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <Button type="submit" className="h-9">
+                                        <PlusCircle className="mr-2 h-4 w-4" />
+                                        Adicionar
+                                    </Button>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="field-type">Tipo do Campo</Label>
-                                    <Select value={newFieldType} onValueChange={(val) => setNewFieldType(val as HTMLInputTypeAttribute)}>
-                                        <SelectTrigger id="field-type" className="w-[180px] h-9">
-                                            <SelectValue placeholder="Selecione o tipo" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="text">Texto</SelectItem>
-                                            <SelectItem value="number">Número</SelectItem>
-                                            <SelectItem value="date">Data</SelectItem>
-                                            <SelectItem value="email">Email</SelectItem>
-                                            <SelectItem value="tel">Telefone</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <Button type="submit" className="h-9">
-                                    <PlusCircle className="mr-2 h-4 w-4" />
-                                    Adicionar
-                                </Button>
+                                {newFieldType === 'select' && (
+                                     <div className="space-y-2 animate-in fade-in-50">
+                                        <Label htmlFor="field-options">Opções do Dropdown</Label>
+                                        <Textarea
+                                            id="field-options"
+                                            placeholder="Opção 1, Opção 2, Opção 3"
+                                            value={newFieldOptions}
+                                            onChange={(e) => setNewFieldOptions(e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Separe cada opção com uma vírgula.</p>
+                                    </div>
+                                )}
                             </form>
 
                             <div className="space-y-4">
@@ -244,7 +279,14 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                         <div key={field.id} className="flex items-center justify-between p-3 border rounded-md bg-background">
                                             <div>
                                                 <p className="font-medium">{field.label}</p>
-                                                <p className="text-xs text-muted-foreground capitalize bg-secondary px-2 py-0.5 rounded-full inline-block mt-1">{field.type}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="capitalize">{field.type}</Badge>
+                                                    {field.type === 'select' && field.options && (
+                                                        <p className="text-xs text-muted-foreground truncate">
+                                                            Opções: {field.options.map(o => o.label).join(', ')}
+                                                        </p>
+                                                    )}
+                                                </div>
                                             </div>
                                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveField(field.id)}>
                                                 <Trash2 className="h-4 w-4 text-destructive" />
