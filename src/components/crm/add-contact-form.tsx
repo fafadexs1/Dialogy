@@ -43,15 +43,9 @@ export function AddContactForm({ children }: { children: React.ReactNode }) {
         <div className="grid max-h-[70vh] grid-cols-1 gap-8 overflow-y-auto p-1 md:grid-cols-2">
           {/* Coluna da Esquerda */}
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="firstName">Nome*</Label>
-                <Input id="firstName" placeholder="João" required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName">Sobrenome</Label>
-                <Input id="lastName" placeholder="Silva" />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="firstName">Nome Completo*</Label>
+              <Input id="firstName" placeholder="João da Silva" required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">E-mail</Label>
@@ -67,7 +61,7 @@ export function AddContactForm({ children }: { children: React.ReactNode }) {
             </div>
              <div className="space-y-2">
               <Label htmlFor="address">Endereço Completo*</Label>
-              <Input id="address" placeholder="Rua, Número, Bairro, Cidade" required />
+              <Input id="address" placeholder="Rua das Flores, 123, Bairro Jardim, São Paulo" required />
             </div>
           </div>
           

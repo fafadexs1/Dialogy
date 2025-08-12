@@ -114,8 +114,13 @@ export default function CustomerList({ customers = [], selectedCustomer, onSelec
                         </TableHeader>
                         <TableBody>
                             {filteredCustomers.map(customer => (
-                                <TableRow key={customer.id} onClick={() => onSelectCustomer(customer)} className="cursor-pointer">
-                                    <TableCell><Checkbox /></TableCell>
+                                <TableRow 
+                                  key={customer.id} 
+                                  onClick={() => onSelectCustomer(customer)} 
+                                  className="cursor-pointer"
+                                  data-state={selectedCustomer?.id === customer.id ? 'selected' : undefined}
+                                >
+                                    <TableCell><Checkbox checked={selectedCustomer?.id === customer.id} /></TableCell>
                                     <TableCell>
                                         <div className="flex items-center gap-3">
                                             <Avatar className="h-8 w-8">

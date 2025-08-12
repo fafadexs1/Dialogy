@@ -23,7 +23,7 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
         <div className="text-center">
           <Users className="h-16 w-16 mx-auto text-muted-foreground/50" />
           <h2 className="mt-4 text-2xl font-semibold">Selecione um Contato</h2>
-          <p className="mt-1 text-muted-foreground">Escolha um diálogo na lista para ver os detalhes e o histórico.</p>
+          <p className="mt-1 text-muted-foreground">Escolha um contato na lista para ver os detalhes e o histórico.</p>
         </div>
       </main>
     );
