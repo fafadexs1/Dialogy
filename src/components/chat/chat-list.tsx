@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -50,7 +49,6 @@ interface LastMessagePreviewProps {
 
 const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
-  const charLimit = 50;
 
   const getIcon = () => {
     if (message.type === 'system') return null;
@@ -79,6 +77,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
         else text = 'Arquivo';
     }
     
+    const charLimit = 30;
     if (text && text.length > charLimit) {
         return text.substring(0, charLimit) + '...';
     }
