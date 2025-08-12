@@ -53,15 +53,22 @@ const modelInfo: Record<string, ModelInfo> = {
     'googleai/gemini-2.0-flash': {
         name: 'Gemini 2.0 Flash',
         description: 'Otimizado para velocidade e custo, ideal para respostas rápidas e automações de alto volume.',
-        inputCost: 0.18, // Roughly R$0.94 / 5.2 BRL/USD
-        outputCost: 0.36, // Roughly R$1.87 / 5.2 BRL/USD
+        inputCost: 0.18, 
+        outputCost: 0.36,
+        contextWindow: '1M tokens'
+    },
+    'googleai/gemini-2.5-flash-lite': {
+        name: 'Gemini 2.5 Flash Lite',
+        description: 'Uma versão ainda mais leve e rápida, perfeita para tarefas simples e de altíssima velocidade.',
+        inputCost: 0.15,
+        outputCost: 0.30,
         contextWindow: '1M tokens'
     },
     'googleai/gemini-1.5-pro': {
         name: 'Gemini 1.5 Pro',
         description: 'Modelo mais poderoso, ideal para tarefas complexas que exigem raciocínio avançado.',
-        inputCost: 3.5, // Roughly R$18.70 / 5.2 BRL/USD
-        outputCost: 10.5, // Roughly R$56.10 / 5.2 BRL/USD
+        inputCost: 3.5,
+        outputCost: 10.5,
         contextWindow: '1M tokens'
     }
 }
@@ -490,6 +497,7 @@ export default function AutopilotPage() {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
+                                                        <SelectItem value="googleai/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Ultra Rápido)</SelectItem>
                                                         <SelectItem value="googleai/gemini-1.5-pro">Gemini 1.5 Pro (Avançado)</SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -690,5 +698,3 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
-
-    
