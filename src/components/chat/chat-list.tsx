@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -207,7 +206,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </div>
 
       {/* Tabs and Content */}
-      <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className="p-2 flex-shrink-0">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
