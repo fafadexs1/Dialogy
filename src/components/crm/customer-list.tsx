@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight, Eye, PhoneSlash, PlusCircle, Trash2 } from 'lucide-react';
+import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight, Eye, PhoneSlash, PlusCircle, Trash2, MoreHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type User, type Tag, Contact } from '@/lib/types';
@@ -15,7 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { mockTags, agents, contacts as mockContacts } from '@/lib/mock-data';
 import { Badge } from '../ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal } from 'lucide-react';
 import CustomerProfile from './customer-profile';
 import { AddActivityForm } from './add-activity-form';
 import { LogAttemptForm } from './log-attempt-form';
@@ -263,3 +262,5 @@ export default function CustomerList({ customers: initialCustomers = [] }: Custo
     </div>
   );
 }
+
+    
