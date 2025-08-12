@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -163,6 +162,8 @@ async function handleMessagesUpsert(payload: any) {
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
     const contactJid = key.remoteJid;
+    // O campo 'sender' costuma ser o número limpo, enquanto o 'remoteJid' é o identificador completo.
+    const contactPhone = sender || contactJid.split('@')[0];
     
     const client = await db.connect();
     try {
@@ -176,12 +177,12 @@ async function handleMessagesUpsert(payload: any) {
         if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
         const workspaceId = instanceRes.rows[0].workspace_id;
 
-        // 2. Criar ou atualizar o contato. Adicionado `phone`
+        // 2. Criar ou atualizar o contato.
         const contactRes = await client.query(
             `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
              ON CONFLICT (workspace_id, phone_number_jid) 
              DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone
-             RETURNING id`, [workspaceId, pushName || contactJid, sender || contactJid, contactJid]
+             RETURNING id`, [workspaceId, pushName || contactPhone, contactPhone, contactJid]
         );
         const contactId = contactRes.rows[0].id;
         

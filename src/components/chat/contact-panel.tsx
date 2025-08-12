@@ -183,7 +183,6 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
   }
 
   const { contact, agent } = chat;
-  const { businessProfile } = contact;
 
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card">
@@ -214,7 +213,6 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
-            <p className="text-sm text-muted-foreground">{contact.businessProfile?.companyName}</p>
           </div>
           
           <Separator className="my-6"/>
@@ -281,23 +279,11 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                         <span className="flex items-center gap-2 font-semibold"><Briefcase className="h-4 w-4" /> Negócios</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile?.deals?.length || 0}</Badge>
+                        <Badge variant="secondary" className="text-xs">0</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">
-                    {businessProfile?.deals && businessProfile.deals.length > 0 ? (
-                        businessProfile.deals.map(deal => (
-                            <div key={deal.id} className="p-3 border rounded-lg bg-background">
-                                <p className="font-semibold text-sm">{deal.name}</p>
-                                <div className="flex justify-between items-center text-xs mt-1">
-                                    <span className="text-green-600 font-medium">{deal.value}</span>
-                                    <Badge variant="outline" className="text-xs font-normal">{deal.stage}</Badge>
-                                </div>
-                            </div>
-                        ))
-                    ) : (
-                        <p className="text-sm text-muted-foreground p-2 text-center">Nenhum negócio ativo.</p>
-                    )}
+                    <p className="text-sm text-muted-foreground p-2 text-center">Nenhum negócio ativo.</p>
                 </CardContent>
             </Card>
             
@@ -305,20 +291,11 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 <CardHeader className="p-0 mb-4">
                     <CardTitle className="flex items-center justify-between text-base">
                     <span className="flex items-center gap-2 font-semibold"><CheckSquare className="h-4 w-4" /> Tarefas</span>
-                        <Badge variant="secondary" className="text-xs">{businessProfile?.tasks?.length || 0}</Badge>
+                        <Badge variant="secondary" className="text-xs">0</Badge>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 space-y-3">
-                    {businessProfile?.tasks && businessProfile.tasks.length > 0 ? (
-                        businessProfile.tasks.map(task => (
-                            <div key={task.id} className="flex items-start gap-2 text-sm">
-                            <CheckSquare className={`h-4 w-4 mt-0.5 shrink-0 ${task.completed ? 'text-primary' : 'text-muted-foreground'}`}/>
-                            <p className={`font-medium ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.description}</p>
-                            </div>
-                        ))
-                    ) : (
-                        <p className="text-sm text-muted-foreground p-2 text-center">Nenhuma tarefa pendente.</p>
-                    )}
+                    <p className="text-sm text-muted-foreground p-2 text-center">Nenhuma tarefa pendente.</p>
                 </CardContent>
             </Card>
         </div>
