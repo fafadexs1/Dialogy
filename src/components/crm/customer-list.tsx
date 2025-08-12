@@ -37,7 +37,7 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
             <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneOff className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
              <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact);}}><Edit className="mr-2 h-4 w-4" /> Editar Contato</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir Contato</DropdownMenuItem>
         </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -237,7 +237,6 @@ export default function CustomerList() {
                                 <TableHead>Telefone</TableHead>
                                 <TableHead>Vendedor</TableHead>
                                 <TableHead>Tags</TableHead>
-                                <TableHead className="text-center">Plano Interesse</TableHead>
                                 <TableHead className="text-center">Última Atividade</TableHead>
                                 <TableHead className="text-center">Ações</TableHead>
                             </TableRow>
@@ -245,7 +244,7 @@ export default function CustomerList() {
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-24 text-center">
+                                    <TableCell colSpan={7} className="h-24 text-center">
                                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                                     </TableCell>
                                 </TableRow>
@@ -274,13 +273,6 @@ export default function CustomerList() {
                                                 <Badge key={tag.id} style={getTagStyle(tag.value)}>{tag.label}</Badge>
                                             ))}
                                         </div>
-                                    </TableCell>
-                                    <TableCell className="text-center">
-                                       {customer.service_interest && (
-                                          <Badge variant={"secondary"}>
-                                              {customer.service_interest}
-                                          </Badge>
-                                      )}
                                     </TableCell>
                                     <TableCell className="text-center text-xs">
                                         {customer.last_activity ? format(new Date(customer.last_activity), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}
@@ -364,3 +356,5 @@ export default function CustomerList() {
     </div>
   );
 }
+
+    

@@ -75,8 +75,6 @@ export type Contact = {
   activities?: Activity[];
   last_activity?: string;
   address?: string;
-  service_interest?: string;
-  current_provider?: string;
   owner_id?: string;
   created_at: string;
   custom_fields?: Record<string, any>;
@@ -331,3 +329,5 @@ export interface WorkspaceInvite {
     is_revoked: boolean;
     use_count: number;
 }
+
+    

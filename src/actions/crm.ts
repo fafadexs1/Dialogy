@@ -93,8 +93,6 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         email: formData.get('email') as string || null,
         phone: formData.get('phone') as string,
         address: formData.get('address') as string || null,
-        service_interest: (formData.get('service_interest') as string) === 'none' ? null : (formData.get('service_interest') as string),
-        current_provider: formData.get('current_provider') as string || null,
         owner_id: ownerId || null,
     };
     
@@ -118,15 +116,15 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         if (id) { // Update
              await client.query(
                 `UPDATE contacts 
-                 SET name = $1, email = $2, phone = $3, address = $4, service_interest = $5, current_provider = $6, owner_id = $7
-                 WHERE id = $8 AND workspace_id = $9`,
-                [data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id, id, workspaceId]
+                 SET name = $1, email = $2, phone = $3, address = $4, owner_id = $5
+                 WHERE id = $6 AND workspace_id = $7`,
+                [data.name, data.email, data.phone, data.address, data.owner_id, id, workspaceId]
             );
         } else { // Create
             const res = await client.query(
-                `INSERT INTO contacts (workspace_id, name, email, phone, address, service_interest, current_provider, owner_id) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [workspaceId, data.name, data.email, data.phone, data.address, data.service_interest, data.current_provider, data.owner_id]
+                `INSERT INTO contacts (workspace_id, name, email, phone, address, owner_id) 
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [workspaceId, data.name, data.email, data.phone, data.address, data.owner_id]
             );
             contactId = res.rows[0].id;
         }
@@ -437,10 +435,12 @@ export async function addActivityAction(
         );
 
         revalidatePath('/crm');
-        revalidatePath(`/api/chats/${workspace_id}`);
+        revalidatePath(`/api/chats/${workspaceId}`);
         return { success: true, error: null };
     } catch (error) {
         console.error("[ADD_ACTIVITY] Error:", error);
         return { success: false, error: "Falha ao registrar atividade." };
     }
 }
+
+    

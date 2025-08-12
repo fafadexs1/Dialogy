@@ -207,24 +207,6 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
             {/* Coluna da Direita */}
             <div className="space-y-4">
                 <div className="space-y-2">
-                    <Label htmlFor="service_interest">Plano de Interesse</Label>
-                    <Select name="service_interest" defaultValue={contact?.service_interest || 'none'}>
-                        <SelectTrigger id="service_interest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="none">Nenhum</SelectItem>
-                            <SelectItem value="Fibra 100MB">Fibra 100MB</SelectItem>
-                            <SelectItem value="Fibra 300MB">Fibra 300MB</SelectItem>
-                            <SelectItem value="Fibra 500MB">Fibra 500MB</SelectItem>
-                            <SelectItem value="Plano Gamer">Plano Gamer</SelectItem>
-                            <SelectItem value="Link Dedicado">Link Dedicado</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div className="space-y-2">
-                    <Label htmlFor="current_provider">Provedor Atual</Label>
-                    <Input id="current_provider" name="current_provider" placeholder="Ex: Vivo, Claro" defaultValue={contact?.current_provider || ''} />
-                </div>
-                <div className="space-y-2">
                     <Label htmlFor="owner_id">Vendedor Responsável</Label>
                     <Select name="owner_id" defaultValue={contact?.owner_id || 'unassigned'}>
                         <SelectTrigger id="owner_id"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
@@ -265,3 +247,5 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     </Dialog>
   );
 }
+
+    
