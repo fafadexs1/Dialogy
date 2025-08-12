@@ -352,40 +352,61 @@ export async function disconnectInstance(instanceName: string, config: Evolution
 
 export async function markMessagesAsReadAction(
     instanceName: string, 
-    messagesToRead: { remoteJid: string; fromMe: boolean; id: string }[]
+    messagesToMark: { remoteJid: string; fromMe: boolean; id: string }[],
+    messageIdsToUpdateInDb: string[]
 ): Promise<{ success: boolean; error?: string }> {
-    if (!instanceName || messagesToRead.length === 0) {
+    if (!instanceName || messagesToMark.length === 0) {
         return { success: false, error: "Dados insuficientes para marcar mensagens como lidas." };
     }
-
+    
+    const client = await db.connect();
     try {
-        // We need the workspaceId to get the API config. Let's get it from the instance name.
-        const instanceRes = await db.query(`
-            SELECT c.workspace_id, c.api_url, c.api_key 
+        await client.query('BEGIN');
+
+        const instanceRes = await client.query(`
+            SELECT c.api_url, c.api_key 
             FROM evolution_api_instances i
             JOIN evolution_api_configs c ON i.config_id = c.id
             WHERE i.name = $1
         `, [instanceName]);
 
         if (instanceRes.rowCount === 0) {
-            return { success: false, error: "Instância ou configuração da API não encontrada." };
+            throw new Error("Instância ou configuração da API não encontrada.");
         }
         const { api_url, api_key } = instanceRes.rows[0];
         const apiConfig = { api_url, api_key };
 
-        await fetchEvolutionAPI(`/message/sendPresence/${instanceName}`, {
+        // 1. Send "read" receipt via API
+        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, {
             ...apiConfig,
             method: 'POST',
             body: JSON.stringify({
-              number: messagesToRead[0].remoteJid,
-              presence: 'READ',
+              read: {
+                remoteJid: messagesToMark[0].remoteJid,
+                fromMe: false,
+                id: messagesToMark.map(m => m.id),
+              }
             }),
           });
-
+        
+        // 2. Update our database
+        await client.query(
+            'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
+            [messageIdsToUpdateInDb]
+        );
+        
+        await client.query('COMMIT');
+        
+        console.log(`[MARK_AS_READ] ${messageIdsToUpdateInDb.length} mensagens marcadas como lidas no DB.`);
+        revalidatePath('/', 'layout'); // Revalidate to update unread counts
         return { success: true };
+
     } catch (error: any) {
-        console.error(`[EVO_ACTION_MARK_READ] Erro ao marcar mensagens como lidas para a instância ${instanceName}:`, error);
+        await client.query('ROLLBACK');
+        console.error(`[MARK_AS_READ] Erro ao marcar mensagens como lidas para a instância ${instanceName}:`, error);
         return { success: false, error: error.message };
+    } finally {
+        client.release();
     }
 }
 
@@ -463,5 +484,3 @@ export async function deleteMessageAction(
         client.release();
     }
 }
-
-    

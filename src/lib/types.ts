@@ -135,6 +135,7 @@ export type Message = {
   message_id_from_api?: string;
   from_me?: boolean;
   api_message_status?: string;
+  is_read?: boolean;
 };
 
 export type Chat = {

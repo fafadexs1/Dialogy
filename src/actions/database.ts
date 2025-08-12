@@ -255,6 +255,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           server_url TEXT,
           from_me BOOLEAN,
           api_message_status TEXT,
+          is_read BOOLEAN DEFAULT FALSE,
           raw_payload JSONB
       );`,
       

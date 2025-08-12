@@ -467,21 +467,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
     const unreadMessages = initialMessages.filter(m => 
         m.sender?.id === chat.contact.id && 
-        m.api_message_status !== 'READ' && 
-        m.message_id_from_api &&
-        !processedMessageIds.current.has(m.id) // Check if not already processed
+        !m.is_read &&
+        m.message_id_from_api
     );
       
     if (unreadMessages.length > 0) {
-        const messagesToMark = unreadMessages.map(m => ({
-            remoteJid: chat.contact.phone_number_jid!,
-            fromMe: false,
-            id: m.message_id_from_api!
-        }));
-          
-        markMessagesAsReadAction(chat.instance_name, messagesToMark);
+        const messageApiIds = unreadMessages.map(m => m.message_id_from_api!);
+        const messageDbIds = unreadMessages.map(m => m.id);
 
-        unreadMessages.forEach(m => processedMessageIds.current.add(m.id));
+        markMessagesAsReadAction(
+            chat.instance_name, 
+            messageApiIds.map(id => ({ remoteJid: chat.contact.phone_number_jid!, fromMe: false, id })),
+            messageDbIds
+        );
     }
   }, [initialMessages, chat]);
 
@@ -911,5 +909,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
