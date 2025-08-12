@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Separator } from '../ui/separator';
-import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as TagIcon, Globe, Clock } from 'lucide-react';
+import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as TagIcon, Globe, Clock, Smartphone } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
@@ -81,7 +81,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                 <h3 className="text-sm font-semibold text-primary mb-3">Informações de Contato</h3>
                                 <div className="space-y-3 text-sm">
                                     {contact.email && (<div className="flex items-center gap-3"><Mail className="h-4 w-4 text-muted-foreground" /><span>{contact.email}</span></div>)}
-                                    {contact.phone && (<div className="flex items-center gap-3"><Phone className="h-4 w-4 text-muted-foreground" /><span>{contact.phone}</span></div>)}
+                                    {contact.phone_number_jid && (<div className="flex items-center gap-3"><Smartphone className="h-4 w-4 text-muted-foreground" /><span>{contact.phone_number_jid}</span></div>)}
                                     {contact.address && (<div className="flex items-center gap-3"><Building className="h-4 w-4 text-muted-foreground" /><span>{contact.address}</span></div>)}
                                 </div>
                             </section>
