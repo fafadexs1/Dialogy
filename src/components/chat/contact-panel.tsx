@@ -225,7 +225,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 <span>{contact.email}</span>
               </div>
             )}
-            {contact.phone_number_jid && (
+             {contact.phone_number_jid && (
               <div className="flex items-center gap-3">
                 <Smartphone className="h-4 w-4 text-muted-foreground" />
                 <span>{contact.phone_number_jid}</span>
