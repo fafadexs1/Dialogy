@@ -3,11 +3,11 @@
 
 import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, NexusFlowInstance, Action, ActionType, AutopilotConfig } from '@/lib/types';
+import type { User, NexusFlowInstance, Action, ActionType, AutopilotConfig, AutopilotUsageLog } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Edit, MoreVertical, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound, Loader2, MessageCircle, Webhook, Save } from 'lucide-react';
+import { Plus, Trash2, Edit, MoreVertical, Bot, DollarSign, BrainCircuit, Cog, ArrowDown, ArrowUp, KeyRound, Loader2, MessageCircle, Webhook, Save, History, Sparkles, BookText } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,10 +34,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { getAutopilotConfig, saveAutopilotConfig, saveAutopilotRule, deleteAutopilotRule, toggleAutopilotRule } from '@/actions/autopilot';
+import { getAutopilotConfig, saveAutopilotConfig, saveAutopilotRule, deleteAutopilotRule, toggleAutopilotRule, getAutopilotUsageLogs } from '@/actions/autopilot';
 import { useFormStatus } from 'react-dom';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 type ModelInfo = {
     name: string;
@@ -255,6 +257,7 @@ export default function AutopilotPage() {
 
     const [config, setConfig] = useState<AutopilotConfig | null>(null);
     const [instances, setInstances] = useState<NexusFlowInstance[]>([]);
+    const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
     const [loading, setLoading] = useState(true);
     
     // Form-specific states
@@ -285,6 +288,12 @@ export default function AutopilotPage() {
                     setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
                     setGeminiApiKey(data.config.gemini_api_key || '');
                     setKnowledgeBase(data.config.knowledge_base || '');
+
+                    // Fetch usage logs if config exists
+                    const logsData = await getAutopilotUsageLogs(data.config.id);
+                    if (logsData.logs) {
+                        setUsageLogs(logsData.logs);
+                    }
                 }
             }
         } finally {
@@ -356,6 +365,13 @@ export default function AutopilotPage() {
         }
     };
     
+    const getFlowIcon = (flowName: string) => {
+        if (flowName.includes('autoResponder')) return <Bot className="h-4 w-4 text-primary" />;
+        if (flowName.includes('summarize')) return <BookText className="h-4 w-4 text-purple-500" />;
+        if (flowName.includes('smartReplies')) return <Sparkles className="h-4 w-4 text-amber-500" />;
+        return <BrainCircuit className="h-4 w-4 text-muted-foreground" />;
+    };
+
     const selectedModelInfo = modelInfo[aiModel];
 
     if (!user || loading) {
@@ -538,8 +554,8 @@ export default function AutopilotPage() {
                             </DialogContent>
                         </Dialog>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <form action={saveAction}>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <form action={saveAction} className='lg:col-span-2 space-y-6'>
                                 <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
                                 <Card>
                                     <CardHeader>
@@ -564,9 +580,7 @@ export default function AutopilotPage() {
                                         </SaveButton>
                                     </CardFooter>
                                 </Card>
-                            </form>
-
-                            <Card>
+                                 <Card>
                                 <CardHeader>
                                     <CardTitle>Regras de Automação</CardTitle>
                                     <CardDescription>
@@ -618,6 +632,53 @@ export default function AutopilotPage() {
                                             <Button variant="link" onClick={handleAddNewClick}>Adicionar a primeira automação</Button>
                                         </div>
                                     )}
+                                </CardContent>
+                            </Card>
+                            </form>
+
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Histórico de Execuções</CardTitle>
+                                    <CardDescription>
+                                        Últimas 20 execuções do Piloto Automático e seus custos em tokens.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Ação</TableHead>
+                                                <TableHead>Tokens</TableHead>
+                                                <TableHead>Quando</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {usageLogs.map((log) => (
+                                                <TableRow key={log.id}>
+                                                    <TableCell>
+                                                        <div className="flex items-center gap-2">
+                                                            {getFlowIcon(log.flow_name)}
+                                                            <div>
+                                                                <p className="font-medium">{log.rule_name || log.flow_name}</p>
+                                                                <p className="text-xs text-muted-foreground">{log.model_name}</p>
+                                                            </div>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="font-mono">{log.total_tokens}</TableCell>
+                                                    <TableCell className="text-muted-foreground text-xs">
+                                                        {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                            {usageLogs.length === 0 && (
+                                                <TableRow>
+                                                    <TableCell colSpan={3} className="text-center h-24 text-muted-foreground">
+                                                        Nenhuma execução registrada ainda.
+                                                    </TableCell>
+                                                </TableRow>
+                                            )}
+                                        </TableBody>
+                                    </Table>
                                 </CardContent>
                             </Card>
                         </div>

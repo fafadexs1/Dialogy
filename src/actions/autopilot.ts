@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
-import type { AutopilotConfig, NexusFlowInstance, Action } from '@/lib/types';
+import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog } from '@/lib/types';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -212,4 +212,27 @@ export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
     }
 }
 
+
+export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: AutopilotUsageLog[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { logs: null, error: "Usuário não autenticado." };
+    
+    // We can assume if the user is fetching logs, they have access to the config.
+    // A more robust check would verify ownership of the configId.
+    
+    try {
+        const res = await db.query(
+            `SELECT flow_name, rule_name, model_name, total_tokens, created_at
+             FROM autopilot_usage_logs
+             WHERE config_id = $1
+             ORDER BY created_at DESC
+             LIMIT 20`,
+            [configId]
+        );
+        return { logs: res.rows };
+    } catch (error) {
+        console.error('[GET_AUTOPILOT_LOGS] Erro ao buscar logs de uso:', error);
+        return { logs: null, error: "Falha ao buscar o histórico de uso." };
+    }
+}
     

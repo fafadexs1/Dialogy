@@ -245,6 +245,15 @@ export interface AutopilotConfig {
     updated_at: string;
 }
 
+export interface AutopilotUsageLog {
+    id: string;
+    flow_name: string;
+    rule_name: string | null;
+    model_name: string;
+    total_tokens: number;
+    created_at: string;
+}
+
 export interface EvolutionApiConfig {
     id: string;
     workspace_id: string;
