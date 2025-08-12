@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React from 'react';
@@ -49,6 +50,10 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 const LastMessagePreview = ({ message }: { message: Message }) => {
+  if (message.type === 'system') {
+    return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
+  }
+  
   if (message.content) {
     return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
   }
