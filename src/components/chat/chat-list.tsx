@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import React from 'react';
@@ -181,7 +179,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </TooltipProvider>
       </div>
 
-      <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className="p-2 flex-shrink-0 overflow-hidden">
           <TabsList className="grid w-full grid-cols-3 min-w-0">
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
@@ -192,15 +190,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         
         <div className="flex-1 relative">
           <ScrollArea className="absolute inset-0 h-full w-full">
-             <TabsContent value="gerais" className="m-0">
-              {renderChatList(gerais)}
-            </TabsContent>
-            <TabsContent value="atendimentos" className="m-0">
-              {renderChatList(atendimentos)}
-            </TabsContent>
-            <TabsContent value="encerrados" className="m-0">
-              {renderChatList(encerrados)}
-            </TabsContent>
+              <TabsContent value="gerais" className="m-0">
+                {renderChatList(gerais)}
+              </TabsContent>
+              <TabsContent value="atendimentos" className="m-0">
+                {renderChatList(atendimentos)}
+              </TabsContent>
+              <TabsContent value="encerrados" className="m-0">
+                {renderChatList(encerrados)}
+              </TabsContent>
           </ScrollArea>
         </div>
       </Tabs>
