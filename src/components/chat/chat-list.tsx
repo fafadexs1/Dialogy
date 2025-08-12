@@ -50,11 +50,7 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 const LastMessagePreview = ({ message }: { message: Message }) => {
-  if (message.type === 'system') {
-    return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
-  }
-  
-  if (message.content) {
+  if (message.type === 'system' || message.content) {
     return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
   }
 
@@ -146,7 +142,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const encerrados = chats.filter(c => c.status === 'encerrados');
 
   return (
-    <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card">
+    <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card min-w-0">
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
