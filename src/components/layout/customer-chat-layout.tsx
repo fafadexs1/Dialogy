@@ -51,7 +51,11 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
     setChats(latestChats);
 
+    // This logic ensures that if the currently selected chat is no longer in the main
+    // list (e.g., it was closed), we don't just pick a random new one, which would
+    // cause the UI to jump. We keep the state unless there's no chat selected at all.
     setSelectedChat(currentSelectedChat => {
+        // If there's no chat selected, try to select a default one.
         if (!currentSelectedChat) {
             const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
             if (atendimentoChat) return atendimentoChat;
@@ -60,16 +64,17 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             return latestChats.length > 0 ? latestChats[0] : null;
         }
 
+        // If a chat is currently selected, find its updated version in the new list.
         const updatedSelectedChatInList = latestChats.find(c => c.id === currentSelectedChat.id);
 
+        // If the updated version is found, return it.
         if (updatedSelectedChatInList) {
             return updatedSelectedChatInList;
         } else {
-            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-            if (atendimentoChat) return atendimentoChat;
-            const geraisChat = latestChats.find(c => c.status === 'gerais');
-            if (geraisChat) return geraisChat;
-            return latestChats.length > 0 ? latestChats[0] : null;
+            // If the currently selected chat is NOT in the new list (e.g., it was closed and now filtered out),
+            // DO NOT change the selection. Keep the existing `currentSelectedChat` object in state.
+            // This prevents the details panel from suddenly changing. The user can manually select a new chat.
+            return currentSelectedChat;
         }
     });
 
