@@ -50,31 +50,34 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 };
 
 const LastMessagePreview = ({ message }: { message: Message }) => {
-  if (message.type === 'system' || message.content) {
-    return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
+  const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+
+  if (isMedia) {
+    const mimetype = message.metadata?.mimetype || '';
+    let Icon = File;
+    let text = message.content || 'Arquivo';
+
+    if (mimetype.startsWith('image/')) {
+      Icon = ImageIcon;
+      text = message.content || 'Imagem';
+    } else if (mimetype.startsWith('video/')) {
+      Icon = Video;
+      text = message.content || 'Vídeo';
+    } else if (mimetype.startsWith('audio/')) {
+      Icon = Mic;
+      text = message.content || 'Áudio';
+    }
+
+    return (
+      <div className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
+        <Icon className="h-4 w-4 flex-shrink-0" />
+        <span className="truncate">{text}</span>
+      </div>
+    );
   }
 
-  const mimetype = message.metadata?.mimetype || '';
-  let Icon = File;
-  let text = 'Arquivo';
-
-  if (mimetype.startsWith('image/')) {
-    Icon = ImageIcon;
-    text = 'Imagem';
-  } else if (mimetype.startsWith('video/')) {
-    Icon = Video;
-    text = 'Vídeo';
-  } else if (mimetype.startsWith('audio/')) {
-    Icon = Mic;
-    text = 'Áudio';
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
-      <Icon className="h-4 w-4 flex-shrink-0" />
-      <span className="truncate">{text}</span>
-    </div>
-  );
+  // Fallback for text or system messages
+  return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
 };
 
 
@@ -96,7 +99,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           >
             <div className="relative flex-shrink-0">
               <Avatar className="h-10 w-10 border">
-                <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+                <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
               </Avatar>
               {chat.source === 'whatsapp' && (
@@ -164,7 +167,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <Tooltip key={agent.user.id}>
                     <TooltipTrigger>
                         <Avatar className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
-                            <AvatarImage src={agent.user.avatar} alt={agent.user.name} data-ai-hint="person" />
+                            <AvatarImage src={agent.user.avatar} />
                             <AvatarFallback>{agent.user.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                     </TooltipTrigger>
