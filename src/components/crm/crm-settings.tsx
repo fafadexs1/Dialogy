@@ -34,6 +34,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HTMLInputTypeAttribute } from 'react';
 import { Checkbox } from '../ui/checkbox';
+import { DialogClose } from '@radix-ui/react-dialog';
+import { ScrollArea } from '../ui/scroll-area';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({ 
@@ -74,7 +76,7 @@ function OptionsManager({
     return (
         <Card>
             <CardHeader>
-                <CardTitle className="text-lg">{title}</CardTitle>
+                <CardTitle className="text-base">{title}</CardTitle>
             </CardHeader>
             <CardContent>
                 <form onSubmit={handleAddItem} className="flex flex-col gap-4 mb-4">
@@ -83,25 +85,26 @@ function OptionsManager({
                             <Label htmlFor={`new-option-${title}`} className='text-xs'>Nome da Opção</Label>
                             <Input
                                 id={`new-option-${title}`} 
-                                placeholder={`Nova opção para ${title}...`}
+                                placeholder={`Nova opção...`}
                                 value={newItemLabel}
                                 onChange={(e) => setNewItemLabel(e.target.value)}
+                                className='h-9'
                             />
                         </div>
                         <div>
                             <Label htmlFor={`new-color-${title}`} className='text-xs'>Cor</Label>
-                            <div className="flex items-center gap-2 border rounded-md h-10 px-2 bg-background">
+                            <div className="flex items-center gap-2 border rounded-md h-9 px-2 bg-background">
                                 <Palette className="h-4 w-4 text-muted-foreground"/>
                                 <input
                                     id={`new-color-${title}`}
                                     type="color"
                                     value={newItemColor}
                                     onChange={(e) => setNewItemColor(e.target.value)}
-                                    className="w-6 h-6 p-0 border-none bg-transparent"
+                                    className="w-5 h-5 p-0 border-none bg-transparent"
                                 />
                             </div>
                         </div>
-                        <Button type="submit" size="sm">Adicionar</Button>
+                        <Button type="submit" size="sm" className='h-9'>Adicionar</Button>
                     </div>
                     {title === "Etiquetas (Tags)" && (
                         <div className="flex items-center space-x-2">
@@ -119,11 +122,11 @@ function OptionsManager({
                         </div>
                     )}
                 </form>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
+                <div className="space-y-2 max-h-40 overflow-y-auto">
                     {options.map(option => (
                         <div key={option.id} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
                             <div className='flex items-center gap-2'>
-                                <span className='h-4 w-4 rounded-full' style={{backgroundColor: option.color}}></span>
+                                <span className='h-3 w-3 rounded-full' style={{backgroundColor: option.color}}></span>
                                 <div className='flex flex-col'>
                                     <span>{option.label}</span>
                                     {(option as Tag).is_close_reason && (
@@ -131,7 +134,7 @@ function OptionsManager({
                                     )}
                                 </div>
                             </div>
-                             <Button variant="ghost" size="icon" onClick={() => handleRemoveItem(option)}>
+                             <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => handleRemoveItem(option)}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
                                 <span className="sr-only">Remover</span>
                             </Button>
@@ -188,7 +191,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
             Gerencie os campos e opções que aparecerão nos formulários e perfis. Adapte o CRM às necessidades do seu negócio.
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[60vh] overflow-y-auto p-1">
+        <div className="max-h-[70vh] overflow-y-auto p-1">
             <Tabs defaultValue="fields">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="fields">Campos Personalizados</TabsTrigger>
@@ -209,12 +212,13 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                         placeholder="Ex: Orçamento Anual"
                                         value={newFieldLabel}
                                         onChange={(e) => setNewFieldLabel(e.target.value)}
+                                        className="h-9"
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="field-type">Tipo do Campo</Label>
                                     <Select value={newFieldType} onValueChange={(val) => setNewFieldType(val as HTMLInputTypeAttribute)}>
-                                        <SelectTrigger id="field-type" className="w-[180px]">
+                                        <SelectTrigger id="field-type" className="w-[180px] h-9">
                                             <SelectValue placeholder="Selecione o tipo" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -226,14 +230,14 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <Button type="submit">
+                                <Button type="submit" className="h-9">
                                     <PlusCircle className="mr-2 h-4 w-4" />
-                                    Adicionar Campo
+                                    Adicionar
                                 </Button>
                             </form>
 
                             <div className="space-y-4">
-                                <h3 className="font-semibold text-lg text-muted-foreground">Campos Atuais</h3>
+                                <h3 className="font-semibold text-muted-foreground">Campos Atuais</h3>
                                 {fields.length > 0 ? (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {fields.map(field => (
@@ -242,7 +246,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                                 <p className="font-medium">{field.label}</p>
                                                 <p className="text-xs text-muted-foreground capitalize bg-secondary px-2 py-0.5 rounded-full inline-block mt-1">{field.type}</p>
                                             </div>
-                                            <Button variant="ghost" size="icon" onClick={() => handleRemoveField(field.id)}>
+                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveField(field.id)}>
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                                 <span className="sr-only">Remover</span>
                                             </Button>
@@ -251,7 +255,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                                     </div>
                                 ) : (
                                     <p className="text-sm text-muted-foreground p-4 text-center border-dashed border rounded-md">
-                                        Nenhum campo personalizado criado. Adicione um acima para começar.
+                                        Nenhum campo personalizado criado.
                                     </p>
                                 )}
                             </div>
@@ -264,18 +268,24 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
                             <CardTitle>Gerenciador de Etiquetas e Opções</CardTitle>
                             <CardDescription>Personalize as etiquetas e as opções disponíveis nos campos de seleção do CRM.</CardDescription>
                         </CardHeader>
-                        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <OptionsManager title="Etiquetas (Tags)" options={tags} setOptions={setTags as any} />
-                            <OptionsManager title="Cargos" options={jobTitles} setOptions={setJobTitles as any} />
-                            <OptionsManager title="Origem do Lead" options={leadSources} setOptions={setLeadSources as any} />
-                            <OptionsManager title="Canais de Contato" options={contactChannels} setOptions={setContactChannels as any} />
+                        <CardContent>
+                          <ScrollArea className="h-[55vh]">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-1">
+                              <OptionsManager title="Etiquetas (Tags)" options={tags} setOptions={setTags as any} />
+                              <OptionsManager title="Cargos" options={jobTitles} setOptions={setJobTitles as any} />
+                              <OptionsManager title="Origem do Lead" options={leadSources} setOptions={setLeadSources as any} />
+                              <OptionsManager title="Canais de Contato" options={contactChannels} setOptions={setContactChannels as any} />
+                            </div>
+                          </ScrollArea>
                         </CardContent>
                      </Card>
                 </TabsContent>
             </Tabs>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline">Fechar</Button>
+          <DialogClose asChild>
+            <Button type="button" variant="outline">Fechar</Button>
+          </DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

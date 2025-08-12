@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -7,9 +8,9 @@ import { Mail, Phone, Building, Briefcase, CheckSquare, Paperclip, Send, Calenda
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { ScrollArea } from '../ui/scroll-area';
+import { mockTags } from '@/lib/mock-data';
 
 interface CustomerProfileProps {
   customer: User | null;
@@ -18,7 +19,7 @@ interface CustomerProfileProps {
 export default function CustomerProfile({ customer }: CustomerProfileProps) {
   if (!customer) {
     return (
-      <main className="flex flex-1 flex-col items-center justify-center bg-secondary/10 p-6">
+      <main className="hidden lg:flex flex-1 flex-col items-center justify-center bg-background p-6 w-full lg:w-2/5 border-l">
         <div className="text-center">
           <Users className="h-16 w-16 mx-auto text-muted-foreground/50" />
           <h2 className="mt-4 text-2xl font-semibold">Selecione um Contato</h2>
@@ -29,8 +30,6 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
   }
   
   const { businessProfile } = customer;
-  const firstName = customer.name.split(' ')[0] || '';
-  const lastName = customer.name.split(' ').slice(1).join(' ') || '';
 
   const getPriorityColor = (score: number) => {
     if (score > 70) return "text-red-500";
@@ -43,15 +42,20 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
     if (score > 50) return "text-amber-500";
     return "text-green-500";
   }
+  
+  const getTagStyle = (tagValue: string) => {
+      const tag = mockTags.find(t => t.value === tagValue);
+      return tag ? { backgroundColor: tag.color, color: '#fff', borderColor: 'transparent' } : {};
+  };
 
   return (
-    <div className="flex-1 flex flex-col bg-secondary/10 h-full">
-      <header className="p-6 border-b bg-card">
+    <div className="hidden lg:flex flex-1 flex-col bg-card h-full w-full lg:w-2/5 border-l">
+      <header className="p-6 border-b bg-card flex-shrink-0">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-6">
             <Avatar className="h-20 w-20 border-2">
               <AvatarImage src={customer.avatar} alt={customer.name} data-ai-hint="person" />
-              <AvatarFallback className="text-2xl">{firstName.charAt(0)}{lastName.charAt(0)}</AvatarFallback>
+              <AvatarFallback className="text-2xl">{customer.firstName?.charAt(0)}{customer.lastName?.charAt(0)}</AvatarFallback>
             </Avatar>
             <div>
               <h1 className="text-3xl font-bold">{customer.name}</h1>
@@ -77,7 +81,6 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
           <div className="flex items-center gap-2">
             <Button variant="outline"><Send className="mr-2 h-4 w-4"/> Enviar E-mail</Button>
             <Button><Briefcase className="mr-2 h-4 w-4"/> Criar Negócio</Button>
-            <Button variant="secondary"><Calendar className="mr-2 h-4 w-4"/> Agendar Reunião</Button>
           </div>
         </div>
       </header>
@@ -85,102 +88,71 @@ export default function CustomerProfile({ customer }: CustomerProfileProps) {
       <ScrollArea className="flex-1">
         <div className="grid grid-cols-12 gap-6 p-6">
           
-          <div className="col-span-12 lg:col-span-3 space-y-6">
+          <div className="col-span-12 xl:col-span-4 space-y-6">
               <Card>
                   <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-lg"><Building className="h-5 w-5" /> Informações da Empresa</CardTitle>
+                      <CardTitle className="flex items-center gap-2 text-base">Informações do Contato</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                      <div className="flex justify-between">
+                       <div className="flex justify-between items-center">
+                          <span className="font-medium text-muted-foreground">Email</span>
+                          <a href={`mailto:${customer.email}`} className="text-primary hover:underline truncate">{customer.email}</a>
+                      </div>
+                       <div className="flex justify-between items-center">
+                          <span className="font-medium text-muted-foreground">Telefone</span>
+                          <span>{customer.phone}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
                           <span className="font-medium text-muted-foreground">Website</span>
                           <a href="#" className="text-primary hover:underline">{businessProfile?.website}</a>
                       </div>
-                      <div className="flex justify-between">
+                       <div className="flex justify-between items-center">
                           <span className="font-medium text-muted-foreground">Setor</span>
                           <span>{businessProfile?.industry}</span>
-                      </div>
-                      <div className="flex justify-between">
-                          <span className="font-medium text-muted-foreground">Nº de Funcionários</span>
-                          <span>{businessProfile?.employees}</span>
                       </div>
                   </CardContent>
               </Card>
                <Card>
                   <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-lg"><Palette className="h-5 w-5" /> Etiquetas (Tags)</CardTitle>
+                      <CardTitle className="flex items-center gap-2 text-base">Etiquetas (Tags)</CardTitle>
                   </CardHeader>
                   <CardContent className="flex flex-wrap gap-2">
                      {businessProfile?.tags.map((tag: Tag) => (
-                       <Badge key={tag.id} style={{ backgroundColor: tag.color, color: '#fff' }} className="border-transparent">
+                       <Badge key={tag.id} style={getTagStyle(tag.value)}>
                           {tag.label}
                       </Badge>
                      ))}
-                     <Button variant="ghost" size="sm" className="h-auto p-1 text-xs mt-2">
+                     <Button variant="ghost" size="sm" className="h-auto p-1 text-xs text-primary">
                           <Plus className="mr-1 h-3 w-3" /> Adicionar tag
                      </Button>
                   </CardContent>
               </Card>
+               <Card>
+                  <CardHeader>
+                      <CardTitle className="flex items-center justify-between text-base">
+                         <span className="flex items-center gap-2"> Anexos</span>
+                          <Badge variant="secondary">{businessProfile?.attachments?.length || 0}</Badge>
+                      </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                      <p className="text-muted-foreground text-center text-xs p-4">Nenhum anexo.</p>
+                      <Button variant="outline" className="w-full mt-2 h-9">Adicionar Anexo</Button>
+                  </CardContent>
+              </Card>
           </div>
           
-          <div className="col-span-12 lg:col-span-6">
+          <div className="col-span-12 xl:col-span-8">
               <Card className="h-full">
                   <CardHeader>
                       <CardTitle>Linha do Tempo</CardTitle>
                   </CardHeader>
                   <CardContent>
                       <Textarea placeholder="Adicionar uma anotação, agendar uma tarefa, registrar uma ligação..." />
-                      <p className="mt-4 text-muted-foreground text-center">Em breve: um feed cronológico de todas as interações do cliente, incluindo chats, tickets, e-mails e faturas.</p>
+                      <p className="mt-4 text-muted-foreground text-center text-sm p-8 bg-muted rounded-lg">Em breve: um feed cronológico de todas as interações do cliente, incluindo chats, tickets, e-mails e faturas.</p>
                   </CardContent>
               </Card>
           </div>
 
-          <div className="col-span-12 lg:col-span-3 space-y-6">
-             <Card>
-                  <CardHeader>
-                      <CardTitle className="flex items-center justify-between text-lg">
-                          <span className="flex items-center gap-2"><Briefcase className="h-5 w-5" /> Negócios</span>
-                          <Badge variant="default">{businessProfile?.deals.length}</Badge>
-                      </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                      {businessProfile?.deals.map(deal => (
-                          <div key={deal.id} className="p-3 border rounded-lg bg-background">
-                              <p className="font-semibold">{deal.name}</p>
-                              <p className="text-sm text-green-600 font-medium">{deal.value}</p>
-                              <Badge variant="outline" className="mt-1">{deal.stage}</Badge>
-                          </div>
-                      ))}
-                  </CardContent>
-              </Card>
-              <Card>
-                  <CardHeader>
-                      <CardTitle className="flex items-center justify-between text-lg">
-                         <span className="flex items-center gap-2"><CheckSquare className="h-5 w-5" /> Tarefas</span>
-                          <Badge variant="default">{businessProfile?.tasks.length}</Badge>
-                      </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                      {businessProfile?.tasks.map(task => (
-                          <div key={task.id} className="flex items-start gap-3">
-                             <CheckSquare className={`h-5 w-5 mt-0.5 ${task.completed ? 'text-primary' : 'text-muted-foreground'}`}/>
-                             <div>
-                               <p className={`font-medium ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.description}</p>
-                               <p className="text-xs text-muted-foreground">{task.dueDate}</p>
-                             </div>
-                          </div>
-                      ))}
-                  </CardContent>
-              </Card>
-               <Card>
-                  <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-lg"><Paperclip className="h-5 w-5" /> Anexos</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                      <p className="text-muted-foreground text-center text-sm">Nenhum anexo.</p>
-                      <Button variant="outline" className="w-full mt-2">Adicionar Anexo</Button>
-                  </CardContent>
-              </Card>
-          </div>
         </div>
       </ScrollArea>
     </div>

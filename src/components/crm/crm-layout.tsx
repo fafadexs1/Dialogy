@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -16,7 +17,7 @@ export default function CrmLayout() {
   }, []);
 
   return (
-    <div className="flex flex-1 w-full min-h-0">
+    <div className="flex flex-1 w-full min-h-0 bg-muted/40">
       <CustomerList
         customers={contacts}
         selectedCustomer={selectedCustomer}
