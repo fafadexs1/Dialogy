@@ -95,7 +95,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           >
             <div className="relative flex-shrink-0">
               <Avatar className="h-10 w-10 border">
-                <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+                <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
               </Avatar>
               {chat.source === 'whatsapp' && (

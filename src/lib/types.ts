@@ -62,7 +62,6 @@ export type Contact = {
   workspace_id: string;
   name: string;
   avatar_url?: string;
-  avatar?: string;
   email?: string;
   phone?: string;
   phone_number_jid?: string;
@@ -329,5 +328,3 @@ export interface WorkspaceInvite {
     is_revoked: boolean;
     use_count: number;
 }
-
-    
