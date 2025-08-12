@@ -1,5 +1,5 @@
 
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance, Contact } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance, Contact, Activity } from './types';
 
 export const workspaces: Workspace[] = [
     { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
@@ -27,12 +27,13 @@ export const agents: User[] = [
 ];
 
 export const mockTags: Tag[] = [
-  { id: 'tag-1', value: 'hot-lead', label: 'Hot Lead', color: '#ef4444' },
-  { id: 'tag-2', value: 'saas-customer', label: 'SaaS Customer', color: '#3b82f6' },
-  { id: 'tag-3', value: 'needs-follow-up', label: 'Needs Follow-Up', color: '#eab308' },
-  { id: 'tag-4', value: 'enterprise', label: 'Enterprise', color: '#8b5cf6' },
-  { id: 'tag-5', value: 'problema-resolvido', label: 'Problema Resolvido', color: '#22c55e', is_close_reason: true },
-  { id: 'tag-6', value: 'sem-resposta', label: 'Cliente sem resposta', color: '#6b7280', is_close_reason: true },
+  { id: 'tag-1', value: 'prospect-quente', label: 'Prospect Quente', color: '#FEE2E2' },
+  { id: 'tag-2', value: 'cliente-ativo', label: 'Cliente Ativo', color: '#D1FAE5' },
+  { id: 'tag-3', value: 'sem-viabilidade', label: 'Sem Viabilidade', color: '#E5E7EB' },
+  { id: 'tag-4', value: 'ex-cliente', label: 'Ex-Cliente', color: '#FEF9C3' },
+  { id: 'tag-5', value: 'prospect', label: 'Prospect', color: '#DBEAFE' },
+  { id: 'tag-6', value: 'problema-resolvido', label: 'Problema Resolvido', color: '#22c55e', is_close_reason: true },
+  { id: 'tag-7', value: 'sem-resposta', label: 'Cliente sem resposta', color: '#6b7280', is_close_reason: true },
 ];
 
 export const leadSources: SelectableOption[] = [
@@ -62,107 +63,55 @@ export const mockCustomFieldDefinitions: CustomFieldDefinition[] = [
     { id: 'legacy_id', label: 'ID do Cliente no Sistema Antigo', type: 'text', placeholder: 'XYZ-123' },
 ];
 
+const sampleActivities: Activity[] = [
+    {type: 'viabilidade', date: '2025-05-06', notes: 'Viabilidade técnica OK para o endereço.'},
+    {type: 'ligacao', date: '2025-05-01', notes: 'Primeiro contacto, interesse no plano 500MB.'},
+    {type: 'nota', date: '2025-05-07', notes: 'Cliente contactou suporte sobre velocidade (resolvido).'},
+];
+
 export const contacts: Contact[] = [
     { 
-      id: 'contact-1', 
+      id: 'CRM001', 
       workspace_id: 'ws-1',
-      firstName: 'Carlos',
-      lastName: 'Silva',
-      name: 'Carlos Silva', 
-      avatar: 'https://placehold.co/40x40.png', 
-      email: 'carlos.silva@example.com', 
-      phone: '+55 11 98765-4321', 
-      lastSeen: '2 hours ago',
+      firstName: 'Marcos',
+      lastName: 'Oliveira',
+      name: 'Marcos Oliveira', 
+      avatar: '', 
+      email: 'marcos.o@emailaleatorio.com', 
+      phone: '(11) 99988-7766', 
       businessProfile: {
+        ownerId: 'agent-1',
+        ownerName: 'Alex Johnson',
         companyName: 'InnovateTech',
-        website: 'innovatetech.com',
-        industry: 'Software',
-        employees: 50,
-        dialogPriorityScore: 95,
-        financialRiskScore: 10,
-        deals: [
-            { id: 'deal-1', name: 'Projeto Alpha', value: 'R$ 25.000', stage: 'Proposta Apresentada', closeDate: '30/08/2025' }
-        ],
-        tasks: [
-            { id: 'task-1', description: 'Enviar contrato para João', dueDate: 'Vence Hoje', completed: false },
-            { id: 'task-2', description: 'Ligar para o Sr. Roberto', dueDate: 'Agendado para 05/08', completed: false }
-        ],
-        tags: [mockTags[0], mockTags[1], mockTags[2]],
-        customFields: {
-            budget: 'R$ 50.000',
-            product_interest: 'Software de Gestão',
-        }
+        lastActivity: '2025-05-06',
+        serviceInterest: 'Fibra 500MB',
+        currentProvider: 'Vivo Fibra',
+        tags: [mockTags[0], mockTags[1]],
+        deals: [ { id: 'NEG001', name: 'Contrato Fibra 500MB - Marcos O.', stage: 'Viabilidade OK', value: "159.90", closeDate: "2025-06-01" } ],
+        tasks: [],
+        activities: [sampleActivities[0], sampleActivities[1]],
       }
     },
     { 
-      id: 'contact-2', 
+      id: 'CRM002',
       workspace_id: 'ws-1',
       firstName: 'Beatriz',
-      lastName: 'Costa',
-      name: 'Beatriz Costa', 
-      avatar: 'https://placehold.co/40x40.png', 
-      email: 'beatriz.costa@example.com', 
-      phone: '+55 21 91234-5678', 
-      lastSeen: 'Online',
+      lastName: 'Santos',
+      name: 'Beatriz Santos', 
+      avatar: '', 
+      email: 'bia.santos@email.com', 
+      phone: '(21) 98877-6655', 
       businessProfile: {
-        companyName: 'Soluções Criativas',
-        website: 'solucoes.com',
-        industry: 'Marketing',
-        employees: 20,
-        dialogPriorityScore: 30,
-        financialRiskScore: 80,
-        deals: [],
-        tasks: [
-             { id: 'task-3', description: 'Preparar apresentação de resultados', dueDate: 'Vence Amanhã', completed: false }
-        ],
-        tags: [],
-        customFields: {}
-      }
-    },
-    { 
-      id: 'contact-3', 
-      workspace_id: 'ws-1',
-      firstName: 'Juliana',
-      lastName: 'Almeida',
-      name: 'Juliana Almeida', 
-      avatar: 'https://placehold.co/40x40.png', 
-      email: 'juliana.almeida@example.com', 
-      phone: '+55 31 99999-8888', 
-      lastSeen: 'Yesterday',
-       businessProfile: {
-        companyName: 'Logística Global',
-        industry: 'Transporte',
-        employees: 250,
-        dialogPriorityScore: 65,
-        financialRiskScore: 40,
-        deals: [
-             { id: 'deal-2', name: 'Expansão de Frota', value: 'R$ 150.000', stage: 'Negociação', closeDate: '15/09/2025' }
-        ],
-        tasks: [],
-        tags: [mockTags[3]],
-        customFields: {}
-      }
-    },
-    { 
-      id: 'contact-4', 
-      workspace_id: 'ws-1',
-      firstName: 'Ricardo',
-      lastName: 'Pereira',
-      name: 'Ricardo Pereira', 
-      avatar: 'https://placehold.co/40x40.png', 
-      email: 'ricardo.pereira@example.com', 
-      phone: '+55 41 98888-7777', 
-      lastSeen: '5 minutes ago',
-      businessProfile: {
-        companyName: 'RP Consultoria',
-        industry: 'Consultoria',
-        employees: 5,
-        dialogPriorityScore: 80,
-        financialRiskScore: 25,
+        ownerId: 'agent-2',
+        ownerName: 'Maria Garcia',
+        companyName: '',
+        lastActivity: '2025-05-07',
+        serviceInterest: 'Fibra 300MB',
+        currentProvider: '',
+        tags: [mockTags[1]],
         deals: [],
         tasks: [],
-        tags: [],
-        customFields: {}
+        activities: [sampleActivities[2]],
       }
     },
 ];
@@ -181,22 +130,6 @@ export const chats: Chat[] = [
     workspace_id: 'ws-1',
     contact: contacts[1],
     status: 'atendimentos',
-    messages: [
-    ],
-  },
-  {
-    id: 'chat-3',
-    workspace_id: 'ws-1',
-    contact: contacts[2],
-    status: 'gerais',
-    messages: [
-    ],
-  },
-  {
-    id: 'chat-4',
-    workspace_id: 'ws-1',
-    contact: contacts[3],
-    status: 'encerrados',
     messages: [
     ],
   },

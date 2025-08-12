@@ -1,7 +1,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -21,95 +21,128 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus } from 'lucide-react';
-import { Textarea } from '../ui/textarea';
-import { agents, leadSources } from '@/lib/mock-data';
+import { agents } from '@/lib/mock-data';
+import type { Contact } from '@/lib/types';
 
-export function AddContactForm({ children }: { children: React.ReactNode }) {
-  const owners = agents;
+interface AddContactFormProps {
+    isOpen: boolean;
+    setIsOpen: (isOpen: boolean) => void;
+    onSave: (contact: Contact) => void;
+    contact: Contact | null;
+}
+
+export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContactFormProps) {
+  const [formData, setFormData] = useState<Partial<Contact>>({});
+
+  useEffect(() => {
+    if (contact) {
+      setFormData(contact);
+    } else {
+      setFormData({});
+    }
+  }, [contact]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+   const handleSelectChange = (name: string, value: string) => {
+    setFormData(prev => ({ ...prev, businessProfile: { ...(prev.businessProfile || {}), [name]: value } as any }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newContact: Contact = {
+        id: contact?.id || `CRM${Date.now()}`,
+        workspace_id: 'ws-1', // Assuming a default workspace for now
+        name: formData.name || '',
+        firstName: (formData.name || '').split(' ')[0],
+        lastName: (formData.name || '').split(' ').slice(1).join(' '),
+        avatar: `https://placehold.co/40x40.png?text=${((formData.name || '?').charAt(0)).toUpperCase()}`,
+        email: formData.email,
+        phone: formData.phone,
+        businessProfile: {
+            ...contact?.businessProfile,
+            companyName: formData.businessProfile?.companyName,
+            ownerId: formData.businessProfile?.ownerId,
+            serviceInterest: formData.businessProfile?.serviceInterest,
+            currentProvider: formData.businessProfile?.currentProvider,
+            tags: formData.businessProfile?.tags || [],
+            deals: contact?.businessProfile?.deals || [],
+            tasks: contact?.businessProfile?.tasks || [],
+        },
+    };
+    onSave(newContact);
+  }
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        {children}
-      </DialogTrigger>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Criar Novo Contato</DialogTitle>
+          <DialogTitle>{contact ? 'Editar Contato' : 'Criar Novo Contato'}</DialogTitle>
           <DialogDescription>
             Preencha os detalhes abaixo para adicionar um novo contato ao seu CRM.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[70vh] grid-cols-1 gap-8 overflow-y-auto p-1 md:grid-cols-2">
-          {/* Coluna da Esquerda */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">Nome Completo*</Label>
-              <Input id="firstName" placeholder="João da Silva" required />
+        <form onSubmit={handleSubmit}>
+            <div className="grid max-h-[70vh] grid-cols-1 gap-8 overflow-y-auto p-1 md:grid-cols-2">
+            {/* Coluna da Esquerda */}
+            <div className="space-y-4">
+                <div className="space-y-2">
+                <Label htmlFor="name">Nome Completo*</Label>
+                <Input id="name" name="name" placeholder="João da Silva" required value={formData.name || ''} onChange={handleChange} />
+                </div>
+                <div className="space-y-2">
+                <Label htmlFor="email">E-mail</Label>
+                <Input id="email" name="email" type="email" placeholder="joao.silva@email.com" value={formData.email || ''} onChange={handleChange} />
+                </div>
+                <div className="space-y-2">
+                <Label htmlFor="phone">Telefone*</Label>
+                <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required value={formData.phone || ''} onChange={handleChange} />
+                </div>
+                <div className="space-y-2">
+                <Label htmlFor="companyName">Empresa (Opcional)</Label>
+                <Input id="companyName" name="companyName" placeholder="InnovateTech Soluções" value={formData.businessProfile?.companyName || ''} onChange={(e) => setFormData(p => ({...p, businessProfile: {...p.businessProfile, companyName: e.target.value} as any}))} />
+                </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
-              <Input id="email" type="email" placeholder="joao.silva@email.com" />
+            
+            {/* Coluna da Direita */}
+            <div className="space-y-4">
+                <div className="space-y-2">
+                    <Label htmlFor="serviceInterest">Plano de Interesse</Label>
+                    <Select name="serviceInterest" value={formData.businessProfile?.serviceInterest || ''} onValueChange={(val) => handleSelectChange('serviceInterest', val)}>
+                        <SelectTrigger id="serviceInterest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="Fibra 100MB">Fibra 100MB</SelectItem>
+                            <SelectItem value="Fibra 300MB">Fibra 300MB</SelectItem>
+                            <SelectItem value="Fibra 500MB">Fibra 500MB</SelectItem>
+                            <SelectItem value="Plano Gamer">Plano Gamer</SelectItem>
+                            <SelectItem value="Link Dedicado">Link Dedicado</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="currentProvider">Provedor Atual</Label>
+                    <Input id="currentProvider" name="currentProvider" placeholder="Ex: Vivo, Claro" value={formData.businessProfile?.currentProvider || ''} onChange={(e) => setFormData(p => ({...p, businessProfile: {...p.businessProfile, currentProvider: e.target.value} as any}))}/>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="ownerId">Vendedor Responsável</Label>
+                    <Select name="ownerId" value={formData.businessProfile?.ownerId || ''} onValueChange={(val) => handleSelectChange('ownerId', val)}>
+                        <SelectTrigger id="ownerId"><SelectValue placeholder="Selecione um proprietário" /></SelectTrigger>
+                        <SelectContent>
+                            {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
-             <div className="space-y-2">
-              <Label htmlFor="phone">Telefone*</Label>
-              <Input id="phone" type="tel" placeholder="+55 11 98765-4321" required />
             </div>
-             <div className="space-y-2">
-              <Label htmlFor="company">Empresa (Opcional)</Label>
-              <Input id="company" placeholder="InnovateTech Soluções" />
-            </div>
-             <div className="space-y-2">
-              <Label htmlFor="address">Endereço Completo*</Label>
-              <Input id="address" placeholder="Rua das Flores, 123, Bairro Jardim, São Paulo" required />
-            </div>
-          </div>
-          
-          {/* Coluna da Direita */}
-          <div className="space-y-4">
-             <div className="space-y-2">
-                <Label htmlFor="service-interest">Plano de Interesse</Label>
-                 <Select>
-                    <SelectTrigger id="service-interest">
-                        <SelectValue placeholder="Selecione um plano" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="none">Nenhum</SelectItem>
-                        <SelectItem value="fibra-100">Fibra 100MB</SelectItem>
-                        <SelectItem value="fibra-300">Fibra 300MB</SelectItem>
-                        <SelectItem value="fibra-500">Fibra 500MB</SelectItem>
-                        <SelectItem value="gamer">Plano Gamer</SelectItem>
-                        <SelectItem value="dedicado">Link Dedicado</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
-            <div className="space-y-2">
-                <Label htmlFor="owner">Vendedor Responsável</Label>
-                <Select>
-                    <SelectTrigger id="owner">
-                        <SelectValue placeholder="Selecione um proprietário" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {owners.map(owner => (
-                            <SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            </div>
-             <div className="space-y-2">
-                <Label htmlFor="tags">Tags (separadas por vírgula)</Label>
-                <Input id="tags" placeholder="prospect, vip, etc" />
-            </div>
-             <div className="space-y-2">
-                <Label htmlFor="current-provider">Provedor Atual</Label>
-                <Input id="current-provider" placeholder="Ex: Vivo, Claro" />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="ghost">Cancelar</Button>
-          <Button type="submit">Salvar Contato</Button>
-        </DialogFooter>
+            <DialogFooter className="pt-6">
+            <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
+            <Button type="submit">Salvar Contato</Button>
+            </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

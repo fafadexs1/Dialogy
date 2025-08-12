@@ -2,34 +2,95 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Settings, Plus, Upload, Filter, ChevronLeft, ChevronRight, Eye, PhoneSlash, PlusCircle, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type User, type Tag } from '@/lib/types';
+import { type User, type Tag, Contact } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { mockTags, agents } from '@/lib/mock-data';
+import { mockTags, agents, contacts as mockContacts } from '@/lib/mock-data';
 import { Badge } from '../ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal } from 'lucide-react';
+import CustomerProfile from './customer-profile';
+import { AddActivityForm } from './add-activity-form';
+import { LogAttemptForm } from './log-attempt-form';
 
 interface CustomerListProps {
-  customers: User[];
+  customers: Contact[];
 }
 
-export default function CustomerList({ customers = [] }: CustomerListProps) {
+function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => void }) {
+  return (
+    <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal className="h-4 w-4" />
+            </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onSelect('view', contact)}><Eye className="mr-2 h-4 w-4" /> Ver Detalhes</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneSlash className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem>
+        </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export default function CustomerList({ customers: initialCustomers = [] }: CustomerListProps) {
+  const [customers, setCustomers] = useState(initialCustomers);
   const [searchTerm, setSearchTerm] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('todos');
   const [tagFilter, setTagFilter] = useState('todos');
+
+  // State for modals and panels
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+  const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  
+
+  const handleAction = (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
+    setSelectedContact(contact);
+    switch (action) {
+      case 'view':
+        setIsProfileOpen(true);
+        break;
+      case 'edit':
+        setEditingContact(contact);
+        setIsAddEditModalOpen(true);
+        break;
+      case 'addActivity':
+        setIsActivityModalOpen(true);
+        break;
+      case 'logAttempt':
+        setIsLogAttemptModalOpen(true);
+        break;
+      case 'delete':
+        if (window.confirm(`Tem certeza que deseja excluir o contato "${contact.name}"?`)) {
+          setCustomers(prev => prev.filter(c => c.id !== contact.id));
+        }
+        break;
+    }
+  };
+
+  const handleSaveContact = (contact: Contact) => {
+    if (editingContact) {
+      setCustomers(prev => prev.map(c => c.id === contact.id ? contact : c));
+    } else {
+      setCustomers(prev => [contact, ...prev]);
+    }
+    setIsAddEditModalOpen(false);
+    setEditingContact(null);
+  }
+
 
   const filteredCustomers = customers.filter((customer) => {
       const searchString = `${customer.name} ${customer.email || ''} ${customer.businessProfile?.companyName || ''}`.toLowerCase();
@@ -41,7 +102,7 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
 
   const getTagStyle = (tagValue: string) => {
       const tag = mockTags.find(t => t.value === tagValue);
-      return tag ? { backgroundColor: tag.color, color: '#fff', borderColor: 'transparent' } : {};
+      return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
   };
 
   return (
@@ -92,11 +153,9 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                             <Settings className="h-5 w-5" />
                         </Button>
                      </CrmSettings>
-                    <AddContactForm>
-                      <Button className="h-9">
-                          <Plus className="mr-1.5 h-4 w-4" />Novo Contato
-                      </Button>
-                    </AddContactForm>
+                    <Button className="h-9" onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}>
+                        <Plus className="mr-1.5 h-4 w-4" />Novo Contato
+                    </Button>
                 </div>
             </div>
         </header>
@@ -109,11 +168,11 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                             <TableRow>
                                 <TableHead className="w-12"><Checkbox /></TableHead>
                                 <TableHead>Nome</TableHead>
-                                <TableHead>Empresa</TableHead>
                                 <TableHead>Telefone</TableHead>
-                                <TableHead>Proprietário</TableHead>
+                                <TableHead>Vendedor</TableHead>
                                 <TableHead>Tags</TableHead>
-                                <TableHead className="text-center">Prioridade</TableHead>
+                                <TableHead className="text-center">Plano Interesse</TableHead>
+                                <TableHead className="text-center">Última Atividade</TableHead>
                                 <TableHead className="text-center">Ações</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -121,7 +180,6 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                             {filteredCustomers.map(customer => (
                                 <TableRow 
                                   key={customer.id} 
-                                  className="cursor-pointer"
                                 >
                                     <TableCell><Checkbox /></TableCell>
                                     <TableCell>
@@ -136,7 +194,6 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                                             </div>
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-xs">{customer.businessProfile?.companyName || '--'}</TableCell>
                                     <TableCell className="text-xs">{customer.phone}</TableCell>
                                     <TableCell className="text-xs">{customer.businessProfile?.ownerName || 'N/A'}</TableCell>
                                     <TableCell>
@@ -147,26 +204,15 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-center">
-                                       {customer.businessProfile?.dialogPriorityScore && (
-                                          <Badge variant={customer.businessProfile.dialogPriorityScore > 70 ? "destructive" : "secondary"}>
-                                              {customer.businessProfile.dialogPriorityScore}
+                                       {customer.businessProfile?.serviceInterest && (
+                                          <Badge variant={"secondary"}>
+                                              {customer.businessProfile.serviceInterest}
                                           </Badge>
                                       )}
                                     </TableCell>
+                                    <TableCell className="text-center text-xs">{customer.businessProfile?.lastActivity}</TableCell>
                                      <TableCell className="text-center">
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7">
-                                                    <MoreHorizontal className="h-4 w-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
-                                                <DropdownMenuItem>Editar Contato</DropdownMenuItem>
-                                                <DropdownMenuItem>Adicionar Atividade</DropdownMenuItem>
-                                                <DropdownMenuItem className="text-destructive">Excluir</DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
+                                        <TableActions contact={customer} onSelect={handleAction} />
                                     </TableCell>
                                 </TableRow>
                             ))}
@@ -186,6 +232,34 @@ export default function CustomerList({ customers = [] }: CustomerListProps) {
                 </div>
             </section>
         </div>
+        
+        {/* Modals and Side Panels */}
+        <AddContactForm 
+            isOpen={isAddEditModalOpen}
+            setIsOpen={setIsAddEditModalOpen}
+            onSave={handleSaveContact}
+            contact={editingContact}
+        />
+        {selectedContact && (
+            <>
+                <CustomerProfile 
+                    contact={selectedContact}
+                    isOpen={isProfileOpen}
+                    setIsOpen={setIsProfileOpen}
+                    onAction={handleAction}
+                />
+                <AddActivityForm
+                    contact={selectedContact}
+                    isOpen={isActivityModalOpen}
+                    setIsOpen={setIsActivityModalOpen}
+                />
+                 <LogAttemptForm
+                    contact={selectedContact}
+                    isOpen={isLogAttemptModalOpen}
+                    setIsOpen={setIsLogAttemptModalOpen}
+                />
+            </>
+        )}
     </div>
   );
 }

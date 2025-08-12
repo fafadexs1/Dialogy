@@ -1,6 +1,4 @@
 
-
-
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -90,6 +88,11 @@ export type BusinessProfile = {
   customFields?: { [key: "string"]: any };
   dialogPriorityScore?: number;
   financialRiskScore?: number;
+  ownerId?: string;
+  ownerName?: string;
+  lastActivity?: string;
+  serviceInterest?: string;
+  currentProvider?: string;
 };
 
 export type Deal = {
@@ -106,6 +109,12 @@ export type Task = {
   dueDate: string;
   completed: boolean;
 };
+
+export type Activity = {
+    type: 'ligacao' | 'email' | 'whatsapp' | 'visita' | 'viabilidade' | 'contrato' | 'agendamento' | 'tentativa-contato' | 'nota';
+    date: string;
+    notes: string;
+}
 
 export type MessageSender = User | Contact | undefined;
 
