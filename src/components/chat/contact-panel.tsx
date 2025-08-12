@@ -209,7 +209,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
         
           <div className="flex flex-col items-center text-center">
             <Avatar className="h-20 w-20 shrink-0 border">
-              <AvatarImage src={contact.avatar} alt={contact.name} data-ai-hint="person" />
+              <AvatarImage src={contact.avatar_url} alt={contact.name} data-ai-hint="person" />
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
@@ -225,10 +225,10 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                 <span>{contact.email}</span>
               </div>
             )}
-            {contact.phone && (
+            {contact.phone_number_jid && (
               <div className="flex items-center gap-3">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{contact.phone}</span>
+                <Smartphone className="h-4 w-4 text-muted-foreground" />
+                <span>{contact.phone_number_jid}</span>
               </div>
             )}
             {chat.instance_name && (
