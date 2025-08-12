@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import type { User, NexusFlowInstance, Action, ActionType, AutopilotConfig, AutopilotUsageLog } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -44,8 +44,8 @@ import { ptBR } from 'date-fns/locale';
 type ModelInfo = {
     name: string;
     description: string;
-    inputCost: string;
-    outputCost: string;
+    inputCost: number; // Price per 1M tokens
+    outputCost: number; // Price per 1M tokens
     contextWindow: string;
 }
 
@@ -53,15 +53,15 @@ const modelInfo: Record<string, ModelInfo> = {
     'googleai/gemini-2.0-flash': {
         name: 'Gemini 2.0 Flash',
         description: 'Otimizado para velocidade e custo, ideal para respostas rápidas e automações de alto volume.',
-        inputCost: 'R$ 0,94',
-        outputCost: 'R$ 1,87',
+        inputCost: 0.18, // Roughly R$0.94 / 5.2 BRL/USD
+        outputCost: 0.36, // Roughly R$1.87 / 5.2 BRL/USD
         contextWindow: '1M tokens'
     },
     'googleai/gemini-1.5-pro': {
         name: 'Gemini 1.5 Pro',
         description: 'Modelo mais poderoso, ideal para tarefas complexas que exigem raciocínio avançado.',
-        inputCost: 'R$ 18,70',
-        outputCost: 'R$ 56,10',
+        inputCost: 3.5, // Roughly R$18.70 / 5.2 BRL/USD
+        outputCost: 10.5, // Roughly R$56.10 / 5.2 BRL/USD
         contextWindow: '1M tokens'
     }
 }
@@ -86,7 +86,6 @@ interface UsageStats {
     executions: number;
     tokens: number;
     currentCost: number;
-    estimatedCost: number;
 }
 
 function SaveButton({ children }: { children: React.ReactNode }) {
@@ -264,8 +263,6 @@ export default function AutopilotPage() {
     const [aiModel, setAiModel] = useState<string>('googleai/gemini-2.0-flash');
     const [geminiApiKey, setGeminiApiKey] = useState('');
     const [knowledgeBase, setKnowledgeBase] = useState('');
-
-    const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -290,10 +287,14 @@ export default function AutopilotPage() {
                     setKnowledgeBase(data.config.knowledge_base || '');
 
                     // Fetch usage logs if config exists
+                    setLoadingStats(true);
                     const logsData = await getAutopilotUsageLogs(data.config.id);
                     if (logsData.logs) {
                         setUsageLogs(logsData.logs);
                     }
+                    setLoadingStats(false);
+                } else {
+                   setLoadingStats(false);
                 }
             }
         } finally {
@@ -301,19 +302,29 @@ export default function AutopilotPage() {
         }
     }, [user?.activeWorkspaceId, toast]);
 
+     const usageStats: UsageStats | null = useMemo(() => {
+        if (!usageLogs || usageLogs.length === 0) {
+            return { executions: 0, tokens: 0, currentCost: 0 };
+        }
+        
+        const executions = usageLogs.length;
+        const tokens = usageLogs.reduce((acc, log) => acc + log.total_tokens, 0);
+        
+        const currentCost = usageLogs.reduce((acc, log) => {
+            const model = modelInfo[log.model_name];
+            if (!model) return acc;
+            const inputCost = (log.input_tokens / 1000000) * model.inputCost;
+            const outputCost = (log.output_tokens / 1000000) * model.outputCost;
+            return acc + inputCost + outputCost;
+        }, 0);
+
+        return { executions, tokens, currentCost };
+    }, [usageLogs]);
+
     useEffect(() => {
         if (user?.activeWorkspaceId) {
             fetchData();
         }
-
-        setLoadingStats(true);
-        const timer = setTimeout(() => {
-            setUsageStats({ executions: 0, tokens: 0, currentCost: 0, estimatedCost: 0 });
-            setLoadingStats(false);
-        }, 1500);
-
-        return () => clearTimeout(timer);
-
     }, [user?.activeWorkspaceId, fetchData]);
 
     useEffect(() => {
@@ -373,6 +384,7 @@ export default function AutopilotPage() {
     };
 
     const selectedModelInfo = modelInfo[aiModel];
+    const BRL_USD_RATE = 5.2; // Approximate rate
 
     if (!user || loading) {
         return (
@@ -412,8 +424,6 @@ export default function AutopilotPage() {
                                             <div className="grid grid-cols-2 gap-4">
                                                 <Skeleton className="h-24" />
                                                 <Skeleton className="h-24" />
-                                                <Skeleton className="h-24" />
-                                                <Skeleton className="h-24" />
                                             </div>
                                         ) : (
                                         <div className="grid grid-cols-2 gap-4 text-center">
@@ -421,28 +431,21 @@ export default function AutopilotPage() {
                                                 <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
                                                 <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                     <BrainCircuit className="h-6 w-6 text-primary"/>
-                                                    {usageStats?.executions.toLocaleString('pt-BR') || 'N/A'}
+                                                    {usageStats?.executions.toLocaleString('pt-BR') || '0'}
                                                 </p>
                                             </div>
                                             <div className="p-4 rounded-lg bg-secondary/50">
                                                 <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
                                                 <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                     <BrainCircuit className="h-6 w-6 text-purple-500"/>
-                                                    {usageStats?.tokens ? `${Math.round(usageStats.tokens / 1000)}k` : 'N/A'}
+                                                    {usageStats?.tokens ? `${(usageStats.tokens / 1000).toFixed(1)}k` : '0'}
                                                 </p>
                                             </div>
-                                            <div className="p-4 rounded-lg bg-secondary/50">
-                                                <p className="text-sm text-muted-foreground font-semibold">Custo Atual</p>
+                                            <div className="p-4 rounded-lg bg-secondary/50 col-span-2">
+                                                <p className="text-sm text-muted-foreground font-semibold">Custo Atual (USD)</p>
                                                 <p className="text-2xl font-bold flex items-center justify-center gap-2">
                                                     <DollarSign className="h-6 w-6 text-green-500"/>
-                                                    {usageStats?.currentCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'N/A'}
-                                                </p>
-                                            </div>
-                                            <div className="p-4 rounded-lg bg-secondary/50">
-                                                <p className="text-sm text-muted-foreground font-semibold">Custo Estimado</p>
-                                                <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                                    <DollarSign className="h-6 w-6 text-amber-500"/>
-                                                    {usageStats?.estimatedCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'N/A'}
+                                                    {usageStats?.currentCost.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0.00'}
                                                 </p>
                                             </div>
                                         </div>
@@ -496,18 +499,18 @@ export default function AutopilotPage() {
                                                         <div className="grid grid-cols-2 gap-3 text-center">
                                                             <div className="p-2 border rounded-lg">
                                                                 <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
-                                                                <p className="text-sm font-bold">{selectedModelInfo.inputCost}*</p>
+                                                                <p className="text-sm font-bold">{(selectedModelInfo.inputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
                                                             </div>
                                                             <div className="p-2 border rounded-lg">
                                                                 <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
-                                                                <p className="text-sm font-bold">{selectedModelInfo.outputCost}*</p>
+                                                                <p className="text-sm font-bold">{(selectedModelInfo.outputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
                                                             </div>
                                                         </div>
                                                         <div className="p-2 border rounded-lg text-center">
                                                             <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
                                                             <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
                                                         </div>
-                                                        <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
+                                                        <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços em USD por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
                                                     </div>
                                                 )}
                                             </div>
@@ -687,3 +690,5 @@ export default function AutopilotPage() {
         </MainLayout>
     );
 }
+
+    
