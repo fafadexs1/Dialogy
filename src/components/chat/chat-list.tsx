@@ -74,8 +74,8 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
-      <div className="mt-0.5">{getIcon()}</div>
+    <div className="flex items-start gap-1.5 text-sm text-muted-foreground truncate">
+      {getIcon()}
       <p className="truncate">
         {getTextContent()}
       </p>
