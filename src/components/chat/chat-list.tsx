@@ -51,33 +51,34 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 
 const LastMessagePreview = ({ message }: { message: Message }) => {
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+  const textContent = message.content || (isMedia ? 'Mídia' : '');
 
-  if (isMedia) {
+  const getIcon = () => {
+    if (!isMedia) return null;
     const mimetype = message.metadata?.mimetype || '';
-    let Icon = File;
-    let text = message.content || 'Arquivo';
-
-    if (mimetype.startsWith('image/')) {
-      Icon = ImageIcon;
-      text = message.content || 'Imagem';
-    } else if (mimetype.startsWith('video/')) {
-      Icon = Video;
-      text = message.content || 'Vídeo';
-    } else if (mimetype.startsWith('audio/')) {
-      Icon = Mic;
-      text = message.content || 'Áudio';
-    }
-
-    return (
-      <div className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
-        <Icon className="h-4 w-4 flex-shrink-0" />
-        <span className="truncate">{text}</span>
-      </div>
-    );
+    if (mimetype.startsWith('image/')) return <ImageIcon className="h-4 w-4 flex-shrink-0" />;
+    if (mimetype.startsWith('video/')) return <Video className="h-4 w-4 flex-shrink-0" />;
+    if (mimetype.startsWith('audio/')) return <Mic className="h-4 w-4 flex-shrink-0" />;
+    return <File className="h-4 w-4 flex-shrink-0" />;
   }
 
-  // Fallback for text or system messages
-  return <p className="text-sm text-muted-foreground truncate">{message.content}</p>;
+  const getMediaText = () => {
+      if (!isMedia) return message.content;
+      if (message.content) return message.content;
+      const mimetype = message.metadata?.mimetype || '';
+      if (mimetype.startsWith('image/')) return 'Imagem';
+      if (mimetype.startsWith('video/')) return 'Vídeo';
+      if (mimetype.startsWith('audio/')) return 'Áudio';
+      if (message.metadata?.fileName) return message.metadata.fileName;
+      return 'Arquivo';
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
+      {getIcon()}
+      <span className="truncate">{getMediaText()}</span>
+    </div>
+  );
 };
 
 
