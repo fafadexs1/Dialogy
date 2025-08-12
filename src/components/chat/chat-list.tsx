@@ -26,10 +26,10 @@ const AgentTooltipContent = ({ agent }: { agent: OnlineAgent }) => {
 
   React.useEffect(() => {
     if (agent.joined_at) {
-       const updateOnlineTime = () => {
+      const updateOnlineTime = () => {
         const distance = formatDistanceToNow(new Date(agent.joined_at), {
-            addSuffix: true,
-            locale: ptBR,
+          addSuffix: true,
+          locale: ptBR,
         });
         setOnlineSince(distance);
       }
@@ -61,14 +61,14 @@ const LastMessagePreview = ({ message }: { message: Message }) => {
   }
 
   const getMediaText = () => {
-      if (!isMedia) return message.content;
-      if (message.content) return message.content;
-      const mimetype = message.metadata?.mimetype || '';
-      if (mimetype.startsWith('image/')) return 'Imagem';
-      if (mimetype.startsWith('video/')) return 'Vídeo';
-      if (mimetype.startsWith('audio/')) return 'Áudio';
-      if (message.metadata?.fileName) return message.metadata.fileName;
-      return 'Arquivo';
+    if (!isMedia) return message.content;
+    if (message.content) return message.content;
+    const mimetype = message.metadata?.mimetype || '';
+    if (mimetype.startsWith('image/')) return 'Imagem';
+    if (mimetype.startsWith('video/')) return 'Vídeo';
+    if (mimetype.startsWith('audio/')) return 'Áudio';
+    if (message.metadata?.fileName) return message.metadata.fileName;
+    return 'Arquivo';
   }
 
   return (
@@ -181,7 +181,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       <Tabs defaultValue="gerais" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className="p-2 flex-shrink-0 overflow-hidden">
-          <TabsList className="grid w-full grid-cols-3 min-w-0">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="gerais">Gerais</TabsTrigger>
             <TabsTrigger value="atendimentos">Atendimentos</TabsTrigger>
             <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
