@@ -43,7 +43,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             id: c.id,
             workspace_id: workspaceId,
             name: c.name,
-            avatar: c.avatar_url,
+            avatar_url: c.avatar_url,
             phone_number_jid: c.phone_number_jid,
             firstName: c.name.split(' ')[0] || '',
             lastName: c.name.split(' ').slice(1).join(' ') || '',
@@ -55,7 +55,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         return usersMap.get(id) || contactsMap.get(id);
     };
     
-    // Updated query to correctly fetch chats, including all 'encerrados' and active chats for the user.
+    // Corrected query to fetch ALL chats for the workspace, allowing the frontend to filter.
+    // This ensures consistency between server and client fetches.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -98,7 +99,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     }));
 
     if (chats.length > 0) {
-        // Corrected logic: Fetch messages for all contacts associated with the fetched chats
+        // Fetch all messages for all contacts associated with the fetched chats.
+        // This provides the full history needed for the toggle feature.
         const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
 
         const messageRes = await db.query(`
