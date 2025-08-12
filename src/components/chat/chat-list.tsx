@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -60,7 +61,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
     return <File className="h-4 w-4 flex-shrink-0" />;
   };
 
-  const getMediaText = () => {
+  const getTextContent = () => {
     if (message.type === 'system') return message.content;
     if (!isMedia) return message.content;
     if (message.content) return message.content; // Caption for the media
@@ -73,9 +74,11 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
-      {getIcon()}
-      <span className="truncate">{getMediaText()}</span>
+    <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
+      <div className="mt-0.5">{getIcon()}</div>
+      <p className="whitespace-normal break-words">
+        {getTextContent()}
+      </p>
     </div>
   );
 };
