@@ -114,7 +114,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact }: AddContac
                     <Select name="serviceInterest" value={formData.businessProfile?.serviceInterest || ''} onValueChange={(val) => handleSelectChange('serviceInterest', val)}>
                         <SelectTrigger id="serviceInterest"><SelectValue placeholder="Selecione um plano" /></SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="none">Nenhum</SelectItem>
                             <SelectItem value="Fibra 100MB">Fibra 100MB</SelectItem>
                             <SelectItem value="Fibra 300MB">Fibra 300MB</SelectItem>
                             <SelectItem value="Fibra 500MB">Fibra 500MB</SelectItem>

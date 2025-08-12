@@ -31,7 +31,9 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
         <Sheet open={isOpen} onOpenChange={setIsOpen}>
             <SheetContent className="sm:max-w-lg p-0">
                 <div className="flex flex-col h-full">
-                    <header className="p-6 border-b">
+                    <SheetHeader className="p-6 border-b">
+                         <SheetTitle className="sr-only">Detalhes do Contato</SheetTitle>
+                         <SheetDescription className="sr-only">Exibindo detalhes para {contact.name}.</SheetDescription>
                          <div className="flex items-center mb-4">
                             <Avatar className="h-16 w-16 mr-4">
                                 <AvatarImage src={contact.avatar} alt={contact.name} />
@@ -50,7 +52,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
                                 <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade
                             </Button>
                         </div>
-                    </header>
+                    </SheetHeader>
 
                     <div className="flex-1 overflow-y-auto p-6 space-y-6">
                         {/* Contact Info */}
@@ -122,4 +124,3 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction }
         </Sheet>
     );
 }
-
