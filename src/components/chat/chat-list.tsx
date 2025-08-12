@@ -51,6 +51,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
 
   const getIcon = () => {
+    if (message.type === 'system') return null;
     if (!isMedia) return null;
     const mimetype = message.metadata?.mimetype || '';
     if (mimetype.startsWith('image/')) return <ImageIcon className="h-4 w-4 flex-shrink-0" />;
@@ -60,8 +61,9 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   const getMediaText = () => {
+    if (message.type === 'system') return message.content;
     if (!isMedia) return message.content;
-    if (message.content) return message.content;
+    if (message.content) return message.content; // Caption for the media
     const mimetype = message.metadata?.mimetype || '';
     if (mimetype.startsWith('image/')) return 'Imagem';
     if (mimetype.startsWith('video/')) return 'Vídeo';
