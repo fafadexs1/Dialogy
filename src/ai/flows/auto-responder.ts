@@ -78,19 +78,6 @@ const AutoResponderFlowInputSchema = AgentResponseInputSchema.extend({
 });
 
 export async function generateAgentResponse(input: z.infer<typeof AutoResponderFlowInputSchema>): Promise<AgentResponseOutput> {
-    const promptInput: AgentResponseInput = {
-        chatId: input.chatId,
-        customerMessage: input.customerMessage,
-        chatHistory: input.chatHistory,
-        rules: input.rules.map(r => ({
-            name: r.name,
-            trigger: r.trigger,
-            action: r.action,
-        })),
-        knowledgeBase: input.knowledgeBase,
-        model: input.model,
-        contact: input.contact,
-    };
     // We pass the full input (including config) to the flow
     return autoResponderFlow(input);
 }
@@ -150,14 +137,13 @@ const autoResponderFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.model || 'googleai/gemini-2.0-flash';
-    // The model is passed directly in the options object to the prompt.
     // The prompt only receives the fields defined in its own input schema.
     const promptInput = AgentResponseInputSchema.parse(input);
     const result = await prompt(promptInput, { model });
     const output = result.output;
     
     // Log usage
-    if (result.usage) {
+    if (result.usage && input.config?.id) {
         await logAutopilotUsage({
             configId: input.config.id,
             flowName: 'autoResponderFlow',

@@ -80,7 +80,7 @@ const summarizeChatFlow = ai.defineFlow(
     const output = result.output!;
 
      // Log usage
-    if (result.usage && input.config && input.config.id !== 'default') {
+    if (result.usage && input.config?.id && input.config.id !== 'default') {
         await logAutopilotUsage({
             configId: input.config.id,
             flowName: 'summarizeChatFlow',
