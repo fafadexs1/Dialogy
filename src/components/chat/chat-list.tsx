@@ -76,7 +76,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   return (
     <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
       <div className="mt-0.5">{getIcon()}</div>
-      <p className="whitespace-normal break-words">
+      <p className="truncate">
         {getTextContent()}
       </p>
     </div>
@@ -219,17 +219,19 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <TabsTrigger value="encerrados">Encerrados</TabsTrigger>
           </TabsList>
         </div>
-        <ScrollArea className="flex-1">
-          <TabsContent value="gerais" className="m-0">
-            {renderChatList(gerais)}
-          </TabsContent>
-          <TabsContent value="atendimentos" className="m-0">
-            {renderChatList(atendimentos)}
-          </TabsContent>
-          <TabsContent value="encerrados" className="m-0">
-            {renderChatList(encerrados)}
-          </TabsContent>
-        </ScrollArea>
+        <div className="flex-1 relative">
+            <ScrollArea className="absolute inset-0">
+              <TabsContent value="gerais" className="m-0">
+                {renderChatList(gerais)}
+              </TabsContent>
+              <TabsContent value="atendimentos" className="m-0">
+                {renderChatList(atendimentos)}
+              </TabsContent>
+              <TabsContent value="encerrados" className="m-0">
+                {renderChatList(encerrados)}
+              </TabsContent>
+            </ScrollArea>
+        </div>
       </Tabs>
     </div>
   );
