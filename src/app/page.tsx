@@ -11,6 +11,7 @@ import { updateUserOnlineStatus } from '@/actions/user';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const timeZone = 'America/Sao_Paulo';
 
@@ -204,6 +205,38 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     return { chats };
 }
 
+function LoadingSkeleton() {
+    return (
+        <div className="flex flex-1 w-full min-h-0">
+          <div className="flex w-full max-w-sm flex-col border-r bg-card p-4 gap-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <div className="space-y-2 mt-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+              </div>
+          </div>
+          <div className="flex-1 flex flex-col min-w-0">
+              <Skeleton className="h-16 w-full" />
+              <div className="flex-1 p-6 space-y-4">
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+                  <Skeleton className="h-10 w-1/2" />
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+              </div>
+              <Skeleton className="h-24 w-full" />
+          </div>
+           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-32 w-full" />
+           </div>
+        </div>
+    )
+}
+
 
 export default async function Home() {
   console.log("--- [PAGE_SERVER] Renderizando a página Home ---");
@@ -246,6 +279,15 @@ export default async function Home() {
   const { chats } = await fetchDataForWorkspace(user.activeWorkspaceId, user.id);
 
   console.log("[PAGE_SERVER] Renderizando layout principal com CustomerChatLayout.");
+  
+  if(!chats) {
+    return (
+        <MainLayout user={user}>
+            <LoadingSkeleton />
+        </MainLayout>
+    )
+  }
+
   return (
     <MainLayout user={user}>
       <CustomerChatLayout initialChats={chats} currentUser={user} />
