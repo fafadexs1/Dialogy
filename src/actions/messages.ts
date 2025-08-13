@@ -7,7 +7,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
-import type { MessageMetadata } from '@/lib/types';
+import type { Message, MessageMetadata } from '@/lib/types';
 
 
 /**
@@ -169,9 +169,13 @@ export async function sendMediaAction(
         for (const file of mediaFiles) {
             let apiResponse: any;
             let dbMessageType: Message['type'] = 'text';
+             let dbMetadata: MessageMetadata = {
+                thumbnail: file.thumbnail,
+            };
 
             if (file.mediatype === 'audio') {
                 dbMessageType = 'audio';
+                console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
                 apiResponse = await fetchEvolutionAPI(
                     `/message/sendWhatsAppAudio/${instanceName}`,
                     apiConfig,
@@ -200,9 +204,7 @@ export async function sendMediaAction(
             }
             
             const dbContent = caption || '';
-            let dbMetadata: MessageMetadata = {
-                thumbnail: file.thumbnail,
-            };
+           
 
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
@@ -210,9 +212,10 @@ export async function sendMediaAction(
                     const mediaDetails = apiResponse.message[messageTypeKey];
                     dbMetadata = {
                         ...dbMetadata,
-                        mediaUrl: apiResponse.message.mediaUrl,
+                        mediaUrl: apiResponse.message.mediaUrl, // This might not exist for audio
                         mimetype: mediaDetails.mimetype,
                         fileName: mediaDetails.fileName || file.filename,
+                        duration: mediaDetails.seconds
                     };
                 }
             }
