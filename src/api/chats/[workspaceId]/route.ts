@@ -76,11 +76,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.contact_id, 
             c.agent_id, 
             c.assigned_at,
+            c.tag,
+            c.color,
             t.name as team_name,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
-            (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE) as unread_count
+            COALESCE((SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE), 0) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
@@ -106,6 +108,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         assigned_at: r.assigned_at,
         unreadCount: parseInt(r.unread_count, 10),
         teamName: r.team_name,
+        tag: r.tag,
+        color: r.color,
     }));
 
     if (chats.length > 0) {

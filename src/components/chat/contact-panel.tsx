@@ -18,6 +18,7 @@ import {
   Loader2,
   Users,
   Edit,
+  Tag,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -209,10 +210,17 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
         
           <div className="flex flex-col items-center text-center">
             <Avatar className="h-20 w-20 shrink-0 border">
-              <AvatarImage src={contact.avatar} alt={contact.name} data-ai-hint="person" />
+              <AvatarImage src={contact.avatar_url} alt={contact.name} data-ai-hint="person" />
               <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
             </Avatar>
-            <h2 className="font-bold text-xl mt-4">{contact.name}</h2>
+            <div className="flex items-center gap-2 mt-4">
+                <h2 className="font-bold text-xl">{contact.name}</h2>
+                {chat.tag && chat.color && (
+                    <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent">
+                        {chat.tag}
+                    </Badge>
+                )}
+            </div>
           </div>
           
           <Separator className="my-6"/>

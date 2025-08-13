@@ -208,15 +208,25 @@ export async function closeChatAction(
         }
         const { workspace_id } = chatRes.rows[0];
 
+        let tagInfo = { label: null, color: null };
+        if (reasonTagId) {
+            const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
+            if (tagRes.rowCount > 0) {
+                tagInfo = tagRes.rows[0];
+            }
+        }
+
         await client.query(
             `UPDATE chats
              SET 
                 status = 'encerrados',
                 closed_at = NOW(),
                 close_reason_tag_id = $1,
-                close_notes = $2
-             WHERE id = $3`,
-            [reasonTagId, notes, chatId]
+                close_notes = $2,
+                tag = $3,
+                color = $4
+             WHERE id = $5`,
+            [reasonTagId, notes, tagInfo.label, tagInfo.color, chatId]
         );
         
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;

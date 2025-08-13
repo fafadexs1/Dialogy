@@ -126,11 +126,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.contact_id, 
             c.agent_id, 
             c.assigned_at,
+            c.tag,
+            c.color,
             t.name as team_name,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
-            (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE) as unread_count
+            COALESCE((SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE), 0) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
@@ -156,6 +158,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         assigned_at: r.assigned_at,
         unreadCount: parseInt(r.unread_count, 10),
         teamName: r.team_name,
+        tag: r.tag,
+        color: r.color,
     }));
 
     // 4. Fetch and combine messages if chats exist
@@ -213,7 +217,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
 function LoadingSkeleton() {
     return (
         <div className="flex flex-1 w-full min-h-0">
-          <div className="flex w-full max-w-sm flex-col border-r bg-card p-4 gap-4">
+          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
