@@ -233,7 +233,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
-          close_reason_tag_id TEXT REFERENCES public.tags(id) ON DELETE SET NULL,
+          close_reason_tag_id TEXT,
           close_notes TEXT,
           tag TEXT,
           color TEXT
@@ -308,6 +308,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         total_tokens INT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
+
+      `ALTER TABLE public.chats ADD CONSTRAINT chats_close_reason_tag_id_fkey FOREIGN KEY (close_reason_tag_id) REFERENCES public.tags(id) ON DELETE SET NULL;`,
 
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
