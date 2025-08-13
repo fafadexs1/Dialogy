@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -27,7 +26,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
 
     // Gerar uma forma de onda simulada e esteticamente agradável no frontend.
     const simulatedWaveform = React.useMemo(() => 
-        Array.from({ length: 40 }, () => Math.random() * 0.8 + 0.2)
+        Array.from({ length: 60 }, () => Math.random() * 0.8 + 0.2)
     , []);
 
     const handlePlayPause = (e: React.MouseEvent) => {
