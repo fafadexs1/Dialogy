@@ -1,4 +1,5 @@
 
+
 import { MainLayout } from '@/components/layout/main-layout';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
@@ -125,18 +126,21 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.contact_id, 
             c.agent_id, 
             c.assigned_at,
+            t.name as team_name,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
             (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
+        LEFT JOIN team_members tm ON c.agent_id = tm.user_id
+        LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
         WHERE c.workspace_id = $1 AND (
             c.status IN ('gerais', 'atendimentos') OR 
             (c.status = 'encerrados' AND c.agent_id = $2)
         )
-        GROUP BY c.id, lm.source_from_api, lm.instance_name
+        GROUP BY c.id, lm.source_from_api, lm.instance_name, t.name
         ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId, userId]);
 
@@ -151,6 +155,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         instance_name: r.instance_name,
         assigned_at: r.assigned_at,
         unreadCount: parseInt(r.unread_count, 10),
+        teamName: r.team_name,
     }));
 
     // 4. Fetch and combine messages if chats exist

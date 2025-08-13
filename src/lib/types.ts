@@ -149,6 +149,7 @@ export type Chat = {
   source?: string;
   instance_name?: string;
   unreadCount?: number;
+  teamName?: string;
 };
 
 export type InternalChannel = {

@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import React from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -143,8 +144,17 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
                     </p>
                     )}
                 </div>
-                <div className="flex items-center justify-between">
-                    {lastMessage && <LastMessagePreview message={lastMessage} />}
+                 <div className="flex items-center justify-between mt-0.5">
+                    <div className="flex-1 min-w-0">
+                        {lastMessage ? <LastMessagePreview message={lastMessage} /> : (
+                            chat.teamName && (
+                                <Badge variant="secondary" className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 w-fit">
+                                    <Users className="h-3 w-3"/>
+                                    {chat.teamName}
+                                </Badge>
+                            )
+                        )}
+                    </div>
                     {chat.unreadCount && chat.unreadCount > 0 && (
                         <Badge className="h-5 w-5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
                             {chat.unreadCount}
