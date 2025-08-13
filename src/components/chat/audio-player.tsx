@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -27,8 +26,8 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
     const [duration, setDuration] = useState(initialDuration || 0);
 
     const normalizedWaveform = waveform.length > 0
-        ? waveform.map(v => Math.max(0.1, v / 100))
-        : Array(50).fill(0).map(() => Math.random() * 0.7 + 0.2);
+        ? waveform.map(v => Math.max(0.05, v / 100)) // Ensure a minimum height for visibility
+        : Array(50).fill(0).map(() => Math.random() * 0.6 + 0.1); // Fallback for missing waveform
 
     const handlePlayPause = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -59,7 +58,7 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
         if (!progressRef.current || !audioRef.current || !isFinite(duration)) return;
         const rect = progressRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
-        const percentage = x / rect.width;
+        const percentage = Math.max(0, Math.min(1, x / rect.width));
         audioRef.current.currentTime = percentage * duration;
     };
     
@@ -71,7 +70,7 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
         audio.addEventListener('loadedmetadata', handleLoadedMetadata);
         audio.addEventListener('ended', () => setIsPlaying(false));
         
-        if(initialDuration) {
+        if(initialDuration && isFinite(initialDuration)) {
             setDuration(initialDuration);
         }
 
@@ -95,35 +94,36 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
                 {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
             </button>
 
-            <div className="flex w-full flex-col gap-1.5">
+            <div className="flex flex-col w-full flex-grow min-w-0">
                 <div 
                   ref={progressRef}
                   onClick={handleSeek}
                   className="relative h-8 w-full cursor-pointer"
                 >
-                    <div className="flex h-full w-full items-center gap-px">
+                    <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
                         {normalizedWaveform.map((bar, index) => (
                              <div 
                                 key={index} 
-                                className="w-1 rounded-full bg-primary/20"
+                                className="w-[3px] rounded-full bg-primary/30"
                                 style={{ height: `${bar * 100}%`}}
                             />
                         ))}
                     </div>
-                    <div className="absolute top-0 left-0 h-full w-full">
-                        <div className="relative h-full" style={{ width: `${progressPercentage}%`}}>
-                            <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
-                                 {normalizedWaveform.map((bar, index) => (
-                                    <div 
-                                        key={index} 
-                                        className="w-1 rounded-full bg-primary"
-                                        style={{ height: `${bar * 100}%`}}
-                                    />
-                                ))}
-                            </div>
-                            <div className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 translate-x-1/2 rounded-full bg-primary" />
+                    <div className="absolute top-0 left-0 h-full overflow-hidden" style={{ width: `${progressPercentage}%`}}>
+                        <div className="flex h-full items-center gap-px" style={{ width: progressRef.current?.offsetWidth }}>
+                             {normalizedWaveform.map((bar, index) => (
+                                <div 
+                                    key={index} 
+                                    className="w-[3px] rounded-full bg-primary"
+                                    style={{ height: `${bar * 100}%`}}
+                                />
+                            ))}
                         </div>
                     </div>
+                     <div 
+                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background" 
+                        style={{ left: `${progressPercentage}%` }}
+                    />
                 </div>
 
                 <div className="flex justify-between text-xs font-mono text-muted-foreground">
