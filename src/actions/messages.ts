@@ -168,8 +168,8 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            let dbMessageType: Message['type'] = 'text';
-             let dbMetadata: MessageMetadata = {
+            let dbMessageType: Message['type'] = 'text'; // Default to text
+            let dbMetadata: MessageMetadata = {
                 thumbnail: file.thumbnail,
             };
 
@@ -196,7 +196,7 @@ export async function sendMediaAction(
                     fileName: file.filename,
                     caption: caption || '',
                 };
-                dbMessageType = 'text';
+                dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
                 apiResponse = await fetchEvolutionAPI(
                     `/message/sendMedia/${instanceName}`,
                     apiConfig,
@@ -293,3 +293,4 @@ export async function sendAutomatedMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }
+
