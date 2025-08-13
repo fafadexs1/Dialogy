@@ -359,11 +359,24 @@ export async function markMessagesAsReadAction(
         return { success: false, error: "Dados insuficientes para marcar mensagens como lidas." };
     }
     
-    const client = await db.connect();
+    // Primeiro, atualize nosso banco de dados. Esta é a nossa fonte da verdade.
     try {
-        await client.query('BEGIN');
-
-        const instanceRes = await client.query(`
+        await db.query(
+            'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
+            [messageDbIds]
+        );
+        console.log(`[MARK_AS_READ] ${messageDbIds.length} mensagens marcadas como lidas no DB.`);
+        revalidatePath('/', 'layout'); // Revalida a UI imediatamente
+    } catch (dbError: any) {
+        console.error(`[MARK_AS_READ] Erro ao marcar mensagens como lidas no DB:`, dbError);
+        // Se a atualização do banco de dados falhar, não continue.
+        return { success: false, error: "Falha ao atualizar o status das mensagens no banco de dados." };
+    }
+    
+    // Em segundo lugar, tente enviar o recibo de leitura para a API do WhatsApp.
+    // Esta parte pode falhar sem quebrar nossa lógica interna.
+    try {
+        const instanceRes = await db.query(`
             SELECT c.api_url, c.api_key 
             FROM evolution_api_instances i
             JOIN evolution_api_configs c ON i.config_id = c.id
@@ -376,7 +389,6 @@ export async function markMessagesAsReadAction(
         const { api_url, api_key } = instanceRes.rows[0];
         const apiConfig = { api_url, api_key };
 
-        // 1. Send "read" receipt via API
         const payload = {
             read: {
                 remoteJid: messagesToMark[0].remoteJid,
@@ -393,25 +405,15 @@ export async function markMessagesAsReadAction(
             body: JSON.stringify(payload),
           });
         
-        // 2. Update our database
-        await client.query(
-            'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
-            [messageDbIds]
-        );
-        
-        await client.query('COMMIT');
-        
-        console.log(`[MARK_AS_READ] ${messageDbIds.length} mensagens marcadas como lidas no DB.`);
-        revalidatePath('/', 'layout'); // Revalidate to update unread counts
-        return { success: true };
+        console.log(`[MARK_AS_READ] Recibo de leitura enviado para a API com sucesso.`);
 
-    } catch (error: any) {
-        await client.query('ROLLBACK');
-        console.error(`[MARK_AS_READ] Erro ao marcar mensagens como lidas para a instância ${instanceName}:`, error);
-        return { success: false, error: error.message };
-    } finally {
-        client.release();
+    } catch (apiError: any) {
+        // Se a chamada da API falhar, apenas registramos o erro.
+        // Não retornamos um erro para o cliente porque nosso banco de dados já foi atualizado.
+        console.error(`[MARK_AS_READ] Falha ao enviar recibo de leitura para a API (não é um erro fatal):`, apiError.message);
     }
+    
+    return { success: true };
 }
 
 
@@ -488,5 +490,3 @@ export async function deleteMessageAction(
         client.release();
     }
 }
-
-    
