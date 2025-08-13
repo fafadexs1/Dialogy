@@ -191,7 +191,7 @@ export interface Tag {
     value: string;
     label: string;
     color: string;
-    is_close_reason?: boolean;
+    is_close_reason: boolean;
 }
 
 

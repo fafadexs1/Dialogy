@@ -6,7 +6,7 @@ import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
-import { mockTags } from '@/lib/mock-data'; // Assuming tags are fetched/mocked somewhere
+import { getTags } from '@/actions/crm';
 
 interface CustomerChatLayoutProps {
     initialChats: Chat[];
@@ -78,7 +78,13 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             const geraisChat = initialChats.find(c => c.status === 'gerais');
             handleSetSelectedChat(atendimentoChat || geraisChat || initialChats[0]);
         }
-        setCloseReasons(mockTags.filter(t => t.is_close_reason));
+        
+        if(currentUser.activeWorkspaceId){
+            const tagsResult = await getTags(currentUser.activeWorkspaceId);
+            if (!tagsResult.error && tagsResult.tags) {
+                setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
+            }
+        }
 
         if (currentUser.activeWorkspaceId) {
             if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
