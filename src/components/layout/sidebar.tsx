@@ -143,7 +143,7 @@ export function Sidebar({ user }: SidebarProps) {
                      <Link href="/automations/robots">
                         <DropdownMenuItem>
                             <Rocket className="mr-2 h-4 w-4" />
-                            <span>Robôs do Sistema</span>
+                            <span>Agentes do Sistema</span>
                         </DropdownMenuItem>
                     </Link>
                 </DropdownMenuContent>
