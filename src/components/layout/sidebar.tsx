@@ -18,6 +18,7 @@ import {
   Users2,
   ShieldAlert,
   Fingerprint,
+  Rocket,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -47,7 +48,8 @@ interface SidebarProps {
 const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
-  { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
+  // A automação agora será um Dropdown separado
+  // { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
@@ -107,6 +109,45 @@ export function Sidebar({ user }: SidebarProps) {
                 </TooltipContent>
               </Tooltip>
             ))}
+
+            {/* Menu de Automações */}
+            <DropdownMenu>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                             <button
+                                className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors
+                                ${
+                                    pathname.startsWith('/autopilot') || pathname.startsWith('/automations')
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                                }`}
+                              >
+                                <Bot className="h-5 w-5" />
+                              </button>
+                        </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                        <p>Automações</p>
+                    </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent side="right">
+                    <DropdownMenuLabel>Automações</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <Link href="/autopilot">
+                        <DropdownMenuItem>
+                            <Bot className="mr-2 h-4 w-4" />
+                            <span>Piloto Automático</span>
+                        </DropdownMenuItem>
+                    </Link>
+                     <Link href="/automations/robots">
+                        <DropdownMenuItem>
+                            <Rocket className="mr-2 h-4 w-4" />
+                            <span>Robôs do Sistema</span>
+                        </DropdownMenuItem>
+                    </Link>
+                </DropdownMenuContent>
+            </DropdownMenu>
 
              <DropdownMenu>
                 <Tooltip>
@@ -205,5 +246,3 @@ export function Sidebar({ user }: SidebarProps) {
 function Separator() {
     return <div className="w-full h-px bg-border my-2" />
 }
-
-    
