@@ -94,8 +94,8 @@ async function internalSendMessage(
         await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, from_me,
-                message_id_from_api, api_message_status, instance_name, metadata
-             ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8)`,
+                message_id_from_api, api_message_status, instance_name, metadata, is_read
+             ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8, true)`,
             [workspace_id, chatId, senderId, content, apiResponse?.key?.id, 'SENT', instanceName, metadata || null]
         );
 
@@ -205,8 +205,8 @@ export async function sendMediaAction(
             await client.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, sender_id, type, content, from_me,
-                    message_id_from_api, api_message_status, metadata, instance_name
-                 ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8)`,
+                    message_id_from_api, api_message_status, metadata, instance_name, is_read
+                 ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8, true)`,
                 [
                     workspace_id, 
                     chatId, 
