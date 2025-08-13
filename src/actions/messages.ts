@@ -192,7 +192,7 @@ export async function sendMediaAction(
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
                     mimetype: file.mimetype,
-                    media: file.base64,
+                    media: `data:${file.mimetype};base64,${file.base64}`,
                     fileName: file.filename,
                     caption: caption || '',
                 };
