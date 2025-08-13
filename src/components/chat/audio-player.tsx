@@ -27,8 +27,8 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
     const [duration, setDuration] = useState(initialDuration || 0);
 
     const normalizedWaveform = waveform.length > 0
-        ? waveform.map(v => Math.max(0.1, v / 100)) // Garante que a barra tenha altura mínima
-        : Array(50).fill(0).map(() => Math.random() * 0.7 + 0.2); // Fallback
+        ? waveform.map(v => Math.max(0.1, v / 100))
+        : Array(50).fill(0).map(() => Math.random() * 0.7 + 0.2);
 
     const handlePlayPause = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -71,7 +71,6 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
         audio.addEventListener('loadedmetadata', handleLoadedMetadata);
         audio.addEventListener('ended', () => setIsPlaying(false));
         
-        // Se a duração já veio da API, usa ela
         if(initialDuration) {
             setDuration(initialDuration);
         }
@@ -86,7 +85,7 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
     return (
-        <div className="flex w-64 items-center gap-3 rounded-lg bg-background p-2 border shadow-sm">
+        <div className="flex w-full max-w-xs items-center gap-3">
             <audio ref={audioRef} src={src} preload="metadata" />
             
             <button
