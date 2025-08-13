@@ -3,7 +3,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause } from 'lucide-react';
-import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
 
 interface AudioPlayerProps {
@@ -13,7 +12,7 @@ interface AudioPlayerProps {
 }
 
 const formatTime = (timeInSeconds: number) => {
-    if (isNaN(timeInSeconds) || timeInSeconds === 0) return '0:00';
+    if (isNaN(timeInSeconds) || timeInSeconds <= 0) return '0:00';
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = Math.floor(timeInSeconds % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -21,6 +20,7 @@ const formatTime = (timeInSeconds: number) => {
 
 export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
+    const scrubbableAreaRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentTime, setCurrentTime] = useState(0);
@@ -46,8 +46,7 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         const handleEnded = () => {
             setIsPlaying(false);
             setProgress(0);
-            setCurrentTime(0);
-            audio.currentTime = 0;
+            // Não resetar o currentTime aqui para manter a duração final visível
         }
 
         audio.addEventListener('loadedmetadata', setAudioData);
@@ -73,6 +72,10 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         if (isPlaying) {
             audio.pause();
         } else {
+            // Se o áudio terminou, volta para o início antes de tocar de novo
+            if (audio.currentTime >= audio.duration - 0.1) {
+                audio.currentTime = 0;
+            }
             audio.play().catch(error => console.error("Error playing audio:", error));
         }
         setIsPlaying(!isPlaying);
@@ -80,67 +83,60 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
 
     const handleScrub = (e: React.MouseEvent<HTMLDivElement>) => {
         const audio = audioRef.current;
-        if (!audio || audio.duration === Infinity || isNaN(audio.duration)) return;
+        const scrubbableArea = scrubbableAreaRef.current;
+        if (!audio || !scrubbableArea || audio.duration === Infinity || isNaN(audio.duration)) return;
 
-        const scrubbableArea = e.currentTarget;
-        const clickPosition = e.clientX - scrubbableArea.getBoundingClientRect().left;
+        const rect = scrubbableArea.getBoundingClientRect();
+        const clickPosition = e.clientX - rect.left;
         const scrubbableAreaWidth = scrubbableArea.offsetWidth;
         const newTime = (clickPosition / scrubbableAreaWidth) * audio.duration;
         
         audio.currentTime = newTime;
     };
     
-    // Normalize waveform for better visual appearance, ensuring a minimum height.
-    const normalizedWaveform = waveform ? waveform.map(v => Math.max(2, (v / 255) * 28)) : new Array(50).fill(2);
-
+    const normalizedWaveform = waveform ? waveform.map(v => Math.max(2, (v / 255) * 50)) : new Array(50).fill(2);
 
     return (
-        <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30 w-full max-w-xs">
+        <div className="flex w-full max-w-sm items-center gap-3 rounded-2xl bg-card p-3 shadow-md">
             <audio ref={audioRef} src={src} preload="metadata" />
-            <Button
-                variant="default"
-                size="icon"
-                className="h-10 w-10 flex-shrink-0 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90"
+            <button
                 onClick={togglePlayPause}
+                className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
             >
-                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
-            </Button>
-            <div className="flex-1 flex flex-col justify-center gap-1 w-full min-w-0">
+                {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6 fill-current pl-0.5" />}
+            </button>
+            <div className="flex w-full flex-col justify-center gap-1">
                 <div
-                    className="relative flex items-center h-7 w-full cursor-pointer group"
+                    ref={scrubbableAreaRef}
+                    className="relative flex h-[50px] w-full cursor-pointer items-center"
                     onClick={handleScrub}
                 >
                     {/* Background Waveform */}
-                    <div className="absolute inset-0 flex items-center w-full">
+                    <div className="absolute inset-0 flex w-full items-center gap-0.5">
                         {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-1 rounded-full mx-px bg-muted-foreground/30 transition-all duration-300 group-hover:bg-muted-foreground/50"
-                                style={{ height: `${height}px` }}
+                                className="w-1 rounded-full bg-blue-200/70"
+                                style={{ height: `${height}%` }}
                             />
                         ))}
                     </div>
                      {/* Progress Waveform */}
-                    <div className="absolute inset-0 flex items-center w-full transition-all duration-75" style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}>
+                    <div className="absolute inset-0 flex w-full items-center gap-0.5" style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}>
                          {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-1 rounded-full mx-px bg-gradient-to-b from-primary to-primary/70"
-                                style={{ height: `${height}px` }}
+                                className="w-1 rounded-full bg-primary"
+                                style={{ height: `${height}%` }}
                             />
                         ))}
                     </div>
-                    {/* Scrub Handle */}
-                    <div 
-                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-white shadow-lg border-2 border-primary transition-opacity opacity-0 group-hover:opacity-100"
-                      style={{ left: `${progress}%`}}
-                    ></div>
                 </div>
-                <div className="text-xs font-mono text-muted-foreground text-right -mt-0.5">
-                    {formatTime(currentTime)} / {formatTime(audioDuration)}
+                <div className="flex justify-between text-xs font-medium text-muted-foreground">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(audioDuration)}</span>
                 </div>
             </div>
         </div>
     );
 }
-
