@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -209,7 +210,6 @@ export async function closeChatAction(
 
         let tagInfo = { label: null, color: null };
         if (reasonTagId) {
-            // Correctly query the tags table using the TEXT id
             const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
             if (tagRes.rowCount > 0) {
                 tagInfo = tagRes.rows[0];
