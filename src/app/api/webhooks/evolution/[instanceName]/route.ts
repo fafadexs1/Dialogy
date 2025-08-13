@@ -101,8 +101,6 @@ async function handleMessagesUpsert(payload: any) {
                 dbMessageType = 'audio';
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.duration = messageDetails?.seconds;
-                // O waveform foi removido para evitar bugs de renderização.
-                // A visualização será simulada no frontend.
                 break;
             case 'imageMessage': case 'videoMessage': case 'documentMessage':
                 metadata.mimetype = messageDetails?.mimetype;

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 interface AudioPlayerProps {
     src: string;
     duration?: number;
-    waveform?: number[];
+    waveform?: number[]; // Este campo agora é opcional e não será mais usado
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -25,6 +25,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(initialDuration || 0);
 
+    // Gera uma forma de onda visualmente agradável no cliente
     const simulatedWaveform = React.useMemo(() => 
         Array.from({ length: 60 }, () => Math.random() * 0.8 + 0.2)
     , []);
@@ -88,7 +89,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
     return (
-        <div className="flex w-[300px] items-center gap-3">
+        <div className="flex w-full max-w-xs items-center gap-3">
             <audio ref={audioRef} src={src} preload="metadata" />
             
             <button
@@ -98,29 +99,29 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                 {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
             </button>
 
-            <div className="flex min-w-0 flex-grow flex-col">
+            <div className="flex min-w-0 flex-grow flex-col justify-center">
                 <div 
                   ref={progressRef}
                   onClick={handleSeek}
-                  className="relative h-12 w-full cursor-pointer"
+                  className="relative h-10 w-full cursor-pointer group"
                 >
                     {/* Background Waveform */}
-                    <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
+                    <div className="absolute top-1/2 -translate-y-1/2 flex h-full w-full items-center gap-px overflow-hidden">
                         {simulatedWaveform.map((barHeight, index) => (
                              <div 
                                 key={index} 
-                                className="w-[3px] rounded-full bg-muted-foreground/30"
+                                className="w-[3px] rounded-full bg-muted-foreground/30 transition-all duration-300 group-hover:bg-muted-foreground/40"
                                 style={{ height: `${barHeight * 100}%`}}
                             />
                         ))}
                     </div>
                     {/* Progress Waveform */}
-                    <div className="absolute top-0 left-0 h-full overflow-hidden" style={{ width: `${progressPercentage}%`}}>
+                    <div className="absolute top-1/2 -translate-y-1/2 h-full overflow-hidden" style={{ width: `${progressPercentage}%`}}>
                         <div className="flex h-full items-center gap-px" style={{ width: progressRef.current?.offsetWidth }}>
                              {simulatedWaveform.map((barHeight, index) => (
                                 <div 
                                     key={index} 
-                                    className="w-[3px] rounded-full bg-primary"
+                                    className="w-[3px] rounded-full bg-primary transition-all duration-300 group-hover:bg-blue-600"
                                     style={{ height: `${barHeight * 100}%`}}
                                 />
                             ))}
@@ -128,8 +129,8 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                     </div>
                     {/* Seek Handle */}
                      <div 
-                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all" 
-                        style={{ left: `min(${progressPercentage}%, calc(100% - 10px))` }}
+                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all opacity-0 group-hover:opacity-100" 
+                        style={{ left: `calc(${progressPercentage}% - 5px)` }}
                     />
                 </div>
 

@@ -162,33 +162,48 @@ export async function sendMediaAction(
         if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
         const apiConfig = apiConfigRes.rows[0];
 
-        // Corrige o JID se for do tipo @lid para @s.whatsapp.net
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
             : remoteJid;
 
         for (const file of mediaFiles) {
-             const apiPayload = {
-                number: correctedRemoteJid,
-                mediatype: file.mediatype,
-                mimetype: file.mimetype,
-                media: file.base64,
-                fileName: file.filename,
-                caption: caption || '',
-            };
-            
-            const apiResponse = await fetchEvolutionAPI(
-                `/message/sendMedia/${instanceName}`,
-                apiConfig,
-                { method: 'POST', body: JSON.stringify(apiPayload) }
-            );
+            let apiResponse: any;
+            let dbMessageType: Message['type'] = 'text';
 
+            if (file.mediatype === 'audio') {
+                dbMessageType = 'audio';
+                apiResponse = await fetchEvolutionAPI(
+                    `/message/sendWhatsAppAudio/${instanceName}`,
+                    apiConfig,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            number: correctedRemoteJid,
+                            audio: `data:${file.mimetype};base64,${file.base64}`
+                        })
+                    }
+                );
+            } else {
+                 const apiPayload = {
+                    number: correctedRemoteJid,
+                    mediatype: file.mediatype,
+                    mimetype: file.mimetype,
+                    media: file.base64,
+                    fileName: file.filename,
+                    caption: caption || '',
+                };
+                apiResponse = await fetchEvolutionAPI(
+                    `/message/sendMedia/${instanceName}`,
+                    apiConfig,
+                    { method: 'POST', body: JSON.stringify(apiPayload) }
+                );
+            }
+            
             const dbContent = caption || '';
             let dbMetadata: MessageMetadata = {
                 thumbnail: file.thumbnail,
             };
 
-            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
@@ -206,11 +221,12 @@ export async function sendMediaAction(
                 `INSERT INTO messages (
                     workspace_id, chat_id, sender_id, type, content, from_me,
                     message_id_from_api, api_message_status, metadata, instance_name, is_read
-                 ) VALUES ($1, $2, $3, 'text', $4, true, $5, $6, $7, $8, true)`,
+                 ) VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, true)`,
                 [
                     workspace_id, 
                     chatId, 
                     currentUserId, 
+                    dbMessageType,
                     dbContent, 
                     apiResponse?.key?.id, 
                     apiResponse?.status || 'SENT', 

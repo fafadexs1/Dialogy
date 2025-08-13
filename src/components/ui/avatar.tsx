@@ -24,7 +24,9 @@ const AvatarImage = React.forwardRef<
   React.ElementRef<typeof AvatarPrimitive.Image>,
   React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>
 >(({ className, ...props }, ref) => {
-    if (!props.src) {
+    // A API de placeholder (placehold.co) pode retornar um erro para avatares vazios,
+    // então verificamos explicitamente se a `src` é uma string válida.
+    if (!props.src || typeof props.src !== 'string' || props.src.trim() === '') {
         return null;
     }
 

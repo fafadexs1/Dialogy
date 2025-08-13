@@ -49,6 +49,7 @@ import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioPlayer } from './audio-player';
+import { AudioRecorder } from './audio-recorder';
 
 
 interface ChatPanelProps {
@@ -132,7 +133,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 function SendMessageButton({ disabled }: { disabled?: boolean }) {
     const { pending } = useFormStatus();
     return (
-        <Button type="submit" size="sm" className='h-8' disabled={pending || disabled}>
+        <Button type="submit" size="icon" className='h-8 w-8' disabled={pending || disabled}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
     )
@@ -178,7 +179,7 @@ function MediaMessage({ message }: { message: Message }) {
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="rounded-lg object-cover w-[300px] h-[300px] cursor-pointer hover:brightness-90 transition-all"
+                            className="rounded-lg object-cover w-full max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
                         />
                     </DialogTrigger>
                     <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
@@ -201,7 +202,7 @@ function MediaMessage({ message }: { message: Message }) {
              return (
                 <Dialog>
                     <DialogTrigger asChild>
-                         <div className="relative group w-[300px] h-[300px] bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                         <div className="relative group w-full max-w-[300px] aspect-square bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
                             {thumbnail ? (
                                 <Image
                                     src={thumbnail}
@@ -592,7 +593,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
 
-  const handleFormSubmit = async (formData: FormData) => {
+  const handleFormSubmit = async () => {
     if (!chat) return;
 
     const plainTextContent = htmlToWhatsappMarkdown(newMessage);
@@ -625,6 +626,27 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     setNewMessage('');
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 };
+
+  const handleSendAudio = async (audioBase64: string, duration: number) => {
+    if (!chat) return;
+
+    const audioFile: MediaFileType = {
+      id: `audio-${Date.now()}`,
+      name: `audio_gravado.mp3`,
+      type: 'audio/mpeg',
+      mediatype: 'audio',
+      base64: audioBase64,
+      file: new File([], 'audio.mp3'),
+    };
+    
+    const result = await sendMediaAction(chat.id, '', [audioFile as any]);
+
+    if (result.success) {
+      onActionSuccess();
+    } else {
+      toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+    }
+  };
 
   const handleTakeOwnership = async () => {
     if (!chat) return;
@@ -771,6 +793,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const isChatAssigned = chat.agent && chat.agent.id === currentUser.id;
   const isChatInGeneralQueue = chat.status === 'gerais';
 
+  const showTextInput = !mediaFiles.length;
+
+
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
       <header className="flex h-16 items-center justify-between border-b bg-card px-6 flex-shrink-0">
@@ -837,58 +862,59 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form action={handleFormSubmit}>
+                     <form action={handleFormSubmit} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
-                         <div className="relative overflow-hidden">
-                            <div className='border rounded-lg'>
-                                <FormattingToolbar />
-                                <ContentEditable
-                                    innerRef={contentEditableRef}
-                                    html={newMessage}
-                                    disabled={isAiTyping}
-                                    onChange={(e) => setNewMessage(e.target.value)}
-                                    className="pr-28 pl-4 py-3 min-h-14 bg-background focus:outline-none"
-                                    tagName="div"
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            if (e.currentTarget.closest('form')) {
-                                               handleFormSubmit(new FormData(e.currentTarget.closest('form')!));
-                                            }
-                                        }
-                                    }}
-                                />
-                            </div>
-                            <div className="absolute right-2 bottom-2.5 flex items-center">
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0 border-none mb-2">
-                                        <EmojiPicker onEmojiClick={onEmojiClick} />
-                                    </PopoverContent>
-                                </Popover>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleFileChange}
-                                    className="hidden"
-                                    multiple
-                                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    disabled={isAiTyping}
-                                    onClick={() => fileInputRef.current?.click()}
-                                >
-                                    <Paperclip className="h-5 w-5" />
-                                </Button>
-                                <SendMessageButton disabled={mediaFiles.length === 0 && !htmlToWhatsappMarkdown(newMessage).trim() || isAiTyping} />
-                            </div>
-                        </div>
+                        <div className="relative w-full">
+                            {showTextInput ? (
+                                <div className='border rounded-lg overflow-hidden'>
+                                    <FormattingToolbar />
+                                    <ContentEditable
+                                        innerRef={contentEditableRef}
+                                        html={newMessage}
+                                        disabled={isAiTyping}
+                                        onChange={(e) => setNewMessage(e.target.value)}
+                                        className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
+                                        tagName="div"
+                                    />
+                                    <div className="absolute right-2 bottom-2.5 flex items-center">
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0 border-none mb-2">
+                                                <EmojiPicker onEmojiClick={onEmojiClick} />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                </div>
+                            ) : null}
+                         </div>
+                         <div className='flex items-center gap-2'>
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                                className="hidden"
+                                multiple
+                                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
+                            />
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-10 w-10"
+                                disabled={isAiTyping}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <Paperclip className="h-5 w-5" />
+                            </Button>
+                            
+                             {newMessage.trim() === "" && mediaFiles.length === 0 ? (
+                                <AudioRecorder onSend={handleSendAudio} />
+                            ) : (
+                                <SendMessageButton disabled={isAiTyping} />
+                            )}
+                         </div>
                     </form>
                     <div className="flex items-center space-x-2">
                         <Bot className="h-5 w-5 text-muted-foreground" />
