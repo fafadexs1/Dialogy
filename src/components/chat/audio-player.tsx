@@ -54,7 +54,6 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         audio.addEventListener('timeupdate', setAudioTime);
         audio.addEventListener('ended', handleEnded);
 
-        // Se a duração inicial for fornecida, defina-a.
         if (duration) {
             setAudioDuration(duration);
         }
@@ -91,22 +90,22 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         audio.currentTime = newTime;
     };
     
-    // Normaliza a forma de onda para uma aparência visual melhor, garantindo uma altura mínima.
+    // Normalize waveform for better visual appearance, ensuring a minimum height.
     const normalizedWaveform = waveform ? waveform.map(v => Math.max(2, (v / 255) * 28)) : new Array(50).fill(2);
 
 
     return (
-        <div className="flex items-center gap-3 p-2 rounded-lg bg-secondary/50 w-full max-w-xs">
+        <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30 w-full max-w-xs">
             <audio ref={audioRef} src={src} preload="metadata" />
             <Button
-                variant="ghost"
+                variant="default"
                 size="icon"
-                className="h-10 w-10 flex-shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20"
+                className="h-10 w-10 flex-shrink-0 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90"
                 onClick={togglePlayPause}
             >
                 {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
             </Button>
-            <div className="flex-1 flex flex-col justify-center gap-1.5 w-full min-w-0">
+            <div className="flex-1 flex flex-col justify-center gap-1 w-full min-w-0">
                 <div
                     className="relative flex items-center h-7 w-full cursor-pointer group"
                     onClick={handleScrub}
@@ -116,31 +115,32 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
                         {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-0.5 rounded-full mx-px bg-muted-foreground/30"
+                                className="w-1 rounded-full mx-px bg-muted-foreground/30 transition-all duration-300 group-hover:bg-muted-foreground/50"
                                 style={{ height: `${height}px` }}
                             />
                         ))}
                     </div>
                      {/* Progress Waveform */}
-                    <div className="absolute inset-0 flex items-center w-full" style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}>
+                    <div className="absolute inset-0 flex items-center w-full transition-all duration-75" style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}>
                          {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-0.5 rounded-full mx-px bg-primary"
+                                className="w-1 rounded-full mx-px bg-gradient-to-b from-primary to-primary/70"
                                 style={{ height: `${height}px` }}
                             />
                         ))}
                     </div>
                     {/* Scrub Handle */}
                     <div 
-                      className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary shadow-lg transition-opacity opacity-0 group-hover:opacity-100"
+                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-white shadow-lg border-2 border-primary transition-opacity opacity-0 group-hover:opacity-100"
                       style={{ left: `${progress}%`}}
                     ></div>
                 </div>
-                <div className="text-xs font-mono text-muted-foreground text-right -mt-1">
-                    {isPlaying ? formatTime(currentTime) : formatTime(audioDuration)}
+                <div className="text-xs font-mono text-muted-foreground text-right -mt-0.5">
+                    {formatTime(currentTime)} / {formatTime(audioDuration)}
                 </div>
             </div>
         </div>
     );
 }
+
