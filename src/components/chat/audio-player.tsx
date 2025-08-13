@@ -3,7 +3,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 interface AudioPlayerProps {
     src: string;
@@ -12,7 +11,7 @@ interface AudioPlayerProps {
 }
 
 const formatTime = (timeInSeconds: number) => {
-    if (isNaN(timeInSeconds) || timeInSeconds <= 0) return '0:00';
+    if (isNaN(timeInSeconds) || timeInSeconds < 0) return '0:00';
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = Math.floor(timeInSeconds % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -37,7 +36,7 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         };
 
         const setAudioTime = () => {
-            if (audio.duration === Infinity || isNaN(audio.duration)) return;
+            if (audio.duration === Infinity || isNaN(audio.duration) || audio.duration === 0) return;
             const newProgress = (audio.currentTime / audio.duration) * 100;
             setProgress(newProgress);
             setCurrentTime(audio.currentTime);
@@ -45,8 +44,8 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
 
         const handleEnded = () => {
             setIsPlaying(false);
-            setProgress(0);
-            // Não resetar o currentTime aqui para manter a duração final visível
+            setProgress(100);
+            setCurrentTime(audioDuration);
         }
 
         audio.addEventListener('loadedmetadata', setAudioData);
@@ -62,7 +61,7 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
             audio.removeEventListener('timeupdate', setAudioTime);
             audio.removeEventListener('ended', handleEnded);
         };
-    }, [duration]);
+    }, [duration, audioDuration]);
 
     const togglePlayPause = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -72,9 +71,9 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         if (isPlaying) {
             audio.pause();
         } else {
-            // Se o áudio terminou, volta para o início antes de tocar de novo
             if (audio.currentTime >= audio.duration - 0.1) {
                 audio.currentTime = 0;
+                setProgress(0);
             }
             audio.play().catch(error => console.error("Error playing audio:", error));
         }
@@ -94,21 +93,25 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         audio.currentTime = newTime;
     };
     
-    const normalizedWaveform = waveform ? waveform.map(v => Math.max(2, (v / 255) * 50)) : new Array(50).fill(2);
+    // Normalize waveform data. If none is provided, create a default "flat" waveform.
+    // The value is a percentage of the container's height.
+    const normalizedWaveform = waveform 
+        ? waveform.map(v => Math.max(5, (v / 255) * 100))
+        : Array.from({ length: 40 }, () => 30); // Default flat wave
 
     return (
-        <div className="flex w-full max-w-sm items-center gap-3 rounded-2xl bg-card p-3 shadow-md">
-            <audio ref={audioRef} src={src} preload="metadata" />
+        <div className="flex w-full max-w-sm items-center gap-3 rounded-2xl bg-white p-4 shadow-md border">
+             <audio ref={audioRef} src={src} preload="metadata" />
             <button
                 onClick={togglePlayPause}
                 className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
             >
-                {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6 fill-current pl-0.5" />}
+                {isPlaying ? <Pause className="h-6 w-6 fill-current" /> : <Play className="h-6 w-6 fill-current pl-0.5" />}
             </button>
-            <div className="flex w-full flex-col justify-center gap-1">
-                <div
+            <div className="flex-grow flex flex-col justify-center">
+                 <div
                     ref={scrubbableAreaRef}
-                    className="relative flex h-[50px] w-full cursor-pointer items-center"
+                    className="relative flex h-[50px] w-full cursor-pointer items-center gap-0.5"
                     onClick={handleScrub}
                 >
                     {/* Background Waveform */}
@@ -116,7 +119,7 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
                         {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-1 rounded-full bg-blue-200/70"
+                                className="w-[3px] rounded-full bg-muted"
                                 style={{ height: `${height}%` }}
                             />
                         ))}
@@ -126,13 +129,13 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
                          {normalizedWaveform.map((height, i) => (
                             <div
                                 key={i}
-                                className="w-1 rounded-full bg-primary"
+                                className="w-[3px] rounded-full bg-primary"
                                 style={{ height: `${height}%` }}
                             />
                         ))}
                     </div>
                 </div>
-                <div className="flex justify-between text-xs font-medium text-muted-foreground">
+                <div className="mt-1 flex justify-between text-xs font-medium text-muted-foreground">
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(audioDuration)}</span>
                 </div>
