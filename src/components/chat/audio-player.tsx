@@ -89,7 +89,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
     return (
-        <div className="flex w-full max-w-xs items-center gap-3">
+        <div className="flex w-full max-w-sm items-center gap-3">
             <audio ref={audioRef} src={src} preload="metadata" />
             
             <button
@@ -130,7 +130,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                     {/* Seek Handle */}
                      <div 
                         className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all opacity-0 group-hover:opacity-100" 
-                        style={{ left: `calc(${progressPercentage}% - 5px)` }}
+                        style={{ left: `min(calc(${progressPercentage}% - 5px), calc(100% - 10px))` }}
                     />
                 </div>
 
