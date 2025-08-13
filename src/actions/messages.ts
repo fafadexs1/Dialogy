@@ -168,7 +168,7 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            let dbMessageType: Message['type'] = 'text';
+            let dbMessageType: Message['type'] = 'text'; // Default to text, but will be overwritten
              let dbMetadata: MessageMetadata = {
                 thumbnail: file.thumbnail,
             };
@@ -205,18 +205,29 @@ export async function sendMediaAction(
             
             const dbContent = caption || '';
            
-
+            // Logic to correctly parse the response and save metadata
             if (apiResponse?.message) {
-                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
-                if (messageTypeKey && apiResponse.message[messageTypeKey]) {
-                    const mediaDetails = apiResponse.message[messageTypeKey];
+                 if (file.mediatype === 'audio' && apiResponse.message.audioMessage) {
+                    const audioDetails = apiResponse.message.audioMessage;
+                    dbMessageType = 'audio';
                     dbMetadata = {
                         ...dbMetadata,
-                        mediaUrl: apiResponse.message.mediaUrl, // This might not exist for audio
-                        mimetype: mediaDetails.mimetype,
-                        fileName: mediaDetails.fileName || file.filename,
-                        duration: mediaDetails.seconds
+                        mediaUrl: audioDetails.url,
+                        mimetype: audioDetails.mimetype,
+                        duration: audioDetails.seconds,
                     };
+                } else {
+                    const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
+                    if (messageTypeKey && apiResponse.message[messageTypeKey]) {
+                        const mediaDetails = apiResponse.message[messageTypeKey];
+                        // Assuming other types will have similar structures. This could be improved.
+                         dbMetadata = {
+                            ...dbMetadata,
+                            mediaUrl: mediaDetails.url, 
+                            mimetype: mediaDetails.mimetype,
+                            fileName: mediaDetails.fileName || file.filename,
+                        };
+                    }
                 }
             }
             
