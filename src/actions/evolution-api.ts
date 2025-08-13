@@ -353,9 +353,9 @@ export async function disconnectInstance(instanceName: string, config: Evolution
 export async function markMessagesAsReadAction(
     instanceName: string, 
     messagesToMark: { remoteJid: string; fromMe: boolean; id: string }[],
-    messageIdsToUpdateInDb: string[]
+    messageDbIds: string[]
 ): Promise<{ success: boolean; error?: string }> {
-    if (!instanceName || messagesToMark.length === 0) {
+    if (!instanceName || messagesToMark.length === 0 || messageDbIds.length === 0) {
         return { success: false, error: "Dados insuficientes para marcar mensagens como lidas." };
     }
     
@@ -377,27 +377,31 @@ export async function markMessagesAsReadAction(
         const apiConfig = { api_url, api_key };
 
         // 1. Send "read" receipt via API
+        const payload = {
+            read: {
+                remoteJid: messagesToMark[0].remoteJid,
+                fromMe: messagesToMark[0].fromMe,
+                id: messagesToMark.map(m => m.id),
+            }
+        };
+
+        console.log(`[MARK_AS_READ] Enviando payload para API: ${JSON.stringify(payload)}`);
+
         await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, {
             ...apiConfig,
             method: 'POST',
-            body: JSON.stringify({
-              read: {
-                remoteJid: messagesToMark[0].remoteJid,
-                fromMe: false,
-                id: messagesToMark.map(m => m.id),
-              }
-            }),
+            body: JSON.stringify(payload),
           });
         
         // 2. Update our database
         await client.query(
             'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
-            [messageIdsToUpdateInDb]
+            [messageDbIds]
         );
         
         await client.query('COMMIT');
         
-        console.log(`[MARK_AS_READ] ${messageIdsToUpdateInDb.length} mensagens marcadas como lidas no DB.`);
+        console.log(`[MARK_AS_READ] ${messageDbIds.length} mensagens marcadas como lidas no DB.`);
         revalidatePath('/', 'layout'); // Revalidate to update unread counts
         return { success: true };
 
@@ -484,3 +488,5 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+    

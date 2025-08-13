@@ -465,23 +465,25 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   useEffect(() => {
     if (!chat || !chat.contact.phone_number_jid || !chat.instance_name) return;
 
-    const unreadMessages = initialMessages.filter(m => 
-        m.sender?.id === chat.contact.id && 
+    const unreadMessagesFromContact = messagesToDisplay.filter(m => 
+        !m.from_me && 
         !m.is_read &&
         m.message_id_from_api
     );
       
-    if (unreadMessages.length > 0) {
-        const messageApiIds = unreadMessages.map(m => m.message_id_from_api!);
-        const messageDbIds = unreadMessages.map(m => m.id);
+    if (unreadMessagesFromContact.length > 0) {
+        console.log(`[MARK_AS_READ] Found ${unreadMessagesFromContact.length} unread messages. Marking as read...`);
+        const messagesToMarkForApi = unreadMessagesFromContact.map(m => ({
+            remoteJid: chat.contact.phone_number_jid!,
+            fromMe: false, // Messages are from the contact
+            id: m.message_id_from_api!,
+        }));
 
-        markMessagesAsReadAction(
-            chat.instance_name, 
-            messageApiIds.map(id => ({ remoteJid: chat.contact.phone_number_jid!, fromMe: false, id })),
-            messageDbIds
-        );
+        const messageDbIdsToUpdate = unreadMessagesFromContact.map(m => m.id);
+
+        markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate);
     }
-  }, [initialMessages, chat]);
+  }, [messagesToDisplay, chat]);
 
   useEffect(() => {
     processedMessageIds.current.clear();
@@ -909,3 +911,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
