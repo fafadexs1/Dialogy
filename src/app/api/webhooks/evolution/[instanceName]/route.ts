@@ -95,26 +95,14 @@ async function handleMessagesUpsert(payload: any) {
     content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
     
-    // Convert base64 waveform to a number array
-    const parseWaveform = (waveform: string | undefined): number[] | undefined => {
-        if (!waveform) return undefined;
-        try {
-            const buffer = Buffer.from(waveform, 'base64');
-            const data = new Uint8Array(buffer);
-            return Array.from(data);
-        } catch(e) {
-            console.error("[WEBHOOK] Failed to parse waveform", e);
-            return undefined;
-        }
-    }
-    
     if (messageType) {
         switch (messageType) {
             case 'audioMessage':
                 dbMessageType = 'audio';
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.duration = messageDetails?.seconds;
-                metadata.waveform = parseWaveform(messageDetails?.waveform);
+                // O waveform foi removido para evitar bugs de renderização.
+                // A visualização será simulada no frontend.
                 break;
             case 'imageMessage': case 'videoMessage': case 'documentMessage':
                 metadata.mimetype = messageDetails?.mimetype;

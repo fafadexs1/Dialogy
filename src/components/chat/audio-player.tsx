@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 
 interface AudioPlayerProps {
     src: string;
-    waveform?: number[];
+    waveform?: number[]; // Manter a prop, mas agora será opcional/ignorada
     duration?: number;
 }
 
@@ -17,7 +17,7 @@ const formatTime = (timeInSeconds: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-export function AudioPlayer({ src, waveform = [], duration: initialDuration }: AudioPlayerProps) {
+export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
 
@@ -25,9 +25,10 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(initialDuration || 0);
 
-    const normalizedWaveform = waveform.length > 0
-        ? waveform.map(v => Math.max(0.05, v / 100)) // Ensure a minimum height for visibility
-        : Array(50).fill(0).map(() => Math.random() * 0.6 + 0.1); // Fallback for missing waveform
+    // Gerar uma forma de onda simulada e esteticamente agradável no frontend.
+    const simulatedWaveform = React.useMemo(() => 
+        Array.from({ length: 40 }, () => Math.random() * 0.8 + 0.2)
+    , []);
 
     const handlePlayPause = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -72,6 +73,11 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
         
         if(initialDuration && isFinite(initialDuration)) {
             setDuration(initialDuration);
+        } else {
+            // Se a duração não for fornecida, tenta obtê-la quando os metadados forem carregados
+             if(audio.readyState > 0) {
+                handleLoadedMetadata();
+             }
         }
 
         return () => {
@@ -94,35 +100,38 @@ export function AudioPlayer({ src, waveform = [], duration: initialDuration }: A
                 {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
             </button>
 
-            <div className="flex flex-col w-full flex-grow min-w-0">
+            <div className="flex min-w-0 flex-grow flex-col">
                 <div 
                   ref={progressRef}
                   onClick={handleSeek}
                   className="relative h-8 w-full cursor-pointer"
                 >
+                    {/* Background Waveform */}
                     <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
-                        {normalizedWaveform.map((bar, index) => (
+                        {simulatedWaveform.map((barHeight, index) => (
                              <div 
                                 key={index} 
-                                className="w-[3px] rounded-full bg-primary/30"
-                                style={{ height: `${bar * 100}%`}}
+                                className="w-[3px] rounded-full bg-muted-foreground/30"
+                                style={{ height: `${barHeight * 100}%`}}
                             />
                         ))}
                     </div>
+                    {/* Progress Waveform */}
                     <div className="absolute top-0 left-0 h-full overflow-hidden" style={{ width: `${progressPercentage}%`}}>
                         <div className="flex h-full items-center gap-px" style={{ width: progressRef.current?.offsetWidth }}>
-                             {normalizedWaveform.map((bar, index) => (
+                             {simulatedWaveform.map((barHeight, index) => (
                                 <div 
                                     key={index} 
                                     className="w-[3px] rounded-full bg-primary"
-                                    style={{ height: `${bar * 100}%`}}
+                                    style={{ height: `${barHeight * 100}%`}}
                                 />
                             ))}
                         </div>
                     </div>
+                    {/* Seek Handle */}
                      <div 
-                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background" 
-                        style={{ left: `${progressPercentage}%` }}
+                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all" 
+                        style={{ left: `calc(${progressPercentage}% - 5px)` }}
                     />
                 </div>
 
