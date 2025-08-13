@@ -176,6 +176,9 @@ export async function sendMediaAction(
             if (file.mediatype === 'audio') {
                 dbMessageType = 'audio';
                 console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
+                
+                const audioDataUri = `data:${file.mimetype};base64,${file.base64}`;
+
                 apiResponse = await fetchEvolutionAPI(
                     `/message/sendWhatsAppAudio/${instanceName}`,
                     apiConfig,
@@ -183,7 +186,7 @@ export async function sendMediaAction(
                         method: 'POST',
                         body: JSON.stringify({
                             number: correctedRemoteJid,
-                            audio: `data:${file.mimetype};base64,${file.base64}`
+                            audio: audioDataUri,
                         })
                     }
                 );
@@ -293,5 +296,6 @@ export async function sendAutomatedMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }
+
 
 
