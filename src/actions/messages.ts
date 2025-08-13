@@ -168,7 +168,7 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            let dbMessageType: Message['type'] = 'text'; // Default to text, but will be overwritten
+            let dbMessageType: Message['type'] = 'text';
              let dbMetadata: MessageMetadata = {
                 thumbnail: file.thumbnail,
             };
@@ -196,6 +196,7 @@ export async function sendMediaAction(
                     fileName: file.filename,
                     caption: caption || '',
                 };
+                dbMessageType = 'text';
                 apiResponse = await fetchEvolutionAPI(
                     `/message/sendMedia/${instanceName}`,
                     apiConfig,
@@ -205,11 +206,9 @@ export async function sendMediaAction(
             
             const dbContent = caption || '';
            
-            // Logic to correctly parse the response and save metadata
             if (apiResponse?.message) {
-                 if (file.mediatype === 'audio' && apiResponse.message.audioMessage) {
+                 if (dbMessageType === 'audio' && apiResponse.message.audioMessage) {
                     const audioDetails = apiResponse.message.audioMessage;
-                    dbMessageType = 'audio';
                     dbMetadata = {
                         ...dbMetadata,
                         mediaUrl: audioDetails.url,
@@ -220,7 +219,6 @@ export async function sendMediaAction(
                     const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                     if (messageTypeKey && apiResponse.message[messageTypeKey]) {
                         const mediaDetails = apiResponse.message[messageTypeKey];
-                        // Assuming other types will have similar structures. This could be improved.
                          dbMetadata = {
                             ...dbMetadata,
                             mediaUrl: mediaDetails.url, 
