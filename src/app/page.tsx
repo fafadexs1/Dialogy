@@ -156,7 +156,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
         
         const messageRes = await db.query(`
-            SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id
+            SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id, m.is_read
             FROM messages m
             JOIN chats c ON m.chat_id = c.id
             WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
@@ -188,6 +188,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 api_message_status: m.api_message_status,
                 message_id_from_api: m.message_id_from_api,
                 from_me: m.from_me,
+                is_read: m.is_read,
             });
         });
 
