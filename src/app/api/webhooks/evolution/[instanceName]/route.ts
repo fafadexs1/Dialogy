@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
-import type { Message } from '@/lib/types';
+import type { Message, MessageMetadata } from '@/lib/types';
 
 
 export async function POST(
@@ -87,7 +87,7 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     let content = '';
-    let metadata: any = {};
+    let metadata: MessageMetadata = {};
     let dbMessageType: Message['type'] = 'text';
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
@@ -95,12 +95,26 @@ async function handleMessagesUpsert(payload: any) {
     content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
     
+    // Convert base64 waveform to a number array
+    const parseWaveform = (waveform: string | undefined): number[] | undefined => {
+        if (!waveform) return undefined;
+        try {
+            const buffer = Buffer.from(waveform, 'base64');
+            const data = new Uint8Array(buffer);
+            return Array.from(data);
+        } catch(e) {
+            console.error("[WEBHOOK] Failed to parse waveform", e);
+            return undefined;
+        }
+    }
+    
     if (messageType) {
         switch (messageType) {
             case 'audioMessage':
                 dbMessageType = 'audio';
                 metadata.mimetype = messageDetails?.mimetype;
-                metadata.fileName = messageDetails?.fileName;
+                metadata.duration = messageDetails?.seconds;
+                metadata.waveform = parseWaveform(messageDetails?.waveform);
                 break;
             case 'imageMessage': case 'videoMessage': case 'documentMessage':
                 metadata.mimetype = messageDetails?.mimetype;
@@ -214,5 +228,3 @@ async function handleMessagesUpsert(payload: any) {
         client.release();
     }
 }
-
-  

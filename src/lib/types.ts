@@ -116,6 +116,8 @@ export type MessageMetadata = {
     fileName?: string;
     thumbnail?: string; // Base64 encoded thumbnail
     sentBy?: 'autopilot' | 'agent';
+    duration?: number; // Duration in seconds for audio/video
+    waveform?: number[]; // For audio visualization
 }
 
 export type Message = {

@@ -48,6 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { AudioPlayer } from './audio-player';
 
 
 interface ChatPanelProps {
@@ -163,7 +164,7 @@ function formatWhatsappText(text: string): string {
 }
 
 function MediaMessage({ message }: { message: Message }) {
-    const { mediaUrl, mimetype = '', fileName, thumbnail } = message.metadata || {};
+    const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
     if (!mediaUrl && !thumbnail) return <p>{message.content || 'Mídia inválida'}</p>;
     
@@ -228,7 +229,7 @@ function MediaMessage({ message }: { message: Message }) {
             );
         }
         if (mimetype.startsWith('audio/')) {
-            return <audio controls src={mediaUrl} className="w-full max-w-xs" />;
+            return <AudioPlayer src={mediaUrl!} duration={duration} waveform={waveform} />;
         }
         if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
             return (
