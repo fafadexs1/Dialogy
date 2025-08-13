@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
+import type { Message } from '@/lib/types';
 
 
 export async function POST(
@@ -87,7 +88,7 @@ async function handleMessagesUpsert(payload: any) {
 
     let content = '';
     let metadata: any = {};
-    let dbMessageType: 'text' | 'audio' = 'text';
+    let dbMessageType: Message['type'] = 'text';
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
 
@@ -213,3 +214,5 @@ async function handleMessagesUpsert(payload: any) {
         client.release();
     }
 }
+
+  

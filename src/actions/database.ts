@@ -35,6 +35,19 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         // Se o tipo já existe, ignora o erro e continua.
       }
     }
+    
+    // Adicionar valor 'audio' ao enum de mensagem, se não existir.
+    // É mais seguro do que tentar dropar e recriar.
+    try {
+        await client.query("ALTER TYPE public.message_type_enum ADD VALUE IF NOT EXISTS 'audio'");
+    } catch(error: any) {
+        // Ignora erros se o tipo já foi modificado ou se a transação está em um estado que não permite
+        if (error.code !== '42710') {
+          console.warn(`[DB_INIT] Não foi possível adicionar o valor 'audio' ao enum:`, error.message);
+        }
+    }
+
+
     console.log('Tipos ENUM verificados com sucesso.');
 
     // --- Etapa 2: Transação principal para criar tabelas e configurar o restante ---
@@ -214,7 +227,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
-          close_reason_tag_id TEXT, -- Alterado para TEXT e sem chave estrangeira
+          close_reason_tag_id TEXT,
           close_notes TEXT,
           tag TEXT,
           color TEXT
@@ -482,3 +495,4 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 }
  
     
+  
