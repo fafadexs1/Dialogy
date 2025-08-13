@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -31,45 +30,10 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     await client.query(`GRANT ALL PRIVILEGES ON DATABASE postgres TO ${appUser};`);
     console.log(`Privilégios concedidos ao usuário '${appUser}'.`);
 
-    console.log('Limpando objetos de banco de dados existentes...');
-    const teardownQueries = [
-        'DROP TABLE IF EXISTS public.contact_custom_field_values CASCADE;',
-        'DROP TABLE IF EXISTS public.custom_field_definitions CASCADE;',
-        'DROP TABLE IF EXISTS public.activities CASCADE;',
-        'DROP TABLE IF EXISTS public.autopilot_usage_logs CASCADE;',
-        'DROP TABLE IF EXISTS public.autopilot_rules CASCADE;',
-        'DROP TABLE IF EXISTS public.autopilot_configs CASCADE;',
-        'DROP TABLE IF EXISTS public.contact_tags CASCADE;',
-        'DROP TABLE IF EXISTS public.tags CASCADE;',
-        'DROP TABLE IF EXISTS public.business_hours CASCADE;',
-        'DROP TABLE IF EXISTS public.team_members CASCADE;',
-        'DROP TABLE IF EXISTS public.teams CASCADE;',
-        'DROP TABLE IF EXISTS public.role_permissions CASCADE;',
-        'DROP TABLE IF EXISTS public.permissions CASCADE;',
-        'DROP TABLE IF EXISTS public.user_invites CASCADE;',
-        'DROP TABLE IF EXISTS public.workspace_invites CASCADE;',
-        'DROP TABLE IF EXISTS public.user_workspace_roles CASCADE;',
-        'DROP TABLE IF EXISTS public.roles CASCADE;',
-        'DROP TABLE IF EXISTS public.evolution_api_instances CASCADE;',
-        'DROP TABLE IF EXISTS public.evolution_api_configs CASCADE;',
-        'DROP TABLE IF EXISTS public.messages CASCADE;',
-        'DROP TABLE IF EXISTS public.chats CASCADE;',
-        'DROP TABLE IF EXISTS public.contacts CASCADE;',
-        'DROP TABLE IF EXISTS public.user_workspaces CASCADE;', // Tabela antiga, removida para limpeza.
-        'DROP TABLE IF EXISTS public.workspaces CASCADE;',
-        'DROP TABLE IF EXISTS public.users CASCADE;',
-        'DROP TYPE IF EXISTS public.chat_status_enum;',
-        'DROP TYPE IF EXISTS public.message_type_enum;',
-        'DROP TYPE IF EXISTS public.message_status_enum;',
-        'DROP TYPE IF EXISTS public.activity_type_enum;',
-        'DROP TYPE IF EXISTS public.custom_field_type_enum;',
-    ];
+    // As operações de DROP foram removidas para tornar o script não-destrutivo.
+    // As verificações "IF NOT EXISTS" abaixo garantem a idempotência.
+    console.log('Verificando e criando schema do banco de dados...');
     
-    for (const query of teardownQueries) {
-        await client.query(query);
-    }
-    console.log('Limpeza concluída. Iniciando a criação do schema...');
-
     const setupQueries = [
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
       `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
@@ -77,7 +41,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
       `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
       
-      `CREATE TABLE public.users (
+      `CREATE TABLE IF NOT EXISTS public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           full_name TEXT NOT NULL,
           avatar_url TEXT,
@@ -87,20 +51,20 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           online BOOLEAN DEFAULT false
       );`,
       
-      `CREATE TABLE public.workspaces (
+      `CREATE TABLE IF NOT EXISTS public.workspaces (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name TEXT NOT NULL,
           avatar_url TEXT,
           owner_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE
       );`,
 
-      `CREATE TABLE public.permissions (
+      `CREATE TABLE IF NOT EXISTS public.permissions (
         id TEXT PRIMARY KEY,
         description TEXT NOT NULL,
         category TEXT NOT NULL
       );`,
 
-      `CREATE TABLE public.roles (
+      `CREATE TABLE IF NOT EXISTS public.roles (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
@@ -109,13 +73,13 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         UNIQUE(workspace_id, name)
       );`,
       
-      `CREATE TABLE public.role_permissions (
+      `CREATE TABLE IF NOT EXISTS public.role_permissions (
         role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
         permission_id TEXT NOT NULL REFERENCES public.permissions(id) ON DELETE CASCADE,
         PRIMARY KEY (role_id, permission_id)
       );`,
 
-      `CREATE TABLE public.user_workspace_roles (
+      `CREATE TABLE IF NOT EXISTS public.user_workspace_roles (
           user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
@@ -123,7 +87,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           PRIMARY KEY (user_id, workspace_id)
       );`,
 
-       `CREATE TABLE public.workspace_invites (
+       `CREATE TABLE IF NOT EXISTS public.workspace_invites (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           code TEXT NOT NULL UNIQUE,
@@ -135,14 +99,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           use_count INT DEFAULT 0
       );`,
 
-      `CREATE TABLE public.user_invites (
+      `CREATE TABLE IF NOT EXISTS public.user_invites (
           invite_id UUID NOT NULL REFERENCES public.workspace_invites(id) ON DELETE CASCADE,
           user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
           used_at TIMESTAMPTZ DEFAULT NOW(),
           PRIMARY KEY (invite_id, user_id)
       );`,
 
-      `CREATE TABLE public.teams (
+      `CREATE TABLE IF NOT EXISTS public.teams (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE RESTRICT,
@@ -151,13 +115,13 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         UNIQUE(workspace_id, name)
       );`,
 
-      `CREATE TABLE public.team_members (
+      `CREATE TABLE IF NOT EXISTS public.team_members (
         team_id UUID NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
         user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
         PRIMARY KEY (team_id, user_id)
       );`,
 
-      `CREATE TABLE public.business_hours (
+      `CREATE TABLE IF NOT EXISTS public.business_hours (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           team_id UUID NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
           day_of_week TEXT NOT NULL, -- Ex: 'Segunda-feira', 'Terca-feira'
@@ -167,7 +131,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           UNIQUE(team_id, day_of_week)
       );`,
 
-      `CREATE TABLE public.contacts (
+      `CREATE TABLE IF NOT EXISTS public.contacts (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
@@ -181,7 +145,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           UNIQUE(workspace_id, phone_number_jid)
       );`,
       
-      `CREATE TABLE public.activities (
+      `CREATE TABLE IF NOT EXISTS public.activities (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
         user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
@@ -191,7 +155,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
 
-      `CREATE TABLE public.tags (
+      `CREATE TABLE IF NOT EXISTS public.tags (
         id TEXT PRIMARY KEY,
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
@@ -201,13 +165,13 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         UNIQUE(workspace_id, label)
       );`,
 
-      `CREATE TABLE public.contact_tags (
+      `CREATE TABLE IF NOT EXISTS public.contact_tags (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           tag_id TEXT NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
       );`,
       
-       `CREATE TABLE public.custom_field_definitions (
+       `CREATE TABLE IF NOT EXISTS public.custom_field_definitions (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           label TEXT NOT NULL,
@@ -217,14 +181,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           UNIQUE(workspace_id, label)
       );`,
 
-      `CREATE TABLE public.contact_custom_field_values (
+      `CREATE TABLE IF NOT EXISTS public.contact_custom_field_values (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
           field_id UUID NOT NULL REFERENCES public.custom_field_definitions(id) ON DELETE CASCADE,
           value TEXT NOT NULL,
           PRIMARY KEY (contact_id, field_id)
       );`,
 
-      `CREATE TABLE public.chats (
+      `CREATE TABLE IF NOT EXISTS public.chats (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
@@ -239,7 +203,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           color TEXT
       );`,
 
-      `CREATE TABLE public.messages (
+      `CREATE TABLE IF NOT EXISTS public.messages (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE,
@@ -261,14 +225,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           raw_payload JSONB
       );`,
       
-      `CREATE TABLE public.evolution_api_configs (
+      `CREATE TABLE IF NOT EXISTS public.evolution_api_configs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           api_url TEXT,
           api_key TEXT
       );`,
       
-      `CREATE TABLE public.evolution_api_instances (
+      `CREATE TABLE IF NOT EXISTS public.evolution_api_instances (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           config_id UUID NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
@@ -276,7 +240,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           webhook_url TEXT
       );`,
 
-      `CREATE TABLE public.autopilot_configs (
+      `CREATE TABLE IF NOT EXISTS public.autopilot_configs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
           user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -288,7 +252,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           UNIQUE(workspace_id, user_id)
       );`,
 
-      `CREATE TABLE public.autopilot_rules (
+      `CREATE TABLE IF NOT EXISTS public.autopilot_rules (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         config_id UUID NOT NULL REFERENCES public.autopilot_configs(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
@@ -297,7 +261,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         enabled BOOLEAN DEFAULT TRUE
       );`,
 
-      `CREATE TABLE public.autopilot_usage_logs (
+      `CREATE TABLE IF NOT EXISTS public.autopilot_usage_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         config_id UUID NOT NULL REFERENCES public.autopilot_configs(id) ON DELETE CASCADE,
         rule_name TEXT,
@@ -308,13 +272,35 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         total_tokens INT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
+    ];
+    
+    // Executa as queries de criação de tipos e tabelas.
+    for (const query of setupQueries) {
+        try {
+            // Para criação de tipos, não podemos usar IF NOT EXISTS.
+            // Em vez disso, capturamos o erro esperado se o tipo já existir.
+            if (query.startsWith('CREATE TYPE')) {
+                await client.query(query).catch(e => {
+                    if (e.code !== '42710') throw e; // 42710 é 'duplicate_object'
+                });
+            } else {
+                // Adiciona 'IF NOT EXISTS' para tabelas.
+                const modifiedQuery = query.replace('CREATE TABLE public.', 'CREATE TABLE IF NOT EXISTS public.');
+                await client.query(modifiedQuery);
+            }
+        } catch (error) {
+            console.error('Erro executando query de setup:', query, error);
+            throw error; // Lança o erro para ser pego pelo catch principal e fazer rollback.
+        }
+    }
 
+    const permissionQueries = [
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO ${appUser};`,
     ];
 
-    for(const query of setupQueries) {
+    for(const query of permissionQueries) {
       await client.query(query);
     }
     
@@ -367,45 +353,59 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           -- Cria o papel de Administrador para o novo workspace (não é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
+          ON CONFLICT (workspace_id, name) DO NOTHING
           RETURNING id INTO admin_role_id;
 
-          -- Atribui todas as permissões existentes ao papel de Administrador
-          INSERT INTO public.role_permissions (role_id, permission_id)
-          SELECT admin_role_id, id FROM public.permissions;
+          -- Se o papel foi criado agora (não existia), preenche as permissões
+          IF admin_role_id IS NOT NULL THEN
+            INSERT INTO public.role_permissions (role_id, permission_id)
+            SELECT admin_role_id, id FROM public.permissions;
+          ELSE
+            -- Se o papel já existia, pega o ID dele para usar depois
+            SELECT id INTO admin_role_id FROM public.roles WHERE workspace_id = NEW.id AND name = 'Administrador';
+          END IF;
 
           -- Cria o papel de Membro para o novo workspace (este é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Membro', 'Acesso às funcionalidades principais, mas não pode gerenciar configurações.', TRUE)
+          ON CONFLICT (workspace_id, name) DO NOTHING
           RETURNING id INTO member_role_id;
-
-          -- Atribui permissões básicas ao papel de Membro
-          INSERT INTO public.role_permissions (role_id, permission_id)
-          SELECT member_role_id, id FROM public.permissions
-          WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view', 'autopilot:edit');
           
-          -- Atribui o papel de Administrador (com todas as permissões) ao criador do workspace
+          -- Se o papel de membro foi criado agora, preenche as permissões
+          IF member_role_id IS NOT NULL THEN
+            INSERT INTO public.role_permissions (role_id, permission_id)
+            SELECT member_role_id, id FROM public.permissions
+            WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view', 'autopilot:edit');
+          END IF;
+          
+          -- Atribui o papel de Administrador ao criador do workspace, se ele ainda não tiver um papel.
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
-          VALUES (NEW.owner_id, NEW.id, admin_role_id);
+          VALUES (NEW.owner_id, NEW.id, admin_role_id)
+          ON CONFLICT (user_id, workspace_id) DO NOTHING;
           
           -- Cria uma configuração padrão do Autopilot para o dono do workspace
           INSERT INTO public.autopilot_configs (workspace_id, user_id, ai_model, knowledge_base)
           VALUES(NEW.id, NEW.owner_id, 'googleai/gemini-2.0-flash', 'Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.')
+          ON CONFLICT (workspace_id, user_id) DO NOTHING
           RETURNING id INTO autopilot_config_id;
 
-          -- Cria uma regra de exemplo para o Autopilot do dono
-          INSERT INTO public.autopilot_rules (config_id, name, trigger, action, enabled)
-          VALUES (autopilot_config_id, 
-            'Saudação Inicial', 
-            'O cliente envia a primeira mensagem, como "oi" ou "olá".',
-            '{ "type": "reply", "value": "Olá! Bem-vindo ao nosso canal de atendimento. Como posso ajudar?" }',
-            TRUE
-          );
+          -- Se a configuração do Autopilot foi criada agora, cria uma regra de exemplo.
+          IF autopilot_config_id IS NOT NULL THEN
+            INSERT INTO public.autopilot_rules (config_id, name, trigger, action, enabled)
+            VALUES (autopilot_config_id, 
+              'Saudação Inicial', 
+              'O cliente envia a primeira mensagem, como "oi" ou "olá".',
+              '{ "type": "reply", "value": "Olá! Bem-vindo ao nosso canal de atendimento. Como posso ajudar?" }',
+              TRUE
+            );
+          END IF;
 
           RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;`,
         
-        `CREATE TRIGGER setup_workspace_defaults_trigger
+        `DROP TRIGGER IF EXISTS setup_workspace_defaults_trigger ON public.workspaces;
+         CREATE TRIGGER setup_workspace_defaults_trigger
             AFTER INSERT ON public.workspaces
             FOR EACH ROW EXECUTE PROCEDURE public.setup_workspace_defaults();`,
 
@@ -425,13 +425,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
                     (day_name <> 'Sábado' AND day_name <> 'Domingo'), 
                     '09:00:00',
                     '18:00:00'
-                );
+                ) ON CONFLICT (team_id, day_of_week) DO NOTHING;
             END LOOP;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;`,
 
-        `CREATE TRIGGER setup_default_business_hours_trigger
+        `DROP TRIGGER IF EXISTS setup_default_business_hours_trigger ON public.teams;
+         CREATE TRIGGER setup_default_business_hours_trigger
             AFTER INSERT ON public.teams
             FOR EACH ROW EXECUTE PROCEDURE public.setup_default_business_hours();`,
             
@@ -445,7 +446,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         END;
         $$ LANGUAGE plpgsql;`,
 
-        `CREATE TRIGGER update_invite_use_count_trigger
+        `DROP TRIGGER IF EXISTS update_invite_use_count_trigger ON public.user_invites;
+         CREATE TRIGGER update_invite_use_count_trigger
             AFTER INSERT ON public.user_invites
             FOR EACH ROW EXECUTE PROCEDURE public.update_invite_use_count();`
     ];
@@ -454,11 +456,11 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       await client.query(query);
     }
 
-    console.log('Funções e triggers criados.');
+    console.log('Funções e triggers criados/atualizados.');
     
     await client.query('COMMIT');
     console.log('Banco de dados inicializado com sucesso.');
-    return { success: true, message: 'Banco de dados inicializado com sucesso! O usuário "evolutionapi" foi criado ou verificado.' };
+    return { success: true, message: 'Banco de dados verificado e atualizado com sucesso! Seus dados foram preservados.' };
 
   } catch (error) {
     await client.query('ROLLBACK');
@@ -471,5 +473,4 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-
     
