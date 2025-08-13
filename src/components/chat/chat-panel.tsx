@@ -62,14 +62,14 @@ interface ChatPanelProps {
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
     const [isOpen, setIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [reasonTagValue, setReasonTagValue] = React.useState<string | null>(null);
+    const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const result = await closeChatAction(chat.id, reasonTagValue, notes);
+        const result = await closeChatAction(chat.id, reasonTagId, notes);
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
             setIsOpen(false);
@@ -98,13 +98,13 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label htmlFor="close-reason">Motivo do Encerramento</Label>
-                             <Select onValueChange={setReasonTagValue} value={reasonTagValue || ''}>
+                             <Select onValueChange={setReasonTagId} value={reasonTagId || ''}>
                                 <SelectTrigger id="close-reason">
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {reasons.map(reason => (
-                                        <SelectItem key={reason.id} value={reason.value}>{reason.label}</SelectItem>
+                                        <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -911,5 +911,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
