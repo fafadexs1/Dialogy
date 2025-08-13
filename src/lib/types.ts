@@ -122,7 +122,7 @@ export type Message = {
   id: string;
   sender?: MessageSender;
   content: string;
-  type: 'text' | 'system';
+  type: 'text' | 'system' | 'audio';
   status: 'default' | 'deleted';
   metadata?: MessageMetadata;
   timestamp: string;

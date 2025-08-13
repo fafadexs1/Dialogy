@@ -449,7 +449,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
          console.error('Erro ao gerar resposta da IA:', error);
          toast({
             title: 'Erro do Agente de IA',
-            description: error.message || 'Não foi possível gerar a resposta automática.',
+            description: error.message || 'Não foi possível gerar la resposta automática.',
             variant: 'destructive',
         });
     } finally {
@@ -637,7 +637,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
   const renderMessageContent = (message: Message) => {
-    const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+    const isMedia = message.type === 'audio' || message.metadata?.mediaUrl || message.metadata?.thumbnail;
     if (isMedia) {
         return <MediaMessage message={message} />;
     }
@@ -873,7 +873,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     onChange={handleFileChange}
                                     className="hidden"
                                     multiple
-                                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
                                 />
                                 <Button
                                     type="button"

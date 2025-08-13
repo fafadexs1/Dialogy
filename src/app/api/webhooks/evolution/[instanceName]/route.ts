@@ -87,13 +87,21 @@ async function handleMessagesUpsert(payload: any) {
 
     let content = '';
     let metadata: any = {};
+    let dbMessageType: 'text' | 'audio' = 'text';
+
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
 
     content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
+    
     if (messageType) {
         switch (messageType) {
-            case 'imageMessage': case 'videoMessage': case 'audioMessage': case 'documentMessage':
+            case 'audioMessage':
+                dbMessageType = 'audio';
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'imageMessage': case 'videoMessage': case 'documentMessage':
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.fileName = messageDetails?.fileName;
                 break;
@@ -187,9 +195,9 @@ async function handleMessagesUpsert(payload: any) {
                 created_at, message_id_from_api, sender_from_api, instance_name,
                 status_from_api, source_from_api, server_url, from_me,
                 api_message_status, raw_payload
-             ) VALUES ($1, $2, $3, 'text'::message_type_enum, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
             [
-                workspaceId, chatId, contactId, content, JSON.stringify(metadata), key.id, sender,
+                workspaceId, chatId, contactId, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
                 instanceName, data.status, data.source, parsedUrl, key.fromMe,
                 data.status?.toUpperCase(), JSON.stringify(payload)
             ]
