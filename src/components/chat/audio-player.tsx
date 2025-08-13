@@ -13,6 +13,7 @@ interface AudioPlayerProps {
 }
 
 const formatTime = (timeInSeconds: number) => {
+    if (isNaN(timeInSeconds) || timeInSeconds === 0) return '0:00';
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = Math.floor(timeInSeconds % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -30,14 +31,13 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         if (!audio) return;
 
         const setAudioData = () => {
-            if (audio.duration !== Infinity) {
+            if (audio.duration !== Infinity && !isNaN(audio.duration)) {
               setAudioDuration(audio.duration);
             }
-            setCurrentTime(audio.currentTime);
         };
 
         const setAudioTime = () => {
-            if (audio.duration === Infinity) return;
+            if (audio.duration === Infinity || isNaN(audio.duration)) return;
             const newProgress = (audio.currentTime / audio.duration) * 100;
             setProgress(newProgress);
             setCurrentTime(audio.currentTime);
@@ -47,34 +47,41 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
             setIsPlaying(false);
             setProgress(0);
             setCurrentTime(0);
+            audio.currentTime = 0;
         }
 
         audio.addEventListener('loadedmetadata', setAudioData);
         audio.addEventListener('timeupdate', setAudioTime);
         audio.addEventListener('ended', handleEnded);
 
+        // Se a duração inicial for fornecida, defina-a.
+        if (duration) {
+            setAudioDuration(duration);
+        }
+
         return () => {
             audio.removeEventListener('loadedmetadata', setAudioData);
             audio.removeEventListener('timeupdate', setAudioTime);
             audio.removeEventListener('ended', handleEnded);
         };
-    }, []);
+    }, [duration]);
 
-    const togglePlayPause = () => {
+    const togglePlayPause = (e: React.MouseEvent) => {
+        e.stopPropagation();
         const audio = audioRef.current;
         if (!audio) return;
 
         if (isPlaying) {
             audio.pause();
         } else {
-            audio.play();
+            audio.play().catch(error => console.error("Error playing audio:", error));
         }
         setIsPlaying(!isPlaying);
     };
 
     const handleScrub = (e: React.MouseEvent<HTMLDivElement>) => {
         const audio = audioRef.current;
-        if (!audio || audio.duration === Infinity) return;
+        if (!audio || audio.duration === Infinity || isNaN(audio.duration)) return;
 
         const scrubbableArea = e.currentTarget;
         const clickPosition = e.clientX - scrubbableArea.getBoundingClientRect().left;
@@ -84,7 +91,7 @@ export function AudioPlayer({ src, waveform, duration }: AudioPlayerProps) {
         audio.currentTime = newTime;
     };
     
-    // Normalize waveform data to fit within a certain height, ensuring a minimum height for visual presence.
+    // Normaliza a forma de onda para uma aparência visual melhor, garantindo uma altura mínima.
     const normalizedWaveform = waveform ? waveform.map(v => Math.max(2, (v / 255) * 28)) : new Array(50).fill(2);
 
 
