@@ -126,7 +126,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.assigned_at,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
-            lm.instance_name
+            lm.instance_name,
+            (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
@@ -148,6 +149,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         source: r.source,
         instance_name: r.instance_name,
         assigned_at: r.assigned_at,
+        unreadCount: parseInt(r.unread_count, 10),
     }));
 
     // 4. Fetch and combine messages if chats exist

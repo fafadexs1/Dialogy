@@ -78,7 +78,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
-            (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.from_me = FALSE AND msg.is_read = FALSE) as unread_count
+            (SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
