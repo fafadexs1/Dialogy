@@ -8,7 +8,33 @@ import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Paperclip, Send, Smile, MoreVertical, Bot, Loader2, MessageSquare, LogOut, FileDown, Info, Check, CheckCheck, Trash2, File, PlayCircle, Mic, Download, Bold, Italic, Strikethrough, Code, Hand, History, Eye, EyeOff } from 'lucide-react';
+import { 
+    Paperclip, 
+    Send, 
+    Smile, 
+    MoreVertical, 
+    Bot, 
+    Loader2, 
+    MessageSquare, 
+    LogOut, 
+    FileDown, 
+    Info, 
+    Check, 
+    CheckCheck, 
+    Trash2, 
+    File as FileIcon, 
+    PlayCircle, 
+    Mic, 
+    Download, 
+    Bold, 
+    Italic, 
+    Strikethrough, 
+    Code, 
+    Hand, 
+    History, 
+    Eye, 
+    EyeOff 
+} from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -240,7 +266,7 @@ function MediaMessage({ message }: { message: Message }) {
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors max-w-xs"
                 >
-                    <File className="h-8 w-8 text-muted-foreground flex-shrink-0" />
+                    <FileIcon className="h-8 w-8 text-muted-foreground flex-shrink-0" />
                     <div className='min-w-0'>
                         <p className="font-medium truncate">{fileName || 'Documento'}</p>
                         <p className="text-xs text-muted-foreground">Clique para abrir ou baixar</p>
@@ -630,16 +656,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const handleSendAudio = async (audioBase64: string, duration: number) => {
     if (!chat) return;
 
-    const audioFile: MediaFileType = {
-      id: `audio-${Date.now()}`,
-      name: `audio_gravado.mp3`,
-      type: 'audio/mpeg',
-      mediatype: 'audio',
+    const result = await sendMediaAction(chat.id, '', [{
       base64: audioBase64,
-      file: new File([], 'audio.mp3'),
-    };
-    
-    const result = await sendMediaAction(chat.id, '', [audioFile as any]);
+      mimetype: 'audio/mpeg',
+      filename: 'audio_gravado.mp3',
+      mediatype: 'audio'
+    }]);
 
     if (result.success) {
       onActionSuccess();
