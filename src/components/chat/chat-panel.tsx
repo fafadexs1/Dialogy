@@ -653,12 +653,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 };
 
-  const handleSendAudio = async (audioBase64: string, duration: number) => {
+  const handleSendAudio = async (audioBase64: string, duration: number, mimetype: string) => {
     if (!chat) return;
 
     const result = await sendMediaAction(chat.id, '', [{
       base64: audioBase64,
-      mimetype: 'audio/mpeg',
+      mimetype: mimetype,
       filename: 'audio_gravado.mp3',
       mediatype: 'audio'
     }]);

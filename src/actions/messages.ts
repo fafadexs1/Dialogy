@@ -255,10 +255,10 @@ export async function sendMediaAction(
 
         return { success: true };
 
-    } catch (error) {
+    } catch (error: any) {
         await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao enviar mídia.";
+        const errorMessage = error instanceof Error ? `Erro da API Evolution: ${error.message}` : "Ocorreu um erro desconhecido ao enviar mídia.";
         return { success: false, error: errorMessage };
     } finally {
         client.release();

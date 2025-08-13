@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -8,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { AudioPlayer } from './audio-player';
 
 interface AudioRecorderProps {
-  onSend: (audioBase64: string, duration: number) => Promise<void>;
+  onSend: (audioBase64: string, duration: number, mimetype: string) => Promise<void>;
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -48,7 +49,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    const media = new MediaRecorder(stream);
+    const media = new MediaRecorder(stream, { mimeType: 'audio/webm' });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
     
@@ -110,7 +111,8 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const base64Audio = (reader.result as string).split(',')[1];
-      await onSend(base64Audio, recordingTime);
+      // Pass the mimetype from the blob
+      await onSend(base64Audio, recordingTime, audioBlob.type);
       handleDiscard();
       setIsSending(false);
     };
