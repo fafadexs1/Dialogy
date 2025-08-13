@@ -173,7 +173,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`,
 
       `CREATE TABLE IF NOT EXISTS public.tags (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id TEXT PRIMARY KEY,
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -184,7 +184,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE IF NOT EXISTS public.contact_tags (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-          tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
+          tag_id TEXT NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
       );`,
       
@@ -481,3 +481,4 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
   }
 }
  
+    
