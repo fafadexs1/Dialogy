@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 interface AudioPlayerProps {
     src: string;
     duration?: number;
+    waveform?: number[];
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -24,7 +25,6 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(initialDuration || 0);
 
-    // Gerar uma forma de onda simulada e esteticamente agradável no frontend.
     const simulatedWaveform = React.useMemo(() => 
         Array.from({ length: 60 }, () => Math.random() * 0.8 + 0.2)
     , []);
@@ -73,7 +73,6 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
         if(initialDuration && isFinite(initialDuration)) {
             setDuration(initialDuration);
         } else {
-            // Se a duração não for fornecida, tenta obtê-la quando os metadados forem carregados
              if(audio.readyState > 0) {
                 handleLoadedMetadata();
              }
@@ -103,7 +102,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                 <div 
                   ref={progressRef}
                   onClick={handleSeek}
-                  className="relative h-8 w-full cursor-pointer"
+                  className="relative h-12 w-full cursor-pointer"
                 >
                     {/* Background Waveform */}
                     <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
@@ -130,7 +129,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                     {/* Seek Handle */}
                      <div 
                         className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all" 
-                        style={{ left: `calc(${progressPercentage}% - 5px)` }}
+                        style={{ left: `min(${progressPercentage}%, calc(100% - 10px))` }}
                     />
                 </div>
 
