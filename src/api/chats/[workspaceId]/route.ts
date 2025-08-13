@@ -85,7 +85,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
-            uc.count as unread_count
+            COALESCE(uc.count, 0) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
@@ -105,7 +105,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         source: r.source,
         instance_name: r.instance_name,
         assigned_at: r.assigned_at,
-        unreadCount: r.unread_count ? parseInt(r.unread_count, 10) : 0,
+        unreadCount: r.unread_count,
     }));
 
     if (chats.length > 0) {
@@ -182,5 +182,3 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-    
