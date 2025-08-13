@@ -61,7 +61,7 @@ export type Contact = {
   id: string;
   workspace_id: string;
   name: string;
-  avatar?: string;
+  avatar_url?: string;
   email?: string;
   phone?: string;
   phone_number_jid?: string;
