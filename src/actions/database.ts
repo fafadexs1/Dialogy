@@ -13,8 +13,33 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
   const client = await adminPool.connect();
 
   try {
+    // --- Etapa 1: Garantir que os Tipos ENUM existam ---
+    // Esses comandos são executados fora da transação principal porque CREATE TYPE
+    // não suporta "IF NOT EXISTS" e falharia dentro de um bloco de transação se o tipo já existisse.
+    console.log('Verificando e criando tipos ENUM...');
+    const enumQueries = [
+      `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
+      `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
+      `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
+      `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
+      `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
+    ];
+
+    for (const query of enumQueries) {
+      try {
+        await client.query(query);
+      } catch (error: any) {
+        if (error.code !== '42710') { // 42710 is 'duplicate_object'
+          throw error; // Se for um erro diferente, lança para o catch principal.
+        }
+        // Se o tipo já existe, ignora o erro e continua.
+      }
+    }
+    console.log('Tipos ENUM verificados com sucesso.');
+
+    // --- Etapa 2: Transação principal para criar tabelas e configurar o restante ---
     await client.query('BEGIN');
-    console.log('Transação iniciada.');
+    console.log('Transação principal iniciada.');
 
     const appUser = 'evolutionapi';
     const appPassword = 'default_password';
@@ -29,18 +54,10 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     await client.query(`GRANT ALL PRIVILEGES ON DATABASE postgres TO ${appUser};`);
     console.log(`Privilégios concedidos ao usuário '${appUser}'.`);
-
-    // As operações de DROP foram removidas para tornar o script não-destrutivo.
-    // As verificações "IF NOT EXISTS" abaixo garantem a idempotência.
+    
     console.log('Verificando e criando schema do banco de dados...');
     
     const setupQueries = [
-      `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
-      `CREATE TYPE public.message_type_enum AS ENUM ('text', 'system');`,
-      `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
-      `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
-      `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
-      
       `CREATE TABLE IF NOT EXISTS public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           full_name TEXT NOT NULL,
@@ -156,7 +173,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`,
 
       `CREATE TABLE IF NOT EXISTS public.tags (
-        id TEXT PRIMARY KEY,
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -167,7 +184,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE IF NOT EXISTS public.contact_tags (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-          tag_id TEXT NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
+          tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
       );`,
       
@@ -274,25 +291,11 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`,
     ];
     
-    // Executa as queries de criação de tipos e tabelas.
+    // Executa as queries de criação de tabela.
     for (const query of setupQueries) {
-        try {
-            // Para criação de tipos, não podemos usar IF NOT EXISTS.
-            // Em vez disso, capturamos o erro esperado se o tipo já existir.
-            if (query.startsWith('CREATE TYPE')) {
-                await client.query(query).catch(e => {
-                    if (e.code !== '42710') throw e; // 42710 é 'duplicate_object'
-                });
-            } else {
-                // Adiciona 'IF NOT EXISTS' para tabelas.
-                const modifiedQuery = query.replace('CREATE TABLE public.', 'CREATE TABLE IF NOT EXISTS public.');
-                await client.query(modifiedQuery);
-            }
-        } catch (error) {
-            console.error('Erro executando query de setup:', query, error);
-            throw error; // Lança o erro para ser pego pelo catch principal e fazer rollback.
-        }
+        await client.query(query);
     }
+    console.log('Schema de tabelas verificado com sucesso.');
 
     const permissionQueries = [
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
@@ -304,7 +307,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       await client.query(query);
     }
     
-    console.log('Tabelas e permissões criadas com sucesso.');
+    console.log('Permissões do usuário da aplicação concedidas.');
 
     console.log('Populando a tabela de permissões...');
     const permissions = [
@@ -463,7 +466,11 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     return { success: true, message: 'Banco de dados verificado e atualizado com sucesso! Seus dados foram preservados.' };
 
   } catch (error) {
-    await client.query('ROLLBACK');
+    // A transação principal já foi iniciada, então damos rollback aqui.
+    await client.query('ROLLBACK').catch(rollbackError => {
+        console.error('Falha ao executar ROLLBACK:', rollbackError);
+    });
+
     console.error('Erro ao inicializar o banco de dados:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     return { success: false, message: `Falha na inicialização do banco de dados: ${errorMessage}` };
@@ -473,4 +480,4 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
-    
+ 
