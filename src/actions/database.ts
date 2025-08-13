@@ -192,7 +192,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`,
 
       `CREATE TABLE public.tags (
-        id TEXT PRIMARY KEY,
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -203,7 +203,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE public.contact_tags (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-          tag_id TEXT NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
+          tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
       );`,
       
@@ -233,7 +233,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
-          close_reason_tag_id TEXT,
+          close_reason_tag_id UUID REFERENCES public.tags(id) ON DELETE SET NULL,
           close_notes TEXT,
           tag TEXT,
           color TEXT
@@ -308,8 +308,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         total_tokens INT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
-
-      `ALTER TABLE public.chats ADD CONSTRAINT chats_close_reason_tag_id_fkey FOREIGN KEY (close_reason_tag_id) REFERENCES public.tags(id) ON DELETE SET NULL;`,
 
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
       `GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
