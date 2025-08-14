@@ -43,6 +43,18 @@ export async function createSystemAgent(
     if (!await hasPermission(session.user.id, workspaceId, 'automations:manage')) {
         return { success: false, error: "Você não tem permissão para criar agentes." };
     }
+
+    // Validate webhook URL if provided
+    if (data.webhook_url) {
+        try {
+            const url = new URL(data.webhook_url);
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                throw new Error();
+            }
+        } catch (_) {
+            return { success: false, error: "A URL do Webhook fornecida é inválida. Ela deve ser uma URL completa (ex: https://seu-site.com/webhook)." };
+        }
+    }
     
     // Generate a secure, unique token
     const token = `dgy_${randomBytes(24).toString('hex')}`;
@@ -50,7 +62,7 @@ export async function createSystemAgent(
     try {
         const res = await db.query(
             'INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [workspaceId, data.name, data.avatar_url, data.webhook_url, token]
+            [workspaceId, data.name, data.avatar_url, data.webhook_url || null, token]
         );
         revalidatePath('/automations/robots');
         return { success: true, agent: res.rows[0] };
@@ -87,4 +99,3 @@ export async function deleteSystemAgent(agentId: string): Promise<{ success: boo
 
 // TODO: Add an 'updateSystemAgent' action
 // TODO: Add a 'toggleSystemAgentActive' action
-

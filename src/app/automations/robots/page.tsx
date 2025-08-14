@@ -86,11 +86,12 @@ function AgentForm({
         </div>
         <div className="space-y-2">
           <Label htmlFor="agent-avatar">URL do Avatar</Label>
-          <Input id="agent-avatar" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="https://exemplo.com/avatar.png" />
+          <Input id="agent-avatar" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} type="url" placeholder="https://exemplo.com/avatar.png" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="agent-webhook">URL do Webhook</Label>
-          <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} placeholder="https://seu-sistema.com/api/dialogy-webhook" />
+          <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} type="url" placeholder="https://seu-sistema.com/api/dialogy-webhook" />
+           <p className="text-xs text-muted-foreground">Deve ser uma URL completa, começando com http:// ou https://</p>
         </div>
       </div>
       <DialogFooter>
@@ -248,8 +249,8 @@ export default function RobotsPage() {
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Webhook className="h-3 w-3"/> URL do Webhook</Label>
                         <div className="flex items-center">
-                            <Input readOnly value={agent.webhook_url} className="h-8 font-mono text-xs flex-1"/>
-                            <CopyButton textToCopy={agent.webhook_url} />
+                            <Input readOnly value={agent.webhook_url || 'N/A'} className="h-8 font-mono text-xs flex-1"/>
+                            {agent.webhook_url && <CopyButton textToCopy={agent.webhook_url} />}
                         </div>
                      </div>
                   </CardContent>
