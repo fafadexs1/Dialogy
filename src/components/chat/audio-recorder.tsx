@@ -49,8 +49,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    // Prefer audio/webm se disponível, pois é mais padrão.
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/mpeg';
+    const mimeType = 'audio/ogg';
     const media = new MediaRecorder(stream, { mimeType });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
@@ -73,7 +72,6 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
       setAudioUrl(audioUrl);
       setAudioBlob(audioBlob);
       if(recordingInterval.current) clearInterval(recordingInterval.current);
-      // Clean up the stream tracks
       stream.getTracks().forEach(track => track.stop());
     };
   };
@@ -113,7 +111,6 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const base64Audio = (reader.result as string).split(',')[1];
-      // Pass the mimetype from the blob
       await onSend(base64Audio, recordingTime, audioBlob.type);
       handleDiscard();
       setIsSending(false);

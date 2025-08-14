@@ -184,20 +184,15 @@ export async function sendMediaAction(
                     },
                     mediaMessage: {
                         mediatype: file.mediatype,
+                        // Use a Data URI for base64 encoded media
                         media: `data:${file.mimetype};base64,${file.base64}`,
                         fileName: file.filename,
                         caption: caption || '',
+                        // For OGG audio, ensure the mimetype is correct
+                        ...(file.mediatype === 'audio' && { mimetype: file.mimetype }),
                     }
                 };
                 
-                // For audio, the payload structure is slightly different for sendMedia
-                if (file.mediatype === 'audio') {
-                    apiPayload.mediaMessage = {
-                        ...apiPayload.mediaMessage,
-                        // mimetype: "audio/mpeg" // The API may infer this, but being explicit is safer
-                    };
-                }
-
                 apiResponse = await fetchEvolutionAPI(
                     `/message/sendMedia/${instanceName}`,
                     apiConfig,
