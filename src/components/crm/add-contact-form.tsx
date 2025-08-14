@@ -190,10 +190,6 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                     <Label htmlFor="name">Nome Completo*</Label>
                     <Input id="name" name="name" placeholder="João da Silva" required defaultValue={contact?.name || ''} />
                 </div>
-                 <div className="space-y-2">
-                    <Label htmlFor="phone">Telefone Principal*</Label>
-                    <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required defaultValue={contact?.phone || ''}/>
-                </div>
                 <div className="space-y-2">
                     <Label htmlFor="phone_number_jid">JID do WhatsApp</Label>
                     <Input id="phone_number_jid" name="phone_number_jid" type="text" placeholder="5511987654321@s.whatsapp.net" defaultValue={contact?.phone_number_jid || ''}/>

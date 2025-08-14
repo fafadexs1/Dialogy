@@ -91,10 +91,9 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
     const data = {
         name: formData.get('name') as string,
         email: formData.get('email') as string || null,
-        phone: formData.get('phone') as string,
+        phone_number_jid: formData.get('phone_number_jid') as string || null,
         address: formData.get('address') as string || null,
         owner_id: ownerId || null,
-        phone_number_jid: formData.get('phone_number_jid') as string || null,
         avatar_url: formData.get('avatar_url') as string || null,
     };
     
@@ -118,15 +117,15 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         if (id) { // Update
              await client.query(
                 `UPDATE contacts 
-                 SET name = $1, email = $2, phone = $3, address = $4, owner_id = $5, phone_number_jid = $6, avatar_url = $7
-                 WHERE id = $8 AND workspace_id = $9`,
-                [data.name, data.email, data.phone, data.address, data.owner_id, data.phone_number_jid, data.avatar_url, id, workspaceId]
+                 SET name = $1, email = $2, phone_number_jid = $3, address = $4, owner_id = $5, avatar_url = $6
+                 WHERE id = $7 AND workspace_id = $8`,
+                [data.name, data.email, data.phone_number_jid, data.address, data.owner_id, data.avatar_url, id, workspaceId]
             );
         } else { // Create
             const res = await client.query(
-                `INSERT INTO contacts (workspace_id, name, email, phone, address, owner_id, phone_number_jid, avatar_url) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [workspaceId, data.name, data.email, data.phone, data.address, data.owner_id, data.phone_number_jid, data.avatar_url]
+                `INSERT INTO contacts (workspace_id, name, email, phone_number_jid, address, owner_id, avatar_url) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [workspaceId, data.name, data.email, data.phone_number_jid, data.address, data.owner_id, data.avatar_url]
             );
             contactId = res.rows[0].id;
         }
@@ -444,5 +443,3 @@ export async function addActivityAction(
         return { success: false, error: "Falha ao registrar atividade." };
     }
 }
-
-    
