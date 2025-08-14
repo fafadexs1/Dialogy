@@ -108,14 +108,14 @@ export type Activity = {
     user_id?: string; // ID do agente que registrou
 }
 
-export type MessageSender = User | Contact | undefined;
+export type MessageSender = User | Contact | SystemAgent | undefined;
 
 export type MessageMetadata = {
     mediaUrl?: string;
     mimetype?: string;
     fileName?: string;
     thumbnail?: string; // Base64 encoded thumbnail
-    sentBy?: 'autopilot' | 'agent';
+    sentBy?: 'autopilot' | 'agent' | 'system_agent';
     duration?: number; // Duration in seconds for audio/video
     waveform?: number[]; // For audio visualization
 }
@@ -335,4 +335,15 @@ export interface WorkspaceInvite {
     max_uses: number | null;
     is_revoked: boolean;
     use_count: number;
+}
+
+export interface SystemAgent {
+    id: string;
+    workspace_id: string;
+    name: string;
+    avatar_url: string;
+    token: string;
+    webhook_url: string;
+    is_active: boolean;
+    created_at: string;
 }

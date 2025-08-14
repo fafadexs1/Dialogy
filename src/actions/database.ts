@@ -302,6 +302,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         total_tokens INT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`,
+
+      `CREATE TABLE IF NOT EXISTS public.system_agents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        avatar_url TEXT,
+        token TEXT NOT NULL UNIQUE,
+        webhook_url TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(workspace_id, name)
+      );`,
     ];
     
     // Executa as queries de criação de tabela.
@@ -509,12 +521,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
- 
-    
-  
-
-    
-
-    
-
-    

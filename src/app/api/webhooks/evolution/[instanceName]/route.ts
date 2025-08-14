@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
-import type { Message, MessageMetadata } from '@/lib/types';
+import type { Message, MessageMetadata, Chat } from '@/lib/types';
+import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
 
 export async function POST(
@@ -149,7 +150,7 @@ async function handleMessagesUpsert(payload: any) {
 
         // 3. Buscar o contato (seja ele novo ou existente) para obter o ID e o avatar.
         const contactRes = await client.query(
-            'SELECT id, avatar_url FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
             [workspaceId, contactJid]
         );
 
@@ -157,9 +158,10 @@ async function handleMessagesUpsert(payload: any) {
             // Isso não deveria acontecer, mas é uma salvaguarda.
             throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         }
-
-        const contactId = contactRes.rows[0].id;
-        const currentAvatar = contactRes.rows[0].avatar_url;
+        
+        const contactData = contactRes.rows[0];
+        const contactId = contactData.id;
+        const currentAvatar = contactData.avatar_url;
         
         // Se o contato não tem avatar, busca na API.
         if (!currentAvatar) {
@@ -176,6 +178,7 @@ async function handleMessagesUpsert(payload: any) {
                 if (profilePicRes?.profilePictureUrl) {
                     await client.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
                     console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
+                    contactData.avatar_url = profilePicRes.profilePictureUrl;
                 }
             } catch (picError) {
                 // Não trava o fluxo principal se a busca da foto falhar.
@@ -185,35 +188,43 @@ async function handleMessagesUpsert(payload: any) {
         
         // 4. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
-            `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
              ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactId]
         );
         
-        let chatId: string;
+        let chat: Chat;
         if (chatRes.rowCount > 0) {
-            chatId = chatRes.rows[0].id;
+            chat = chatRes.rows[0];
         } else {
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactId]
             );
-            chatId = newChatRes.rows[0].id;
+            chat = newChatRes.rows[0];
         }
 
         // 5. Inserir a mensagem
-        await client.query(
+        const messageResult = await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
                 created_at, message_id_from_api, sender_from_api, instance_name,
                 status_from_api, source_from_api, server_url, from_me,
                 api_message_status, raw_payload
-             ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
             [
-                workspaceId, chatId, contactId, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
+                workspaceId, chat.id, contactId, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
                 instanceName, data.status, data.source, parsedUrl, key.fromMe,
                 data.status?.toUpperCase(), JSON.stringify(payload)
             ]
         );
+        
+        const newMessage: Message = messageResult.rows[0];
+
+        // Adiciona os dados do contato ao chat para o dispatcher
+        chat.contact = contactData;
+
+        // 6. Enviar a mensagem para os webhooks dos agentes do sistema
+        await dispatchMessageToWebhooks(chat, newMessage);
 
         await client.query('COMMIT');
         revalidatePath(`/api/chats/${workspaceId}`);
