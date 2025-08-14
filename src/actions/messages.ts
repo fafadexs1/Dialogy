@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -115,7 +116,11 @@ async function internalSendMessage(
 }
 
 
-export async function sendMediaAction(
+/**
+ * Internal function to handle media sending logic.
+ * Can be called by agent-triggered actions or automated system actions.
+ */
+async function internalSendMedia(
     chatId: string,
     caption: string,
     mediaFiles: {
@@ -124,15 +129,11 @@ export async function sendMediaAction(
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
         thumbnail?: string; 
-    }[]
+    }[],
+    senderId: string,
+    metadata?: MessageMetadata
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
-    const currentUserId = session.user.id;
-
-    if (!chatId || !mediaFiles || mediaFiles.length === 0) {
+     if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
     }
 
@@ -198,6 +199,7 @@ export async function sendMediaAction(
 
             const dbContent = caption || '';
             let dbMetadata: MessageMetadata = {
+                ...metadata,
                 thumbnail: file.thumbnail,
             };
 
@@ -225,7 +227,7 @@ export async function sendMediaAction(
                 [
                     workspace_id, 
                     chatId, 
-                    currentUserId, 
+                    senderId, 
                     dbMessageType,
                     dbContent, 
                     apiResponse?.key?.id, 
@@ -255,7 +257,7 @@ export async function sendMediaAction(
 
 
 /**
- * Action specifically for sending messages from the UI (agents).
+ * Action specifically for sending messages from the UI (human agents).
  * It gets the senderId from the session.
  */
 export async function sendAgentMessageAction(
@@ -271,13 +273,55 @@ export async function sendAgentMessageAction(
 }
 
 /**
- * Action for sending automated messages (e.g., from Autopilot).
- * The senderId is passed explicitly as the agent responsible for the chat.
+ * Action for sending automated messages (e.g., from Autopilot or System Agents).
+ * The senderId is passed explicitly.
  */
 export async function sendAutomatedMessageAction(
     chatId: string,
     content: string,
+    agentId: string,
+    isSystemAgent: boolean = false
+): Promise<{ success: boolean; error?: string }> {
+    const metadata = isSystemAgent ? { sentBy: 'system_agent' } : { sentBy: 'autopilot' };
+    return internalSendMessage(chatId, content, agentId, metadata);
+}
+
+
+/**
+ * Action for sending media from the UI (human agents).
+ */
+export async function sendMediaAction(
+    chatId: string,
+    caption: string,
+    mediaFiles: {
+        base64: string;
+        mimetype: string;
+        filename: string;
+        mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string; 
+    }[]
+): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+        return { success: false, error: 'Usuário não autenticado.' };
+    }
+    return internalSendMedia(chatId, caption, mediaFiles, session.user.id);
+}
+
+/**
+ * Action for sending media from automated systems (System Agents).
+ */
+export async function sendAutomatedMediaAction(
+     chatId: string,
+    caption: string,
+    mediaFiles: {
+        base64: string;
+        mimetype: string;
+        filename: string;
+        mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string; 
+    }[],
     agentId: string
 ): Promise<{ success: boolean; error?: string }> {
-    return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
+    return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' });
 }

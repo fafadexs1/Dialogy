@@ -3,15 +3,19 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sendAutomatedMessageAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAutomatedMediaAction } from '@/actions/messages';
 
-/**
- * @deprecated Use /api/agent/messages instead. This endpoint will be removed in a future version.
- * It only supports sending text messages.
- */
-interface AgentResponsePayload {
+interface MediaFilePayload {
+    base64: string;
+    mimetype: string;
+    filename: string;
+    mediatype: 'image' | 'video' | 'document' | 'audio';
+}
+
+interface AgentMessagePayload {
   chatId: string;
-  content: string;
+  content?: string; // Caption for media, or content for text
+  media?: MediaFilePayload[];
 }
 
 export async function POST(request: Request) {
@@ -32,15 +36,28 @@ export async function POST(request: Request) {
        return NextResponse.json({ error: 'Agent is not active.' }, { status: 403 });
     }
     
-    const body: AgentResponsePayload = await request.json();
-    const { chatId, content } = body;
+    const body: AgentMessagePayload = await request.json();
+    const { chatId, content = '', media } = body;
 
-    if (!chatId || !content) {
-      return NextResponse.json({ error: 'chatId and content are required.' }, { status: 400 });
+    if (!chatId) {
+      return NextResponse.json({ error: 'chatId is required.' }, { status: 400 });
     }
 
-    // We send the message using the agent's ID as the sender
-    const result = await sendAutomatedMessageAction(chatId, content, agent.id, true);
+    if (!content && (!media || media.length === 0)) {
+       return NextResponse.json({ error: 'Either content or media must be provided.' }, { status: 400 });
+    }
+    
+    let result: { success: boolean; error?: string };
+
+    // If media is present, send it. Content will be used as caption.
+    if (media && media.length > 0) {
+        result = await sendAutomatedMediaAction(chatId, content, media, agent.id);
+    } 
+    // Otherwise, send a text message.
+    else {
+        result = await sendAutomatedMessageAction(chatId, content, agent.id, true);
+    }
+
 
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Message sent successfully.' });
@@ -49,7 +66,7 @@ export async function POST(request: Request) {
     }
     
   } catch (error: any) {
-    console.error('[AGENT_RESPONSE_API] Error:', error);
+    console.error('[AGENT_MESSAGE_API] Error:', error);
     if (error instanceof SyntaxError) {
         return NextResponse.json({ error: 'Invalid JSON payload.' }, { status: 400 });
     }
