@@ -2,8 +2,8 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Search, Settings, Plus, UploadCloud, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, Edit, MoreHorizontal, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Search, Settings, Plus, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, Edit, MoreHorizontal, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type Contact, Tag, User, Activity } from '@/lib/types';
@@ -66,7 +66,7 @@ export default function CustomerList() {
   const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   
-  const fetchData = React.useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     setLoading(true);
     try {
@@ -97,7 +97,7 @@ export default function CustomerList() {
   }, [fetchData]);
 
 
-  const handleAction = async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
+  const handleAction = useCallback(async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
     setSelectedContact(contact);
     switch (action) {
       case 'view':
@@ -125,15 +125,15 @@ export default function CustomerList() {
         }
         break;
     }
-  };
+  }, [fetchData]);
   
-  const handleSaveSuccess = () => {
+  const handleSaveSuccess = useCallback(() => {
     setIsAddEditModalOpen(false);
     setEditingContact(null);
     setIsActivityModalOpen(false);
     setIsLogAttemptModalOpen(false);
     fetchData(); // Re-fetch all data to reflect changes
-  }
+  }, [fetchData]);
 
 
   const filteredCustomers = customers.filter((customer) => {

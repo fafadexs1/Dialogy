@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -123,8 +123,8 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   
-  useEffect(() => {
-    if(isOpen && user?.activeWorkspaceId) {
+  const fetchDropdownData = useCallback(async () => {
+      if(isOpen && user?.activeWorkspaceId) {
         getTags(user.activeWorkspaceId).then(res => {
             if (!res.error) setAvailableTags(res.tags || []);
         });
@@ -132,7 +132,12 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
             if (!res.error) setCustomFields(res.fields || []);
         });
     }
-  }, [isOpen, user?.activeWorkspaceId])
+  }, [isOpen, user?.activeWorkspaceId]);
+
+  useEffect(() => {
+    fetchDropdownData();
+  }, [fetchDropdownData]);
+
 
   useEffect(() => {
     if (state.success) {
