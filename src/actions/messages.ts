@@ -173,7 +173,7 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: `data:audio/ogg;base64,${file.base64}`,
+                    audio: file.base64, // Use raw base64 as instructed
                 };
                 dbMessageType = 'audio';
             } else {
@@ -181,7 +181,8 @@ export async function sendMediaAction(
                 apiPayload = {
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
-                    media: `data:${file.mimetype};base64,${file.base64}`,
+                    mimetype: file.mimetype,
+                    media: file.base64, // Use raw base64 as instructed
                     fileName: file.filename,
                     caption: caption || '',
                 };
@@ -200,11 +201,9 @@ export async function sendMediaAction(
                 thumbnail: file.thumbnail,
             };
 
+            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
-                // Correctly extract mediaUrl from the top-level message object
-                if (apiResponse.message.mediaUrl) {
-                    dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
-                }
+                 dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
                 
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
