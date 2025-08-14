@@ -27,36 +27,45 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
     }
 
     try {
-        const teamsRes = await db.query('SELECT id, name, color, role_id, tag_id FROM teams WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
-        
-        const teams: Team[] = [];
+        const teamsRes = await db.query(`
+            SELECT
+                t.id,
+                t.name,
+                t.color,
+                t.role_id,
+                t.tag_id,
+                COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'id', u.id,
+                            'name', u.full_name,
+                            'avatar', u.avatar_url
+                        )
+                    )
+                    FROM team_members tm
+                    JOIN users u ON tm.user_id = u.id
+                    WHERE tm.team_id = t.id),
+                    '[]'::json
+                ) as members,
+                COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'day', bh.day_of_week,
+                            'isEnabled', bh.is_enabled,
+                            'startTime', bh.start_time,
+                            'endTime', bh.end_time
+                        )
+                    )
+                    FROM business_hours bh
+                    WHERE bh.team_id = t.id),
+                    '[]'::json
+                ) as "businessHours"
+            FROM teams t
+            WHERE t.workspace_id = $1
+            ORDER BY t.name;
+        `, [workspaceId]);
 
-        for (const row of teamsRes.rows) {
-            const membersRes = await db.query(`
-                SELECT u.id, u.full_name as name, u.avatar_url as avatar
-                FROM users u
-                JOIN team_members tm ON u.id = tm.user_id
-                WHERE tm.team_id = $1
-            `, [row.id]);
-
-            const businessHoursRes = await db.query(`
-                SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
-                FROM business_hours
-                WHERE team_id = $1
-            `, [row.id]);
-
-            teams.push({
-                id: row.id,
-                name: row.name,
-                color: row.color,
-                roleId: row.role_id,
-                tagId: row.tag_id,
-                members: membersRes.rows,
-                businessHours: businessHoursRes.rows,
-            });
-        }
-        
-        return { teams };
+        return { teams: teamsRes.rows };
 
     } catch (error) {
         console.error("Erro ao buscar equipes:", error);
@@ -278,3 +287,5 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
 }
+
+    
