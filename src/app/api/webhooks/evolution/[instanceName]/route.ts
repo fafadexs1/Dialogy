@@ -74,6 +74,10 @@ async function handleMessagesUpdate(payload: any) {
 
 async function handleMessagesUpsert(payload: any) {
     const { instance: instanceName, data, sender, server_url } = payload;
+    const client = await db.connect();
+    let savedChat: Chat | null = null;
+    let savedMessage: Message | null = null;
+    let workspaceId: string | null = null;
 
     if (!data || !data.key || !data.message) {
         console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
@@ -123,7 +127,6 @@ async function handleMessagesUpsert(payload: any) {
     const contactJid = key.remoteJid;
     const contactPhone = sender || contactJid.split('@')[0];
     
-    const client = await db.connect();
     try {
         await client.query('BEGIN');
 
@@ -136,7 +139,8 @@ async function handleMessagesUpsert(payload: any) {
         );
         if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
         
-        const { workspace_id: workspaceId, api_url, api_key } = instanceRes.rows[0];
+        const { workspace_id, api_url, api_key } = instanceRes.rows[0];
+        workspaceId = workspace_id; // Store for later use
         const apiConfig = { api_url, api_key };
 
 
@@ -155,7 +159,6 @@ async function handleMessagesUpsert(payload: any) {
         );
 
         if (contactRes.rowCount === 0) {
-            // Isso não deveria acontecer, mas é uma salvaguarda.
             throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         }
         
@@ -181,7 +184,6 @@ async function handleMessagesUpsert(payload: any) {
                     contactData.avatar_url = profilePicRes.profilePictureUrl;
                 }
             } catch (picError) {
-                // Não trava o fluxo principal se a busca da foto falhar.
                 console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
             }
         }
@@ -202,6 +204,8 @@ async function handleMessagesUpsert(payload: any) {
             );
             chat = newChatRes.rows[0];
         }
+        
+        chat.contact = contactData;
 
         // 5. Inserir a mensagem
         const messageResult = await client.query(
@@ -217,22 +221,27 @@ async function handleMessagesUpsert(payload: any) {
                 data.status?.toUpperCase(), JSON.stringify(payload)
             ]
         );
-        
-        const newMessage: Message = messageResult.rows[0];
-
-        // Adiciona os dados do contato ao chat para o dispatcher
-        chat.contact = contactData;
-
-        // 6. Enviar a mensagem para os webhooks dos agentes do sistema
-        await dispatchMessageToWebhooks(chat, newMessage);
 
         await client.query('COMMIT');
-        revalidatePath(`/api/chats/${workspaceId}`);
+        
+        savedChat = chat;
+        savedMessage = messageResult.rows[0];
 
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
+        // Retornamos para evitar o despacho do webhook em caso de falha.
+        return;
     } finally {
         client.release();
+    }
+    
+    // --- Despacho do Webhook (Fora da Transação) ---
+    if (savedChat && savedMessage) {
+        await dispatchMessageToWebhooks(savedChat, savedMessage);
+    }
+
+    if (workspaceId) {
+        revalidatePath(`/api/chats/${workspaceId}`);
     }
 }
