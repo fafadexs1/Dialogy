@@ -171,41 +171,39 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            let dbMessageType: Message['type'] = 'text';
+            const dbMessageType: Message['type'] = file.mediatype === 'audio' ? 'audio' : 'text';
             let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
 
             try {
-                if (file.mediatype === 'audio') {
-                    dbMessageType = 'audio';
-                    
-                    const payload = {
-                      number: correctedRemoteJid,
-                      audio: `data:${file.mimetype};base64,${file.base64}`,
-                    };
-
-                    apiResponse = await fetchEvolutionAPI(
-                        `/message/sendWhatsAppAudio/${instanceName}`,
-                        apiConfig,
-                        {
-                            method: 'POST',
-                            body: JSON.stringify(payload),
-                        }
-                    );
-                } else {
-                     dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
-                     const apiPayload = {
-                        number: correctedRemoteJid,
+                // Unified endpoint for all media types
+                const apiPayload = {
+                    number: correctedRemoteJid,
+                    options: {
+                        delay: 1200,
+                        presence: "composing"
+                    },
+                    mediaMessage: {
                         mediatype: file.mediatype,
                         media: `data:${file.mimetype};base64,${file.base64}`,
                         fileName: file.filename,
                         caption: caption || '',
+                    }
+                };
+                
+                // For audio, the payload structure is slightly different for sendMedia
+                if (file.mediatype === 'audio') {
+                    apiPayload.mediaMessage = {
+                        ...apiPayload.mediaMessage,
+                        // mimetype: "audio/mpeg" // The API may infer this, but being explicit is safer
                     };
-                    apiResponse = await fetchEvolutionAPI(
-                        `/message/sendMedia/${instanceName}`,
-                        apiConfig,
-                        { method: 'POST', body: JSON.stringify(apiPayload) }
-                    );
                 }
+
+                apiResponse = await fetchEvolutionAPI(
+                    `/message/sendMedia/${instanceName}`,
+                    apiConfig,
+                    { method: 'POST', body: JSON.stringify(apiPayload) }
+                );
+
             } catch (error: any) {
                 await client.query('ROLLBACK');
                 console.error('[SEND_MEDIA_ACTION] Erro na chamada da API:', error);
@@ -215,26 +213,18 @@ export async function sendMediaAction(
             
             const dbContent = caption || '';
            
+            // Normalize metadata saving from API response
             if (apiResponse?.message) {
-                 if (dbMessageType === 'audio' && apiResponse.message.audioMessage) {
-                    const audioDetails = apiResponse.message.audioMessage;
-                    dbMetadata = {
+                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
+                if (messageTypeKey && apiResponse.message[messageTypeKey]) {
+                    const mediaDetails = apiResponse.message[messageTypeKey];
+                     dbMetadata = {
                         ...dbMetadata,
-                        mediaUrl: audioDetails.url,
-                        mimetype: audioDetails.mimetype,
-                        duration: audioDetails.seconds,
+                        mediaUrl: mediaDetails.url, 
+                        mimetype: mediaDetails.mimetype,
+                        fileName: mediaDetails.fileName || file.filename,
+                        ...(file.mediatype === 'audio' && { duration: mediaDetails.seconds }),
                     };
-                } else {
-                    const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
-                    if (messageTypeKey && apiResponse.message[messageTypeKey]) {
-                        const mediaDetails = apiResponse.message[messageTypeKey];
-                         dbMetadata = {
-                            ...dbMetadata,
-                            mediaUrl: mediaDetails.url, 
-                            mimetype: mediaDetails.mimetype,
-                            fileName: mediaDetails.fileName || file.filename,
-                        };
-                    }
                 }
             }
             
