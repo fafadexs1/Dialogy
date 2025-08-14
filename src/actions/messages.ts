@@ -6,7 +6,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
-import type { Message, MessageMetadata } from '@/lib/types';
+import type { MessageMetadata } from '@/lib/types';
 
 
 /**
@@ -175,7 +175,7 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: `data:${file.mimetype};base64,${file.base64}`,
+                    audio: `data:${file.mimetype};base64,${file.base64}`, // Data URI for audio endpoint
                 };
                 dbMessageType = 'audio';
             } else {
@@ -184,13 +184,13 @@ export async function sendMediaAction(
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
                     mimetype: file.mimetype,
-                    media: `data:${file.mimetype};base64,${file.base64}`,
+                    media: file.base64, // Pure base64 for media endpoint
                     fileName: file.filename,
                     caption: caption || '',
                 };
             }
             
-            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload:`, JSON.stringify(apiPayload, null, 2));
+            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload:`, JSON.stringify(apiPayload, (key, value) => key === 'media' || key === 'audio' ? value.substring(0, 50) + '...' : value, 2));
 
             apiResponse = await fetchEvolutionAPI(
                 endpoint,
@@ -203,13 +203,14 @@ export async function sendMediaAction(
                 thumbnail: file.thumbnail,
             };
 
+            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
                     const mediaDetails = apiResponse.message[messageTypeKey];
                     dbMetadata = {
                         ...dbMetadata,
-                        mediaUrl: mediaDetails.url, 
+                        mediaUrl: mediaDetails.url, // Correctly extract the URL from the nested object
                         mimetype: mediaDetails.mimetype,
                         fileName: mediaDetails.fileName || file.filename,
                         ...(file.mediatype === 'audio' && { duration: mediaDetails.seconds }),

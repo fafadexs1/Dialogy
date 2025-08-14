@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -48,8 +49,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    // Usar webm para melhor compatibilidade com navegadores
-    const mimeType = 'audio/webm';
+    const mimeType = 'audio/webm'; // Use a more compatible mimetype
     if (!MediaRecorder.isTypeSupported(mimeType)) {
         toast({ title: "Formato Incompatível", description: "Seu navegador não suporta a gravação no formato necessário (webm).", variant: 'destructive' });
         setIsRecording(false);
@@ -116,7 +116,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const base64Audio = (reader.result as string).split(',')[1];
-      // Enviar como ogg para a API, que consegue lidar com a conversão se necessário.
+      // Send as audio/ogg for better compatibility with Evolution API
       await onSend(base64Audio, recordingTime, 'audio/ogg');
       handleDiscard();
       setIsSending(false);
