@@ -188,19 +188,14 @@ export async function sendMediaAction(
                     );
 
                 } else {
-                    // Use the generic media endpoint for images, videos, documents
+                    // Use the generic media endpoint with a FLAT payload
                     const apiPayload = {
                         number: correctedRemoteJid,
-                        options: {
-                            delay: 1200,
-                            presence: "composing"
-                        },
-                        mediaMessage: {
-                            mediatype: file.mediatype,
-                            media: `data:${file.mimetype};base64,${file.base64}`,
-                            fileName: file.filename,
-                            caption: caption || '',
-                        }
+                        mediatype: file.mediatype,
+                        mimetype: file.mimetype,
+                        fileName: file.filename,
+                        caption: caption || '',
+                        media: `data:${file.mimetype};base64,${file.base64}`,
                     };
                     apiResponse = await fetchEvolutionAPI(
                         `/message/sendMedia/${instanceName}`,
