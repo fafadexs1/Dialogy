@@ -175,7 +175,7 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: file.base64,
+                    audio: `data:${file.mimetype};base64,${file.base64}`,
                 };
                 dbMessageType = 'audio';
             } else {
@@ -184,7 +184,7 @@ export async function sendMediaAction(
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
                     mimetype: file.mimetype,
-                    media: file.base64,
+                    media: `data:${file.mimetype};base64,${file.base64}`,
                     fileName: file.filename,
                     caption: caption || '',
                 };

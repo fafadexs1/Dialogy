@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -49,8 +48,13 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    // Explicitly set mimetype to ogg for better compatibility with Evolution API
-    const mimeType = 'audio/ogg; codecs=opus';
+    // Usar webm para melhor compatibilidade com navegadores
+    const mimeType = 'audio/webm';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+        toast({ title: "Formato Incompatível", description: "Seu navegador não suporta a gravação no formato necessário (webm).", variant: 'destructive' });
+        setIsRecording(false);
+        return;
+    }
     const media = new MediaRecorder(stream, { mimeType });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
@@ -68,8 +72,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     };
 
     mediaRecorder.current.onstop = () => {
-      // The blob type will be audio/ogg
-      const audioBlob = new Blob(localAudioChunks, { type: 'audio/ogg' });
+      const audioBlob = new Blob(localAudioChunks, { type: mimeType });
       const audioUrl = URL.createObjectURL(audioBlob);
       setAudioUrl(audioUrl);
       setAudioBlob(audioBlob);
@@ -113,7 +116,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const base64Audio = (reader.result as string).split(',')[1];
-      // Send the correct mimetype 'audio/ogg' to the server action
+      // Enviar como ogg para a API, que consegue lidar com a conversão se necessário.
       await onSend(base64Audio, recordingTime, 'audio/ogg');
       handleDiscard();
       setIsSending(false);
