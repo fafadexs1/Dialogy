@@ -1,5 +1,4 @@
 
-
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';

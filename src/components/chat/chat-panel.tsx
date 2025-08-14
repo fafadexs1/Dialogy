@@ -619,7 +619,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
 
-  const handleFormSubmit = async () => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!chat) return;
 
     const plainTextContent = htmlToWhatsappMarkdown(newMessage);
@@ -884,7 +885,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form action={handleFormSubmit} className='flex items-end gap-2'>
+                     <form onSubmit={handleFormSubmit} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
                         <div className="relative w-full">
                             {showTextInput ? (
@@ -961,5 +962,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
