@@ -6,10 +6,6 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { Message, MessageMetadata } from '@/lib/types';
-import fs from 'fs/promises';
-import os from 'os';
-import path from 'path';
-import { randomBytes } from 'crypto';
 
 
 /**
@@ -164,7 +160,6 @@ export async function sendMediaAction(
         if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
         const apiConfig = apiConfigRes.rows[0];
 
-        // Corrige o JID se for do tipo @lid para @s.whatsapp.net
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
             : remoteJid;
@@ -210,7 +205,6 @@ export async function sendMediaAction(
                 thumbnail: file.thumbnail,
             };
 
-            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
@@ -254,7 +248,7 @@ export async function sendMediaAction(
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? `Erro da API Evolution: ${error.message}` : "Ocorreu um erro desconhecido ao enviar mídia.";
+        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao enviar mídia.";
         return { success: false, error: errorMessage };
     } finally {
         client.release();
