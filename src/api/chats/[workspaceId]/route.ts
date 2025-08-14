@@ -26,7 +26,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     if (!workspaceId) return { chats: [] };
 
     // 1. Fetch all possible senders and create a map for quick lookup.
-    // Use aliases to prevent column name collisions.
+    // Use aliases to prevent column name collisions and standardize the 'avatar' property.
     const userRes = await db.query('SELECT id, full_name as name, avatar_url as avatar FROM users');
     const contactRes = await db.query('SELECT id, name, avatar_url as avatar, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const systemAgentRes = await db.query('SELECT id, name, avatar_url as avatar FROM system_agents WHERE workspace_id = $1', [workspaceId]);
