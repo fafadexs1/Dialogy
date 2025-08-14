@@ -177,11 +177,13 @@ export async function sendMediaAction(
             try {
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
-                    console.log(`[SEND_MEDIA_ACTION] Processando áudio. Mimetype: ${file.mimetype}`);
                     
+                    // Monta o Data URI corretamente para a API
+                    const audioDataUri = `data:${file.mimetype};base64,${file.base64}`;
+
                     const payload = {
                       number: correctedRemoteJid,
-                      audio: `data:${file.mimetype};base64,${file.base64}`,
+                      audio: audioDataUri, // Envia o Data URI completo
                     };
 
                     apiResponse = await fetchEvolutionAPI(
@@ -193,6 +195,7 @@ export async function sendMediaAction(
                         }
                     );
                 } else {
+                     dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
                      const apiPayload = {
                         number: correctedRemoteJid,
                         mediatype: file.mediatype,
@@ -200,7 +203,6 @@ export async function sendMediaAction(
                         fileName: file.filename,
                         caption: caption || '',
                     };
-                    dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
                     apiResponse = await fetchEvolutionAPI(
                         `/message/sendMedia/${instanceName}`,
                         apiConfig,
