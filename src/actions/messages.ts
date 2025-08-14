@@ -164,60 +164,58 @@ export async function sendMediaAction(
         if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
         const apiConfig = apiConfigRes.rows[0];
 
+        // Corrige o JID se for do tipo @lid para @s.whatsapp.net
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
             : remoteJid;
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            const dbMessageType: Message['type'] = file.mediatype === 'audio' ? 'audio' : 'text'; // Simplified for DB
-            let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
+            let endpoint: string;
+            let apiPayload: Record<string, any>;
+            let dbMessageType: 'audio' | 'text' = 'text';
 
-            try {
-                 if (file.mediatype === 'audio') {
-                    // Use the specific audio endpoint
-                    const apiPayload = {
-                        number: correctedRemoteJid,
-                        audio: `data:${file.mimetype};base64,${file.base64}`,
-                    };
-                     apiResponse = await fetchEvolutionAPI(
-                        `/message/sendWhatsAppAudio/${instanceName}`,
-                        apiConfig,
-                        { method: 'POST', body: JSON.stringify(apiPayload) }
-                    );
+            if (file.mediatype === 'audio') {
+                endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
+                apiPayload = {
+                    number: correctedRemoteJid,
+                    audio: `data:${file.mimetype};base64,${file.base64}`,
+                };
+                dbMessageType = 'audio';
+                console.log('--- [DEBUG] Enviando Payload de Áudio ---');
+                console.log(JSON.stringify(apiPayload, null, 2));
 
-                } else {
-                    // Use the generic media endpoint with a FLAT payload
-                    const apiPayload = {
-                        number: correctedRemoteJid,
-                        mediatype: file.mediatype,
-                        mimetype: file.mimetype,
-                        fileName: file.filename,
-                        caption: caption || '',
-                        media: `data:${file.mimetype};base64,${file.base64}`,
-                    };
-                    apiResponse = await fetchEvolutionAPI(
-                        `/message/sendMedia/${instanceName}`,
-                        apiConfig,
-                        { method: 'POST', body: JSON.stringify(apiPayload) }
-                    );
-                }
-
-            } catch (error: any) {
-                await client.query('ROLLBACK');
-                console.error('[SEND_MEDIA_ACTION] Erro na chamada da API:', error);
-                const errorMessage = error.message || "Ocorreu um erro desconhecido ao enviar mídia.";
-                return { success: false, error: `Erro da API Evolution: ${errorMessage}` };
+            } else {
+                endpoint = `/message/sendMedia/${instanceName}`;
+                apiPayload = {
+                    number: correctedRemoteJid,
+                    mediatype: file.mediatype,
+                    mimetype: file.mimetype,
+                    media: `data:${file.mimetype};base64,${file.base64}`,
+                    fileName: file.filename,
+                    caption: caption || '',
+                };
+                console.log('--- [DEBUG] Enviando Payload de Mídia (Imagem/Vídeo/Doc) ---');
+                console.log(JSON.stringify(apiPayload, null, 2));
             }
             
+            apiResponse = await fetchEvolutionAPI(
+                endpoint,
+                apiConfig,
+                { method: 'POST', body: JSON.stringify(apiPayload) }
+            );
+
             const dbContent = caption || '';
-           
-            // Normalize metadata saving from API response
+            let dbMetadata: MessageMetadata = {
+                thumbnail: file.thumbnail,
+            };
+
+            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
                     const mediaDetails = apiResponse.message[messageTypeKey];
-                     dbMetadata = {
+                    dbMetadata = {
                         ...dbMetadata,
                         mediaUrl: mediaDetails.url, 
                         mimetype: mediaDetails.mimetype,
@@ -253,11 +251,11 @@ export async function sendMediaAction(
 
         return { success: true };
 
-    } catch (error: any) {
+    } catch (error) {
         await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
-        const errorMessage = error.message || "Ocorreu um erro desconhecido ao enviar mídia.";
-        return { success: false, error: `Erro da API Evolution: ${errorMessage}` };
+        const errorMessage = error instanceof Error ? `Erro da API Evolution: ${error.message}` : "Ocorreu um erro desconhecido ao enviar mídia.";
+        return { success: false, error: errorMessage };
     } finally {
         client.release();
     }
