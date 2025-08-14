@@ -2,7 +2,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -25,35 +25,19 @@ function formatMessageDate(date: Date): string {
 async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     if (!workspaceId) return { chats: [] };
 
-    const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
-    const usersMap = new Map<string, User>(userRes.rows.map(u => [
-        u.id,
-        {
-            id: u.id,
-            name: u.full_name,
-            avatar: u.avatar_url,
-            firstName: u.full_name.split(' ')[0] || '',
-            lastName: u.full_name.split(' ').slice(1).join(' ') || '',
-        }
-    ]));
+    // 1. Fetch all possible senders and create a map for quick lookup.
+    const userRes = await db.query('SELECT id, full_name as name, avatar_url as avatar FROM users');
+    const contactRes = await db.query('SELECT id, name, avatar_url as avatar, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
+    const systemAgentRes = await db.query('SELECT id, name, avatar_url as avatar FROM system_agents WHERE workspace_id = $1', [workspaceId]);
 
-    const contactRes = await db.query('SELECT id, name, avatar_url, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
-    const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
-        c.id,
-        {
-            id: c.id,
-            workspace_id: workspaceId,
-            name: c.name,
-            avatar: c.avatar_url,
-            phone_number_jid: c.phone_number_jid,
-            firstName: c.name.split(' ')[0] || '',
-            lastName: c.name.split(' ').slice(1).join(' ') || '',
-        }
-    ]));
+    const sendersMap = new Map<string, MessageSender>();
+    userRes.rows.forEach(u => sendersMap.set(u.id, { ...u, type: 'user' }));
+    contactRes.rows.forEach(c => sendersMap.set(c.id, { ...c, type: 'contact' }));
+    systemAgentRes.rows.forEach(a => sendersMap.set(a.id, { ...a, type: 'system_agent' }));
 
     const getSenderById = (id: string | null): MessageSender | undefined => {
         if (!id) return undefined;
-        return usersMap.get(id) || contactsMap.get(id);
+        return sendersMap.get(id);
     };
     
     // Corrected query to fetch ALL chats for the workspace, allowing the frontend to filter.
@@ -100,8 +84,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: contactsMap.get(r.contact_id)!, 
-        agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
+        contact: sendersMap.get(r.contact_id) as Contact,
+        agent: sendersMap.get(r.agent_id) as User | undefined,
         messages: [],
         source: r.source,
         instance_name: r.instance_name,
