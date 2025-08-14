@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -174,26 +175,23 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: `data:${file.mimetype};base64,${file.base64}`,
+                    audio: file.base64,
                 };
                 dbMessageType = 'audio';
-                console.log('--- [DEBUG] Enviando Payload de Áudio ---');
-                console.log(JSON.stringify(apiPayload, null, 2));
-
             } else {
                 endpoint = `/message/sendMedia/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
                     mimetype: file.mimetype,
-                    media: `data:${file.mimetype};base64,${file.base64}`,
+                    media: file.base64,
                     fileName: file.filename,
                     caption: caption || '',
                 };
-                console.log('--- [DEBUG] Enviando Payload de Mídia (Imagem/Vídeo/Doc) ---');
-                console.log(JSON.stringify(apiPayload, null, 2));
             }
             
+            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload:`, JSON.stringify(apiPayload, null, 2));
+
             apiResponse = await fetchEvolutionAPI(
                 endpoint,
                 apiConfig,
