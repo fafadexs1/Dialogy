@@ -174,31 +174,34 @@ export async function sendMediaAction(
             let apiResponse: any;
             let dbMessageType: Message['type'] = 'text';
             let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
-            let tempFilePath: string | null = null; // Variable to hold temp file path
+            let tempFilePath: string | null = null;
 
             try {
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
                     console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
                     
-                    // --- NEW LOGIC: Save to temp file ---
                     const audioBuffer = Buffer.from(file.base64, 'base64');
                     const tempDir = os.tmpdir();
-                    const uniqueFilename = `${randomBytes(16).toString('hex')}.${file.mimetype.split('/')[1] || 'mp3'}`;
+                    // Use a more appropriate extension for the temporary file
+                    const extension = file.mimetype.split('/')[1]?.split(';')[0] || 'mp3';
+                    const uniqueFilename = `${randomBytes(16).toString('hex')}.${extension}`;
                     tempFilePath = path.join(tempDir, uniqueFilename);
                     
                     console.log(`[SEND_MEDIA_ACTION] Salvando arquivo de áudio temporário em: ${tempFilePath}`);
                     await fs.writeFile(tempFilePath, audioBuffer);
+                    
+                    const payload = {
+                      number: correctedRemoteJid,
+                      audio: tempFilePath, // Send the file path
+                    };
 
                     apiResponse = await fetchEvolutionAPI(
                         `/message/sendWhatsAppAudio/${instanceName}`,
                         apiConfig,
                         {
                             method: 'POST',
-                            body: JSON.stringify({
-                                number: correctedRemoteJid,
-                                audio: tempFilePath, // Send the file path
-                            })
+                            body: JSON.stringify(payload),
                         }
                     );
                 } else {
@@ -218,7 +221,7 @@ export async function sendMediaAction(
                     );
                 }
             } finally {
-                // --- NEW LOGIC: Clean up temp file ---
+                // Guaranteed cleanup of the temporary file
                 if (tempFilePath) {
                     try {
                         await fs.unlink(tempFilePath);
@@ -318,6 +321,7 @@ export async function sendAutomatedMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }
+
 
 
 
