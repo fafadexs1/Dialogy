@@ -94,6 +94,8 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         phone: formData.get('phone') as string,
         address: formData.get('address') as string || null,
         owner_id: ownerId || null,
+        phone_number_jid: formData.get('phone_number_jid') as string || null,
+        avatar_url: formData.get('avatar_url') as string || null,
     };
     
     const tagIds = formData.getAll('tags') as string[];
@@ -116,15 +118,15 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         if (id) { // Update
              await client.query(
                 `UPDATE contacts 
-                 SET name = $1, email = $2, phone = $3, address = $4, owner_id = $5
-                 WHERE id = $6 AND workspace_id = $7`,
-                [data.name, data.email, data.phone, data.address, data.owner_id, id, workspaceId]
+                 SET name = $1, email = $2, phone = $3, address = $4, owner_id = $5, phone_number_jid = $6, avatar_url = $7
+                 WHERE id = $8 AND workspace_id = $9`,
+                [data.name, data.email, data.phone, data.address, data.owner_id, data.phone_number_jid, data.avatar_url, id, workspaceId]
             );
         } else { // Create
             const res = await client.query(
-                `INSERT INTO contacts (workspace_id, name, email, phone, address, owner_id) 
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-                [workspaceId, data.name, data.email, data.phone, data.address, data.owner_id]
+                `INSERT INTO contacts (workspace_id, name, email, phone, address, owner_id, phone_number_jid, avatar_url) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+                [workspaceId, data.name, data.email, data.phone, data.address, data.owner_id, data.phone_number_jid, data.avatar_url]
             );
             contactId = res.rows[0].id;
         }

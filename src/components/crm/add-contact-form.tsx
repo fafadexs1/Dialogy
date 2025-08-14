@@ -190,17 +190,25 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                     <Label htmlFor="name">Nome Completo*</Label>
                     <Input id="name" name="name" placeholder="João da Silva" required defaultValue={contact?.name || ''} />
                 </div>
-                <div className="space-y-2">
-                    <Label htmlFor="email">E-mail</Label>
-                    <Input id="email" name="email" type="email" placeholder="joao.silva@email.com" defaultValue={contact?.email || ''}/>
+                 <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone Principal*</Label>
+                    <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required defaultValue={contact?.phone || ''}/>
                 </div>
                 <div className="space-y-2">
-                    <Label htmlFor="phone">Telefone*</Label>
-                    <Input id="phone" name="phone" type="tel" placeholder="+55 11 98765-4321" required defaultValue={contact?.phone || ''}/>
+                    <Label htmlFor="phone_number_jid">JID do WhatsApp</Label>
+                    <Input id="phone_number_jid" name="phone_number_jid" type="text" placeholder="5511987654321@s.whatsapp.net" defaultValue={contact?.phone_number_jid || ''}/>
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="email">E-mail</Label>
+                    <Input id="email" name="email" type="email" placeholder="joao.silva@email.com" defaultValue={contact?.email || ''}/>
                 </div>
                  <div className="space-y-2">
                     <Label htmlFor="address">Endereço Completo</Label>
                     <Input id="address" name="address" placeholder="Rua, Número, Bairro, Cidade" defaultValue={contact?.address || ''}/>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="avatar_url">URL do Avatar</Label>
+                    <Input id="avatar_url" name="avatar_url" type="url" placeholder="https://exemplo.com/avatar.png" defaultValue={contact?.avatar_url || ''}/>
                 </div>
             </div>
             
@@ -220,16 +228,17 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                     <Label>Etiquetas (Tags)</Label>
                     <MultiSelectTags availableTags={availableTags} initialSelectedTags={contact?.tags} />
                 </div>
-            </div>
-            {/* Custom Fields Section */}
-            {customFields.length > 0 && (
-                <div className="md:col-span-2 space-y-4 pt-4 border-t">
-                    <h3 className="font-medium text-muted-foreground">Informações Adicionais</h3>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                         {customFields.map(renderCustomField)}
+                {/* Custom Fields Section */}
+                {customFields.length > 0 && (
+                    <div className="space-y-4 pt-4 border-t">
+                        <h3 className="font-medium text-muted-foreground">Informações Adicionais</h3>
+                        <div className="grid grid-cols-1 gap-4">
+                            {customFields.map(renderCustomField)}
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
+            
             </div>
              {state.error && (
                 <Alert variant="destructive" className="mt-4">
@@ -247,5 +256,3 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     </Dialog>
   );
 }
-
-    
