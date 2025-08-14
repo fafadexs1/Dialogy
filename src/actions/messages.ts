@@ -8,6 +8,10 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { Message, MessageMetadata } from '@/lib/types';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { randomBytes } from 'crypto';
 
 
 /**
@@ -168,43 +172,61 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            let dbMessageType: Message['type'] = 'text'; // Default to text
-            let dbMetadata: MessageMetadata = {
-                thumbnail: file.thumbnail,
-            };
+            let dbMessageType: Message['type'] = 'text';
+            let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
+            let tempFilePath: string | null = null; // Variable to hold temp file path
 
-            if (file.mediatype === 'audio') {
-                dbMessageType = 'audio';
-                console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
-                
-                const audioDataUri = `data:${file.mimetype};base64,${file.base64}`;
+            try {
+                if (file.mediatype === 'audio') {
+                    dbMessageType = 'audio';
+                    console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
+                    
+                    // --- NEW LOGIC: Save to temp file ---
+                    const audioBuffer = Buffer.from(file.base64, 'base64');
+                    const tempDir = os.tmpdir();
+                    const uniqueFilename = `${randomBytes(16).toString('hex')}.${file.mimetype.split('/')[1] || 'mp3'}`;
+                    tempFilePath = path.join(tempDir, uniqueFilename);
+                    
+                    console.log(`[SEND_MEDIA_ACTION] Salvando arquivo de áudio temporário em: ${tempFilePath}`);
+                    await fs.writeFile(tempFilePath, audioBuffer);
 
-                apiResponse = await fetchEvolutionAPI(
-                    `/message/sendWhatsAppAudio/${instanceName}`,
-                    apiConfig,
-                    {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            number: correctedRemoteJid,
-                            audio: audioDataUri,
-                        })
+                    apiResponse = await fetchEvolutionAPI(
+                        `/message/sendWhatsAppAudio/${instanceName}`,
+                        apiConfig,
+                        {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                number: correctedRemoteJid,
+                                audio: tempFilePath, // Send the file path
+                            })
+                        }
+                    );
+                } else {
+                     const apiPayload = {
+                        number: correctedRemoteJid,
+                        mediatype: file.mediatype,
+                        mimetype: file.mimetype,
+                        media: `data:${file.mimetype};base64,${file.base64}`,
+                        fileName: file.filename,
+                        caption: caption || '',
+                    };
+                    dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
+                    apiResponse = await fetchEvolutionAPI(
+                        `/message/sendMedia/${instanceName}`,
+                        apiConfig,
+                        { method: 'POST', body: JSON.stringify(apiPayload) }
+                    );
+                }
+            } finally {
+                // --- NEW LOGIC: Clean up temp file ---
+                if (tempFilePath) {
+                    try {
+                        await fs.unlink(tempFilePath);
+                        console.log(`[SEND_MEDIA_ACTION] Arquivo temporário ${tempFilePath} excluído com sucesso.`);
+                    } catch (cleanupError) {
+                        console.error(`[SEND_MEDIA_ACTION] Erro ao excluir arquivo temporário ${tempFilePath}:`, cleanupError);
                     }
-                );
-            } else {
-                 const apiPayload = {
-                    number: correctedRemoteJid,
-                    mediatype: file.mediatype,
-                    mimetype: file.mimetype,
-                    media: `data:${file.mimetype};base64,${file.base64}`,
-                    fileName: file.filename,
-                    caption: caption || '',
-                };
-                dbMessageType = 'text'; // Other media types are stored as 'text' with metadata
-                apiResponse = await fetchEvolutionAPI(
-                    `/message/sendMedia/${instanceName}`,
-                    apiConfig,
-                    { method: 'POST', body: JSON.stringify(apiPayload) }
-                );
+                }
             }
             
             const dbContent = caption || '';
@@ -296,6 +318,7 @@ export async function sendAutomatedMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }
+
 
 
 
