@@ -173,7 +173,7 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: `data:audio/ogg;base64,${file.base64}`, // Data URI para áudio
+                    audio: `data:audio/ogg;base64,${file.base64}`,
                 };
                 dbMessageType = 'audio';
             } else {
@@ -181,14 +181,13 @@ export async function sendMediaAction(
                 apiPayload = {
                     number: correctedRemoteJid,
                     mediatype: file.mediatype,
-                    mimetype: file.mimetype,
-                    media: file.base64,
+                    media: `data:${file.mimetype};base64,${file.base64}`,
                     fileName: file.filename,
                     caption: caption || '',
                 };
             }
             
-            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload...`);
+            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload...`, JSON.stringify(apiPayload));
 
             const apiResponse = await fetchEvolutionAPI(
                 endpoint,
@@ -202,20 +201,20 @@ export async function sendMediaAction(
             };
 
             if (apiResponse?.message) {
-                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
-                const mediaDetails = messageTypeKey ? apiResponse.message[messageTypeKey] : null;
-
-                if (mediaDetails) {
-                    dbMetadata = {
-                        ...dbMetadata,
-                        mediaUrl: mediaDetails.url,
-                        mimetype: mediaDetails.mimetype,
-                        fileName: mediaDetails.fileName || file.filename,
-                        ...(file.mediatype === 'audio' && mediaDetails && { duration: mediaDetails.seconds }),
-                    };
-                } else if (apiResponse.message.mediaUrl) {
-                    // Fallback for responses that have mediaUrl at the top level of message
+                // Correctly extract mediaUrl from the top-level message object
+                if (apiResponse.message.mediaUrl) {
                     dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
+                }
+                
+                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
+                if (messageTypeKey && apiResponse.message[messageTypeKey]) {
+                    const mediaDetails = apiResponse.message[messageTypeKey];
+                    dbMetadata.mimetype = mediaDetails.mimetype;
+                    dbMetadata.fileName = mediaDetails.fileName || file.filename;
+                    
+                    if (file.mediatype === 'audio' && mediaDetails.seconds) {
+                        dbMetadata.duration = mediaDetails.seconds;
+                    }
                 }
             }
             
