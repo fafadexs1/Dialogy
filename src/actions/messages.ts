@@ -173,25 +173,15 @@ export async function sendMediaAction(
             let apiResponse: any;
             let dbMessageType: Message['type'] = 'text';
             let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
-            let tempFilePath: string | null = null;
 
             try {
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
                     console.log(`[SEND_MEDIA_ACTION] Processando áudio. Mimetype: ${file.mimetype}`);
                     
-                    const audioBuffer = Buffer.from(file.base64, 'base64');
-                    const tempDir = os.tmpdir();
-                    const extension = file.mimetype.split('/')[1]?.split(';')[0] || 'mp3';
-                    const uniqueFilename = `${randomBytes(16).toString('hex')}.${extension}`;
-                    tempFilePath = path.join(tempDir, uniqueFilename);
-                    
-                    console.log(`[SEND_MEDIA_ACTION] Salvando arquivo de áudio temporário em: ${tempFilePath}`);
-                    await fs.writeFile(tempFilePath, audioBuffer);
-                    
                     const payload = {
                       number: correctedRemoteJid,
-                      audio: tempFilePath, 
+                      audio: `data:${file.mimetype};base64,${file.base64}`,
                     };
 
                     apiResponse = await fetchEvolutionAPI(
@@ -217,16 +207,11 @@ export async function sendMediaAction(
                         { method: 'POST', body: JSON.stringify(apiPayload) }
                     );
                 }
-            } finally {
-                // Guaranteed cleanup of the temporary file
-                if (tempFilePath) {
-                    try {
-                        await fs.unlink(tempFilePath);
-                        console.log(`[SEND_MEDIA_ACTION] Arquivo temporário ${tempFilePath} excluído com sucesso.`);
-                    } catch (cleanupError) {
-                        console.error(`[SEND_MEDIA_ACTION] Erro ao excluir arquivo temporário ${tempFilePath}:`, cleanupError);
-                    }
-                }
+            } catch (error: any) {
+                await client.query('ROLLBACK');
+                console.error('[SEND_MEDIA_ACTION] Erro na chamada da API:', error);
+                const errorMessage = error.message || "Ocorreu um erro desconhecido ao enviar mídia.";
+                return { success: false, error: `Erro da API Evolution: ${errorMessage}` };
             }
             
             const dbContent = caption || '';
@@ -283,8 +268,8 @@ export async function sendMediaAction(
     } catch (error: any) {
         await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? `Erro da API Evolution: ${error.message}` : "Ocorreu um erro desconhecido ao enviar mídia.";
-        return { success: false, error: errorMessage };
+        const errorMessage = error.message || "Ocorreu um erro desconhecido ao enviar mídia.";
+        return { success: false, error: `Erro da API Evolution: ${errorMessage}` };
     } finally {
         client.release();
     }
@@ -324,5 +309,7 @@ export async function sendAutomatedMessageAction(
 
 
 
+
+    
 
     
