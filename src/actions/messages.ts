@@ -178,12 +178,10 @@ export async function sendMediaAction(
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
                     
-                    // Monta o Data URI corretamente para a API
-                    const audioDataUri = `data:${file.mimetype};base64,${file.base64}`;
-
+                    // Payload para enviar o base64 puro, como requisitado pela API
                     const payload = {
                       number: correctedRemoteJid,
-                      audio: audioDataUri, // Envia o Data URI completo
+                      audio: file.base64,
                     };
 
                     apiResponse = await fetchEvolutionAPI(
@@ -305,13 +303,3 @@ export async function sendAutomatedMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMessage(chatId, content, agentId, { sentBy: 'autopilot' });
 }
-
-
-
-
-
-
-
-    
-
-    
