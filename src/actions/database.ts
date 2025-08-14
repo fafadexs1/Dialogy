@@ -150,7 +150,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE RESTRICT,
-        tag_id TEXT REFERENCES public.tags(id) ON DELETE SET NULL,
         name TEXT NOT NULL,
         color TEXT DEFAULT '#3b82f6',
         UNIQUE(workspace_id, name)
@@ -310,6 +309,19 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         await client.query(query);
     }
     console.log('Schema de tabelas verificado com sucesso.');
+
+    // --- Etapa 3: Adicionar colunas faltantes a tabelas existentes (Migrações) ---
+    console.log('Verificando e aplicando migrações de colunas...');
+    try {
+        await client.query('ALTER TABLE public.teams ADD COLUMN tag_id TEXT REFERENCES public.tags(id) ON DELETE SET NULL;');
+        console.log('Coluna "tag_id" adicionada à tabela "teams".');
+    } catch (error: any) {
+        if (error.code === '42701') { // 42701 is 'duplicate_column'
+            console.log('Coluna "tag_id" já existe em "teams". Ignorando.');
+        } else {
+            throw error; // Lança outros erros
+        }
+    }
 
     const permissionQueries = [
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
@@ -497,5 +509,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
  
     
   
+
+    
 
     

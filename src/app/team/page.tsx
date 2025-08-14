@@ -48,7 +48,10 @@ function TeamSettingsContent({
   const sortedBusinessHours = sortBusinessHours(team.businessHours);
 
   const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
-    const result = await updateTeam(team.id, { [field]: value });
+    // Treat "no-tag" as null for the database
+    const finalValue = value === 'no-tag' ? null : value;
+    
+    const result = await updateTeam(team.id, { [field]: finalValue });
     if (result.error) {
       toast({ title: 'Erro ao atualizar', description: result.error, variant: 'destructive' });
     } else {
@@ -166,14 +169,14 @@ function TeamSettingsContent({
             <div className="space-y-1">
               <Label htmlFor={`team-tag-${team.id}`}>Tag Automática da Equipe</Label>
               <Select
-                value={team.tagId || ''}
+                value={team.tagId || 'no-tag'}
                 onValueChange={(value) => handleUpdateField('tagId', value)}
               >
                   <SelectTrigger id={`team-tag-${team.id}`}>
                       <SelectValue placeholder="Nenhuma tag automática" />
                   </SelectTrigger>
                   <SelectContent>
-                      <SelectItem value="">Nenhuma tag</SelectItem>
+                      <SelectItem value="no-tag">Nenhuma tag</SelectItem>
                       {tags.map(tag => (
                           <SelectItem key={tag.id} value={tag.id}>
                             <div className='flex items-center gap-2'>
@@ -516,3 +519,5 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
+
+    
