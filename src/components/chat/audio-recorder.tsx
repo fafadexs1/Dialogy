@@ -49,7 +49,8 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    const mimeType = 'audio/ogg';
+    // Explicitly set mimetype to ogg for better compatibility with Evolution API
+    const mimeType = 'audio/ogg; codecs=opus';
     const media = new MediaRecorder(stream, { mimeType });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
@@ -67,7 +68,8 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     };
 
     mediaRecorder.current.onstop = () => {
-      const audioBlob = new Blob(localAudioChunks, { type: media.mimeType });
+      // The blob type will be audio/ogg
+      const audioBlob = new Blob(localAudioChunks, { type: 'audio/ogg' });
       const audioUrl = URL.createObjectURL(audioBlob);
       setAudioUrl(audioUrl);
       setAudioBlob(audioBlob);
@@ -111,7 +113,8 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = async () => {
       const base64Audio = (reader.result as string).split(',')[1];
-      await onSend(base64Audio, recordingTime, audioBlob.type);
+      // Send the correct mimetype 'audio/ogg' to the server action
+      await onSend(base64Audio, recordingTime, 'audio/ogg');
       handleDiscard();
       setIsSending(false);
     };

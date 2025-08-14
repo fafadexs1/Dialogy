@@ -171,33 +171,43 @@ export async function sendMediaAction(
 
         for (const file of mediaFiles) {
             let apiResponse: any;
-            const dbMessageType: Message['type'] = file.mediatype === 'audio' ? 'audio' : 'text';
+            const dbMessageType: Message['type'] = file.mediatype === 'audio' ? 'audio' : 'text'; // Simplified for DB
             let dbMetadata: MessageMetadata = { thumbnail: file.thumbnail };
 
             try {
-                // Unified endpoint for all media types
-                const apiPayload = {
-                    number: correctedRemoteJid,
-                    options: {
-                        delay: 1200,
-                        presence: "composing"
-                    },
-                    mediaMessage: {
-                        mediatype: file.mediatype,
-                        // Use a Data URI for base64 encoded media
-                        media: `data:${file.mimetype};base64,${file.base64}`,
-                        fileName: file.filename,
-                        caption: caption || '',
-                        // For OGG audio, ensure the mimetype is correct
-                        ...(file.mediatype === 'audio' && { mimetype: file.mimetype }),
-                    }
-                };
-                
-                apiResponse = await fetchEvolutionAPI(
-                    `/message/sendMedia/${instanceName}`,
-                    apiConfig,
-                    { method: 'POST', body: JSON.stringify(apiPayload) }
-                );
+                 if (file.mediatype === 'audio') {
+                    // Use the specific audio endpoint
+                    const apiPayload = {
+                        number: correctedRemoteJid,
+                        audio: `data:${file.mimetype};base64,${file.base64}`,
+                    };
+                     apiResponse = await fetchEvolutionAPI(
+                        `/message/sendWhatsAppAudio/${instanceName}`,
+                        apiConfig,
+                        { method: 'POST', body: JSON.stringify(apiPayload) }
+                    );
+
+                } else {
+                    // Use the generic media endpoint for images, videos, documents
+                    const apiPayload = {
+                        number: correctedRemoteJid,
+                        options: {
+                            delay: 1200,
+                            presence: "composing"
+                        },
+                        mediaMessage: {
+                            mediatype: file.mediatype,
+                            media: `data:${file.mimetype};base64,${file.base64}`,
+                            fileName: file.filename,
+                            caption: caption || '',
+                        }
+                    };
+                    apiResponse = await fetchEvolutionAPI(
+                        `/message/sendMedia/${instanceName}`,
+                        apiConfig,
+                        { method: 'POST', body: JSON.stringify(apiPayload) }
+                    );
+                }
 
             } catch (error: any) {
                 await client.query('ROLLBACK');
