@@ -43,15 +43,6 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
                 FROM business_hours
                 WHERE team_id = $1
-                ORDER BY CASE
-                    WHEN day_of_week = 'Domingo' THEN 1
-                    WHEN day_of_week = 'Segunda-feira' THEN 2
-                    WHEN day_of_week = 'Terça-feira' THEN 3
-                    WHEN day_of_week = 'Quarta-feira' THEN 4
-                    WHEN day_of_week = 'Quinta-feira' THEN 5
-                    WHEN day_of_week = 'Sexta-feira' THEN 6
-                    WHEN day_of_week = 'Sábado' THEN 7
-                END
             `, [row.id]);
 
             teams.push({

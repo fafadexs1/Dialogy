@@ -20,7 +20,12 @@ import { getTags } from '@/actions/crm';
 import { getWorkspaceMembers } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
 
-const daysOfWeek = [ 'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado' ];
+const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+const sortBusinessHours = (businessHours: BusinessHour[]) => {
+  return [...businessHours].sort((a, b) => daysOrder.indexOf(a.day) - daysOrder.indexOf(b.day));
+};
+
 
 function TeamSettingsContent({ 
     team, 
@@ -40,6 +45,7 @@ function TeamSettingsContent({
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [teamName, setTeamName] = useState(team.name);
+  const sortedBusinessHours = sortBusinessHours(team.businessHours);
 
   const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
     const result = await updateTeam(team.id, { [field]: value });
@@ -228,7 +234,7 @@ function TeamSettingsContent({
           <CardDescription>Defina quando sua equipe estará disponível para atender.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {team.businessHours.map(bh => (
+          {sortedBusinessHours.map(bh => (
               <div key={bh.day} className="flex items-center justify-between p-3 rounded-lg bg-background border">
                 <div className='flex items-center gap-4'>
                   <Switch 
@@ -510,5 +516,3 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
-
-    
