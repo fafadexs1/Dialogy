@@ -702,7 +702,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const prevMessage = messagesToDisplay[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
-    const isFromMe = message.sender?.id === currentUser?.id;
+    const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
 
     return (
@@ -961,3 +961,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
