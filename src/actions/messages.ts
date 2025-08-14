@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -179,11 +178,10 @@ export async function sendMediaAction(
             try {
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
-                    console.log(`[SEND_MEDIA_ACTION] Enviando áudio. Mimetype: ${file.mimetype}`);
+                    console.log(`[SEND_MEDIA_ACTION] Processando áudio. Mimetype: ${file.mimetype}`);
                     
                     const audioBuffer = Buffer.from(file.base64, 'base64');
                     const tempDir = os.tmpdir();
-                    // Use a more appropriate extension for the temporary file
                     const extension = file.mimetype.split('/')[1]?.split(';')[0] || 'mp3';
                     const uniqueFilename = `${randomBytes(16).toString('hex')}.${extension}`;
                     tempFilePath = path.join(tempDir, uniqueFilename);
@@ -193,7 +191,7 @@ export async function sendMediaAction(
                     
                     const payload = {
                       number: correctedRemoteJid,
-                      audio: tempFilePath, // Send the file path
+                      audio: tempFilePath, 
                     };
 
                     apiResponse = await fetchEvolutionAPI(
@@ -208,7 +206,6 @@ export async function sendMediaAction(
                      const apiPayload = {
                         number: correctedRemoteJid,
                         mediatype: file.mediatype,
-                        mimetype: file.mimetype,
                         media: `data:${file.mimetype};base64,${file.base64}`,
                         fileName: file.filename,
                         caption: caption || '',
@@ -326,3 +323,6 @@ export async function sendAutomatedMessageAction(
 
 
 
+
+
+    
