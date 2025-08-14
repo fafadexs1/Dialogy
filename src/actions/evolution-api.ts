@@ -399,8 +399,7 @@ export async function markMessagesAsReadAction(
 
         console.log(`[MARK_AS_READ] Enviando payload para API: ${JSON.stringify(payload)}`);
 
-        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, {
-            ...apiConfig,
+        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload),
           });

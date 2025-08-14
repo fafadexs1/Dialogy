@@ -178,10 +178,9 @@ export async function sendMediaAction(
                 if (file.mediatype === 'audio') {
                     dbMessageType = 'audio';
                     
-                    // Payload para enviar o base64 puro, como requisitado pela API
                     const payload = {
                       number: correctedRemoteJid,
-                      audio: file.base64,
+                      audio: `data:${file.mimetype};base64,${file.base64}`,
                     };
 
                     apiResponse = await fetchEvolutionAPI(

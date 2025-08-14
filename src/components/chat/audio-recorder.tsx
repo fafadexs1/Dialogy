@@ -49,7 +49,9 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     setAudioUrl(null);
     setAudioBlob(null);
 
-    const media = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    // Prefer audio/webm se disponível, pois é mais padrão.
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/mpeg';
+    const media = new MediaRecorder(stream, { mimeType });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
     
