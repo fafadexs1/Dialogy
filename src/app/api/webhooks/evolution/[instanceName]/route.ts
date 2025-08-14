@@ -139,14 +139,25 @@ async function handleMessagesUpsert(payload: any) {
         const apiConfig = { api_url, api_key };
 
 
-        // 2. Criar ou encontrar o contato e buscar a foto de perfil.
-        const contactRes = await client.query(
+        // 2. Criar o contato APENAS SE ele não existir.
+        await client.query(
             `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
              ON CONFLICT (workspace_id, phone_number_jid) 
-             DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone
-             RETURNING id, avatar_url`, [workspaceId, pushName || contactPhone, contactPhone, contactJid]
+             DO NOTHING`, // NÃO FAZ NADA se o contato já existir
+            [workspaceId, pushName || contactPhone, contactPhone, contactJid]
         );
-        
+
+        // 3. Buscar o contato (seja ele novo ou existente) para obter o ID e o avatar.
+        const contactRes = await client.query(
+            'SELECT id, avatar_url FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+            [workspaceId, contactJid]
+        );
+
+        if (contactRes.rowCount === 0) {
+            // Isso não deveria acontecer, mas é uma salvaguarda.
+            throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
+        }
+
         const contactId = contactRes.rows[0].id;
         const currentAvatar = contactRes.rows[0].avatar_url;
         
@@ -172,7 +183,7 @@ async function handleMessagesUpsert(payload: any) {
             }
         }
         
-        // 3. Encontrar um chat ativo ou criar um novo
+        // 4. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
             `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
              ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactId]
@@ -189,7 +200,7 @@ async function handleMessagesUpsert(payload: any) {
             chatId = newChatRes.rows[0].id;
         }
 
-        // 4. Inserir a mensagem
+        // 5. Inserir a mensagem
         await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
