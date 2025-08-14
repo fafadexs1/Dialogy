@@ -436,7 +436,7 @@ export async function addActivityAction(
         );
 
         revalidatePath('/crm');
-        revalidatePath(`/api/chats/${workspaceId}`);
+        revalidatePath(`/api/chats/${workspace_id}`);
         return { success: true, error: null };
     } catch (error) {
         console.error("[ADD_ACTIVITY] Error:", error);

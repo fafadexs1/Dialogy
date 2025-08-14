@@ -137,7 +137,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`,
 
       `CREATE TABLE IF NOT EXISTS public.tags (
-        id TEXT PRIMARY KEY,
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -197,7 +197,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
       `CREATE TABLE IF NOT EXISTS public.contact_tags (
           contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
-          tag_id TEXT NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
+          tag_id UUID NOT NULL REFERENCES public.tags(id) ON DELETE CASCADE,
           PRIMARY KEY (contact_id, tag_id)
       );`,
       
@@ -227,7 +227,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           created_at TIMESTAMPTZ DEFAULT NOW(),
           assigned_at TIMESTAMPTZ,
           closed_at TIMESTAMPTZ,
-          close_reason_tag_id TEXT,
+          close_reason_tag_id UUID,
           close_notes TEXT,
           tag TEXT,
           color TEXT
@@ -313,15 +313,15 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     // --- Etapa 3: Adicionar colunas faltantes a tabelas existentes (Migrações) ---
     console.log('Verificando e aplicando migrações de colunas...');
     try {
-        await client.query('ALTER TABLE public.teams ADD COLUMN tag_id TEXT REFERENCES public.tags(id) ON DELETE SET NULL;');
+        await client.query('ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS tag_id UUID REFERENCES public.tags(id) ON DELETE SET NULL;');
         console.log('Coluna "tag_id" adicionada à tabela "teams".');
     } catch (error: any) {
-        if (error.code === '42701') { // 42701 is 'duplicate_column'
-            console.log('Coluna "tag_id" já existe em "teams". Ignorando.');
+        // Se a coluna já existe ou outro erro relacionado a ela, o IF NOT EXISTS deve prevenir.
+        // Se ainda houver erro, algo está fundamentalmente errado.
+        if (error.code === '42701') {
+             console.log('Coluna "tag_id" já existe em "teams". Ignorando.');
         } else {
-            // Se o erro for outro, relança para o catch principal.
-            // Isso pode acontecer se a tabela 'tags' não existir, por exemplo,
-            // mas o código acima já deveria tê-la criado.
+            console.error('[DB_MIGRATE] Erro ao adicionar coluna `tag_id` a `teams`:', error.message)
             throw error;
         }
     }

@@ -27,11 +27,11 @@ export const agents: User[] = [
 ];
 
 export const mockTags: Tag[] = [
-  { id: 'tag-1', value: 'prospect-quente', label: 'Prospect Quente', color: '#FEE2E2' },
-  { id: 'tag-2', value: 'cliente-ativo', label: 'Cliente Ativo', color: '#D1FAE5' },
-  { id: 'tag-3', value: 'sem-viabilidade', label: 'Sem Viabilidade', color: '#E5E7EB' },
-  { id: 'tag-4', value: 'ex-cliente', label: 'Ex-Cliente', color: '#FEF9C3' },
-  { id: 'tag-5', value: 'prospect', label: 'Prospect', color: '#DBEAFE' },
+  { id: 'tag-1', value: 'prospect-quente', label: 'Prospect Quente', color: '#FEE2E2', is_close_reason: false },
+  { id: 'tag-2', value: 'cliente-ativo', label: 'Cliente Ativo', color: '#D1FAE5', is_close_reason: false },
+  { id: 'tag-3', value: 'sem-viabilidade', label: 'Sem Viabilidade', color: '#E5E7EB', is_close_reason: false },
+  { id: 'tag-4', value: 'ex-cliente', label: 'Ex-Cliente', color: '#FEF9C3', is_close_reason: false },
+  { id: 'tag-5', value: 'prospect', label: 'Prospect', color: '#DBEAFE', is_close_reason: false },
   { id: 'tag-6', value: 'problema-resolvido', label: 'Problema Resolvido', color: '#22c55e', is_close_reason: true },
   { id: 'tag-7', value: 'sem-resposta', label: 'Cliente sem resposta', color: '#6b7280', is_close_reason: true },
 ];
@@ -73,46 +73,24 @@ export const contacts: Contact[] = [
     { 
       id: 'CRM001', 
       workspace_id: 'ws-1',
-      firstName: 'Marcos',
-      lastName: 'Oliveira',
       name: 'Marcos Oliveira', 
-      avatar: '', 
       email: 'marcos.o@emailaleatorio.com', 
       phone: '(11) 99988-7766', 
-      businessProfile: {
-        ownerId: 'agent-1',
-        ownerName: 'Alex Johnson',
-        companyName: 'InnovateTech',
-        lastActivity: '2025-05-06',
-        serviceInterest: 'Fibra 500MB',
-        currentProvider: 'Vivo Fibra',
-        tags: [mockTags[0], mockTags[1]],
-        deals: [ { id: 'NEG001', name: 'Contrato Fibra 500MB - Marcos O.', stage: 'Viabilidade OK', value: "159.90", closeDate: "2025-06-01" } ],
-        tasks: [],
-        activities: [sampleActivities[0], sampleActivities[1]],
-      }
+      owner_id: 'agent-1',
+      last_activity: '2025-05-06',
+      tags: [mockTags[0], mockTags[1]],
+      activities: [sampleActivities[0], sampleActivities[1]],
     },
     { 
       id: 'CRM002',
       workspace_id: 'ws-1',
-      firstName: 'Beatriz',
-      lastName: 'Santos',
       name: 'Beatriz Santos', 
-      avatar: '', 
       email: 'bia.santos@email.com', 
       phone: '(21) 98877-6655', 
-      businessProfile: {
-        ownerId: 'agent-2',
-        ownerName: 'Maria Garcia',
-        companyName: '',
-        lastActivity: '2025-05-07',
-        serviceInterest: 'Fibra 300MB',
-        currentProvider: '',
-        tags: [mockTags[1]],
-        deals: [],
-        tasks: [],
-        activities: [sampleActivities[2]],
-      }
+      owner_id: 'agent-2',
+      last_activity: '2025-05-07',
+      tags: [mockTags[1]],
+      activities: [sampleActivities[2]],
     },
 ];
 
