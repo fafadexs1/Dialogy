@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -37,13 +36,13 @@ export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate }: TagSel
   const user = useAuth();
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   const fetchTags = React.useCallback(async () => {
     if (user?.activeWorkspaceId) {
       setLoading(true);
       const tagsResult = await getTags(user.activeWorkspaceId);
       if (tagsResult.tags) {
-        // Filtra apenas as tags que NÃO são de motivo de encerramento
         setAvailableTags(tagsResult.tags.filter(t => !t.is_close_reason));
       }
       setLoading(false);
@@ -53,6 +52,10 @@ export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate }: TagSel
   useEffect(() => {
     if (isOpen) {
       fetchTags();
+      // Focus the input when the dialog opens
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
     }
   }, [isOpen, fetchTags]);
   
@@ -77,7 +80,10 @@ export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate }: TagSel
           </DialogDescription>
         </DialogHeader>
         <Command>
-          <CommandInput placeholder="Buscar etiqueta..." />
+          <CommandInput 
+            ref={inputRef}
+            placeholder="Buscar etiqueta..." 
+          />
           <CommandList>
             {loading ? (
                 <div className='flex justify-center items-center h-24'><Loader2 className="h-6 w-6 animate-spin"/></div>
@@ -94,14 +100,19 @@ export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate }: TagSel
                     <CommandItem
                         key={tag.id}
                         value={tag.label}
-                        onSelect={() => handleSelectTag(tag.id)}
-                        className="flex justify-between items-center"
+                        onSelect={(currentValue) => {
+                            const selectedTag = availableTags.find(t => t.label.toLowerCase() === currentValue);
+                            if (selectedTag) {
+                                handleSelectTag(selectedTag.id);
+                            }
+                        }}
+                        className="flex justify-between items-center cursor-pointer"
                     >
-                    <div className="flex items-center gap-2">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: tag.color }} />
-                        {tag.label}
-                    </div>
-                    {chat.tag === tag.label && <Check className="h-4 w-4" />}
+                        <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: tag.color }} />
+                            {tag.label}
+                        </div>
+                        {chat.tag === tag.label && <Check className="h-4 w-4" />}
                     </CommandItem>
                 ))}
                 </CommandGroup>
