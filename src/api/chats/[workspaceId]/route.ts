@@ -26,7 +26,8 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     console.log(`--- [API_ROUTE] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
     if (!workspaceId) return { chats: [] };
 
-    // 1. Fetch all possible senders (users, contacts, system agents) and create a map for quick lookup.
+    // 1. Fetch all possible senders and create a map for quick lookup.
+    // Use aliases to prevent column name collisions.
     const userRes = await db.query('SELECT id, full_name as name, avatar_url as avatar FROM users');
     const contactRes = await db.query('SELECT id, name, avatar_url as avatar, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const systemAgentRes = await db.query('SELECT id, name, avatar_url as avatar FROM system_agents WHERE workspace_id = $1', [workspaceId]);
@@ -85,7 +86,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: sendersMap.get(r.contact_id) as Contact,
+        contact: sendersMap.get(r.contact_id) as Contact, // Assuming contact will always be found
         agent: sendersMap.get(r.agent_id) as User | undefined,
         messages: [],
         source: r.source,
@@ -100,49 +101,53 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
         // Fetch the complete message history for all contacts present in the visible chats.
-        const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
+        const contactIds = Array.from(new Set(chats.map(c => c.contact?.id).filter(Boolean)));
         
-        const messageRes = await db.query(`
-            SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id, m.is_read
-            FROM messages m
-            JOIN chats c ON m.chat_id = c.id
-            WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
-            ORDER BY m.created_at ASC
-        `, [contactIds, workspaceId]);
+        if (contactIds.length > 0) {
+            const messageRes = await db.query(`
+                SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id, m.is_read
+                FROM messages m
+                JOIN chats c ON m.chat_id = c.id
+                WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
+                ORDER BY m.created_at ASC
+            `, [contactIds, workspaceId]);
 
-        const messagesByContact: { [key: string]: Message[] } = {};
-        messageRes.rows.forEach(m => {
-            if (!messagesByContact[m.contact_id]) {
-                messagesByContact[m.contact_id] = [];
-            }
-            const createdAtDate = new Date(m.created_at);
-            const zonedDate = toZonedTime(createdAtDate, timeZone);
-            
-            messagesByContact[m.contact_id].push({
-                id: m.id,
-                chat_id: m.chat_id,
-                workspace_id: m.workspace_id,
-                content: m.content,
-                type: m.type,
-                status: m.status,
-                metadata: m.metadata,
-                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
-                createdAt: createdAtDate.toISOString(),
-                formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id), 
-                instance_name: m.instance_name,
-                source_from_api: m.source_from_api,
-                api_message_status: m.api_message_status,
-                message_id_from_api: m.message_id_from_api,
-                from_me: m.from_me,
-                is_read: m.is_read,
+            const messagesByContact: { [key: string]: Message[] } = {};
+            messageRes.rows.forEach(m => {
+                if (!messagesByContact[m.contact_id]) {
+                    messagesByContact[m.contact_id] = [];
+                }
+                const createdAtDate = new Date(m.created_at);
+                const zonedDate = toZonedTime(createdAtDate, timeZone);
+                
+                messagesByContact[m.contact_id].push({
+                    id: m.id,
+                    chat_id: m.chat_id,
+                    workspace_id: m.workspace_id,
+                    content: m.content,
+                    type: m.type,
+                    status: m.status,
+                    metadata: m.metadata,
+                    timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
+                    createdAt: createdAtDate.toISOString(),
+                    formattedDate: formatMessageDate(createdAtDate),
+                    sender: getSenderById(m.sender_id), 
+                    instance_name: m.instance_name,
+                    source_from_api: m.source_from_api,
+                    api_message_status: m.api_message_status,
+                    message_id_from_api: m.message_id_from_api,
+                    from_me: m.from_me,
+                    is_read: m.is_read,
+                });
             });
-        });
 
-        // Assign the full history to each chat object for that contact
-        chats.forEach(chat => {
-          chat.messages = messagesByContact[chat.contact.id] || [];
-        });
+            // Assign the full history to each chat object for that contact
+            chats.forEach(chat => {
+              if (chat.contact?.id) {
+                chat.messages = messagesByContact[chat.contact.id] || [];
+              }
+            });
+        }
     }
 
     console.log(`[API_ROUTE] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);
