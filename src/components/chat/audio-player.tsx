@@ -9,6 +9,7 @@ interface AudioPlayerProps {
     src: string;
     duration?: number;
     waveform?: number[];
+    isFromMe?: boolean;
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -18,7 +19,7 @@ const formatTime = (timeInSeconds: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps) {
+export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +88,11 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     }, [handleTimeUpdate, handleLoadedMetadata, initialDuration]);
 
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
+    const playButtonClasses = isFromMe ? "bg-white text-primary" : "bg-primary text-primary-foreground";
+    const waveformProgressClasses = isFromMe ? "bg-white" : "bg-primary";
+    const waveformBgClasses = isFromMe ? "bg-primary-foreground/30" : "bg-muted-foreground/30";
+    const timeClasses = isFromMe ? "text-primary-foreground/80" : "text-muted-foreground";
+    const handleClasses = isFromMe ? "bg-white" : "bg-primary";
 
     return (
         <div className="flex w-[300px] items-center gap-3">
@@ -94,7 +100,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
             
             <button
                 onClick={handlePlayPause}
-                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2", playButtonClasses)}
             >
                 {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
             </button>
@@ -110,7 +116,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                         {simulatedWaveform.map((barHeight, index) => (
                              <div 
                                 key={index} 
-                                className="w-[3px] rounded-full bg-muted-foreground/30"
+                                className={cn("w-[3px] rounded-full", waveformBgClasses)}
                                 style={{ height: `${barHeight * 100}%`}}
                             />
                         ))}
@@ -121,7 +127,7 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                              {simulatedWaveform.map((barHeight, index) => (
                                 <div 
                                     key={index} 
-                                    className="w-[3px] rounded-full bg-primary"
+                                    className={cn("w-[3px] rounded-full", waveformProgressClasses)}
                                     style={{ height: `${barHeight * 100}%`}}
                                 />
                             ))}
@@ -129,12 +135,12 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
                     </div>
                     {/* Seek Handle */}
                      <div 
-                        className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background transition-all" 
+                        className={cn("absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full ring-2 ring-background transition-all", handleClasses)} 
                         style={{ left: `min(${progressPercentage}%, calc(100% - 10px))` }}
                     />
                 </div>
 
-                <div className="flex justify-between text-xs font-mono text-muted-foreground">
+                <div className={cn("flex justify-between text-xs font-mono", timeClasses)}>
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(duration)}</span>
                 </div>

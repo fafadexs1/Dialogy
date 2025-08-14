@@ -258,3 +258,35 @@ export async function closeChatAction(
         client.release();
     }
 }
+
+
+export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+        return { success: false, error: "Usuário não autenticado." };
+    }
+    
+    if (!chatId || !tagId) {
+        return { success: false, error: "IDs do chat e da tag são obrigatórios." };
+    }
+    
+    try {
+        const tagRes = await db.query('SELECT label, color FROM tags WHERE id = $1', [tagId]);
+        if (tagRes.rowCount === 0) {
+            return { success: false, error: "Etiqueta não encontrada." };
+        }
+        const { label, color } = tagRes.rows[0];
+        
+        await db.query(
+            'UPDATE chats SET tag = $1, color = $2 WHERE id = $3',
+            [label, color, chatId]
+        );
+        
+        revalidatePath('/', 'layout');
+        return { success: true };
+
+    } catch (error) {
+        console.error("Erro ao atualizar a tag do chat:", error);
+        return { success: false, error: "Falha ao atualizar a etiqueta no servidor." };
+    }
+}

@@ -2,7 +2,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
+import { TagSelectionDialog } from './tag-selection-dialog';
 
 // --- Sub-componentes Fortemente Tipados ---
 
@@ -103,10 +104,12 @@ interface ChatListItemProps {
     chat: Chat;
     isSelected: boolean;
     onSelect: (chat: Chat) => void;
+    onUpdate: () => void;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate }) => {
     const lastMessage = chat.messages[chat.messages.length - 1];
+    const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
     return (
         <div
@@ -114,7 +117,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
             isSelected ? 'bg-primary/10' : 'hover:bg-accent'
             }`}
             onClick={() => onSelect(chat)}
+            onDoubleClick={() => setIsTagDialogOpen(true)}
         >
+            <TagSelectionDialog 
+              isOpen={isTagDialogOpen}
+              setIsOpen={setIsTagDialogOpen}
+              chat={chat}
+              onUpdate={onUpdate}
+            />
             <div className="relative flex-shrink-0">
             <Avatar className="h-10 w-10 border">
                 <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} />
@@ -139,7 +149,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                      <div className="flex items-center gap-2 truncate">
-                        <p className="font-semibold truncate">{chat.contact.firstName}</p>
+                        <p className="font-semibold truncate">{chat.contact.name}</p>
+                         {chat.tag && chat.color && (
+                            <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent text-xs px-2 py-0.5">
+                                {chat.tag}
+                            </Badge>
+                        )}
                         {chat.teamName && chat.status === 'atendimentos' && (
                             <Badge variant="secondary" className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 w-fit flex-shrink-0">
                                 <Users className="h-3 w-3"/>
@@ -176,9 +191,10 @@ interface ChatListProps {
   selectedChat: Chat | null;
   setSelectedChat: (chat: Chat) => void;
   currentUser: User;
+  onUpdate: () => void;
 }
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
   const onlineAgents = usePresence();
 
   const renderChatList = (chatList: Chat[]) => (
@@ -190,6 +206,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             chat={chat}
             isSelected={selectedChat?.id === chat.id}
             onSelect={setSelectedChat}
+            onUpdate={onUpdate}
           />
         ))
       ) : (

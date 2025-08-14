@@ -109,6 +109,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={currentUser}
+        onUpdate={updateData}
       />
       <ChatPanel 
         key={selectedChat?.id} 

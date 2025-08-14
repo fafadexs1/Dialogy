@@ -228,14 +228,14 @@ function MediaMessage({ message }: { message: Message }) {
              return (
                 <Dialog>
                     <DialogTrigger asChild>
-                         <div className="relative group w-full max-w-[300px] aspect-square bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                         <div className="relative group w-full max-w-[300px] aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
                             {thumbnail ? (
                                 <Image
                                     src={thumbnail}
                                     alt="Video thumbnail"
-                                    fill
-                                    objectFit="cover"
-                                    className="group-hover:brightness-75 transition-all"
+                                    width={300}
+                                    height={169}
+                                    className="group-hover:brightness-75 transition-all object-cover"
                                 />
                             ) : null}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
@@ -256,7 +256,7 @@ function MediaMessage({ message }: { message: Message }) {
             );
         }
         if (mimetype.startsWith('audio/')) {
-            return <AudioPlayer src={mediaUrl!} duration={duration} waveform={waveform} />;
+            return <AudioPlayer src={mediaUrl!} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
         }
         if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
             return (
