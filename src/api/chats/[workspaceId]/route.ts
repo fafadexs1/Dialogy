@@ -23,9 +23,10 @@ function formatMessageDate(date: Date): string {
 }
 
 async function fetchDataForWorkspace(workspaceId: string, userId: string) {
+    console.log(`--- [API_ROUTE] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
     if (!workspaceId) return { chats: [] };
 
-    // 1. Fetch all possible senders and create a map for quick lookup.
+    // 1. Fetch all possible senders (users, contacts, system agents) and create a map for quick lookup.
     const userRes = await db.query('SELECT id, full_name as name, avatar_url as avatar FROM users');
     const contactRes = await db.query('SELECT id, name, avatar_url as avatar, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
     const systemAgentRes = await db.query('SELECT id, name, avatar_url as avatar FROM system_agents WHERE workspace_id = $1', [workspaceId]);
@@ -35,13 +36,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     contactRes.rows.forEach(c => sendersMap.set(c.id, { ...c, type: 'contact' }));
     systemAgentRes.rows.forEach(a => sendersMap.set(a.id, { ...a, type: 'system_agent' }));
 
+    // Helper to find any sender by their ID
     const getSenderById = (id: string | null): MessageSender | undefined => {
         if (!id) return undefined;
         return sendersMap.get(id);
     };
     
-    // Corrected query to fetch ALL chats for the workspace, allowing the frontend to filter.
-    // This ensures consistency between server and client fetches.
+    // 3. Fetch chats visible to the current user (Gerais, Atendimentos, and their own Encerrados)
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -72,7 +73,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-         WHERE c.workspace_id = $1 AND (
+        WHERE c.workspace_id = $1 AND (
             c.status IN ('gerais', 'atendimentos') OR 
             (c.status = 'encerrados' AND c.agent_id = $2)
         )
@@ -96,11 +97,11 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         color: r.color,
     }));
 
+    // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
-        // Fetch all messages for all contacts associated with the fetched chats.
-        // This provides the full history needed for the toggle feature.
+        // Fetch the complete message history for all contacts present in the visible chats.
         const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
-
+        
         const messageRes = await db.query(`
             SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id, m.is_read
             FROM messages m
@@ -116,7 +117,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             }
             const createdAtDate = new Date(m.created_at);
             const zonedDate = toZonedTime(createdAtDate, timeZone);
-
+            
             messagesByContact[m.contact_id].push({
                 id: m.id,
                 chat_id: m.chat_id,
@@ -138,12 +139,13 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             });
         });
 
+        // Assign the full history to each chat object for that contact
         chats.forEach(chat => {
-          // Assign the full message history of the contact to every chat with that contact
           chat.messages = messagesByContact[chat.contact.id] || [];
         });
     }
 
+    console.log(`[API_ROUTE] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);
     return { chats };
 }
 
