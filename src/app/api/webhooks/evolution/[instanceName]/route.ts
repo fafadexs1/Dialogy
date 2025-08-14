@@ -238,7 +238,7 @@ async function handleMessagesUpsert(payload: any) {
     
     // --- Despacho do Webhook (Fora da Transação) ---
     if (savedChat && savedMessage) {
-        await dispatchMessageToWebhooks(savedChat, savedMessage);
+        await dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
     }
 
     if (workspaceId) {

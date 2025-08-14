@@ -44,7 +44,8 @@ async function getWorkspaceName(workspaceId: string): Promise<string> {
 
 export async function dispatchMessageToWebhooks(
     chat: Chat, 
-    message: Message
+    message: Message,
+    instanceName: string,
 ) {
     console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
     
@@ -67,7 +68,7 @@ export async function dispatchMessageToWebhooks(
             id: chat.id,
             status: chat.status,
             channel: 'WhatsApp', // Placeholder
-            instance_name: chat.instance_name || 'N/A',
+            instance_name: instanceName || 'N/A',
             assigned_agent: {
                 id: chat.agent?.id,
                 name: chat.agent?.name,
