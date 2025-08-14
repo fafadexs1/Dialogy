@@ -1,4 +1,3 @@
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -166,7 +165,6 @@ export async function sendMediaAction(
             : remoteJid;
 
         for (const file of mediaFiles) {
-            let apiResponse: any;
             let endpoint: string;
             let apiPayload: Record<string, any>;
             let dbMessageType: 'audio' | 'text' = 'text';
@@ -175,7 +173,7 @@ export async function sendMediaAction(
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
                 apiPayload = {
                     number: correctedRemoteJid,
-                    audio: file.base64,
+                    audio: `data:audio/ogg;base64,${file.base64}`, // Data URI para áudio
                 };
                 dbMessageType = 'audio';
             } else {
@@ -190,9 +188,9 @@ export async function sendMediaAction(
                 };
             }
             
-            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload:`, { ...apiPayload, media: apiPayload.media ? '...' : undefined, audio: apiPayload.audio ? '...' : undefined });
+            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload...`);
 
-            apiResponse = await fetchEvolutionAPI(
+            const apiResponse = await fetchEvolutionAPI(
                 endpoint,
                 apiConfig,
                 { method: 'POST', body: JSON.stringify(apiPayload) }
@@ -203,18 +201,22 @@ export async function sendMediaAction(
                 thumbnail: file.thumbnail,
             };
 
-            // Adiciona detalhes da mídia do retorno da API para salvar no nosso DB
             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 const mediaDetails = messageTypeKey ? apiResponse.message[messageTypeKey] : null;
 
-                dbMetadata = {
-                    ...dbMetadata,
-                    mediaUrl: apiResponse.message.mediaUrl, // Get top-level mediaUrl
-                    mimetype: mediaDetails?.mimetype || file.mimetype,
-                    fileName: mediaDetails?.fileName || file.filename,
-                    ...(file.mediatype === 'audio' && mediaDetails && { duration: mediaDetails.seconds }),
-                };
+                if (mediaDetails) {
+                    dbMetadata = {
+                        ...dbMetadata,
+                        mediaUrl: mediaDetails.url,
+                        mimetype: mediaDetails.mimetype,
+                        fileName: mediaDetails.fileName || file.filename,
+                        ...(file.mediatype === 'audio' && mediaDetails && { duration: mediaDetails.seconds }),
+                    };
+                } else if (apiResponse.message.mediaUrl) {
+                    // Fallback for responses that have mediaUrl at the top level of message
+                    dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
+                }
             }
             
             await client.query(
