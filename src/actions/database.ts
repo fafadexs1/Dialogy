@@ -319,7 +319,10 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         if (error.code === '42701') { // 42701 is 'duplicate_column'
             console.log('Coluna "tag_id" já existe em "teams". Ignorando.');
         } else {
-            throw error; // Lança outros erros
+            // Se o erro for outro, relança para o catch principal.
+            // Isso pode acontecer se a tabela 'tags' não existir, por exemplo,
+            // mas o código acima já deveria tê-la criado.
+            throw error;
         }
     }
 
@@ -509,6 +512,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
  
     
   
+
+    
 
     
 
