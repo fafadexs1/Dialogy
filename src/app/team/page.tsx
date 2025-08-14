@@ -3,12 +3,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import type { User, Team, BusinessHour, Role } from '@/lib/types';
+import type { User, Team, BusinessHour, Role, Tag } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette, Tag as TagIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours } from '@/actions/teams';
-import { getWorkspaceMembers } from '@/actions/members';
+import { getWorkspaceMembers, getTags } from '@/actions/crm';
 import { getRolesAndPermissions } from '@/actions/permissions';
 
 const daysOfWeek = [ 'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado' ];
@@ -25,12 +25,14 @@ function TeamSettingsContent({
     team, 
     allMembers,
     roles,
+    tags,
     onTeamUpdate,
     onTeamDelete,
 }: { 
     team: Team, 
     allMembers: User[],
     roles: Role[],
+    tags: Tag[],
     onTeamUpdate: (teamId: string, updatedTeam: Team) => void;
     onTeamDelete: (teamId: string) => void;
 }) {
@@ -137,21 +139,45 @@ function TeamSettingsContent({
               </div>
             </div>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor={`team-role-${team.id}`}>Papel da Equipe</Label>
-            <Select
-              value={team.roleId}
-              onValueChange={(value) => handleUpdateField('roleId', value)}
-            >
-                <SelectTrigger id={`team-role-${team.id}`}>
-                    <SelectValue placeholder="Selecione um papel" />
-                </SelectTrigger>
-                <SelectContent>
-                    {roles.map(role => (
-                        <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor={`team-role-${team.id}`}>Papel da Equipe</Label>
+              <Select
+                value={team.roleId}
+                onValueChange={(value) => handleUpdateField('roleId', value)}
+              >
+                  <SelectTrigger id={`team-role-${team.id}`}>
+                      <SelectValue placeholder="Selecione um papel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      {roles.map(role => (
+                          <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`team-tag-${team.id}`}>Tag Automática da Equipe</Label>
+              <Select
+                value={team.tagId || ''}
+                onValueChange={(value) => handleUpdateField('tagId', value)}
+              >
+                  <SelectTrigger id={`team-tag-${team.id}`}>
+                      <SelectValue placeholder="Nenhuma tag automática" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="">Nenhuma tag</SelectItem>
+                      {tags.map(tag => (
+                          <SelectItem key={tag.id} value={tag.id}>
+                            <div className='flex items-center gap-2'>
+                                <span className='h-2 w-2 rounded-full' style={{backgroundColor: tag.color}}></span>
+                                {tag.label}
+                            </div>
+                          </SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
+            </div>
           </div>
           <div>
             <Label>Membros da Equipe ({team.members.length})</Label>
@@ -306,6 +332,7 @@ export default function TeamPage() {
     const [teams, setTeams] = useState<Team[]>([]);
     const [allMembers, setAllMembers] = useState<User[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
+    const [tags, setTags] = useState<Tag[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -317,10 +344,11 @@ export default function TeamPage() {
             if (!user?.activeWorkspaceId) return;
             setLoading(true);
             try {
-                const [teamsData, membersData, rolesData] = await Promise.all([
+                const [teamsData, membersData, rolesData, tagsData] = await Promise.all([
                     getTeams(user.activeWorkspaceId),
                     getWorkspaceMembers(user.activeWorkspaceId),
-                    getRolesAndPermissions(user.activeWorkspaceId)
+                    getRolesAndPermissions(user.activeWorkspaceId),
+                    getTags(user.activeWorkspaceId)
                 ]);
 
                 if (teamsData.error) throw new Error(teamsData.error);
@@ -337,6 +365,9 @@ export default function TeamPage() {
 
                 if (rolesData.error) throw new Error(rolesData.error);
                 setRoles(rolesData.roles || []);
+                
+                if (tagsData.error) throw new Error(tagsData.error);
+                setTags(tagsData.tags?.filter(t => !t.is_close_reason) || []);
 
             } catch (e: any) {
                 toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
@@ -461,6 +492,7 @@ export default function TeamPage() {
                             team={selectedTeam} 
                             allMembers={allMembers}
                             roles={roles}
+                            tags={tags}
                             onTeamUpdate={handleTeamUpdate}
                             onTeamDelete={handleTeamDelete}
                         />

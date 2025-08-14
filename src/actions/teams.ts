@@ -27,7 +27,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
     }
 
     try {
-        const teamsRes = await db.query('SELECT id, name, color, role_id FROM teams WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
+        const teamsRes = await db.query('SELECT id, name, color, role_id, tag_id FROM teams WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
         
         const teams: Team[] = [];
 
@@ -59,6 +59,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 name: row.name,
                 color: row.color,
                 roleId: row.role_id,
+                tagId: row.tag_id,
                 members: membersRes.rows,
                 businessHours: businessHoursRes.rows,
             });
@@ -82,7 +83,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
     try {
         const teamRes = await db.query(
-            'INSERT INTO teams (workspace_id, name, role_id) VALUES ($1, $2, $3) RETURNING id, name, color, role_id',
+            'INSERT INTO teams (workspace_id, name, role_id) VALUES ($1, $2, $3) RETURNING id, name, color, role_id, tag_id',
             [data.workspaceId, data.name, data.roleId]
         );
         
@@ -100,6 +101,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
             name: newTeam.name,
             color: newTeam.color,
             roleId: newTeam.role_id,
+            tagId: newTeam.tag_id,
             members: [],
             businessHours: businessHoursRes.rows
         }
@@ -111,7 +113,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
     }
 }
 
-export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId'>>): Promise<{ success: boolean; error?: string }> {
+export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     
@@ -127,12 +129,18 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
         const fields = Object.keys(data);
         const values = Object.values(data);
         const setClauses = fields.map((field, index) => {
-            const dbField = field === 'roleId' ? 'role_id' : field;
+            const dbField = { roleId: 'role_id', tagId: 'tag_id' }[field] || field;
             return `${dbField} = $${index + 1}`;
         }).join(', ');
 
+        if (!setClauses) return { success: true };
+
         const query = `UPDATE teams SET ${setClauses} WHERE id = $${fields.length + 1}`;
-        await db.query(query, [...values, teamId]);
+        
+        // Handle case where tagId might be an empty string from the form, should be NULL
+        const finalValues = values.map(val => val === '' ? null : val);
+
+        await db.query(query, [...finalValues, teamId]);
         
         return { success: true };
     } catch (error) {
@@ -251,6 +259,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
                 t.name, 
                 t.color, 
                 t.role_id,
+                t.tag_id,
                 COUNT(u.id) FILTER (WHERE u.online = TRUE) as "onlineMembersCount"
             FROM teams t
             LEFT JOIN team_members tm ON t.id = tm.team_id
@@ -265,6 +274,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
             name: row.name,
             color: row.color,
             roleId: row.role_id,
+            tagId: row.tag_id,
             members: [], // This function doesn't need to return all members
             businessHours: [], // or business hours
             onlineMembersCount: parseInt(row.onlineMembersCount, 10) || 0,

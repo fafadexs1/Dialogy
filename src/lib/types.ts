@@ -202,6 +202,7 @@ export interface Team {
   name: string;
   color: string;
   roleId: string;
+  tagId: string | null;
   businessHours: BusinessHour[];
   members: User[];
 }

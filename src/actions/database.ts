@@ -136,10 +136,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           PRIMARY KEY (invite_id, user_id)
       );`,
 
+      `CREATE TABLE IF NOT EXISTS public.tags (
+        id TEXT PRIMARY KEY,
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        value TEXT NOT NULL,
+        color TEXT NOT NULL,
+        is_close_reason BOOLEAN DEFAULT FALSE,
+        UNIQUE(workspace_id, label)
+      );`,
+      
       `CREATE TABLE IF NOT EXISTS public.teams (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         role_id UUID NOT NULL REFERENCES public.roles(id) ON DELETE RESTRICT,
+        tag_id TEXT REFERENCES public.tags(id) ON DELETE SET NULL,
         name TEXT NOT NULL,
         color TEXT DEFAULT '#3b82f6',
         UNIQUE(workspace_id, name)
@@ -183,16 +194,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         notes TEXT,
         date TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW()
-      );`,
-
-      `CREATE TABLE IF NOT EXISTS public.tags (
-        id TEXT PRIMARY KEY,
-        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-        label TEXT NOT NULL,
-        value TEXT NOT NULL,
-        color TEXT NOT NULL,
-        is_close_reason BOOLEAN DEFAULT FALSE,
-        UNIQUE(workspace_id, label)
       );`,
 
       `CREATE TABLE IF NOT EXISTS public.contact_tags (
