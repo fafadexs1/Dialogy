@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
-import ContactPanel from '../chat/contact-panel';
+import ContactPanel from '../contact/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 
@@ -49,25 +49,15 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
     setChats(latestChats);
 
-    setSelectedChat(currentSelectedChat => {
-        if (!currentSelectedChat) {
-            const atendimentoChat = latestChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-            if (atendimentoChat) return atendimentoChat;
-            const geraisChat = latestChats.find(c => c.status === 'gerais');
-            if (geraisChat) return geraisChat;
-            return latestChats.length > 0 ? latestChats[0] : null;
-        }
+    // Update selected chat with latest data from the list
+    if (selectedChat) {
+      const updatedSelectedChat = latestChats.find(c => c.id === selectedChat.id);
+      if (updatedSelectedChat) {
+        setSelectedChat(updatedSelectedChat);
+      }
+    }
 
-        const updatedSelectedChatInList = latestChats.find(c => c.id === currentSelectedChat.id);
-
-        if (updatedSelectedChatInList) {
-            return updatedSelectedChatInList;
-        } else {
-            return currentSelectedChat;
-        }
-    });
-
-}, [currentUser.activeWorkspaceId, currentUser.id]);
+}, [currentUser.activeWorkspaceId, selectedChat]);
 
 
    useEffect(() => {
