@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
-import ContactPanel from '../contact/contact-panel';
+import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 
@@ -66,7 +66,10 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         if (initialChats.length > 0 && !selectedChat) {
             const atendimentoChat = initialChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
             const geraisChat = initialChats.find(c => c.status === 'gerais');
-            handleSetSelectedChat(atendimentoChat || geraisChat || initialChats[0]);
+            const chatToSelect = atendimentoChat || geraisChat || initialChats[0];
+            if (chatToSelect) {
+              handleSetSelectedChat(chatToSelect);
+            }
         }
         
         if(currentUser.activeWorkspaceId){
@@ -89,7 +92,8 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
             clearInterval(pollingIntervalRef.current);
         }
     };
-  }, [initialChats, currentUser.activeWorkspaceId, currentUser.id, updateData, selectedChat]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialChats, currentUser.activeWorkspaceId, currentUser.id]);
 
 
   return (
