@@ -39,13 +39,21 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const [showFullHistory, setShowFullHistory] = useState(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleSetSelectedChat = (chat: Chat) => {
+  const handleSetSelectedChat = async (chat: Chat) => {
     setSelectedChat(chat);
     setShowFullHistory(true);
 
     // Immediately mark messages as read when a chat is selected
     if (chat.unreadCount && chat.unreadCount > 0 && chat.contact.phone_number_jid && chat.instance_name) {
       console.log(`[MARK_AS_READ_ACTION] Marking ${chat.unreadCount} messages as read for chat ${chat.id}`);
+      
+      // Optimistically update the UI to provide immediate feedback
+      setChats(prevChats => 
+          prevChats.map(c => 
+              c.id === chat.id ? { ...c, unreadCount: 0 } : c
+          )
+      );
+      
       const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read && m.message_id_from_api);
       
       const messagesToMarkForApi = unreadMessages.map(m => ({
@@ -55,14 +63,12 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
       }));
       const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
 
-      markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate).then(() => {
-        // Optimistically update the UI
-        setChats(prevChats => 
-            prevChats.map(c => 
-                c.id === chat.id ? { ...c, unreadCount: 0 } : c
-            )
-        );
-      });
+      const result = await markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate);
+      
+      // After the server confirms, re-fetch the data to ensure consistency
+      if (result.success) {
+          updateData();
+      }
     }
   };
   
@@ -146,3 +152,5 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     </div>
   );
 }
+
+  

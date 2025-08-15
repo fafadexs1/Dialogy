@@ -366,8 +366,6 @@ export async function markMessagesAsReadAction(
             [messageDbIds]
         );
         console.log(`[MARK_AS_READ] ${messageDbIds.length} mensagens marcadas como lidas no DB.`);
-        // A revalidação foi removida para evitar recargas desnecessárias da UI.
-        // O estado de lido será atualizado na próxima sondagem (polling).
     } catch (dbError: any) {
         console.error(`[MARK_AS_READ] Erro ao marcar mensagens como lidas no DB:`, dbError);
         // Se a atualização do banco de dados falhar, não continue.
@@ -413,6 +411,7 @@ export async function markMessagesAsReadAction(
         console.error(`[MARK_AS_READ] Falha ao enviar recibo de leitura para a API (não é um erro fatal):`, apiError.message);
     }
     
+    revalidatePath('/', 'layout');
     return { success: true };
 }
 
@@ -490,3 +489,5 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+  
