@@ -69,19 +69,17 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         };
 
         // Call the new POST endpoint
-        fetch('/api/chats/mark-as-read', {
+        const res = await fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-        })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) {
-                // After successful DB update, fetch the latest state to be sure
-                updateData();
-            }
-        })
-        .catch(err => console.error("Failed to mark messages as read via API", err));
+        });
+        
+        const data = await res.json();
+        if(data.success) {
+            // After successful DB update, fetch the latest state to be sure
+            updateData();
+        }
       }
     }
   };
@@ -106,14 +104,9 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
    useEffect(() => {
     const initialLoad = async () => {
         setChats(initialChats);
-        if (initialChats.length > 0 && !selectedChat) {
-            const atendimentoChat = initialChats.find(c => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-            const geraisChat = initialChats.find(c => c.status === 'gerais');
-            const chatToSelect = atendimentoChat || geraisChat || initialChats[0];
-            if (chatToSelect) {
-              handleSetSelectedChat(chatToSelect);
-            }
-        }
+        // We removed the logic that automatically selects a chat on load.
+        // The user must now explicitly click a chat to select it.
+        // This prevents the view from changing unexpectedly.
         
         if(currentUser.activeWorkspaceId){
             const tagsResult = await getTags(currentUser.activeWorkspaceId);

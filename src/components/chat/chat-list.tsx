@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -197,6 +197,22 @@ interface ChatListProps {
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
   const onlineAgents = usePresence();
 
+  // Memoize the sorted lists to prevent re-sorting on every render
+  const sortedChats = useMemo(() => {
+    const sorted = [...chats].sort((a, b) => {
+      const timeA = a.messages.length > 0 ? new Date(a.messages[a.messages.length - 1].createdAt).getTime() : 0;
+      const timeB = b.messages.length > 0 ? new Date(b.messages[b.messages.length - 1].createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    const gerais = sorted.filter((c) => c.status === 'gerais');
+    const atendimentos = sorted.filter((c) => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+    const encerrados = sorted.filter((c) => c.status === 'encerrados');
+    
+    return { gerais, atendimentos, encerrados };
+  }, [chats, currentUser.id]);
+
+
   const renderChatList = (chatList: Chat[]) => (
     <div className="space-y-1 p-2">
       {chatList.length > 0 ? (
@@ -216,10 +232,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       )}
     </div>
   );
-
-  const gerais = chats.filter((c) => c.status === 'gerais');
-  const atendimentos = chats.filter((c) => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
-  const encerrados = chats.filter((c) => c.status === 'encerrados');
 
   return (
     <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card">
@@ -270,13 +282,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
         <ScrollArea className="flex-1">
           <TabsContent value="gerais" className="m-0">
-            {renderChatList(gerais)}
+            {renderChatList(sortedChats.gerais)}
           </TabsContent>
           <TabsContent value="atendimentos" className="m-0">
-            {renderChatList(atendimentos)}
+            {renderChatList(sortedChats.atendimentos)}
           </TabsContent>
           <TabsContent value="encerrados" className="m-0">
-            {renderChatList(encerrados)}
+            {renderChatList(sortedChats.encerrados)}
           </TabsContent>
         </ScrollArea>
       </Tabs>
