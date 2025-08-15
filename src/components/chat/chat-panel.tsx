@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -410,7 +408,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
     const shouldRun = isAiAgentActive &&
                       !!chat &&
-                      !lastMessage?.from_me &&
+                      lastMessage?.sender?.id !== currentUser.id &&
                       !lastMessage?.metadata?.sentBy &&
                       !isAiTyping &&
                       lastMessage;
@@ -501,16 +499,22 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     );
       
     if (unreadMessagesFromContact.length > 0) {
-        console.log(`[MARK_AS_READ] Found ${unreadMessagesFromContact.length} unread messages. Marking as read...`);
-        const messagesToMarkForApi = unreadMessagesFromContact.map(m => ({
-            remoteJid: chat.contact.phone_number_jid!,
-            fromMe: false, // Messages are from the contact
-            id: m.message_id_from_api!,
-        }));
+      const timer = setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+            console.log(`[MARK_AS_READ] Found ${unreadMessagesFromContact.length} unread messages. Marking as read...`);
+            const messagesToMarkForApi = unreadMessagesFromContact.map(m => ({
+                remoteJid: chat.contact.phone_number_jid!,
+                fromMe: false,
+                id: m.message_id_from_api!,
+            }));
 
-        const messageDbIdsToUpdate = unreadMessagesFromContact.map(m => m.id);
+            const messageDbIdsToUpdate = unreadMessagesFromContact.map(m => m.id);
 
-        markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate);
+            markMessagesAsReadAction(chat.instance_name!, messagesToMarkForApi, messageDbIdsToUpdate);
+        }
+      }, 3000); // 3-second delay
+
+      return () => clearTimeout(timer);
     }
   }, [messagesToDisplay, chat]);
 
@@ -619,8 +623,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   };
 
 
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFormSubmit = async () => {
     if (!chat) return;
 
     const plainTextContent = htmlToWhatsappMarkdown(newMessage);
@@ -703,30 +706,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     const prevMessage = messagesToDisplay[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
-    // Handle system message rendering
-    if (message.type === 'system') {
-      return (
-        <React.Fragment key={message.id}>
-            {showDateSeparator && (
-                <div className="relative my-6">
-                    <Separator />
-                    <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-muted/20 px-2">
-                        <span className="text-xs font-medium text-muted-foreground">{message.formattedDate}</span>
-                    </div>
-                </div>
-            )}
-            <div className="flex justify-center items-center my-4">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/70 rounded-full px-3 py-1">
-                    <Info className="h-3.5 w-3.5" />
-                    <span>{message.content}</span>
-                    <span>-</span>
-                    <span>{message.timestamp}</span>
-                </div>
-            </div>
-        </React.Fragment>
-      )
-    }
-
     const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
 
@@ -740,6 +719,16 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </div>
                 </div>
             )}
+             {message.type === 'system' ? (
+                <div className="flex justify-center items-center my-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/70 rounded-full px-3 py-1">
+                        <Info className="h-3.5 w-3.5" />
+                        <span>{message.content}</span>
+                        <span>-</span>
+                        <span>{message.timestamp}</span>
+                    </div>
+                </div>
+            ) : (
              <div className={`group flex items-start gap-3 animate-in fade-in ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}>
                 {message.sender && (
                     <Avatar className="h-8 w-8">
@@ -808,6 +797,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     </div>
                 </div>
               </div>
+            )}
         </React.Fragment>
     )
   }
