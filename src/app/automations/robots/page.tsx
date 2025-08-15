@@ -27,7 +27,7 @@ import {
   DialogClose
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { getSystemAgents, createSystemAgent, deleteSystemAgent } from '@/actions/system-agents';
+import { getSystemAgents, createSystemAgent, deleteSystemAgent, updateSystemAgent } from '@/actions/system-agents';
 import { type SystemAgent } from '@/lib/types';
 import { Loader2, PlusCircle, MoreVertical, Edit, Trash2, Copy, Rocket, KeyRound, Webhook, Save } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -58,8 +58,9 @@ function AgentForm({
     setIsSubmitting(true);
 
     const data = { name, avatar_url: avatarUrl, webhook_url: webhookUrl };
+    
     const result = agent 
-      ? { success: false, error: 'Edit not implemented' } // Placeholder for edit action
+      ? await updateSystemAgent(agent.id, data)
       : await createSystemAgent(workspaceId, data);
       
     if (result.success) {
@@ -146,6 +147,11 @@ export default function RobotsPage() {
     fetchData();
   }
 
+  const handleEditAgent = (agent: SystemAgent) => {
+    setEditingAgent(agent);
+    setIsModalOpen(true);
+  }
+
   const handleRemoveAgent = async (agentId: string) => {
     const result = await deleteSystemAgent(agentId);
     if(result.success) {
@@ -168,7 +174,7 @@ export default function RobotsPage() {
             <h1 className="text-2xl font-bold flex items-center gap-2"><Rocket /> Agentes do Sistema</h1>
             <p className="text-muted-foreground">Crie e gerencie agentes virtuais para automatizar tarefas via webhooks.</p>
           </div>
-          <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+          <Dialog open={isModalOpen} onOpenChange={(isOpen) => { setIsModalOpen(isOpen); if (!isOpen) setEditingAgent(null); }}>
             <DialogTrigger asChild>
                 <Button onClick={() => setEditingAgent(null)}>
                     <PlusCircle className="mr-2 h-4 w-4" />
@@ -226,7 +232,7 @@ export default function RobotsPage() {
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem disabled>
+                                <DropdownMenuItem onClick={() => handleEditAgent(agent)}>
                                     <Edit className="mr-2 h-4 w-4" />
                                     Editar
                                 </DropdownMenuItem>
