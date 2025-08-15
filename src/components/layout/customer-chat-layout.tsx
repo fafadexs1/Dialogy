@@ -7,6 +7,7 @@ import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
+import { markMessagesAsReadAction } from '@/actions/evolution-api';
 
 interface CustomerChatLayoutProps {
     initialChats: Chat[];
@@ -41,6 +42,28 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const handleSetSelectedChat = (chat: Chat) => {
     setSelectedChat(chat);
     setShowFullHistory(true);
+
+    // Immediately mark messages as read when a chat is selected
+    if (chat.unreadCount && chat.unreadCount > 0 && chat.contact.phone_number_jid && chat.instance_name) {
+      console.log(`[MARK_AS_READ_ACTION] Marking ${chat.unreadCount} messages as read for chat ${chat.id}`);
+      const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read && m.message_id_from_api);
+      
+      const messagesToMarkForApi = unreadMessages.map(m => ({
+        remoteJid: chat.contact.phone_number_jid!,
+        fromMe: false,
+        id: m.message_id_from_api!,
+      }));
+      const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
+
+      markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate).then(() => {
+        // Optimistically update the UI
+        setChats(prevChats => 
+            prevChats.map(c => 
+                c.id === chat.id ? { ...c, unreadCount: 0 } : c
+            )
+        );
+      });
+    }
   };
   
   const updateData = useCallback(async () => {
