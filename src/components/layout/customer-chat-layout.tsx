@@ -117,7 +117,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
 
         if (currentUser.activeWorkspaceId) {
             if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = setInterval(updateData, 5000); 
+            pollingIntervalRef.current = setInterval(updateData, 1000); 
         }
     };
 
