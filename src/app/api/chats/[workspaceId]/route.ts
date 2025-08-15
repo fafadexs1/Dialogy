@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import type { User, Workspace, Chat, Message, MessageSender, Contact } from '@/lib/types';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -22,41 +22,27 @@ function formatMessageDate(date: Date): string {
 }
 
 async function fetchDataForWorkspace(workspaceId: string, userId: string) {
+    console.log(`--- [API_ROUTE] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
     if (!workspaceId) return { chats: [] };
 
-    const userRes = await db.query('SELECT id, full_name, avatar_url FROM users');
-    const usersMap = new Map<string, User>(userRes.rows.map(u => [
-        u.id,
-        {
-            id: u.id,
-            name: u.full_name,
-            avatar: u.avatar_url,
-            firstName: u.full_name.split(' ')[0] || '',
-            lastName: u.full_name.split(' ').slice(1).join(' ') || '',
-        }
-    ]));
+    // 1. Fetch all possible senders and create a map for quick lookup.
+    // Use aliases to prevent column name collisions and standardize the 'avatar' property.
+    const userRes = await db.query('SELECT id, full_name as name, avatar_url as avatar FROM users');
+    const contactRes = await db.query('SELECT id, name, avatar_url as avatar, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
+    const systemAgentRes = await db.query('SELECT id, name, avatar_url as avatar FROM system_agents WHERE workspace_id = $1', [workspaceId]);
 
-    const contactRes = await db.query('SELECT id, name, avatar_url, phone_number_jid FROM contacts WHERE workspace_id = $1', [workspaceId]);
-    const contactsMap = new Map<string, Contact>(contactRes.rows.map(c => [
-        c.id,
-        {
-            id: c.id,
-            workspace_id: workspaceId,
-            name: c.name,
-            avatar: c.avatar_url,
-            phone_number_jid: c.phone_number_jid,
-            firstName: c.name.split(' ')[0] || '',
-            lastName: c.name.split(' ').slice(1).join(' ') || '',
-        }
-    ]));
+    const sendersMap = new Map<string, MessageSender>();
+    userRes.rows.forEach(u => sendersMap.set(u.id, { ...u, type: 'user' }));
+    contactRes.rows.forEach(c => sendersMap.set(c.id, { ...c, type: 'contact' }));
+    systemAgentRes.rows.forEach(a => sendersMap.set(a.id, { ...a, type: 'system_agent' }));
 
+    // Helper to find any sender by their ID
     const getSenderById = (id: string | null): MessageSender | undefined => {
         if (!id) return undefined;
-        return usersMap.get(id) || contactsMap.get(id);
+        return sendersMap.get(id);
     };
     
-    // Corrected query to fetch ALL chats for the workspace, allowing the frontend to filter.
-    // This ensures consistency between server and client fetches.
+    // 3. Fetch chats visible to the current user (Gerais, Atendimentos, and their own Encerrados)
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -67,13 +53,6 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
             WHERE type = 'text' OR type IS NULL
-        ), UnreadCounts AS (
-            SELECT 
-                chat_id,
-                COUNT(*) as count
-            FROM messages
-            WHERE from_me = FALSE AND (api_message_status IS NULL OR api_message_status != 'READ')
-            GROUP BY chat_id
         )
         SELECT 
             c.id, 
@@ -82,79 +61,95 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.contact_id, 
             c.agent_id, 
             c.assigned_at,
+            c.tag,
+            c.color,
+            t.name as team_name,
             MAX(m.created_at) as last_message_time,
             lm.source_from_api as source,
             lm.instance_name,
-            uc.count as unread_count
+            COALESCE((SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE), 0) as unread_count
         FROM chats c
         LEFT JOIN messages m ON c.id = m.chat_id
+        LEFT JOIN team_members tm ON c.agent_id = tm.user_id
+        LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
-        LEFT JOIN UnreadCounts uc ON c.id = uc.chat_id
-        WHERE c.workspace_id = $1
-        GROUP BY c.id, lm.source_from_api, lm.instance_name, uc.count
+        WHERE c.workspace_id = $1 AND (
+            c.status IN ('gerais', 'atendimentos') OR 
+            (c.status = 'encerrados' AND c.agent_id = $2)
+        )
+        GROUP BY c.id, lm.source_from_api, lm.instance_name, t.name
         ORDER BY last_message_time DESC NULLS LAST
-    `, [workspaceId]);
+    `, [workspaceId, userId]);
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
         status: r.status,
         workspace_id: r.workspace_id,
-        contact: contactsMap.get(r.contact_id)!, 
-        agent: r.agent_id ? usersMap.get(r.agent_id) : undefined,
+        contact: sendersMap.get(r.contact_id) as Contact, // Assuming contact will always be found
+        agent: sendersMap.get(r.agent_id) as User | undefined,
         messages: [],
         source: r.source,
         instance_name: r.instance_name,
         assigned_at: r.assigned_at,
-        unreadCount: r.unread_count ? parseInt(r.unread_count, 10) : 0,
+        unreadCount: parseInt(r.unread_count, 10),
+        teamName: r.team_name,
+        tag: r.tag,
+        color: r.color,
     }));
 
+    // 4. Fetch and combine messages if chats exist
     if (chats.length > 0) {
-        // Fetch all messages for all contacts associated with the fetched chats.
-        // This provides the full history needed for the toggle feature.
-        const contactIds = Array.from(new Set(chats.map(c => c.contact.id)));
+        // Fetch the complete message history for all contacts present in the visible chats.
+        const contactIds = Array.from(new Set(chats.map(c => c.contact?.id).filter(Boolean)));
+        
+        if (contactIds.length > 0) {
+            const messageRes = await db.query(`
+                SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id, m.is_read
+                FROM messages m
+                JOIN chats c ON m.chat_id = c.id
+                WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
+                ORDER BY m.created_at ASC
+            `, [contactIds, workspaceId]);
 
-        const messageRes = await db.query(`
-            SELECT m.id, m.content, m.created_at, m.chat_id, m.sender_id, m.workspace_id, m.instance_name, m.source_from_api, m.type, m.status, m.metadata, m.api_message_status, m.message_id_from_api, m.from_me, c.contact_id
-            FROM messages m
-            JOIN chats c ON m.chat_id = c.id
-            WHERE c.contact_id = ANY($1::uuid[]) AND c.workspace_id = $2
-            ORDER BY m.created_at ASC
-        `, [contactIds, workspaceId]);
-
-        const messagesByContact: { [key: string]: Message[] } = {};
-        messageRes.rows.forEach(m => {
-            if (!messagesByContact[m.contact_id]) {
-                messagesByContact[m.contact_id] = [];
-            }
-            const createdAtDate = new Date(m.created_at);
-            const zonedDate = toZonedTime(createdAtDate, timeZone);
-
-            messagesByContact[m.contact_id].push({
-                id: m.id,
-                chat_id: m.chat_id,
-                workspace_id: m.workspace_id,
-                content: m.content,
-                type: m.type,
-                status: m.status,
-                metadata: m.metadata,
-                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
-                createdAt: createdAtDate.toISOString(),
-                formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id), 
-                instance_name: m.instance_name,
-                source_from_api: m.source_from_api,
-                api_message_status: m.api_message_status,
-                message_id_from_api: m.message_id_from_api,
-                from_me: m.from_me,
+            const messagesByContact: { [key: string]: Message[] } = {};
+            messageRes.rows.forEach(m => {
+                if (!messagesByContact[m.contact_id]) {
+                    messagesByContact[m.contact_id] = [];
+                }
+                const createdAtDate = new Date(m.created_at);
+                const zonedDate = toZonedTime(createdAtDate, timeZone);
+                
+                messagesByContact[m.contact_id].push({
+                    id: m.id,
+                    chat_id: m.chat_id,
+                    workspace_id: m.workspace_id,
+                    content: m.content,
+                    type: m.type,
+                    status: m.status,
+                    metadata: m.metadata,
+                    timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
+                    createdAt: createdAtDate.toISOString(),
+                    formattedDate: formatMessageDate(createdAtDate),
+                    sender: getSenderById(m.sender_id), 
+                    instance_name: m.instance_name,
+                    source_from_api: m.source_from_api,
+                    api_message_status: m.api_message_status,
+                    message_id_from_api: m.message_id_from_api,
+                    from_me: m.from_me,
+                    is_read: m.is_read,
+                });
             });
-        });
 
-        chats.forEach(chat => {
-          // Assign the full message history of the contact to every chat with that contact
-          chat.messages = messagesByContact[chat.contact.id] || [];
-        });
+            // Assign the full history to each chat object for that contact
+            chats.forEach(chat => {
+              if (chat.contact?.id) {
+                chat.messages = messagesByContact[chat.contact.id] || [];
+              }
+            });
+        }
     }
 
+    console.log(`[API_ROUTE] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);
     return { chats };
 }
 
