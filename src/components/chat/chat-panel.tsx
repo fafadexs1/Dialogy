@@ -362,6 +362,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentEditableRef = useRef<HTMLElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const processedMessageIds = useRef(new Set());
   
   const { toast } = useToast();
@@ -669,8 +670,40 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (!editableDiv) return;
 
         editableDiv.focus();
-        document.execCommand('insertText', false, emojiData.emoji);
+        
+        // Use a more reliable way to insert text at the cursor
+        const selection = window.getSelection();
+        if (selection) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            const textNode = document.createTextNode(emojiData.emoji);
+            range.insertNode(textNode);
+            
+            // Move cursor after the inserted emoji
+            range.setStartAfter(textNode);
+            range.setEndAfter(textNode);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            // Manually update the state because contentEditable changes don't trigger onChange
+            setNewMessage(editableDiv.innerHTML);
+        } else {
+            // Fallback for older browsers or edge cases
+            document.execCommand('insertText', false, emojiData.emoji);
+            setNewMessage(editableDiv.innerHTML);
+        }
     };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (formRef.current) {
+                // Trigger form submission programmatically
+                // We use requestSubmit for better browser support and to trigger validation
+                formRef.current.requestSubmit();
+            }
+        }
+    }
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
@@ -863,7 +896,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} className='flex items-end gap-2'>
+                     <form ref={formRef} onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
                         <div className="relative w-full">
                             {showTextInput ? (
@@ -874,6 +907,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                         html={newMessage}
                                         disabled={isAiTyping}
                                         onChange={(e) => setNewMessage(e.target.value)}
+                                        onKeyDown={handleKeyDown}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
                                     />
