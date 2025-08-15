@@ -364,6 +364,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const contentEditableRef = useRef<HTMLElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const processedMessageIds = useRef(new Set());
+  const savedRange = useRef<Range | null>(null);
   
   const { toast } = useToast();
 
@@ -670,25 +671,29 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (!editableDiv) return;
 
         editableDiv.focus();
-        
         const selection = window.getSelection();
+        
         if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
+            const range = savedRange.current || selection.getRangeAt(0);
             range.deleteContents();
-            const textNode = document.createTextNode(emojiData.emoji);
-            range.insertNode(textNode);
             
-            // Move cursor after the inserted emoji
-            range.setStartAfter(textNode);
-            range.setEndAfter(textNode);
+            const emojiNode = document.createTextNode(emojiData.emoji);
+            range.insertNode(emojiNode);
+
+            // Move cursor to after the inserted emoji
+            range.setStartAfter(emojiNode);
+            range.setEndAfter(emojiNode);
+            
             selection.removeAllRanges();
             selection.addRange(range);
+
+            // Save the new cursor position
+            savedRange.current = range.cloneRange();
         } else {
-            // Fallback if no selection exists
-            editableDiv.innerHTML += emojiData.emoji;
+            // Fallback
+             editableDiv.innerHTML += emojiData.emoji;
         }
 
-        // Manually update the state because contentEditable changes don't trigger onChange
         setNewMessage(editableDiv.innerHTML);
     };
 
@@ -696,6 +701,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleFormSubmit();
+        }
+    }
+
+    // Save cursor position on any interaction with the contentEditable div
+    const saveCursorPosition = () => {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+            savedRange.current = selection.getRangeAt(0).cloneRange();
         }
     }
 
@@ -903,6 +916,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                         onChange={(e) => setNewMessage(e.target.value)}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
+                                        onKeyUp={saveCursorPosition}
+                                        onClick={saveCursorPosition}
                                     />
                                     <div className="absolute right-2 bottom-2.5 flex items-center">
                                         <Popover>
