@@ -19,7 +19,8 @@ async function internalSendMessage(
     chatId: string,
     content: string,
     senderId: string, // The user ID of the sender (could be an agent or the system for automated messages)
-    metadata?: MessageMetadata
+    metadata?: MessageMetadata,
+    instanceNameParam?: string, // Opcional: nome da instância para usar
 ): Promise<{ success: boolean; error?: string }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -36,7 +37,7 @@ async function internalSendMessage(
                 c.status,
                 c.agent_id,
                 ct.phone_number_jid as "remoteJid",
-                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
+                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "lastInstanceName"
              FROM chats c
              JOIN contacts ct ON c.contact_id = ct.id
              WHERE c.id = $1`,
@@ -47,7 +48,10 @@ async function internalSendMessage(
             throw new Error('Chat não encontrado.');
         }
 
-        const { workspace_id, status: chatStatus, agent_id: currentAgentId, remoteJid, instanceName } = chatInfoRes.rows[0];
+        const { workspace_id, status: chatStatus, agent_id: currentAgentId, remoteJid, lastInstanceName } = chatInfoRes.rows[0];
+
+        // Define a instância a ser usada: a fornecida como parâmetro tem prioridade.
+        const instanceName = instanceNameParam || lastInstanceName;
 
         // Atribui o agente se o chat estiver na fila 'gerais' e ainda não tiver um.
         if (chatStatus === 'gerais' && !currentAgentId) {
@@ -131,7 +135,8 @@ async function internalSendMedia(
         thumbnail?: string; 
     }[],
     senderId: string,
-    metadata?: MessageMetadata
+    metadata?: MessageMetadata,
+    instanceNameParam?: string, // Opcional: nome da instância para usar
 ): Promise<{ success: boolean; error?: string }> {
      if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
@@ -145,7 +150,7 @@ async function internalSendMedia(
             `SELECT
                 c.workspace_id,
                 ct.phone_number_jid as "remoteJid",
-                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "instanceName"
+                (SELECT lm.instance_name FROM messages lm WHERE lm.chat_id = c.id AND lm.instance_name IS NOT NULL ORDER BY lm.created_at DESC LIMIT 1) as "lastInstanceName"
              FROM chats c
              JOIN contacts ct ON c.contact_id = ct.id
              WHERE c.id = $1`,
@@ -153,7 +158,9 @@ async function internalSendMedia(
         );
 
         if (chatInfoRes.rowCount === 0) throw new Error('Chat não encontrado.');
-        const { workspace_id, remoteJid, instanceName } = chatInfoRes.rows[0];
+        const { workspace_id, remoteJid, lastInstanceName } = chatInfoRes.rows[0];
+
+        const instanceName = instanceNameParam || lastInstanceName;
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         
@@ -280,10 +287,11 @@ export async function sendAutomatedMessageAction(
     chatId: string,
     content: string,
     agentId: string,
-    isSystemAgent: boolean = false
+    isSystemAgent: boolean = false,
+    instanceName?: string, // Opcional
 ): Promise<{ success: boolean; error?: string }> {
     const metadata = isSystemAgent ? { sentBy: 'system_agent' } : { sentBy: 'autopilot' };
-    return internalSendMessage(chatId, content, agentId, metadata);
+    return internalSendMessage(chatId, content, agentId, metadata, instanceName);
 }
 
 
@@ -321,7 +329,8 @@ export async function sendAutomatedMediaAction(
         mediatype: 'image' | 'video' | 'document' | 'audio';
         thumbnail?: string; 
     }[],
-    agentId: string
+    agentId: string,
+    instanceName?: string, // Opcional
 ): Promise<{ success: boolean; error?: string }> {
-    return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' });
+    return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
 }
