@@ -448,31 +448,17 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         
         if (result && result.response) {
             const textToType = result.response;
-            console.log('[AUTOPILOT] Resposta gerada pela IA:', textToType);
-            
-            for (let i = 0; i <= textToType.length; i++) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-                if(contentEditableRef.current) {
-                    contentEditableRef.current.innerHTML = textToType.substring(0, i);
-                    setNewMessage(textToType.substring(0, i));
-                }
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 500));
-            console.log('[AUTOPILOT] Enviando mensagem automática...');
+            console.log('[AUTOPILOT] Enviando resposta gerada pela IA:', textToType);
             
             if (chat) {
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
                 const sendResult = await sendAutomatedMessageAction(chat.id, textToType, agentIdForMessage);
-                 if (sendResult.success) {
+                if (sendResult.success) {
                     onActionSuccess();
                 } else {
                     toast({ title: 'Erro ao Enviar Mensagem', description: sendResult.error, variant: 'destructive' });
                 }
             }
-            
-            setNewMessage('');
-            if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
         }
     } catch (error: any) {
          console.error('Erro ao gerar resposta da IA:', error);
