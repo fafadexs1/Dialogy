@@ -671,9 +671,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
         editableDiv.focus();
         
-        // Use a more reliable way to insert text at the cursor
         const selection = window.getSelection();
-        if (selection) {
+        if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             range.deleteContents();
             const textNode = document.createTextNode(emojiData.emoji);
@@ -684,24 +683,19 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             range.setEndAfter(textNode);
             selection.removeAllRanges();
             selection.addRange(range);
-
-            // Manually update the state because contentEditable changes don't trigger onChange
-            setNewMessage(editableDiv.innerHTML);
         } else {
-            // Fallback for older browsers or edge cases
-            document.execCommand('insertText', false, emojiData.emoji);
-            setNewMessage(editableDiv.innerHTML);
+            // Fallback if no selection exists
+            editableDiv.innerHTML += emojiData.emoji;
         }
+
+        // Manually update the state because contentEditable changes don't trigger onChange
+        setNewMessage(editableDiv.innerHTML);
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (formRef.current) {
-                // Trigger form submission programmatically
-                // We use requestSubmit for better browser support and to trigger validation
-                formRef.current.requestSubmit();
-            }
+            handleFormSubmit();
         }
     }
 
@@ -896,7 +890,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form ref={formRef} onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} className='flex items-end gap-2'>
+                     <form ref={formRef} onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
                         <div className="relative w-full">
                             {showTextInput ? (
@@ -907,7 +901,6 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                         html={newMessage}
                                         disabled={isAiTyping}
                                         onChange={(e) => setNewMessage(e.target.value)}
-                                        onKeyDown={handleKeyDown}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
                                     />
