@@ -47,7 +47,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../ui/textarea';
 import { closeChatAction, assignChatToSelfAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
-import { markMessagesAsReadAction, deleteMessageAction } from '@/actions/evolution-api';
+import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
 import {
@@ -792,6 +792,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
   const showTextInput = !mediaFiles.length;
 
+  const lastCustomerMessage = React.useMemo(() => 
+    initialMessages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
+  , [initialMessages]);
+
 
   return (
     <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
@@ -849,7 +853,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 )}
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
-                        customerMessage={initialMessages[initialMessages.length - 1]?.content || ''}
+                        customerMessage={lastCustomerMessage?.content || ''}
                         chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         workspaceId={currentUser.activeWorkspaceId!}
                         onSelectReply={(reply) => {
