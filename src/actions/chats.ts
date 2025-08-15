@@ -95,20 +95,20 @@ export async function transferChatAction(
 
         // Load balancing logic for team transfer
         if (teamId) {
-            console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente...`);
+            console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
             const agentRes = await client.query(`
                 SELECT
                     u.id as "agentId",
                     u.full_name as "agentName",
                     t.name as "teamName",
-                    COUNT(c.id) as "activeChats"
+                    MAX(c.assigned_at) as "lastAssigned"
                 FROM users u
                 JOIN team_members tm ON u.id = tm.user_id
                 JOIN teams t ON tm.team_id = t.id
-                LEFT JOIN chats c ON u.id = c.agent_id AND c.status = 'atendimentos'
+                LEFT JOIN chats c ON u.id = c.agent_id
                 WHERE tm.team_id = $1 AND u.online = TRUE
                 GROUP BY u.id, t.name
-                ORDER BY "activeChats" ASC, random()
+                ORDER BY "lastAssigned" ASC NULLS FIRST, random()
                 LIMIT 1;
             `, [teamId]);
 
