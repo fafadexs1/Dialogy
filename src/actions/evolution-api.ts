@@ -351,15 +351,15 @@ export async function disconnectInstance(instanceName: string, config: Evolution
 }
 
 export async function markMessagesAsReadAction(
-    instanceName: string, 
-    messagesToMark: { remoteJid: string; fromMe: boolean; id: string }[],
-    messageDbIds: string[]
+    messageDbIds: string[],
+    instanceName?: string, 
+    messagesToMark?: { remoteJid: string; fromMe: boolean; id: string }[]
 ): Promise<{ success: boolean; error?: string }> {
-    if (!instanceName || messagesToMark.length === 0 || messageDbIds.length === 0) {
-        return { success: false, error: "Dados insuficientes para marcar mensagens como lidas." };
+    // A única parte crítica é atualizar o nosso banco de dados.
+    if (!messageDbIds || messageDbIds.length === 0) {
+        return { success: false, error: "IDs de mensagem não fornecidos para marcar como lidas." };
     }
     
-    // Primeiro, atualize nosso banco de dados. Esta é a nossa fonte da verdade.
     try {
         await db.query(
             'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
@@ -368,50 +368,44 @@ export async function markMessagesAsReadAction(
         console.log(`[MARK_AS_READ] ${messageDbIds.length} mensagens marcadas como lidas no DB.`);
     } catch (dbError: any) {
         console.error(`[MARK_AS_READ] Erro ao marcar mensagens como lidas no DB:`, dbError);
-        // Se a atualização do banco de dados falhar, não continue.
         return { success: false, error: "Falha ao atualizar o status das mensagens no banco de dados." };
     }
-    
-    // Em segundo lugar, tente enviar o recibo de leitura para a API do WhatsApp.
-    // Esta parte pode falhar sem quebrar nossa lógica interna.
-    try {
-        const instanceRes = await db.query(`
-            SELECT c.api_url, c.api_key 
-            FROM evolution_api_instances i
-            JOIN evolution_api_configs c ON i.config_id = c.id
-            WHERE i.name = $1
-        `, [instanceName]);
 
-        if (instanceRes.rowCount === 0) {
-            throw new Error("Instância ou configuração da API não encontrada.");
-        }
-        const { api_url, api_key } = instanceRes.rows[0];
-        const apiConfig = { api_url, api_key };
+    // A segunda parte é enviar o recibo para a API, o que é secundário.
+    // Se falhar, não quebra a nossa lógica interna.
+    if (instanceName && messagesToMark && messagesToMark.length > 0) {
+        try {
+            const instanceRes = await db.query(`
+                SELECT c.api_url, c.api_key 
+                FROM evolution_api_instances i
+                JOIN evolution_api_configs c ON i.config_id = c.id
+                WHERE i.name = $1
+            `, [instanceName]);
 
-        const payload = {
-            read: {
-                remoteJid: messagesToMark[0].remoteJid,
-                fromMe: messagesToMark[0].fromMe,
-                id: messagesToMark.map(m => m.id),
+            if (instanceRes.rowCount > 0) {
+                const { api_url, api_key } = instanceRes.rows[0];
+                const apiConfig = { api_url, api_key };
+                const payload = {
+                    read: {
+                        remoteJid: messagesToMark[0].remoteJid,
+                        fromMe: messagesToMark[0].fromMe,
+                        id: messagesToMark.map(m => m.id),
+                    }
+                };
+                await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
+                    method: 'POST',
+                    body: JSON.stringify(payload),
+                });
+                console.log(`[MARK_AS_READ] Recibo de leitura enviado para a API com sucesso.`);
+            } else {
+                 console.warn(`[MARK_AS_READ] Configuração da API não encontrada para instância ${instanceName}. Não foi possível enviar recibo de leitura.`);
             }
-        };
-
-        console.log(`[MARK_AS_READ] Enviando payload para API: ${JSON.stringify(payload)}`);
-
-        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          });
-        
-        console.log(`[MARK_AS_READ] Recibo de leitura enviado para a API com sucesso.`);
-
-    } catch (apiError: any) {
-        // Se a chamada da API falhar, apenas registramos o erro.
-        // Não retornamos um erro para o cliente porque nosso banco de dados já foi atualizado.
-        console.error(`[MARK_AS_READ] Falha ao enviar recibo de leitura para a API (não é um erro fatal):`, apiError.message);
+        } catch (apiError: any) {
+            console.error(`[MARK_AS_READ] Falha ao enviar recibo de leitura para a API (não é um erro fatal):`, apiError.message);
+        }
     }
     
-    revalidatePath('/', 'layout');
+    // A revalidação agora acontece no cliente após a confirmação do sucesso.
     return { success: true };
 }
 
@@ -489,5 +483,3 @@ export async function deleteMessageAction(
         client.release();
     }
 }
-
-  

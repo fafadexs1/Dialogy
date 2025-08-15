@@ -43,8 +43,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     setSelectedChat(chat);
     setShowFullHistory(true);
 
-    // Immediately mark messages as read when a chat is selected
-    if (chat.unreadCount && chat.unreadCount > 0 && chat.contact.phone_number_jid && chat.instance_name) {
+    if (chat.unreadCount && chat.unreadCount > 0) {
       console.log(`[MARK_AS_READ_ACTION] Marking ${chat.unreadCount} messages as read for chat ${chat.id}`);
       
       // Optimistically update the UI to provide immediate feedback
@@ -55,19 +54,21 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
       );
       
       const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read && m.message_id_from_api);
-      
-      const messagesToMarkForApi = unreadMessages.map(m => ({
-        remoteJid: chat.contact.phone_number_jid!,
-        fromMe: false,
-        id: m.message_id_from_api!,
-      }));
       const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
 
-      const result = await markMessagesAsReadAction(chat.instance_name, messagesToMarkForApi, messageDbIdsToUpdate);
+      if (messageDbIdsToUpdate.length > 0) {
+        const messagesToMarkForApi = chat.instance_name ? unreadMessages.map(m => ({
+          remoteJid: chat.contact.phone_number_jid!,
+          fromMe: false,
+          id: m.message_id_from_api!,
+        })) : [];
+
+        const result = await markMessagesAsReadAction(messageDbIdsToUpdate, chat.instance_name, messagesToMarkForApi);
       
-      // After the server confirms, re-fetch the data to ensure consistency
-      if (result.success) {
-          updateData();
+        // After the server confirms, re-fetch the data to ensure consistency
+        if (result.success) {
+            updateData();
+        }
       }
     }
   };
@@ -152,5 +153,3 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     </div>
   );
 }
-
-  
