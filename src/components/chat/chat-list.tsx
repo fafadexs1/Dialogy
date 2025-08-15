@@ -172,11 +172,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     <div className="flex-1 min-w-0">
                         {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
                     </div>
-                    {chat.unreadCount && chat.unreadCount > 0 && (
+                    {chat.unreadCount && chat.unreadCount > 0 ? (
                         <Badge className="h-5 w-5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
                             {chat.unreadCount}
                         </Badge>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>
