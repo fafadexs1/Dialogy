@@ -97,7 +97,7 @@ async function handleMessagesUpsert(payload: any) {
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
 
-    content = messageDetails?.caption || messageDetails?.text || message.conversation || '';
+    content = messageDetails?.text || messageDetails?.caption || message.conversation || '';
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
     
     if (messageType) {
