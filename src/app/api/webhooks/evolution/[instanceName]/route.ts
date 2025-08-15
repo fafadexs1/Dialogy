@@ -96,8 +96,10 @@ async function handleMessagesUpsert(payload: any) {
     let dbMessageType: Message['type'] = 'text';
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
+    
+    // Correct content extraction logic
+    content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
 
-    content = messageDetails?.text || messageDetails?.caption || message.conversation || '';
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
     
     if (messageType) {
