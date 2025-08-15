@@ -7,7 +7,6 @@ import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
-import { markMessagesAsReadAction } from '@/actions/evolution-api';
 
 interface CustomerChatLayoutProps {
     initialChats: Chat[];
@@ -39,36 +38,50 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const [showFullHistory, setShowFullHistory] = useState(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleSetSelectedChat = async (chat: Chat) => {
+   const handleSetSelectedChat = async (chat: Chat) => {
     setSelectedChat(chat);
     setShowFullHistory(true);
 
     if (chat.unreadCount && chat.unreadCount > 0) {
-      console.log(`[MARK_AS_READ_ACTION] Marking ${chat.unreadCount} messages as read for chat ${chat.id}`);
-      
-      // Optimistically update the UI to provide immediate feedback
+      // Optimistically update the UI for instant feedback
       setChats(prevChats => 
           prevChats.map(c => 
               c.id === chat.id ? { ...c, unreadCount: 0 } : c
           )
       );
       
-      const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read && m.message_id_from_api);
+      const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read);
       const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
 
       if (messageDbIdsToUpdate.length > 0) {
-        const messagesToMarkForApi = chat.instance_name ? unreadMessages.map(m => ({
-          remoteJid: chat.contact.phone_number_jid!,
-          fromMe: false,
-          id: m.message_id_from_api!,
-        })) : [];
+        // Prepare payload for the new API route
+        const payload = {
+            messageIds: messageDbIdsToUpdate,
+            // Include optional data for the Evolution API receipt
+            instanceName: chat.instance_name,
+            messagesToMark: chat.instance_name ? unreadMessages
+                .filter(m => m.message_id_from_api) // Ensure message_id_from_api exists
+                .map(m => ({
+                    remoteJid: chat.contact.phone_number_jid!,
+                    fromMe: false,
+                    id: m.message_id_from_api!,
+                })) : undefined,
+        };
 
-        const result = await markMessagesAsReadAction(messageDbIdsToUpdate, chat.instance_name, messagesToMarkForApi);
-      
-        // After the server confirms, re-fetch the data to ensure consistency
-        if (result.success) {
-            updateData();
-        }
+        // Call the new POST endpoint
+        fetch('/api/chats/mark-as-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                // After successful DB update, fetch the latest state to be sure
+                updateData();
+            }
+        })
+        .catch(err => console.error("Failed to mark messages as read via API", err));
       }
     }
   };
