@@ -355,6 +355,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   
   const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
   const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -447,12 +448,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         console.log('[AUTOPILOT] Resposta da IA recebida:', result);
         
         if (result && result.response) {
-            const textToType = result.response;
-            console.log('[AUTOPILOT] Enviando resposta gerada pela IA:', textToType);
+            const textToSend = result.response;
+            console.log('[AUTOPILOT] Enviando resposta gerada pela IA:', textToSend);
             
             if (chat) {
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
-                const sendResult = await sendAutomatedMessageAction(chat.id, textToType, agentIdForMessage);
+                const sendResult = await sendAutomatedMessageAction(chat.id, textToSend, agentIdForMessage);
                 if (sendResult.success) {
                     onActionSuccess();
                 } else {
@@ -583,37 +584,55 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const handleFormSubmit = async () => {
-    if (!chat) return;
+    if (!chat || isSending) return;
 
-    const plainTextContent = htmlToWhatsappMarkdown(newMessage);
+    setIsSending(true);
 
-    if (mediaFiles.length > 0) {
-        const mediaData = mediaFiles.map(mf => ({
-            base64: mf.base64,
-            mimetype: mf.type,
-            filename: mf.name,
-            mediatype: mf.mediatype,
-            thumbnail: mf.thumbnail,
-        }));
-        const result = await sendMediaAction(chat.id, plainTextContent, mediaData as any);
-         if (result.success) {
-            onActionSuccess();
+    // Capture current content and files
+    const currentMessage = newMessage;
+    const currentMediaFiles = [...mediaFiles];
+    const plainTextContent = htmlToWhatsappMarkdown(currentMessage);
+    
+    // Clear the input fields immediately for better UX
+    setNewMessage('');
+    setMediaFiles([]);
+    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
+    try {
+        let result: { success: boolean; error?: string };
+        if (currentMediaFiles.length > 0) {
+            const mediaData = currentMediaFiles.map(mf => ({
+                base64: mf.base64,
+                mimetype: mf.type,
+                filename: mf.name,
+                mediatype: mf.mediatype,
+                thumbnail: mf.thumbnail,
+            }));
+            result = await sendMediaAction(chat.id, plainTextContent, mediaData as any);
         } else {
-            toast({ title: 'Erro ao Enviar Mídia', description: result.error, variant: 'destructive' });
+            if (!plainTextContent.trim()) return;
+            result = await sendAgentMessageAction(chat.id, plainTextContent);
         }
-    } else {
-        if (!plainTextContent.trim()) return;
-        const result = await sendAgentMessageAction(chat.id, plainTextContent);
+
         if (result.success) {
             onActionSuccess();
         } else {
-            toast({ title: 'Erro ao Enviar Mensagem', description: result.error, variant: 'destructive' });
+            toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
+            // Restore content if sending failed
+            setNewMessage(currentMessage);
+            if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
+            setMediaFiles(currentMediaFiles);
         }
+    } catch (error) {
+        console.error("Error during message submission:", error);
+        toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
+         // Restore content on critical error
+        setNewMessage(currentMessage);
+        if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
+        setMediaFiles(currentMediaFiles);
+    } finally {
+        setIsSending(false);
     }
-
-    setMediaFiles([]);
-    setNewMessage('');
-    if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 };
 
   const handleSendAudio = async (audioBase64: string, duration: number, mimetype: string) => {
@@ -898,7 +917,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     <ContentEditable
                                         innerRef={contentEditableRef}
                                         html={newMessage}
-                                        disabled={isAiTyping}
+                                        disabled={isAiTyping || isSending}
                                         onChange={(e) => setNewMessage(e.target.value)}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
@@ -908,7 +927,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     <div className="absolute right-2 bottom-2.5 flex items-center">
                                         <Popover>
                                             <PopoverTrigger asChild>
-                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
+                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping || isSending}><Smile className="h-5 w-5" /></Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0 border-none mb-2">
                                                 <EmojiPicker onEmojiClick={onEmojiClick} />
@@ -932,7 +951,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 variant="ghost"
                                 size="icon"
                                 className="h-10 w-10"
-                                disabled={isAiTyping}
+                                disabled={isAiTyping || isSending}
                                 onClick={() => fileInputRef.current?.click()}
                             >
                                 <Paperclip className="h-5 w-5" />
@@ -941,7 +960,9 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                              {newMessage.trim() === "" && mediaFiles.length === 0 ? (
                                 <AudioRecorder onSend={handleSendAudio} />
                             ) : (
-                                <SendMessageButton disabled={isAiTyping} />
+                                <Button type="submit" size="icon" className='h-10 w-10' disabled={isAiTyping || isSending}>
+                                    {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                </Button>
                             )}
                          </div>
                     </form>
@@ -968,3 +989,5 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
+
+    
