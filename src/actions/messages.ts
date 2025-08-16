@@ -53,9 +53,10 @@ async function internalSendMessage(
         // Define a instância a ser usada: a fornecida como parâmetro tem prioridade.
         const instanceName = instanceNameParam || lastInstanceName;
 
-        // Atribui o agente se o chat estiver na fila 'gerais' e ainda não tiver um.
-        if (chatStatus === 'gerais' && !currentAgentId) {
-            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} é 'gerais'. Atribuindo agente ${senderId}.`);
+        // Atribui o agente se o chat estiver na fila 'gerais', não tiver agente, E a mensagem não for de um robô.
+        const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
+        if (chatStatus === 'gerais' && !currentAgentId && isFromHumanAgent) {
+            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} é 'gerais'. Atribuindo agente humano ${senderId}.`);
             await client.query(
                 `UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2`,
                 [senderId, chatId]
