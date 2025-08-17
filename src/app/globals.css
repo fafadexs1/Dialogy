@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    height: 100%;
+  }
+
   :root {
     --background: 217.5 33.3% 95.9%;
     --foreground: 220 15% 20%;

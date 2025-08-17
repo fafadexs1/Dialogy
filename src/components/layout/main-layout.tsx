@@ -20,8 +20,7 @@ export function MainLayout({ user, children }: MainLayoutProps) {
   return (
     <div
       className={cn(
-        // altura de viewport estável; use h-screen se preferir
-        'h-dvh w-full bg-background',
+        'h-dvh w-full bg-background overflow-hidden',
         hasSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
       )}
     >
@@ -31,13 +30,15 @@ export function MainLayout({ user, children }: MainLayoutProps) {
         </aside>
       )}
 
-      {/* Coluna principal */}
-      <main className="min-h-0 flex flex-col">
-        {/* se tiver header fixo, coloque fora da área rolável */}
+      {/* Main column */}
+      <div className="min-h-0 min-w-0 flex flex-col overflow-hidden">
+        {/* Scrollable page area */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <PageTransition key={transitionKey}>{children}</PageTransition>
+          <PageTransition transitionKey={transitionKey} className="h-full">
+            {children}
+          </PageTransition>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
