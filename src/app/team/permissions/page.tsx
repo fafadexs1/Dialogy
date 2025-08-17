@@ -307,7 +307,7 @@ export default function PermissionsPage() {
     }
     
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                     <div>

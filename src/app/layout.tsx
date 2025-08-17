@@ -1,15 +1,11 @@
-
 'use client';
 
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
 import { SessionProvider } from 'next-auth/react';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 
-// export const metadata: Metadata = {
-//   title: 'Dialogy',
-//   description: 'Customer Support Platform',
-// };
 
 export default function RootLayout({
   children,
@@ -27,7 +23,9 @@ export default function RootLayout({
       <body className="h-full font-body antialiased">
         <SessionProvider>
           <PresenceProvider>
-            {children}
+            <MainAppLayout>
+              {children}
+            </MainAppLayout>
           </PresenceProvider>
         </SessionProvider>
         <Toaster />

@@ -16,14 +16,16 @@ export default function IntegrationsPage() {
 
     if (!user) {
          return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainLayout>
+              <div className="flex items-center justify-center h-full">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+              </div>
+            </MainLayout>
         )
     }
 
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold">Extensões</h1>

@@ -260,7 +260,7 @@ export default async function Home() {
   if (!user.activeWorkspaceId) {
     console.log("[PAGE_SERVER] Usuário não possui workspace ativo. Renderizando onboarding.");
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <WorkspaceOnboarding user={user} />
         </MainLayout>
     )
@@ -273,14 +273,14 @@ export default async function Home() {
   
   if(!chats) {
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <LoadingSkeleton />
         </MainLayout>
     )
   }
 
   return (
-    <MainLayout user={user}>
+    <MainLayout>
       <CustomerChatLayout initialChats={chats} currentUser={user} />
     </MainLayout>
   );

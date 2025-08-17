@@ -420,7 +420,7 @@ export default function TeamPage() {
 
     if (!user || loading) {
         return (
-            <MainLayout user={user ?? undefined}>
+            <MainLayout>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
@@ -429,7 +429,7 @@ export default function TeamPage() {
     }
 
   return (
-    <MainLayout user={user}>
+    <MainLayout>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0 bg-card">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="h-6 w-6"/>Gestão de Equipes</h1>
@@ -519,5 +519,3 @@ export default function TeamPage() {
     </MainLayout>
   );
 }
-
-    

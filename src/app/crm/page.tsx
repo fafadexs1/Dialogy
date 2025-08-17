@@ -21,7 +21,7 @@ export default function CrmPage() {
   }
 
   return (
-    <MainLayout user={user}>
+    <MainLayout>
       <div className="flex flex-1 w-full min-h-0 bg-muted/40">
         <CustomerList />
       </div>

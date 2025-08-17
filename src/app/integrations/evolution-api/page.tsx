@@ -388,7 +388,7 @@ export default function EvolutionApiPage() {
     }
 
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold flex items-center gap-2"><Settings /> Conexões com a Evolution API</h1>

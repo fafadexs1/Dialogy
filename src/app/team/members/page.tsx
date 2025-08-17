@@ -204,7 +204,7 @@ export default function ManageMembersPage() {
 
     if (!user || loading) {
         return (
-            <MainLayout user={user ?? undefined}>
+            <MainLayout>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
@@ -215,7 +215,7 @@ export default function ManageMembersPage() {
     const activeWorkspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
     return (
-        <MainLayout user={user}>
+        <MainLayout>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold flex items-center gap-2"><ShieldAlert /> Gerenciar Membros</h1>

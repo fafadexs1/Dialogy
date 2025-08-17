@@ -170,7 +170,7 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <MainLayout user={user}>
+    <MainLayout>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 border-b flex-shrink-0 bg-card flex items-center justify-between sticky top-0 z-10">
                 <div>
