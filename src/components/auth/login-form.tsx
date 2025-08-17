@@ -29,25 +29,25 @@ export function LoginForm() {
 
     try {
       const result = await signIn('credentials', {
-        redirect: false, // Manusearemos o redirecionamento manualmente
+        redirect: false, // We will handle the redirect manually
         email,
         password,
-        callbackUrl,
       });
 
       if (result?.error) {
-        console.error(`[LOGIN_FORM] Erro de login: ${result.error}`);
+        console.error(`[LOGIN_FORM] Login error: ${result.error}`);
         setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
         setLoading(false);
       } else if (result?.ok) {
-        router.push(result.url || callbackUrl);
+        // Explicitly redirect to the callbackUrl or home page
+        router.push(callbackUrl);
       } else {
-        console.error('[LOGIN_FORM] A requisição de login falhou sem um erro específico do NextAuth.');
+        console.error('[LOGIN_FORM] Login request failed without a specific NextAuth error.');
         setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
         setLoading(false);
       }
     } catch (error) {
-        console.error('[LOGIN_FORM] Erro catastrófico na função handleSubmit:', error);
+        console.error('[LOGIN_FORM] Catastrophic error in handleSubmit:', error);
         setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
         setLoading(false);
     }

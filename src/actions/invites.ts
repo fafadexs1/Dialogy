@@ -198,5 +198,3 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
     revalidatePath('/', 'layout');
     redirect('/');
 }
-
-    

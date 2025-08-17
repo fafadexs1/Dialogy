@@ -11,7 +11,8 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - setup (database setup page)
+     * - join (workspace invite page)
      */
-    '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup).*)',
+    '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup|join).*)',
   ],
 }
