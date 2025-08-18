@@ -46,11 +46,12 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
 
 
    const handleSetSelectedChat = async (chat: Chat) => {
+    // Optimistic Update: Set the selected chat immediately for instant UI feedback.
     setSelectedChat(chat);
     setShowFullHistory(true);
 
     if (chat.unreadCount && chat.unreadCount > 0) {
-      // Optimistically update the UI for instant feedback
+      // Optimistically update the unread count in the UI
       setChats(prevChats => 
           prevChats.map(c => 
               c.id === chat.id ? { ...c, unreadCount: 0 } : c
@@ -61,13 +62,11 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
       const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
 
       if (messageDbIdsToUpdate.length > 0) {
-        // Prepare payload for the new API route
         const payload = {
             messageIds: messageDbIdsToUpdate,
-            // Include optional data for the Evolution API receipt
             instanceName: chat.instance_name,
             messagesToMark: chat.instance_name ? unreadMessages
-                .filter(m => m.message_id_from_api) // Ensure message_id_from_api exists
+                .filter(m => m.message_id_from_api)
                 .map(m => ({
                     remoteJid: chat.contact.phone_number_jid!,
                     fromMe: false,
@@ -75,35 +74,34 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
                 })) : undefined,
         };
 
-        // Call the new POST endpoint
-        const res = await fetch('/api/chats/mark-as-read', {
+        // Fire and forget the API call. The UI is already updated.
+        // If it fails, the next poll will correct the unread count anyway.
+        fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
+        }).catch(err => {
+            console.error("Failed to mark messages as read in the background:", err);
         });
-        
-        const data = await res.json();
-        if(data.success) {
-            // After successful DB update, fetch the latest state to be sure
-            updateData(chat.id);
-        }
       }
     }
   };
   
-  const updateData = useCallback(async (currentChatId: string | null) => {
+  const updateData = useCallback(async () => {
     if (!currentUser.activeWorkspaceId) return;
 
     const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
     setChats(latestChats);
 
-    // Update selected chat with latest data from the list, using the ID from the argument
+    // After fetching, find the currently selected chat in the new list and update it
+    // This keeps the selected chat's data fresh without changing the selection
+    const currentChatId = selectedChatIdRef.current;
     if (currentChatId) {
       const updatedSelectedChat = latestChats.find(c => c.id === currentChatId);
       if (updatedSelectedChat) {
         setSelectedChat(updatedSelectedChat);
       } else {
-        // If the selected chat no longer exists (e.g., closed by another agent), deselect it.
+        // If the chat doesn't exist anymore, deselect it
         setSelectedChat(null);
       }
     }
@@ -136,8 +134,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   useEffect(() => {
      if (currentUser.activeWorkspaceId) {
         if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-        // Pass the ref's current value to the interval function
-        pollingIntervalRef.current = setInterval(() => updateData(selectedChatIdRef.current), 1000); 
+        pollingIntervalRef.current = setInterval(() => updateData(), 1000); 
     }
      return () => {
         if (pollingIntervalRef.current) {
@@ -154,22 +151,22 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={currentUser}
-        onUpdate={() => updateData(selectedChat?.id || null)}
+        onUpdate={() => updateData()}
       />
       <ChatPanel 
         key={selectedChat?.id} 
         chat={selectedChat} 
         messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
-        onActionSuccess={() => updateData(selectedChat?.id || null)}
+        onActionSuccess={() => updateData()}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
       <ContactPanel 
         chat={selectedChat} 
-        onTransferSuccess={() => updateData(selectedChat?.id || null)}
-        onContactUpdate={() => updateData(selectedChat?.id || null)}
+        onTransferSuccess={() => updateData()}
+        onContactUpdate={() => updateData()}
       />
     </div>
   );
