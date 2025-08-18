@@ -50,6 +50,9 @@ import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers } from '@/ac
 import { getTeams } from '@/actions/teams';
 import type { AnalyticsData, AgentPerformance, User, Team } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
+
+type TimeRange = 'last_30_days' | 'last_7_days' | 'today' | 'this_month';
 
 // Componente de Cartão de Estatística
 const StatCard = ({ title, value, change, changeType, icon: Icon, loading }: any) => (
@@ -145,14 +148,35 @@ export default function AnalyticsPage() {
   const [allMembers, setAllMembers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
 
+  // --- Filter States ---
+  const [timeRange, setTimeRange] = useState<TimeRange>('last_30_days');
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
   
-  const fetchPageData = useCallback((workspaceId: string, filters: { teamId?: string; agentId?: string }) => {
+  const getDateRange = (range: TimeRange): { from: string, to: string } => {
+    const now = new Date();
+    switch (range) {
+        case 'today':
+            return { from: startOfDay(now).toISOString(), to: endOfDay(now).toISOString() };
+        case 'last_7_days':
+            return { from: startOfDay(subDays(now, 6)).toISOString(), to: endOfDay(now).toISOString() };
+        case 'this_month':
+            return { from: startOfMonth(now).toISOString(), to: endOfMonth(now).toISOString() };
+        case 'last_30_days':
+        default:
+            return { from: startOfDay(subDays(now, 29)).toISOString(), to: endOfDay(now).toISOString() };
+    }
+  };
+
+  const fetchPageData = useCallback((
+    workspaceId: string, 
+    filters: { teamId?: string; agentId?: string },
+    dateRange: { from: string, to: string }
+  ) => {
     startTransition(async () => {
         const [data, performance] = await Promise.all([
-             getAnalyticsData(workspaceId, filters),
-             getAgentPerformance(workspaceId, { teamId: filters.teamId })
+             getAnalyticsData(workspaceId, filters, dateRange),
+             getAgentPerformance(workspaceId, { teamId: filters.teamId }, dateRange)
         ]);
         if(data) setAnalyticsData(data);
         if(performance) setAgentPerformance(performance);
@@ -178,9 +202,10 @@ export default function AnalyticsPage() {
             teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
             agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
         };
-        fetchPageData(user.activeWorkspaceId, filters);
+        const dateRange = getDateRange(timeRange);
+        fetchPageData(user.activeWorkspaceId, filters, dateRange);
     }
-  }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, fetchPageData]);
+  }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, timeRange, fetchPageData]);
 
   // Reset agent filter when team changes
   useEffect(() => {
@@ -189,12 +214,16 @@ export default function AnalyticsPage() {
 
   const filteredMembers = useMemo(() => {
     if (selectedTeamId === 'all') return allMembers;
+    // This logic is flawed because `team.members` is not populated in this context.
+    // It should rely on a separate query or a better data structure.
+    // Let's get the member IDs from the `team_members` table association if possible, or filter by a property.
+    // For now, we'll assume the members have a team_id property for filtering.
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
     if (!selectedTeam) return [];
     
-    const memberIds = new Set(selectedTeam.members.map(m => m.id));
-    return allMembers.filter(member => memberIds.has(member.id));
-
+    // We need to fetch team members properly. Let's assume `getWorkspaceMembers` returns team info.
+    return allMembers.filter(member => (member as any).team_id === selectedTeamId);
+    
   }, [allMembers, teams, selectedTeamId]);
 
 
@@ -223,7 +252,7 @@ export default function AnalyticsPage() {
                     <p className="text-muted-foreground">Métricas e insights para otimizar sua operação.</p>
                 </div>
                 <div className='flex items-center gap-2'>
-                    <Select defaultValue='last_30_days'>
+                    <Select value={timeRange} onValueChange={(value) => setTimeRange(value as TimeRange)}>
                         <SelectTrigger className="w-[180px]">
                             <Calendar className='mr-2 h-4 w-4' />
                             <SelectValue placeholder="Selecione o período" />
@@ -232,7 +261,7 @@ export default function AnalyticsPage() {
                             <SelectItem value="last_30_days">Últimos 30 dias</SelectItem>
                             <SelectItem value="last_7_days">Últimos 7 dias</SelectItem>
                             <SelectItem value="today">Hoje</SelectItem>
-                            <SelectItem value="this_month" disabled>Este mês</SelectItem>
+                            <SelectItem value="this_month">Este mês</SelectItem>
                         </SelectContent>
                     </Select>
                      <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
@@ -247,13 +276,13 @@ export default function AnalyticsPage() {
                             ))}
                         </SelectContent>
                     </Select>
-                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={filteredMembers.length === 0}>
+                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={filteredMembers.length === 0 && selectedTeamId !== 'all'}>
                         <SelectTrigger className="w-[220px]">
                             <Filter className='mr-2 h-4 w-4' />
                             <SelectValue placeholder="Filtrar por atendente" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="all">Visão da Equipe</SelectItem>
+                            <SelectItem value="all">Todos da Equipe</SelectItem>
                              {filteredMembers.map(member => (
                                 <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
                             ))}

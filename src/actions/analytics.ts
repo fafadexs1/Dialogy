@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -18,39 +19,30 @@ const addFilters = (
 
     // Check if the base query already has a WHERE clause
     const hasWhere = newQuery.toUpperCase().includes(' WHERE ');
-
-    // The first condition should always be the workspace_id for the main table (aliased as 'c')
-    whereConditions.push(`c.workspace_id = $1`);
+    const whereOrAnd = hasWhere ? ' AND ' : ' WHERE ';
     
     if (agentId) {
         whereConditions.push(`c.agent_id = $${newParams.length + 1}`);
         newParams.push(agentId);
     } else if (teamId) {
-        // If filtering by team, we need to join with team_members
-        const fromClause = 'FROM chats c';
-        const newFromClause = `FROM chats c JOIN team_members tm ON c.agent_id = tm.user_id`;
-        
-        if (newQuery.includes(fromClause)) {
-            newQuery = newQuery.replace(fromClause, newFromClause);
-        } else if (newQuery.includes('FROM FirstMessages')) {
-            // Special handling for the Avg Response Time query
-             const fromClauseFm = 'FROM FirstMessages';
-             const newFromClauseFm = `FROM FirstMessages JOIN team_members tm ON FirstMessages.agent_id = tm.user_id`;
-             newQuery = newQuery.replace(fromClauseFm, newFromClauseFm);
+        // If filtering by team, we need to join with team_members if not already joined
+        if (!newQuery.toUpperCase().includes('JOIN TEAM_MEMBERS')) {
+            const fromClause = 'FROM chats c';
+            const newFromClause = `FROM chats c JOIN team_members tm ON c.agent_id = tm.user_id`;
+             if (newQuery.includes(fromClause)) {
+                newQuery = newQuery.replace(fromClause, newFromClause);
+             } else if (newQuery.includes('FROM FirstMessages')) {
+                 const fromClauseFm = 'FROM FirstMessages';
+                 const newFromClauseFm = `FROM FirstMessages JOIN team_members tm ON FirstMessages.agent_id = tm.user_id`;
+                 newQuery = newQuery.replace(fromClauseFm, newFromClauseFm);
+             }
         }
-        
         whereConditions.push(`tm.team_id = $${newParams.length + 1}`);
         newParams.push(teamId);
     }
 
     if (whereConditions.length > 0) {
-        // If the original query had a WHERE clause, we append with AND
-        // otherwise, we add a new WHERE clause.
-        if (hasWhere) {
-            newQuery += ` AND ${whereConditions.join(' AND ')}`;
-        } else {
-            newQuery += ` WHERE ${whereConditions.join(' AND ')}`;
-        }
+        newQuery += whereOrAnd + whereConditions.join(' AND ');
     }
     
     return [newQuery, newParams];
@@ -59,33 +51,32 @@ const addFilters = (
 
 export async function getAnalyticsData(
     workspaceId: string, 
-    filters: { teamId?: string; agentId?: string }
+    filters: { teamId?: string; agentId?: string },
+    dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return null;
 
     try {
-        const baseParams: (string | number)[] = [workspaceId];
+        const baseParams: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
 
         // Total Conversations
         const [totalConvQuery, totalConvParams] = addFilters(
-            'SELECT COUNT(*) FROM chats c',
+            'SELECT COUNT(*) FROM chats c WHERE c.workspace_id = $1 AND c.created_at BETWEEN $2 AND $3',
             baseParams,
             filters
         );
         const totalConversationsRes = await db.query(totalConvQuery, totalConvParams);
         const totalConversations = parseInt(totalConversationsRes.rows[0].count, 10);
 
-        // New Contacts (workspace-wide, not filtered)
+        // New Contacts (workspace-wide, not filtered by agent/team but by daterange)
         const newContactsRes = await db.query(
-            "SELECT COUNT(*) FROM contacts WHERE workspace_id = $1 AND created_at > NOW() - INTERVAL '30 days'",
-            [workspaceId]
+            "SELECT COUNT(*) FROM contacts WHERE workspace_id = $1 AND created_at BETWEEN $2 AND $3",
+            [workspaceId, dateRange.from, dateRange.to]
         );
         const newContacts = parseInt(newContactsRes.rows[0].count, 10);
 
         // Avg First Response Time
-        // The subquery already filters by workspace_id, so we pass an empty base query string
-        // to let addFilters build the WHERE clause for the outer query.
         const [avgResponseQuery, avgResponseParams] = addFilters(
             `WITH FirstMessages AS (
                 SELECT
@@ -95,7 +86,7 @@ export async function getAnalyticsData(
                     MIN(CASE WHEN from_me = true THEN m.created_at END) as first_agent_message
                 FROM messages m
                 JOIN chats c ON m.chat_id = c.id
-                WHERE c.workspace_id = $1
+                WHERE c.workspace_id = $1 AND m.created_at BETWEEN $2 AND $3
                 GROUP BY chat_id, c.agent_id
             )
             SELECT
@@ -111,7 +102,7 @@ export async function getAnalyticsData(
 
         // FCR
         const [fcrQuery, fcrParams] = addFilters(
-            'SELECT COUNT(*) FROM chats c WHERE c.status = \'encerrados\'',
+            `SELECT COUNT(*) FROM chats c WHERE c.status = 'encerrados' AND c.workspace_id = $1 AND c.closed_at BETWEEN $2 AND $3`,
             baseParams,
             filters
         );
@@ -119,14 +110,14 @@ export async function getAnalyticsData(
         const resolvedCount = parseInt(resolvedRes.rows[0].count, 10);
         const firstContactResolutionRate = totalConversations > 0 ? (resolvedCount / totalConversations) * 100 : 0;
         
-        // Conversations by Hour
+        // Conversations by Hour (always uses last 30 days for pattern analysis, not the selected range)
         const [convByHourQuery, convByHourParams] = addFilters(
              `SELECT EXTRACT(HOUR FROM c.created_at) as hour, COUNT(*) as count
              FROM chats c
-             WHERE c.created_at > NOW() - INTERVAL '30 days'
+             WHERE c.workspace_id = $1 AND c.created_at > NOW() - INTERVAL '30 days'
              GROUP BY hour
              ORDER BY hour;`,
-             baseParams,
+             [workspaceId], // Use only workspaceId for this query
              filters
         );
         const conversationsByHourRes = await db.query(convByHourQuery, convByHourParams);
@@ -147,7 +138,8 @@ export async function getAnalyticsData(
 
 export async function getAgentPerformance(
     workspaceId: string, 
-    filters: { teamId?: string }
+    filters: { teamId?: string },
+    dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return null;
@@ -168,6 +160,8 @@ export async function getAgentPerformance(
                             MIN(CASE WHEN m.from_me = false THEN m.created_at END) as first_customer_message,
                             MIN(CASE WHEN m.from_me = true THEN m.created_at END) as first_agent_message
                         FROM messages m
+                        -- Filter messages by date range within the sub-subquery
+                        WHERE m.created_at BETWEEN $2 AND $3
                         GROUP BY m.chat_id
                     ) fm
                     JOIN chats fmc ON fm.chat_id = fmc.id
@@ -177,11 +171,14 @@ export async function getAgentPerformance(
             LEFT JOIN chats c ON u.id = c.agent_id AND c.workspace_id = $1
         `;
 
-        const params: (string | number)[] = [workspaceId];
-        const whereClauses = ['c.workspace_id IS NOT NULL'];
+        const params: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
+        // Main WHERE clause filters chats by date range
+        const whereClauses = ['c.created_at BETWEEN $2 AND $3'];
 
         if (filters.teamId) {
-            whereClauses.push(`u.id IN (SELECT user_id FROM team_members WHERE team_id = $${params.length + 1})`);
+            // This join is only for filtering by team
+            query += ` JOIN team_members tm ON u.id = tm.user_id `;
+            whereClauses.push(`tm.team_id = $${params.length + 1}`);
             params.push(filters.teamId);
         }
 
