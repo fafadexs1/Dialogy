@@ -37,6 +37,10 @@ export async function POST(
       await handleMessagesUpsert(payload);
     } else if (event === 'messages.update') {
       await handleMessagesUpdate(payload);
+    } else if (event === 'contacts.update') {
+      await handleContactsUpdate(payload);
+    } else if (event === 'chats.upsert') {
+      await handleChatsUpsert(payload);
     } else {
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
@@ -245,5 +249,55 @@ async function handleMessagesUpsert(payload: any) {
 
     if (workspaceId) {
         revalidatePath(`/api/chats/${workspaceId}`);
+    }
+}
+
+async function handleContactsUpdate(payload: any) {
+    const { instance: instanceName, data } = payload;
+    if (!Array.isArray(data) || data.length === 0) {
+        console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou vazio.');
+        return;
+    }
+    
+    const contactUpdate = data[0];
+    const { remoteJid, profilePicUrl } = contactUpdate;
+
+    if (!remoteJid || !profilePicUrl) {
+        console.log('[WEBHOOK_CONTACT_UPDATE] JID ou URL da foto de perfil ausente.');
+        return;
+    }
+
+    try {
+        const result = await db.query(
+            `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2`,
+            [profilePicUrl, remoteJid]
+        );
+        if (result.rowCount > 0) {
+            console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
+        }
+    } catch (error) {
+        console.error('[WEBHOOK_CONTACT_UPDATE] Erro ao atualizar foto de perfil:', error);
+    }
+}
+
+async function handleChatsUpsert(payload: any) {
+    const { instance: instanceName, data } = payload;
+     if (!Array.isArray(data) || data.length === 0) {
+        console.log('[WEBHOOK_CHAT_UPSERT] Payload inválido ou vazio.');
+        return;
+    }
+    
+    // A API da Evolution usa o evento 'chats.upsert' principalmente para indicar arquivamento.
+    // O payload típico tem um objeto com `id` (JID do contato) e `archive`.
+    // Se `archive` for true, o chat foi arquivado.
+    for (const chatUpdate of data) {
+        const { id: remoteJid, archive } = chatUpdate;
+        if (!remoteJid) continue;
+
+        if (archive) {
+             console.log(`[WEBHOOK_CHAT_UPSERT] Recebido evento de arquivamento para ${remoteJid}. Esta funcionalidade ainda não está implementada.`);
+             // Futuramente, poderíamos adicionar uma lógica para mudar o status do chat aqui.
+             // Ex: `UPDATE chats SET status = 'arquivados' WHERE contact_id = (SELECT id FROM contacts WHERE phone_number_jid = $1)`
+        }
     }
 }
