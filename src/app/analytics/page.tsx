@@ -241,7 +241,7 @@ export default function AnalyticsPage() {
                             <SelectValue placeholder="Filtrar por setor" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="all">Visão Geral (Todos os Setores)</SelectItem>
+                            <SelectItem value="all">Todos os Setores</SelectItem>
                              {teams.map(team => (
                                 <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
                             ))}

@@ -66,7 +66,7 @@ export async function getAnalyticsData(
     if (!session?.user?.id) return null;
 
     try {
-        const baseParams = [workspaceId];
+        const baseParams: (string | number)[] = [workspaceId];
 
         // Total Conversations
         const [totalConvQuery, totalConvParams] = addFilters(
@@ -102,7 +102,7 @@ export async function getAnalyticsData(
             FROM FirstMessages
             WHERE first_agent_message > first_customer_message`,
              baseParams,
-             { agentId: filters.agentId } // Team filter for this is complex, applying only agent for now.
+             { agentId: filters.agentId, teamId: filters.teamId }
         );
         const avgFirstResponseTimeRes = await db.query(avgResponseQuery, avgResponseParams);
         const avgSeconds = avgFirstResponseTimeRes.rows[0]?.avg_seconds;
@@ -179,6 +179,8 @@ export async function getAgentPerformance(
 
         const params: (string | number)[] = [workspaceId];
 
+        // Apply team filter only if a teamId is provided.
+        // This ensures all agents are included in the general view.
         if (filters.teamId) {
             query += ` AND u.id IN (SELECT user_id FROM team_members WHERE team_id = $2)`;
             params.push(filters.teamId);
@@ -186,6 +188,7 @@ export async function getAgentPerformance(
 
         query += `
             GROUP BY u.id
+            HAVING COUNT(c.id) > 0
             ORDER BY total_chats DESC;
         `;
         
