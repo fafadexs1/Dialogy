@@ -79,9 +79,13 @@ async function handleMessagesUpdate(payload: any) {
 async function handleMessagesUpsert(payload: any) {
     const { instance: instanceName, data, sender, server_url } = payload;
     const client = await db.connect();
+    
     let savedChat: Chat | null = null;
     let savedMessage: Message | null = null;
     let workspaceId: string | null = null;
+    let apiConfig: { api_url: string; api_key: string; } | null = null;
+    let contactId: string | null = null;
+    const contactJid = data?.key?.remoteJid;
 
     if (!data || !data.key || !data.message) {
         console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
@@ -101,7 +105,6 @@ async function handleMessagesUpsert(payload: any) {
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
     
-    // Correct content extraction logic
     content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
 
     if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
@@ -130,7 +133,6 @@ async function handleMessagesUpsert(payload: any) {
     }
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
-    const contactJid = key.remoteJid;
     const contactPhone = sender || contactJid.split('@')[0];
     
     try {
@@ -146,55 +148,23 @@ async function handleMessagesUpsert(payload: any) {
         if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
         
         const { workspace_id, api_url, api_key } = instanceRes.rows[0];
-        workspaceId = workspace_id; // Store for later use
-        const apiConfig = { api_url, api_key };
+        workspaceId = workspace_id;
+        apiConfig = { api_url, api_key };
 
-
-        // 2. Criar o contato APENAS SE ele não existir.
-        await client.query(
+        // 2. Criar o contato (se não existir) e obter o ID
+        const contactRes = await client.query(
             `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
              ON CONFLICT (workspace_id, phone_number_jid) 
-             DO NOTHING`, // NÃO FAZ NADA se o contato já existir
+             DO UPDATE SET name = EXCLUDED.name WHERE contacts.name IS NULL OR contacts.name = ''
+             RETURNING *`,
             [workspaceId, pushName || contactPhone, contactPhone, contactJid]
         );
-
-        // 3. Buscar o contato (seja ele novo ou existente) para obter o ID e o avatar.
-        const contactRes = await client.query(
-            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-            [workspaceId, contactJid]
-        );
-
-        if (contactRes.rowCount === 0) {
-            throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
-        }
         
+        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         const contactData = contactRes.rows[0];
-        const contactId = contactData.id;
-        const currentAvatar = contactData.avatar_url;
-        
-        // Se o contato não tem avatar, busca na API.
-        if (!currentAvatar) {
-            try {
-                console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
-                const profilePicRes = await fetchEvolutionAPI(
-                    `/chat/fetchProfilePictureUrl/${instanceName}`,
-                    apiConfig,
-                    {
-                        method: 'POST',
-                        body: JSON.stringify({ number: contactJid }),
-                    }
-                );
-                if (profilePicRes?.profilePictureUrl) {
-                    await client.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
-                    console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
-                    contactData.avatar_url = profilePicRes.profilePictureUrl;
-                }
-            } catch (picError) {
-                console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
-            }
-        }
-        
-        // 4. Encontrar um chat ativo ou criar um novo
+        contactId = contactData.id;
+
+        // 3. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
             `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
              ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactId]
@@ -210,10 +180,9 @@ async function handleMessagesUpsert(payload: any) {
             );
             chat = newChatRes.rows[0];
         }
-        
         chat.contact = contactData;
 
-        // 5. Inserir a mensagem
+        // 4. Inserir a mensagem
         const messageResult = await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, sender_id, type, content, metadata,
@@ -235,16 +204,35 @@ async function handleMessagesUpsert(payload: any) {
 
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem:', error);
-        // Retornamos para evitar o despacho do webhook em caso de falha.
-        return;
+        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem na transação:', error);
+        return; // Retornamos para evitar o despacho do webhook em caso de falha.
     } finally {
         client.release();
     }
     
-    // --- Despacho do Webhook (Fora da Transação) ---
+    // --- Despacho do Webhook (Fora da Transação Principal) ---
+    // Ação prioritária para garantir tempo real.
     if (savedChat && savedMessage) {
         await dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
+    }
+
+    // --- Atualização Secundária da Foto de Perfil ---
+    // Ação não crítica, executada após o despacho para não atrasá-lo.
+    if (contactId && apiConfig && !savedChat?.contact?.avatar_url) {
+        try {
+            console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
+            const profilePicRes = await fetchEvolutionAPI(
+                `/chat/fetchProfilePictureUrl/${instanceName}`,
+                apiConfig,
+                { method: 'POST', body: JSON.stringify({ number: contactJid }) }
+            );
+            if (profilePicRes?.profilePictureUrl) {
+                await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
+                console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
+            }
+        } catch (picError) {
+            console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
+        }
     }
 
     if (workspaceId) {
