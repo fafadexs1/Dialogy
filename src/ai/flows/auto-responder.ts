@@ -1,4 +1,5 @@
 
+
 'use server';
 
 /**
@@ -142,9 +143,10 @@ const autoResponderFlow = ai.defineFlow(
     const result = await prompt(promptInput, { model });
     const output = result.output;
     
-    // Log usage
+    // Log usage in the background without awaiting it.
+    // This allows the flow to return faster.
     if (result.usage && input.config?.id) {
-        await logAutopilotUsage({
+        logAutopilotUsage({
             configId: input.config.id,
             flowName: 'autoResponderFlow',
             modelName: model,
@@ -152,6 +154,9 @@ const autoResponderFlow = ai.defineFlow(
             outputTokens: result.usage.outputTokens,
             totalTokens: result.usage.totalTokens,
             ruleName: output?.triggeredRule ?? undefined,
+        }).catch(err => {
+            // Log the error but don't block the main flow.
+            console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
         });
     }
 

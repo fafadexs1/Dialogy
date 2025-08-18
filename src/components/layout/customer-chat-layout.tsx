@@ -99,7 +99,12 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
     if (currentChatId) {
       const updatedSelectedChat = latestChats.find(c => c.id === currentChatId);
       if (updatedSelectedChat) {
-        setSelectedChat(updatedSelectedChat);
+        setSelectedChat(prevSelected => ({
+          ...updatedSelectedChat,
+          // Preserve the messages from the *previous* state if the new one is empty
+          // This prevents a "flash" of empty messages if the API is slow
+          messages: updatedSelectedChat.messages.length > 0 ? updatedSelectedChat.messages : (prevSelected?.messages || [])
+        }));
       } else {
         // If the chat doesn't exist anymore, deselect it
         setSelectedChat(null);
@@ -156,7 +161,6 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
       <ChatPanel 
         key={selectedChat?.id} 
         chat={selectedChat} 
-        messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
         onActionSuccess={() => updateData()}
         closeReasons={closeReasons}

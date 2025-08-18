@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -32,7 +33,8 @@ import {
     Hand, 
     History, 
     Eye, 
-    EyeOff 
+    EyeOff, 
+    Clock
 } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
 import SmartReplies from './smart-replies';
@@ -79,7 +81,6 @@ import { AudioRecorder } from './audio-recorder';
 
 interface ChatPanelProps {
   chat: Chat | null;
-  messages: Message[];
   currentUser: User;
   onActionSuccess: () => void;
   closeReasons: Tag[];
@@ -350,12 +351,12 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, messages: initialMessages, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
+export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
   const [isAiTyping, setIsAiTyping] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   
   const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
   const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -363,15 +364,14 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contentEditableRef = useRef<HTMLElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const processedMessageIds = useRef(new Set());
   const savedRange = useRef<Range | null>(null);
   
   const { toast } = useToast();
 
   const messagesToDisplay = showFullHistory
-    ? initialMessages
-    : initialMessages.filter(m => m.chat_id === chat?.id);
+    ? messages
+    : messages.filter(m => m.chat_id === chat?.id);
   
   const handleAiSwitchChange = (checked: boolean) => {
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
@@ -393,6 +393,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     fetchAutopilotData();
   }, [fetchAutopilotData]);
 
+  useEffect(() => {
+    if (chat) {
+        setMessages(chat.messages);
+    }
+  }, [chat]);
+
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -401,10 +407,10 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
             viewport.scrollTop = viewport.scrollHeight;
         }
     }
-  }, [initialMessages]);
+  }, [messages]);
 
   const runAiAgent = useCallback(async () => {
-    const lastMessage = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1] : null;
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
 
     if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
         return;
@@ -425,7 +431,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
         setIsAiTyping(true);
         processedMessageIds.current.add(lastMessage.id);
         console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
-        const chatHistoryForAI = initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+        const chatHistoryForAI = messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         
         const activeRules = autopilotRules.filter(rule => rule.enabled);
 
@@ -471,12 +477,12 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     } finally {
         setIsAiTyping(false);
     }
-  }, [isAiAgentActive, chat, initialMessages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
+  }, [isAiAgentActive, chat, messages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
 
 
   useEffect(() => {
     runAiAgent();
-  }, [runAiAgent, initialMessages]);
+  }, [runAiAgent, messages]);
   
   useEffect(() => {
     processedMessageIds.current.clear();
@@ -584,16 +590,35 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
 
   const handleFormSubmit = async () => {
-    if (!chat || isSending) return;
-
-    setIsSending(true);
+    if (!chat) return;
 
     // Capture current content and files
-    const currentMessage = newMessage;
+    const currentMessageText = htmlToWhatsappMarkdown(newMessage);
     const currentMediaFiles = [...mediaFiles];
-    const plainTextContent = htmlToWhatsappMarkdown(currentMessage);
     
-    // Clear the input fields immediately for better UX
+    // Optimistic UI update
+    if (currentMessageText.trim() || currentMediaFiles.length > 0) {
+        const tempId = `temp-${Date.now()}`;
+        const optimisticMessage: Message = {
+            id: tempId,
+            chat_id: chat.id,
+            workspace_id: chat.workspace_id,
+            content: currentMessageText,
+            type: 'text',
+            status: 'default',
+            api_message_status: 'PENDING',
+            from_me: true,
+            is_read: true,
+            sender: currentUser,
+            createdAt: new Date().toISOString(),
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            formattedDate: 'Hoje', // Simplified for optimistic update
+            metadata: currentMediaFiles.length > 0 ? { fileName: currentMediaFiles[0].name } : {}
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+    }
+    
+    // Clear the input fields immediately
     setNewMessage('');
     setMediaFiles([]);
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
@@ -608,30 +633,26 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 mediatype: mf.mediatype,
                 thumbnail: mf.thumbnail,
             }));
-            result = await sendMediaAction(chat.id, plainTextContent, mediaData as any);
+            result = await sendMediaAction(chat.id, currentMessageText, mediaData as any);
         } else {
-            if (!plainTextContent.trim()) return;
-            result = await sendAgentMessageAction(chat.id, plainTextContent);
+            if (!currentMessageText.trim()) return;
+            result = await sendAgentMessageAction(chat.id, currentMessageText);
         }
 
-        if (result.success) {
-            onActionSuccess();
-        } else {
+        if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-            // Restore content if sending failed
-            setNewMessage(currentMessage);
-            if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
-            setMediaFiles(currentMediaFiles);
+            // Remove the optimistic message on failure
+            setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
         }
+        
+        // Re-fetch data to get the final message from the server
+        onActionSuccess();
+
     } catch (error) {
         console.error("Error during message submission:", error);
         toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
-         // Restore content on critical error
-        setNewMessage(currentMessage);
-        if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessage;
-        setMediaFiles(currentMediaFiles);
-    } finally {
-        setIsSending(false);
+        // Remove the optimistic message on critical error
+        setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
     }
 };
 
@@ -724,6 +745,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
 
     const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
+    const isPending = message.api_message_status === 'PENDING';
 
     return (
         <React.Fragment key={message.id}>
@@ -804,11 +826,13 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
                         <span className="mx-1">{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
-                            message.api_message_status === 'READ'
-                            ? <CheckCheck className="h-4 w-4 text-sky-400" />
-                            : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                            ? <CheckCheck className="h-4 w-4" />
-                            : <Check className="h-4 w-4" />
+                             isPending
+                             ? <Clock className="h-4 w-4 text-muted-foreground" />
+                             : message.api_message_status === 'READ'
+                             ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                             : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
+                             ? <CheckCheck className="h-4 w-4" />
+                             : <Check className="h-4 w-4" />
                         )}
                     </div>
                 </div>
@@ -838,8 +862,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
   const showTextInput = !mediaFiles.length;
 
   const lastCustomerMessage = React.useMemo(() => 
-    initialMessages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
-  , [initialMessages]);
+    messages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
+  , [messages]);
 
 
   return (
@@ -872,7 +896,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
               <FileDown className="h-5 w-5"/>
           </Button>
           <ChatSummary 
-            chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+            chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
             workspaceId={currentUser.activeWorkspaceId!} 
           />
           <Button variant="ghost" size="icon">
@@ -899,7 +923,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
                         customerMessage={lastCustomerMessage?.content || ''}
-                        chatHistory={initialMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+                        chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         workspaceId={currentUser.activeWorkspaceId!}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
@@ -908,7 +932,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                     />
                 )}
                 <div className="space-y-2">
-                     <form ref={formRef} onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
+                     <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
                         <div className="relative w-full">
                             {showTextInput ? (
@@ -917,7 +941,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     <ContentEditable
                                         innerRef={contentEditableRef}
                                         html={newMessage}
-                                        disabled={isAiTyping || isSending}
+                                        disabled={isAiTyping}
                                         onChange={(e) => setNewMessage(e.target.value)}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
@@ -927,7 +951,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                     <div className="absolute right-2 bottom-2.5 flex items-center">
                                         <Popover>
                                             <PopoverTrigger asChild>
-                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping || isSending}><Smile className="h-5 w-5" /></Button>
+                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0 border-none mb-2">
                                                 <EmojiPicker onEmojiClick={onEmojiClick} />
@@ -951,7 +975,7 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                                 variant="ghost"
                                 size="icon"
                                 className="h-10 w-10"
-                                disabled={isAiTyping || isSending}
+                                disabled={isAiTyping}
                                 onClick={() => fileInputRef.current?.click()}
                             >
                                 <Paperclip className="h-5 w-5" />
@@ -960,8 +984,8 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
                              {newMessage.trim() === "" && mediaFiles.length === 0 ? (
                                 <AudioRecorder onSend={handleSendAudio} />
                             ) : (
-                                <Button type="submit" size="icon" className='h-10 w-10' disabled={isAiTyping || isSending}>
-                                    {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                <Button type="submit" size="icon" className='h-10 w-10' disabled={isAiTyping}>
+                                    <Send className="h-4 w-4" />
                                 </Button>
                             )}
                          </div>
@@ -989,5 +1013,3 @@ export default function ChatPanel({ chat, messages: initialMessages, currentUser
     </main>
   );
 }
-
-    
