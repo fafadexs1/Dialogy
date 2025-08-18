@@ -8,50 +8,49 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 
 // Helper to add agent and team filters to a query
 const addFilters = (
-    query: string, 
-    baseParams: any[], 
+    query: string,
+    baseParams: any[],
     { teamId, agentId }: { teamId?: string; agentId?: string }
 ): [string, any[]] => {
     let newQuery = query;
     const newParams = [...baseParams];
-    let whereClauseExists = newQuery.includes(' WHERE ');
+    let whereConditions: string[] = [];
 
-    const addCondition = (condition: string) => {
-        if (whereClauseExists) {
-            newQuery += ` AND ${condition}`;
-        } else {
-            newQuery += ` WHERE ${condition}`;
-            whereClauseExists = true;
-        }
-    };
+    // Check if the base query already has a WHERE clause
+    const hasWhere = newQuery.toUpperCase().includes(' WHERE ');
+
+    // The first condition should always be the workspace_id for the main table (aliased as 'c')
+    whereConditions.push(`c.workspace_id = $1`);
     
-    // Ensure the base query has a WHERE clause if needed for subsequent ANDs
-    if (!whereClauseExists && (teamId || agentId)) {
-        const fromIndex = newQuery.toUpperCase().indexOf(' FROM ');
-        if (fromIndex !== -1) {
-             const tableAliasMatch = newQuery.substring(fromIndex).match(/\s+FROM\s+\w+\s+(\w+)/i);
-             const tableAlias = tableAliasMatch ? tableAliasMatch[1] : 'c'; // Default to 'c'
-             const baseWhere = `${tableAlias}.workspace_id = $1`;
-             if (!newQuery.toUpperCase().includes('WHERE')) {
-                 newQuery += ` WHERE ${baseWhere}`
-                 whereClauseExists = true;
-             }
-        }
-    }
-
-
     if (agentId) {
-        addCondition(`c.agent_id = $${newParams.length + 1}`);
+        whereConditions.push(`c.agent_id = $${newParams.length + 1}`);
         newParams.push(agentId);
     } else if (teamId) {
-        // If filtering by team, join with team_members
+        // If filtering by team, we need to join with team_members
         const fromClause = 'FROM chats c';
         const newFromClause = `FROM chats c JOIN team_members tm ON c.agent_id = tm.user_id`;
+        
         if (newQuery.includes(fromClause)) {
-             newQuery = newQuery.replace(fromClause, newFromClause);
+            newQuery = newQuery.replace(fromClause, newFromClause);
+        } else if (newQuery.includes('FROM FirstMessages')) {
+            // Special handling for the Avg Response Time query
+             const fromClauseFm = 'FROM FirstMessages';
+             const newFromClauseFm = `FROM FirstMessages JOIN team_members tm ON FirstMessages.agent_id = tm.user_id`;
+             newQuery = newQuery.replace(fromClauseFm, newFromClauseFm);
         }
-        addCondition(`tm.team_id = $${newParams.length + 1}`);
+        
+        whereConditions.push(`tm.team_id = $${newParams.length + 1}`);
         newParams.push(teamId);
+    }
+
+    if (whereConditions.length > 0) {
+        // If the original query had a WHERE clause, we append with AND
+        // otherwise, we add a new WHERE clause.
+        if (hasWhere) {
+            newQuery += ` AND ${whereConditions.join(' AND ')}`;
+        } else {
+            newQuery += ` WHERE ${whereConditions.join(' AND ')}`;
+        }
     }
     
     return [newQuery, newParams];
@@ -85,6 +84,8 @@ export async function getAnalyticsData(
         const newContacts = parseInt(newContactsRes.rows[0].count, 10);
 
         // Avg First Response Time
+        // The subquery already filters by workspace_id, so we pass an empty base query string
+        // to let addFilters build the WHERE clause for the outer query.
         const [avgResponseQuery, avgResponseParams] = addFilters(
             `WITH FirstMessages AS (
                 SELECT
@@ -174,18 +175,18 @@ export async function getAgentPerformance(
                 ) as avg_response_seconds
             FROM users u
             LEFT JOIN chats c ON u.id = c.agent_id AND c.workspace_id = $1
-            WHERE c.workspace_id IS NOT NULL
         `;
 
         const params: (string | number)[] = [workspaceId];
+        const whereClauses = ['c.workspace_id IS NOT NULL'];
 
-        // Apply team filter only if a teamId is provided.
-        // This ensures all agents are included in the general view.
         if (filters.teamId) {
-            query += ` AND u.id IN (SELECT user_id FROM team_members WHERE team_id = $2)`;
+            whereClauses.push(`u.id IN (SELECT user_id FROM team_members WHERE team_id = $${params.length + 1})`);
             params.push(filters.teamId);
         }
 
+        query += ` WHERE ${whereClauses.join(' AND ')}`;
+        
         query += `
             GROUP BY u.id
             HAVING COUNT(c.id) > 0
