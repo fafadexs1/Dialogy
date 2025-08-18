@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
-import type { Message, MessageMetadata, Chat } from '@/lib/types';
+import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
 
@@ -84,7 +84,7 @@ async function handleMessagesUpsert(payload: any) {
     let savedMessage: Message | null = null;
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
-    let contactId: string | null = null;
+    let contactData: Contact | null = null;
     const contactJid = data?.key?.remoteJid;
 
     if (!data || !data.key || !data.message) {
@@ -153,12 +153,11 @@ async function handleMessagesUpsert(payload: any) {
 
         // 2. Tentar encontrar o contato. Se não existir, criar um.
         let contactRes = await client.query(
-            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-            [workspaceId, contactJid]
+            'UPDATE contacts SET name = COALESCE(name, $1) WHERE workspace_id = $2 AND phone_number_jid = $3 RETURNING *',
+            [pushName || contactPhone, workspaceId, contactJid]
         );
 
         if (contactRes.rowCount === 0) {
-            // Contato não existe, então criamos um novo.
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4) RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid]
@@ -166,13 +165,12 @@ async function handleMessagesUpsert(payload: any) {
         }
         
         if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
-        const contactData = contactRes.rows[0];
-        contactId = contactData.id;
+        contactData = contactRes.rows[0];
 
         // 3. Encontrar um chat ativo ou criar um novo
         let chatRes = await client.query(
             `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')
-             ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactId]
+             ORDER BY assigned_at DESC NULLS LAST LIMIT 1`, [workspaceId, contactData.id]
         );
         
         let chat: Chat;
@@ -181,7 +179,7 @@ async function handleMessagesUpsert(payload: any) {
         } else {
             const newChatRes = await client.query(
                 `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
-                [workspaceId, contactId]
+                [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
         }
@@ -196,7 +194,7 @@ async function handleMessagesUpsert(payload: any) {
                 api_message_status, raw_payload
              ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
             [
-                workspaceId, chat.id, contactId, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
+                workspaceId, chat.id, contactData.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
                 instanceName, data.status, data.source, parsedUrl, key.fromMe,
                 data.status?.toUpperCase(), JSON.stringify(payload)
             ]
@@ -215,35 +213,51 @@ async function handleMessagesUpsert(payload: any) {
         client.release();
     }
     
-    // --- Despacho do Webhook (Fora da Transação Principal) ---
-    // Ação prioritária para garantir tempo real.
+    // --- Tarefas Pós-Transação (Executadas em Paralelo) ---
+    // Ações não críticas que podem ocorrer simultaneamente para otimizar o tempo de resposta.
     if (savedChat && savedMessage) {
-        await dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
+        const postTransactionTasks: Promise<any>[] = [
+            dispatchMessageToWebhooks(savedChat, savedMessage, instanceName),
+        ];
+
+        if (contactData?.id && apiConfig && !contactData.avatar_url) {
+            postTransactionTasks.push(
+                updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
+            );
+        }
+        
+        // Executa as tarefas em paralelo, mas não bloqueia a resposta do webhook.
+        Promise.all(postTransactionTasks).catch(err => {
+            console.error("[WEBHOOK_POST_TRANSACTION] Erro ao executar tarefas em paralelo:", err);
+        });
     }
 
-    // --- Atualização Secundária da Foto de Perfil ---
-    // Ação não crítica, executada após o despacho para não atrasá-lo.
-    if (contactId && apiConfig && !savedChat?.contact?.avatar_url) {
-        try {
-            console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
-            const profilePicRes = await fetchEvolutionAPI(
-                `/chat/fetchProfilePictureUrl/${instanceName}`,
-                apiConfig,
-                { method: 'POST', body: JSON.stringify({ number: contactJid }) }
-            );
-            if (profilePicRes?.profilePictureUrl) {
-                await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
-                console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
-            }
-        } catch (picError) {
-            console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
-        }
-    }
 
     if (workspaceId) {
         revalidatePath(`/api/chats/${workspaceId}`);
     }
 }
+
+/**
+ * Busca a foto de perfil de um contato e atualiza no banco de dados.
+ */
+async function updateProfilePicture(contactId: string, contactJid: string, instanceName: string, apiConfig: { api_url: string; api_key: string; }) {
+    try {
+        console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
+        const profilePicRes = await fetchEvolutionAPI(
+            `/chat/fetchProfilePictureUrl/${instanceName}`,
+            apiConfig,
+            { method: 'POST', body: JSON.stringify({ number: contactJid }) }
+        );
+        if (profilePicRes?.profilePictureUrl) {
+            await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
+            console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
+        }
+    } catch (picError) {
+        console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
+    }
+}
+
 
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
@@ -253,7 +267,7 @@ async function handleContactsUpdate(payload: any) {
     }
     
     const contactUpdate = data[0];
-    const { remoteJid, profilePicUrl } = contactUpdate;
+    const { id: remoteJid, profilePicUrl } = contactUpdate;
 
     if (!remoteJid || !profilePicUrl) {
         console.log('[WEBHOOK_CONTACT_UPDATE] JID ou URL da foto de perfil ausente.');
