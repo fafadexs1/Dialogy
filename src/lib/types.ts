@@ -26,7 +26,8 @@ export type Role = {
 export type User = {
   id: string;
   name: string; 
-  avatar: string;
+  avatar_url?: string; // Made optional to match DB
+  avatar?: string;
   email?: string;
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
@@ -266,6 +267,8 @@ export interface AutopilotUsageLog {
     model_name: string;
     total_tokens: number;
     created_at: string;
+    input_tokens: number;
+    output_tokens: number;
 }
 
 export interface EvolutionApiConfig {
@@ -346,4 +349,23 @@ export interface SystemAgent {
     webhook_url: string;
     is_active: boolean;
     created_at: string;
+}
+
+// Analytics Types
+export interface AnalyticsData {
+    totalConversations: number;
+    newContacts: number;
+    avgFirstResponseTime: string | null;
+    firstContactResolutionRate: number;
+    conversationsByHour: { hour: string; count: number }[];
+}
+
+export interface AgentPerformance {
+    agent_id: string;
+    agent_name: string;
+    avatar_url: string;
+    total_chats: number;
+    resolved_chats: number;
+    avg_first_response_time: string | null;
+    avg_rating: string | null; // Mocked for now
 }
