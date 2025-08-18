@@ -173,11 +173,11 @@ export async function getAgentPerformance(
                     WHERE fmc.agent_id = u.id AND fm.first_agent_message > fm.first_customer_message
                 ) as avg_response_seconds
             FROM users u
-            JOIN chats c ON u.id = c.agent_id
-            WHERE c.workspace_id = $1
+            LEFT JOIN chats c ON u.id = c.agent_id AND c.workspace_id = $1
+            WHERE c.workspace_id IS NOT NULL
         `;
 
-        const params = [workspaceId];
+        const params: (string | number)[] = [workspaceId];
 
         if (filters.teamId) {
             query += ` AND u.id IN (SELECT user_id FROM team_members WHERE team_id = $2)`;
@@ -188,7 +188,7 @@ export async function getAgentPerformance(
             GROUP BY u.id
             ORDER BY total_chats DESC;
         `;
-
+        
         const res = await db.query(query, params);
 
         const performanceData: AgentPerformance[] = res.rows.map(row => {
