@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useTransition } from 'react';
+import React, { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
 import { 
@@ -31,7 +31,8 @@ import {
     Award,
     Bot,
     TrendingUp,
-    Loader2
+    Loader2,
+    Users2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers } from '@/actions/analytics';
-import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
+import { getTeams } from '@/actions/teams';
+import type { AnalyticsData, AgentPerformance, User, Team } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // Componente de Cartão de Estatística
@@ -139,30 +141,61 @@ export default function AnalyticsPage() {
   const [isPending, startTransition] = useTransition();
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
-  const [members, setMembers] = useState<User[]>([]);
+  const [allMembers, setAllMembers] = useState<User[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
   
-  const fetchPageData = useCallback((workspaceId: string, agentId?: string) => {
+  const fetchPageData = useCallback((workspaceId: string, filters: { teamId?: string; agentId?: string }) => {
     startTransition(async () => {
         const [data, performance] = await Promise.all([
-             getAnalyticsData(workspaceId, agentId),
-             getAgentPerformance(workspaceId)
+             getAnalyticsData(workspaceId, filters),
+             getAgentPerformance(workspaceId, { teamId: filters.teamId })
         ]);
         if(data) setAnalyticsData(data);
         if(performance) setAgentPerformance(performance);
     });
   }, []);
-
+  
+  // Fetch filter options (teams, members)
   useEffect(() => {
     if (user?.activeWorkspaceId) {
-        fetchPageData(user.activeWorkspaceId, selectedAgentId === 'all' ? undefined : selectedAgentId);
-        
         getWorkspaceMembers(user.activeWorkspaceId).then(res => {
-            if (res.members) setMembers(res.members as User[]);
+            if (res.members) setAllMembers(res.members as User[]);
         });
-
+        getTeams(user.activeWorkspaceId).then(res => {
+             if (res.teams) setTeams(res.teams);
+        })
     }
-  }, [user?.activeWorkspaceId, selectedAgentId, fetchPageData]);
+  }, [user?.activeWorkspaceId]);
+
+  // Fetch analytics data when filters change
+  useEffect(() => {
+    if (user?.activeWorkspaceId) {
+        const filters = {
+            teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
+            agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
+        };
+        fetchPageData(user.activeWorkspaceId, filters);
+    }
+  }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, fetchPageData]);
+
+  // Reset agent filter when team changes
+  useEffect(() => {
+    setSelectedAgentId('all');
+  }, [selectedTeamId]);
+
+  const filteredMembers = useMemo(() => {
+    if (selectedTeamId === 'all') return allMembers;
+    const selectedTeam = teams.find(t => t.id === selectedTeamId);
+    if (!selectedTeam) return [];
+    
+    const memberIds = new Set(selectedTeam.members.map(m => m.id));
+    return allMembers.filter(member => memberIds.has(member.id));
+
+  }, [allMembers, teams, selectedTeamId]);
+
 
   if (!user) {
     return (
@@ -197,14 +230,26 @@ export default function AnalyticsPage() {
                             <SelectItem value="this_month" disabled>Este mês</SelectItem>
                         </SelectContent>
                     </Select>
-                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                     <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
+                        <SelectTrigger className="w-[220px]">
+                            <Users2 className='mr-2 h-4 w-4' />
+                            <SelectValue placeholder="Filtrar por setor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Visão Geral (Todos os Setores)</SelectItem>
+                             {teams.map(team => (
+                                <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={selectedTeamId === 'all' && filteredMembers.length === 0}>
                         <SelectTrigger className="w-[220px]">
                             <Filter className='mr-2 h-4 w-4' />
                             <SelectValue placeholder="Filtrar por atendente" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="all">Visão Geral (Todos)</SelectItem>
-                             {members.map(member => (
+                            <SelectItem value="all">Visão da Equipe</SelectItem>
+                             {filteredMembers.map(member => (
                                 <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
                             ))}
                         </SelectContent>
@@ -217,8 +262,8 @@ export default function AnalyticsPage() {
                 
                 <section>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-                        <StatCard loading={isPending} title="Total de Conversas" value={analyticsData?.totalConversations.toLocaleString() || '0'} change="+15.2%" changeType="increase" icon={MessageSquare} />
-                        <StatCard loading={isPending} title="Novos Contatos" value={analyticsData?.newContacts.toLocaleString() || '0'} change="+8.1%" changeType="increase" icon={Users} />
+                        <StatCard loading={isPending} title="Total de Conversas" value={analyticsData?.totalConversations?.toLocaleString() || '0'} change="+15.2%" changeType="increase" icon={MessageSquare} />
+                        <StatCard loading={isPending} title="Novos Contatos" value={analyticsData?.newContacts?.toLocaleString() || '0'} change="+8.1%" changeType="increase" icon={Users} />
                         <StatCard loading={isPending} title="Tempo Médio de Resposta" value={analyticsData?.avgFirstResponseTime || 'N/A'} change="-5.6%" changeType="decrease" icon={Clock} />
                         <StatCard loading={isPending} title="Taxa de Resolução (FCR)" value={`${analyticsData?.firstContactResolutionRate.toFixed(1) || '0.0'}%`} change="+1.2%" changeType="increase" icon={CheckCircle} />
                         <StatCard loading={isPending} title="CSAT" value={'94.2%'} change="+0.5%" changeType="increase" icon={Smile} />
@@ -279,7 +324,12 @@ export default function AnalyticsPage() {
                         <Card>
                             <CardHeader>
                                 <CardTitle>Performance dos Atendentes</CardTitle>
-                                <CardDescription>Ranking de performance da equipe de atendimento.</CardDescription>
+                                <CardDescription>
+                                    {selectedTeamId === 'all' 
+                                        ? "Ranking de performance da equipe de atendimento."
+                                        : `Ranking da equipe: ${teams.find(t => t.id === selectedTeamId)?.name}`
+                                    }
+                                </CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <AgentPerformanceTable performance={agentPerformance} loading={isPending} />
