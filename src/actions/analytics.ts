@@ -18,12 +18,27 @@ const addFilters = (
 
     const addCondition = (condition: string) => {
         if (whereClauseExists) {
-            newQuery = newQuery.replace(' WHERE ', ` WHERE ${condition} AND `);
+            newQuery += ` AND ${condition}`;
         } else {
             newQuery += ` WHERE ${condition}`;
             whereClauseExists = true;
         }
     };
+    
+    // Ensure the base query has a WHERE clause if needed for subsequent ANDs
+    if (!whereClauseExists && (teamId || agentId)) {
+        const fromIndex = newQuery.toUpperCase().indexOf(' FROM ');
+        if (fromIndex !== -1) {
+             const tableAliasMatch = newQuery.substring(fromIndex).match(/\s+FROM\s+\w+\s+(\w+)/i);
+             const tableAlias = tableAliasMatch ? tableAliasMatch[1] : 'c'; // Default to 'c'
+             const baseWhere = `${tableAlias}.workspace_id = $1`;
+             if (!newQuery.toUpperCase().includes('WHERE')) {
+                 newQuery += ` WHERE ${baseWhere}`
+                 whereClauseExists = true;
+             }
+        }
+    }
+
 
     if (agentId) {
         addCondition(`c.agent_id = $${newParams.length + 1}`);
