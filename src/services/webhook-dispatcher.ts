@@ -45,10 +45,15 @@ async function getWorkspaceName(workspaceId: string): Promise<string> {
 export async function dispatchMessageToWebhooks(
     chat: Chat, 
     message: Message,
-    instanceName: string,
+    instanceName: string
 ) {
     console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
     
+    if (!chat.workspace_id) {
+        console.error(`[WEBHOOK_DISPATCHER] Erro crítico: O objeto 'chat' não contém 'workspace_id'. Abortando.`);
+        return;
+    }
+
     const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
     
     if (agents.rowCount === 0) {
