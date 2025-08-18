@@ -38,6 +38,13 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
   const [showFullHistory, setShowFullHistory] = useState(true);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Use a ref to hold the current selected chat ID to avoid stale closures in interval
+  const selectedChatIdRef = useRef<string | null>(null);
+  useEffect(() => {
+      selectedChatIdRef.current = selectedChat?.id || null;
+  }, [selectedChat]);
+
+
    const handleSetSelectedChat = async (chat: Chat) => {
     setSelectedChat(chat);
     setShowFullHistory(true);
@@ -78,46 +85,40 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         const data = await res.json();
         if(data.success) {
             // After successful DB update, fetch the latest state to be sure
-            updateData();
+            updateData(chat.id);
         }
       }
     }
   };
   
-  const updateData = useCallback(async () => {
+  const updateData = useCallback(async (currentChatId: string | null) => {
     if (!currentUser.activeWorkspaceId) return;
 
     const latestChats = await fetchChatsForWorkspace(currentUser.activeWorkspaceId);
     setChats(latestChats);
 
-    // Update selected chat with latest data from the list
-    if (selectedChat) {
-      const updatedSelectedChat = latestChats.find(c => c.id === selectedChat.id);
+    // Update selected chat with latest data from the list, using the ID from the argument
+    if (currentChatId) {
+      const updatedSelectedChat = latestChats.find(c => c.id === currentChatId);
       if (updatedSelectedChat) {
         setSelectedChat(updatedSelectedChat);
+      } else {
+        // If the selected chat no longer exists (e.g., closed by another agent), deselect it.
+        setSelectedChat(null);
       }
     }
-
-}, [currentUser.activeWorkspaceId, selectedChat]);
+}, [currentUser.activeWorkspaceId]);
 
 
    useEffect(() => {
     const initialLoad = async () => {
         setChats(initialChats);
-        // We removed the logic that automatically selects a chat on load.
-        // The user must now explicitly click a chat to select it.
-        // This prevents the view from changing unexpectedly.
         
         if(currentUser.activeWorkspaceId){
             const tagsResult = await getTags(currentUser.activeWorkspaceId);
             if (!tagsResult.error && tagsResult.tags) {
                 setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
             }
-        }
-
-        if (currentUser.activeWorkspaceId) {
-            if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = setInterval(updateData, 1000); 
         }
     };
 
@@ -129,32 +130,46 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
         }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialChats, currentUser.activeWorkspaceId, currentUser.id]);
+  }, [initialChats, currentUser.activeWorkspaceId]);
+
+  // Separate effect for polling to handle dependencies correctly
+  useEffect(() => {
+     if (currentUser.activeWorkspaceId) {
+        if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        // Pass the ref's current value to the interval function
+        pollingIntervalRef.current = setInterval(() => updateData(selectedChatIdRef.current), 1000); 
+    }
+     return () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+        }
+    };
+  }, [currentUser.activeWorkspaceId, updateData]);
 
 
   return (
-    <div className="flex h-full flex-1 w-full min-h-0">
+    <div className="h-full flex-1 w-full min-h-0">
       <ChatList
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={currentUser}
-        onUpdate={updateData}
+        onUpdate={() => updateData(selectedChat?.id || null)}
       />
       <ChatPanel 
         key={selectedChat?.id} 
         chat={selectedChat} 
         messages={selectedChat?.messages || []} 
         currentUser={currentUser} 
-        onActionSuccess={updateData}
+        onActionSuccess={() => updateData(selectedChat?.id || null)}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
       <ContactPanel 
         chat={selectedChat} 
-        onTransferSuccess={updateData}
-        onContactUpdate={updateData}
+        onTransferSuccess={() => updateData(selectedChat?.id || null)}
+        onContactUpdate={() => updateData(selectedChat?.id || null)}
       />
     </div>
   );
