@@ -148,7 +148,7 @@ export default function CustomerChatLayout({ initialChats, currentUser }: Custom
 
 
   return (
-    <div className="h-full flex-1 w-full min-h-0">
+    <div className="h-full flex-1 w-full min-h-0 flex">
       <ChatList
         chats={chats}
         selectedChat={selectedChat}
