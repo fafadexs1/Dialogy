@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
@@ -209,6 +210,10 @@ export default function AnalyticsPage() {
   
   const conversationsByHour = analyticsData?.conversationsByHour || [];
 
+  const performanceToDisplay = selectedAgentId === 'all'
+    ? agentPerformance
+    : agentPerformance.filter(p => p.agent_id === selectedAgentId);
+
   return (
     <MainLayout>
         <div className="flex flex-col flex-1 h-full">
@@ -242,7 +247,7 @@ export default function AnalyticsPage() {
                             ))}
                         </SelectContent>
                     </Select>
-                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={selectedTeamId === 'all' && filteredMembers.length === 0}>
+                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={filteredMembers.length === 0}>
                         <SelectTrigger className="w-[220px]">
                             <Filter className='mr-2 h-4 w-4' />
                             <SelectValue placeholder="Filtrar por atendente" />
@@ -319,24 +324,29 @@ export default function AnalyticsPage() {
                     </Card>
                 </section>
                 
-                {selectedAgentId === 'all' && (
-                    <section>
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Performance dos Atendentes</CardTitle>
-                                <CardDescription>
-                                    {selectedTeamId === 'all' 
+                <section>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>
+                                {selectedAgentId !== 'all' 
+                                    ? `Performance de: ${allMembers.find(m => m.id === selectedAgentId)?.name}`
+                                    : `Performance dos Atendentes`
+                                }
+                            </CardTitle>
+                            <CardDescription>
+                                {selectedAgentId !== 'all' 
+                                    ? "Análise detalhada da performance individual."
+                                    : selectedTeamId === 'all' 
                                         ? "Ranking de performance da equipe de atendimento."
                                         : `Ranking da equipe: ${teams.find(t => t.id === selectedTeamId)?.name}`
-                                    }
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <AgentPerformanceTable performance={agentPerformance} loading={isPending} />
-                            </CardContent>
-                        </Card>
-                    </section>
-                )}
+                                }
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <AgentPerformanceTable performance={performanceToDisplay} loading={isPending} />
+                        </CardContent>
+                    </Card>
+                </section>
                 
                  <div className="grid md:grid-cols-2 gap-6">
                     <section>
