@@ -151,14 +151,19 @@ async function handleMessagesUpsert(payload: any) {
         workspaceId = workspace_id;
         apiConfig = { api_url, api_key };
 
-        // 2. Criar o contato (se não existir) e obter o ID
-        const contactRes = await client.query(
-            `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4)
-             ON CONFLICT (workspace_id, phone_number_jid) 
-             DO UPDATE SET name = EXCLUDED.name WHERE contacts.name IS NULL OR contacts.name = ''
-             RETURNING *`,
-            [workspaceId, pushName || contactPhone, contactPhone, contactJid]
+        // 2. Tentar encontrar o contato. Se não existir, criar um.
+        let contactRes = await client.query(
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+            [workspaceId, contactJid]
         );
+
+        if (contactRes.rowCount === 0) {
+            // Contato não existe, então criamos um novo.
+            contactRes = await client.query(
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid) VALUES ($1, $2, $3, $4) RETURNING *`,
+                [workspaceId, pushName || contactPhone, contactPhone, contactJid]
+            );
+        }
         
         if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         const contactData = contactRes.rows[0];
