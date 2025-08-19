@@ -17,13 +17,6 @@ import { ArrowRight, Loader2 } from 'lucide-react';
 import { CampaignSteps } from '../campaign-steps';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type LocalCampaignData = {
-  message: string;
-  instanceName: string;
-};
-
-const EMPTY_DATA: LocalCampaignData = { message: '', instanceName: '' };
-
 export default function CampaignMessagePage() {
   const user = useAuth();
   const router = useRouter();
@@ -32,8 +25,9 @@ export default function CampaignMessagePage() {
   const { campaignData, setCampaignData, clearCampaignData } = useCampaignState();
 
   // Estado local "espelho" para evitar ler propriedades de undefined
-  const [localData, setLocalData] = useState<LocalCampaignData>(EMPTY_DATA);
-
+  const [message, setMessage] = useState('');
+  const [instanceName, setInstanceName] = useState('');
+  
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -46,13 +40,10 @@ export default function CampaignMessagePage() {
   // Sincroniza o estado local quando a store estiver pronta
   useEffect(() => {
     if (isHydrated) {
-      setLocalData({
-        message: campaignData?.message ?? '',
-        instanceName: campaignData?.instanceName ?? '',
-      });
+      setMessage(campaignData?.message ?? '');
+      setInstanceName(campaignData?.instanceName ?? '');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHydrated, campaignData?.message, campaignData?.instanceName]);
+  }, [isHydrated, campaignData]);
 
   // Carrega instâncias
   useEffect(() => {
@@ -73,16 +64,18 @@ export default function CampaignMessagePage() {
     };
   }, [user?.activeWorkspaceId]);
 
-  const persist = useCallback(
-    (partial: Partial<LocalCampaignData>) => {
-      setLocalData((prev) => ({ ...prev, ...partial }));
-    },
-    []
-  );
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newMessage = e.target.value;
+    setMessage(newMessage);
+    setCampaignData((prev) => ({...prev, message: newMessage }));
+  };
+
+  const handleInstanceChange = (newInstance: string) => {
+    setInstanceName(newInstance);
+    setCampaignData((prev) => ({...prev, instanceName: newInstance }));
+  };
 
   const handleNext = () => {
-    // Garante que o estado mais recente do localData seja salvo na store antes de navegar
-    setCampaignData((prev) => ({ ...prev, ...localData }));
     router.push('/campaigns/new/audience');
   };
 
@@ -133,8 +126,8 @@ export default function CampaignMessagePage() {
                   <Label htmlFor="message">Mensagem da Campanha</Label>
                   <Textarea
                     id="message"
-                    value={localData.message}
-                    onChange={(e) => persist({ message: e.target.value })}
+                    value={message}
+                    onChange={handleMessageChange}
                     rows={6}
                     placeholder="Digite sua mensagem aqui... Use {{nome}} para personalizar com o nome do contato."
                   />
@@ -152,8 +145,8 @@ export default function CampaignMessagePage() {
                     </div>
                   ) : (
                     <Select
-                      value={localData.instanceName || undefined}
-                      onValueChange={(value) => persist({ instanceName: value })}
+                      value={instanceName || undefined}
+                      onValueChange={handleInstanceChange}
                     >
                       <SelectTrigger id="instance">
                         <SelectValue placeholder="Selecione a instância do WhatsApp" />
@@ -175,7 +168,7 @@ export default function CampaignMessagePage() {
               <Button variant="outline" onClick={handleCancel}>
                 Cancelar
               </Button>
-              <Button onClick={handleNext} disabled={!localData.message || !localData.instanceName}>
+              <Button onClick={handleNext} disabled={!message || !instanceName}>
                 Próximo Passo <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
