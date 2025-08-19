@@ -955,7 +955,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                         {filteredShortcuts.map(shortcut => (
                             <button
                                 key={shortcut.id}
-                                className="w-full text-left p-2 rounded hover:bg-accent"
+                                className="w-full text-left p-2 rounded hover:bg-accent text-sm"
                                 onClick={() => handleShortcutSelect(shortcut)}
                             >
                                 <span className="font-bold">/{shortcut.name}</span>
