@@ -15,6 +15,7 @@ import type { EvolutionInstance } from '@/lib/types';
 import { useAuth } from '@/hooks/use-auth';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { CampaignSteps } from '../campaign-steps';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function CampaignMessagePage() {
     const user = useAuth();
@@ -22,6 +23,13 @@ export default function CampaignMessagePage() {
     const { campaignData, setCampaignData, clearCampaignData } = useCampaignState();
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [loadingInstances, setLoadingInstances] = useState(true);
+    const [isHydrated, setIsHydrated] = useState(false);
+
+    useEffect(() => {
+        // Zustand's persist middleware rehydrates asynchronously.
+        // We use this effect to know when the state is ready to be used.
+        setIsHydrated(true);
+    }, []);
 
     useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -34,6 +42,22 @@ export default function CampaignMessagePage() {
     const handleNext = () => {
         router.push('/campaigns/new/audience');
     };
+
+    if (!isHydrated) {
+        return (
+             <MainLayout>
+                <div className="flex flex-col flex-1 h-full bg-muted/40">
+                    <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                        <Skeleton className="h-8 w-48" />
+                        <Skeleton className="h-4 w-72 mt-2" />
+                    </header>
+                    <div className="flex-1 p-4 sm:p-6 flex flex-col items-center">
+                        <Skeleton className="h-64 w-full max-w-4xl" />
+                    </div>
+                </div>
+            </MainLayout>
+        )
+    }
 
     return (
         <MainLayout>
