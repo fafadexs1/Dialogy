@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -20,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface CampaignContact extends Pick<Contact, 'id' | 'name' | 'phone_number_jid'> {}
 
@@ -33,20 +33,37 @@ export default function CampaignAudiencePage() {
     const [crmContacts, setCrmContacts] = useState<Contact[]>([]);
     const [loadingCrm, setLoadingCrm] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedCrmContactIds, setSelectedCrmContactIds] = useState<Set<string>>(new Set(
-        campaignData.contacts.filter(c => c.id.startsWith('crm-')).map(c => c.id.replace('crm-', ''))
-    ));
+    const [selectedCrmContactIds, setSelectedCrmContactIds] = useState<Set<string>>(new Set());
 
     // CSV Contacts
     const [csvContacts, setCsvContacts] = useState<CampaignContact[]>([]);
     const [csvFileName, setCsvFileName] = useState<string | null>(null);
     const [csvError, setCsvError] = useState<string | null>(null);
     
+    // Hydration state
+    const [isHydrated, setIsHydrated] = useState(false);
+
     useEffect(() => {
-        if (!campaignData.message || !campaignData.instanceName) {
+        setIsHydrated(true);
+    }, []);
+    
+    // Sync with Zustand store once hydrated
+    useEffect(() => {
+        if (isHydrated) {
+             const crmIds = new Set(
+                campaignData.contacts.filter(c => c.id.startsWith('crm-')).map(c => c.id.replace('crm-', ''))
+            );
+            const csvData = campaignData.contacts.filter(c => c.id.startsWith('csv-'));
+            setSelectedCrmContactIds(crmIds);
+            setCsvContacts(csvData);
+        }
+    }, [isHydrated, campaignData.contacts]);
+
+    useEffect(() => {
+        if (isHydrated && (!campaignData.message || !campaignData.instanceName)) {
             router.replace('/campaigns/new/message');
         }
-    }, [campaignData, router]);
+    }, [isHydrated, campaignData, router]);
 
     useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -132,6 +149,22 @@ export default function CampaignAudiencePage() {
     };
 
     const totalSelected = selectedCrmContactIds.size + csvContacts.length;
+    
+    if (!isHydrated) {
+        return (
+          <MainLayout>
+            <div className="flex flex-col flex-1 h-full bg-muted/40">
+              <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-72 mt-2" />
+              </header>
+              <div className="flex-1 p-4 sm:p-6 flex flex-col items-center">
+                <Skeleton className="h-80 w-full max-w-4xl" />
+              </div>
+            </div>
+          </MainLayout>
+        );
+    }
 
     return (
         <MainLayout>
