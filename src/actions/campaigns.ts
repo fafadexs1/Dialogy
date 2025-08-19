@@ -52,8 +52,6 @@ export async function createCampaign(
     workspaceId: string,
     instanceName: string,
     message: string,
-    // The contact IDs can now be prefixed with 'crm-' or 'csv-'.
-    // The backend doesn't need to know the source, just the contact data.
     contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const session = await getServerSession(authOptions);

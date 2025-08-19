@@ -11,9 +11,9 @@ interface CampaignContact {
 }
 
 interface CampaignState {
-    message: string;
-    instanceName: string;
-    contacts: CampaignContact[];
+    message?: string;
+    instanceName?: string;
+    contacts?: CampaignContact[];
 }
 
 interface CampaignActions {

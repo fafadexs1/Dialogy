@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -30,9 +29,6 @@ export default function CampaignAudiencePage() {
   const { campaignData, setCampaignData } = useCampaignState();
   const { toast } = useToast();
 
-  // ⚠️ Fallback seguro enquanto a store hidrata
-  const storeData = campaignData ?? { message: '', instanceName: '', contacts: [] as CampaignContact[] };
-
   // CRM Contacts
   const [crmContacts, setCrmContacts] = useState<Contact[]>([]);
   const [loadingCrm, setLoadingCrm] = useState(true);
@@ -51,29 +47,34 @@ export default function CampaignAudiencePage() {
     setIsHydrated(true);
   }, []);
 
-  // Sync com a store (somente depois de hidratar)
+  // Sincroniza seleção vinda da store (somente após hidratar)
   useEffect(() => {
     if (!isHydrated) return;
 
-    const contactsFromStore = Array.isArray(storeData.contacts) ? storeData.contacts : [];
+    const contactsFromStore: CampaignContact[] = (campaignData?.contacts ?? []) as any;
+
     const crmIds = new Set(
       contactsFromStore
         .filter((c) => typeof c.id === 'string' && c.id.startsWith('crm-'))
         .map((c) => c.id.replace('crm-', ''))
     );
-    const csvData = contactsFromStore.filter((c) => typeof c.id === 'string' && c.id.startsWith('csv-')) as CampaignContact[];
+
+    const csvData = contactsFromStore.filter(
+      (c) => typeof c.id === 'string' && c.id.startsWith('csv-')
+    ) as CampaignContact[];
 
     setSelectedCrmContactIds(crmIds);
     setCsvContacts(csvData);
-  }, [isHydrated, storeData.contacts]);
+    // dependemos de `campaignData` (objeto estável do Zustand) e do flag de hidratação
+  }, [isHydrated, campaignData]);
 
-  // Redireciona se o passo anterior não foi preenchido
+  // Redireciona se o passo anterior não foi preenchido (depois de hidratar)
   useEffect(() => {
     if (!isHydrated) return;
-    if (!storeData.message || !storeData.instanceName) {
+    if (!campaignData?.message || !campaignData?.instanceName) {
       router.replace('/campaigns/new/message');
     }
-  }, [isHydrated, storeData.message, storeData.instanceName, router]);
+  }, [isHydrated, campaignData, router]);
 
   // Carregar contatos do CRM
   useEffect(() => {
@@ -107,7 +108,7 @@ export default function CampaignAudiencePage() {
 
     const finalContacts: CampaignContact[] = [...crmSelection, ...csvContacts];
 
-    setCampaignData({ ...(campaignData ?? {}), contacts: finalContacts });
+    setCampaignData((prev) => ({ ...(prev ?? {}), contacts: finalContacts }));
     router.push('/campaigns/new/review');
   };
 
@@ -129,10 +130,10 @@ export default function CampaignAudiencePage() {
   const handleSelectCrmContact = (contactId: string, checked: boolean | 'indeterminate') => {
     const isChecked = checked === true;
     setSelectedCrmContactIds((prev) => {
-      const newSet = new Set(prev);
-      if (isChecked) newSet.add(contactId);
-      else newSet.delete(contactId);
-      return newSet;
+      const next = new Set(prev);
+      if (isChecked) next.add(contactId);
+      else next.delete(contactId);
+      return next;
     });
   };
 
@@ -187,10 +188,11 @@ export default function CampaignAudiencePage() {
   const isAllSelected = useMemo(() => {
     if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size === filteredCrmContacts.length;
-  }, [selectedCrmContactIds, filteredCrmContacts]);
-  
+  }, [selectedCrmContactIds.size, filteredCrmContacts.length]);
+
   const isSomeSelected = useMemo(() => {
-      return selectedCrmContactIds.size > 0 && !isAllSelected;
+    if (filteredCrmContacts.length === 0) return false;
+    return selectedCrmContactIds.size > 0 && !isAllSelected;
   }, [selectedCrmContactIds.size, isAllSelected]);
 
   if (!isHydrated) {
@@ -255,9 +257,8 @@ export default function CampaignAudiencePage() {
                       <div className="flex items-center space-x-2 p-2 border-b">
                         <Checkbox
                           id="select-all"
-                          checked={isAllSelected}
+                          checked={isAllSelected ? true : isSomeSelected ? 'indeterminate' : false}
                           onCheckedChange={handleSelectAllCrm}
-                          data-state={isSomeSelected ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
                         />
                         <Label htmlFor="select-all" className="font-medium">
                           Selecionar todos

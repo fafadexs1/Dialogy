@@ -22,31 +22,23 @@ export default function CampaignReviewPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        if (!campaignData.message || !campaignData.instanceName || campaignData.contacts.length === 0) {
+        if (!campaignData?.message || !campaignData?.instanceName || !campaignData?.contacts || campaignData.contacts.length === 0) {
             router.replace('/campaigns/new/message');
         }
     }, [campaignData, router]);
 
     const handleSendCampaign = async () => {
-        if (!user?.activeWorkspaceId) return;
+        if (!user?.activeWorkspaceId || !campaignData?.contacts) return;
         setIsSubmitting(true);
         
         // The names are used for personalization, the JID is the key.
         const contactsToSend = campaignData.contacts.map(c => ({
-            id: c.id, // For now we don't have a reliable way to get the real ID from CSV, but we need something.
+            id: c.id, 
             name: c.name,
             phone_number_jid: c.phone_number_jid
         }));
         
-        // This is a simplified version. A real implementation would create contacts if they don't exist.
-        // For now, we will assume contacts from CSV should just be sent. 
-        // We'll need a better way to map these to actual CRM contacts or create them.
-        
-        // A better approach would be to find existing contacts by JID and use their real IDs.
-        // Let's adapt `createCampaign` to handle this.
-        // For now, we'll just pass the JIDs and names. The backend should handle it.
-
-        const result = await createCampaign(user.activeWorkspaceId, campaignData.instanceName, campaignData.message, campaignData.contacts.map(c => c.id));
+        const result = await createCampaign(user.activeWorkspaceId, campaignData.instanceName, campaignData.message, contactsToSend);
         
         if (result.error) {
             toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
@@ -80,18 +72,18 @@ export default function CampaignReviewPage() {
                                 <div className="p-4 border rounded-lg space-y-4">
                                     <h3 className="font-semibold flex items-center gap-2"><MessageSquare className="h-5 w-5 text-primary"/> Mensagem</h3>
                                     <div className="p-3 bg-secondary/50 rounded-md text-sm text-muted-foreground whitespace-pre-wrap">
-                                        {campaignData.message}
+                                        {campaignData?.message}
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                      <div className="p-4 border rounded-lg space-y-2">
                                         <h3 className="font-semibold flex items-center gap-2"><Users className="h-5 w-5 text-primary"/> Destinatários</h3>
-                                        <p className="text-3xl font-bold">{campaignData.contacts.length}</p>
+                                        <p className="text-3xl font-bold">{campaignData?.contacts?.length || 0}</p>
                                         <p className="text-sm text-muted-foreground">contatos selecionados</p>
                                     </div>
                                     <div className="p-4 border rounded-lg space-y-2">
                                         <h3 className="font-semibold flex items-center gap-2"><Server className="h-5 w-5 text-primary"/> Instância de Envio</h3>
-                                        <p className="text-3xl font-bold">{campaignData.instanceName}</p>
+                                        <p className="text-3xl font-bold">{campaignData?.instanceName}</p>
                                         <p className="text-sm text-muted-foreground">será usada para os envios</p>
                                     </div>
                                 </div>
