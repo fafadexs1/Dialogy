@@ -75,7 +75,6 @@ export default function CampaignMessagePage() {
 
   const persist = useCallback(
     (partial: Partial<LocalCampaignData>) => {
-      // Atualiza local e store com segurança
       setLocalData((prev) => ({ ...prev, ...partial }));
     },
     []
