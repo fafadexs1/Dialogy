@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -36,7 +36,7 @@ import {
     EyeOff, 
     Clock
 } from 'lucide-react';
-import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance } from '@/lib/types';
+import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -52,6 +52,7 @@ import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
+import { getShortcuts } from '@/actions/shortcuts';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -360,6 +361,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   
   const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
   const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
+  const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
+  const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -389,9 +392,19 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     }
   }, [currentUser.activeWorkspaceId]);
 
+  const fetchShortcuts = useCallback(async () => {
+      if (!currentUser.activeWorkspaceId) return;
+      const data = await getShortcuts(currentUser.activeWorkspaceId);
+      if (!data.error) {
+          setShortcuts(data.shortcuts || []);
+      }
+  }, [currentUser.activeWorkspaceId]);
+
+
   useEffect(() => {
     fetchAutopilotData();
-  }, [fetchAutopilotData]);
+    fetchShortcuts();
+  }, [fetchAutopilotData, fetchShortcuts]);
 
   useEffect(() => {
     if (chat) {
@@ -738,6 +751,26 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         }
     }
 
+    const filteredShortcuts = useMemo(() => {
+        if (!showShortcutSuggestions) return [];
+        const command = newMessage.substring(newMessage.lastIndexOf('/') + 1).toLowerCase();
+        return shortcuts.filter(s => s.name.toLowerCase().startsWith(command));
+    }, [newMessage, shortcuts, showShortcutSuggestions]);
+
+    const handleMessageChange = (e: React.FormEvent<HTMLDivElement>) => {
+        const text = e.currentTarget.innerHTML;
+        setNewMessage(text);
+        setShowShortcutSuggestions(text.includes('/'));
+    }
+
+    const handleShortcutSelect = (shortcut: Shortcut) => {
+        if (contentEditableRef.current) {
+            contentEditableRef.current.innerHTML = shortcut.message;
+            setNewMessage(shortcut.message);
+            setShowShortcutSuggestions(false);
+        }
+    }
+
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
     const prevMessage = messagesToDisplay[index - 1];
@@ -917,6 +950,20 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
        {isChatOpen && isChatAssigned ? (
             <footer className="border-t bg-card p-4 flex-shrink-0">
+                 {showShortcutSuggestions && filteredShortcuts.length > 0 && (
+                    <div className="mb-2 p-2 border rounded-md bg-background max-h-40 overflow-y-auto">
+                        {filteredShortcuts.map(shortcut => (
+                            <button
+                                key={shortcut.id}
+                                className="w-full text-left p-2 rounded hover:bg-accent"
+                                onClick={() => handleShortcutSelect(shortcut)}
+                            >
+                                <span className="font-bold">/{shortcut.name}</span>
+                                <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
                 {mediaFiles.length > 0 && (
                     <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
                 )}
@@ -942,7 +989,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                         innerRef={contentEditableRef}
                                         html={newMessage}
                                         disabled={isAiTyping}
-                                        onChange={(e) => setNewMessage(e.target.value)}
+                                        onChange={handleMessageChange}
                                         className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
                                         tagName="div"
                                         onKeyUp={saveCursorPosition}

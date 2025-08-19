@@ -47,7 +47,8 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
     const userId = session.user.id;
 
     const id = formData.get('id') as string | null;
-    const name = (formData.get('name') as string)?.trim().replace(/^\//, ''); // Remove leading slash
+    // Garante que o nome seja salvo em minúsculas e sem a barra inicial
+    const name = (formData.get('name') as string)?.trim().replace(/^\//, '').toLowerCase(); 
     const message = formData.get('message') as string;
     const type = formData.get('type') as 'global' | 'private';
     const workspaceId = formData.get('workspaceId') as string;
