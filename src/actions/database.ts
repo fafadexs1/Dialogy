@@ -24,6 +24,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
       `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
       `CREATE TYPE public.shortcut_type_enum AS ENUM ('global', 'private');`,
+      `CREATE TYPE public.campaign_status_enum AS ENUM ('draft', 'sending', 'completed', 'paused', 'failed');`,
+      `CREATE TYPE public.campaign_recipient_status_enum AS ENUM ('pending', 'sent', 'failed');`
     ];
 
     for (const query of enumQueries) {
@@ -326,6 +328,29 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(workspace_id, name)
+      );`,
+      
+      `CREATE TABLE IF NOT EXISTS public.campaigns (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        created_by_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        instance_name TEXT NOT NULL,
+        status campaign_status_enum NOT NULL DEFAULT 'draft',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ
+      );`,
+
+      `CREATE TABLE IF NOT EXISTS public.campaign_recipients (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        campaign_id UUID NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
+        contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
+        status campaign_recipient_status_enum NOT NULL DEFAULT 'pending',
+        sent_at TIMESTAMPTZ,
+        error_message TEXT,
+        UNIQUE(campaign_id, contact_id)
       );`
     ];
     

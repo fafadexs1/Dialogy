@@ -381,3 +381,30 @@ export interface Shortcut {
   updated_at: string;
   user_name?: string; // Optional: for displaying the creator's name
 }
+
+export type CampaignStatus = 'draft' | 'sending' | 'completed' | 'paused' | 'failed';
+export type CampaignRecipientStatus = 'pending' | 'sent' | 'failed';
+
+export interface Campaign {
+  id: string;
+  workspace_id: string;
+  name: string;
+  message: string;
+  instance_name: string;
+  status: CampaignStatus;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  total_recipients?: number;
+  sent_recipients?: number;
+  progress?: number;
+}
+
+export interface CampaignRecipient {
+  id: string;
+  campaign_id: string;
+  contact_id: string;
+  status: CampaignRecipientStatus;
+  sent_at?: string;
+  error_message?: string;
+}

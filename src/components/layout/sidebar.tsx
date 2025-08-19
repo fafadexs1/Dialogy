@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   Fingerprint,
   Rocket,
+  Send,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -48,6 +49,7 @@ interface SidebarProps {
 const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
+  { href: '/campaigns', icon: Send, label: 'Campanhas' },
   // A automação agora será um Dropdown separado
   // { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },

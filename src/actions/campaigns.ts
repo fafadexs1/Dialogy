@@ -1,0 +1,178 @@
+
+'use server';
+
+import { db } from '@/lib/db';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { revalidatePath } from 'next/cache';
+import type { Campaign, CampaignRecipient, Contact } from '@/lib/types';
+import { sendAutomatedMessageAction } from './messages';
+
+async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
+    const res = await db.query(`
+        SELECT 1
+        FROM user_workspace_roles uwr
+        JOIN role_permissions rp ON uwr.role_id = rp.role_id
+        WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND rp.permission_id = $3
+    `, [userId, workspaceId, permission]);
+    // For now, let's assume if they are part of the workspace, they can manage campaigns.
+    // Replace with a real permission like 'campaigns:manage' later.
+    return res.rowCount > 0;
+}
+
+
+export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { campaigns: null, error: "Usuário não autenticado." };
+
+    try {
+        const res = await db.query(`
+            SELECT 
+                c.*,
+                (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id) as total_recipients,
+                (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status = 'sent') as sent_recipients
+            FROM campaigns c
+            WHERE c.workspace_id = $1
+            ORDER BY c.created_at DESC
+        `, [workspaceId]);
+
+        const campaigns: Campaign[] = res.rows.map(row => ({
+            ...row,
+            progress: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0
+        }));
+
+        return { campaigns };
+    } catch (error) {
+        console.error('[GET_CAMPAIGNS_ACTION]', error);
+        return { campaigns: null, error: 'Falha ao buscar campanhas.' };
+    }
+}
+
+export async function createCampaign(
+    workspaceId: string,
+    instanceName: string,
+    message: string,
+    contactIds: string[]
+): Promise<{ campaign: Campaign | null, error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { campaign: null, error: "Usuário não autenticado." };
+    
+    if (!workspaceId || !instanceName || !message || contactIds.length === 0) {
+        return { campaign: null, error: 'Dados da campanha incompletos.' };
+    }
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Create the campaign
+        const campaignRes = await client.query(
+            `INSERT INTO campaigns (workspace_id, created_by_id, name, message, instance_name, status)
+             VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING *`,
+            [workspaceId, session.user.id, `Campanha ${new Date().toLocaleString()}`, message, instanceName]
+        );
+        const newCampaign = campaignRes.rows[0];
+
+        // 2. Add recipients
+        const recipientValues = contactIds.map(contactId => `('${newCampaign.id}', '${contactId}')`).join(',');
+        await client.query(
+            `INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES ${recipientValues}`
+        );
+
+        await client.query('COMMIT');
+        
+        revalidatePath('/campaigns');
+
+        // Start sending process in the background, don't await it
+        startCampaignSending(newCampaign.id);
+
+        return { campaign: newCampaign };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[CREATE_CAMPAIGN_ACTION]', error);
+        return { campaign: null, error: 'Falha ao criar a campanha no banco de dados.' };
+    } finally {
+        client.release();
+    }
+}
+
+async function startCampaignSending(campaignId: string) {
+    const client = await db.connect();
+    try {
+        console.log(`[CAMPAIGN_WORKER] Iniciando envio para a campanha ${campaignId}`);
+        
+        await client.query("UPDATE campaigns SET status = 'sending', started_at = NOW() WHERE id = $1", [campaignId]);
+
+        const recipientsRes = await client.query(
+            `SELECT cr.id as recipient_id, c.id as contact_id, c.phone_number_jid, cam.message, cam.instance_name, cam.workspace_id
+             FROM campaign_recipients cr
+             JOIN contacts c ON cr.contact_id = c.id
+             JOIN campaigns cam ON cr.campaign_id = cam.id
+             WHERE cr.campaign_id = $1 AND cr.status = 'pending'`,
+            [campaignId]
+        );
+        
+        const recipients = recipientsRes.rows;
+        console.log(`[CAMPAIGN_WORKER] Encontrados ${recipients.length} destinatários pendentes.`);
+        
+        for (const recipient of recipients) {
+            let messageStatus: 'sent' | 'failed' = 'sent';
+            let errorMessage: string | null = null;
+            
+            try {
+                // Find or create a chat for the contact to send the message
+                let chatRes = await client.query(
+                    `SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2 AND status IN ('gerais', 'atendimentos') LIMIT 1`,
+                    [recipient.contact_id, recipient.workspace_id]
+                );
+
+                let chatId;
+                if (chatRes.rowCount > 0) {
+                    chatId = chatRes.rows[0].id;
+                } else {
+                    const newChatRes = await client.query(
+                        `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
+                        [recipient.workspace_id, recipient.contact_id]
+                    );
+                    chatId = newChatRes.rows[0].id;
+                }
+                
+                // Use a generic system agent ID for now. This could be improved.
+                const systemAgentId = '00000000-0000-0000-0000-000000000000'; 
+                const result = await sendAutomatedMessageAction(chatId, recipient.message, systemAgentId, true, recipient.instance_name);
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Falha no envio da mensagem.');
+                }
+
+            } catch (err: any) {
+                messageStatus = 'failed';
+                errorMessage = err.message;
+                console.error(`[CAMPAIGN_WORKER] Falha ao enviar para ${recipient.phone_number_jid}:`, err.message);
+            }
+
+            // Update recipient status
+            await client.query(
+                `UPDATE campaign_recipients SET status = $1, error_message = $2, sent_at = CASE WHEN $1 = 'sent' THEN NOW() ELSE NULL END WHERE id = $3`,
+                [messageStatus, errorMessage, recipient.recipient_id]
+            );
+            
+            // Revalidate path after each send to provide real-time feedback
+            revalidatePath('/campaigns');
+            
+            // Add a small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        
+        await client.query("UPDATE campaigns SET status = 'completed', completed_at = NOW() WHERE id = $1", [campaignId]);
+        revalidatePath('/campaigns');
+        console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída.`);
+
+    } catch (error) {
+         console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
+         await client.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
+    } finally {
+        client.release();
+    }
+}
