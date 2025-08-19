@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -183,6 +184,15 @@ export default function CampaignAudiencePage() {
 
   const totalSelected = selectedCrmContactIds.size + csvContacts.length;
 
+  const isAllSelected = useMemo(() => {
+    if (filteredCrmContacts.length === 0) return false;
+    return selectedCrmContactIds.size === filteredCrmContacts.length;
+  }, [selectedCrmContactIds, filteredCrmContacts]);
+  
+  const isSomeSelected = useMemo(() => {
+      return selectedCrmContactIds.size > 0 && !isAllSelected;
+  }, [selectedCrmContactIds, isAllSelected]);
+
   if (!isHydrated) {
     return (
       <MainLayout>
@@ -245,11 +255,9 @@ export default function CampaignAudiencePage() {
                       <div className="flex items-center space-x-2 p-2 border-b">
                         <Checkbox
                           id="select-all"
-                          checked={
-                            filteredCrmContacts.length > 0 &&
-                            selectedCrmContactIds.size === filteredCrmContacts.length
-                          }
+                          checked={isAllSelected || isSomeSelected}
                           onCheckedChange={handleSelectAllCrm}
+                          data-state={isSomeSelected ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
                         />
                         <Label htmlFor="select-all" className="font-medium">
                           Selecionar todos
