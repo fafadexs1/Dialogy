@@ -191,7 +191,7 @@ export default function CampaignAudiencePage() {
   
   const isSomeSelected = useMemo(() => {
       return selectedCrmContactIds.size > 0 && !isAllSelected;
-  }, [selectedCrmContactIds, isAllSelected]);
+  }, [selectedCrmContactIds.size, isAllSelected]);
 
   if (!isHydrated) {
     return (
@@ -255,7 +255,7 @@ export default function CampaignAudiencePage() {
                       <div className="flex items-center space-x-2 p-2 border-b">
                         <Checkbox
                           id="select-all"
-                          checked={isAllSelected || isSomeSelected}
+                          checked={isAllSelected}
                           onCheckedChange={handleSelectAllCrm}
                           data-state={isSomeSelected ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
                         />
