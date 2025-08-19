@@ -17,7 +17,7 @@ interface CampaignState {
 }
 
 interface CampaignActions {
-    setCampaignData: (data: Partial<CampaignState>) => void;
+    setCampaignData: (updater: (state: CampaignState) => Partial<CampaignState>) => void;
     clearCampaignData: () => void;
 }
 
@@ -31,7 +31,7 @@ export const useCampaignState = create<CampaignState & CampaignActions>()(
     persist(
         (set) => ({
             ...initialState,
-            setCampaignData: (data) => set((state) => ({ ...state, ...data })),
+            setCampaignData: (updater) => set((state) => ({ ...state, ...updater(state) })),
             clearCampaignData: () => {
                 set(initialState);
                 // Also clear from localStorage directly
