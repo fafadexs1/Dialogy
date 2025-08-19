@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -7,30 +6,14 @@ import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Loader2, PlusCircle, Send, FileText, Users, MessageSquare, CheckCircle, AlertTriangle, XCircle, Clock, Search } from 'lucide-react';
-import { getCampaigns, createCampaign } from '@/actions/campaigns';
-import { getContacts } from '@/actions/crm';
-import { getEvolutionApiInstances } from '@/actions/evolution-api';
-import type { Campaign, Contact, EvolutionInstance } from '@/lib/types';
+import { Loader2, PlusCircle, Send, FileText, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { getCampaigns } from '@/actions/campaigns';
+import type { Campaign } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
+import Link from 'next/link';
 
 const statusConfig = {
     draft: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, color: 'bg-gray-400' },
@@ -40,164 +23,6 @@ const statusConfig = {
     failed: { label: 'Falhou', icon: <XCircle className="h-4 w-4" />, color: 'bg-red-500' },
 };
 
-
-function CreateCampaignDialog() {
-  const user = useAuth();
-  const { toast } = useToast();
-  const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState(1);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Step 1 state
-  const [message, setMessage] = useState('');
-  const [instanceName, setInstanceName] = useState('');
-  const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
-
-  // Step 2 state
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
-  const [searchTerm, setSearchTerm] = useState('');
-
-  useEffect(() => {
-    if (isOpen && user?.activeWorkspaceId) {
-      getEvolutionApiInstances(user.activeWorkspaceId).then(setInstances);
-      getContacts(user.activeWorkspaceId).then(res => setContacts(res.contacts || []));
-    }
-  }, [isOpen, user?.activeWorkspaceId]);
-
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const allIds = new Set(filteredContacts.map(c => c.id));
-      setSelectedContactIds(allIds);
-    } else {
-      setSelectedContactIds(new Set());
-    }
-  };
-
-  const handleSelectContact = (contactId: string, checked: boolean) => {
-    setSelectedContactIds(prev => {
-      const newSet = new Set(prev);
-      if (checked) {
-        newSet.add(contactId);
-      } else {
-        newSet.delete(contactId);
-      }
-      return newSet;
-    });
-  };
-  
-  const handleCreateCampaign = async () => {
-    if (!user?.activeWorkspaceId) return;
-    setIsLoading(true);
-    const result = await createCampaign(user.activeWorkspaceId, instanceName, message, Array.from(selectedContactIds));
-
-    if (result.error) {
-        toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
-    } else {
-        toast({ title: 'Campanha criada e em andamento!', description: 'O envio foi iniciado em segundo plano.' });
-        setIsOpen(false);
-        // Reset state
-        setStep(1);
-        setMessage('');
-        setInstanceName('');
-        setSelectedContactIds(new Set());
-    }
-    setIsLoading(false);
-  }
-
-  const filteredContacts = contacts.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
-
-  return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button>
-          <PlusCircle className="mr-2 h-4 w-4" /> Criar Campanha
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Nova Campanha de Mensagens em Massa</DialogTitle>
-          <DialogDescription>
-            Envie uma mensagem para múltiplos contatos do seu CRM. Passo {step} de 2.
-          </DialogDescription>
-        </DialogHeader>
-
-        {step === 1 && (
-            <div className="py-4 space-y-4">
-                <div className="space-y-2">
-                    <Label htmlFor="message">Mensagem</Label>
-                    <Textarea id="message" value={message} onChange={e => setMessage(e.target.value)} rows={5} placeholder="Digite sua mensagem aqui... Use {{nome}} para personalizar com o nome do contato."/>
-                </div>
-                 <div className="space-y-2">
-                    <Label htmlFor="instance">Instância de Envio</Label>
-                    <Select value={instanceName} onValueChange={setInstanceName}>
-                        <SelectTrigger id="instance">
-                            <SelectValue placeholder="Selecione a instância do WhatsApp" />
-                        </SelectTrigger>
-                        <SelectContent>
-                           {instances.map(inst => <SelectItem key={inst.id} value={inst.name}>{inst.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-            </div>
-        )}
-        
-        {step === 2 && (
-             <div className="py-4 space-y-4">
-                <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Buscar contato..." className="pl-8" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                </div>
-                <div className="flex items-center space-x-2 p-2 border-b">
-                    <Checkbox
-                        id="select-all"
-                        checked={selectedContactIds.size === filteredContacts.length && filteredContacts.length > 0}
-                        onCheckedChange={handleSelectAll}
-                    />
-                    <Label htmlFor="select-all" className="font-medium">Selecionar todos</Label>
-                </div>
-                <ScrollArea className="h-64">
-                    <div className="space-y-1 p-1">
-                        {filteredContacts.map(contact => (
-                            <div key={contact.id} className="flex items-center space-x-3 p-2 rounded-md hover:bg-accent">
-                                <Checkbox
-                                    id={`contact-${contact.id}`}
-                                    checked={selectedContactIds.has(contact.id)}
-                                    onCheckedChange={(checked) => handleSelectContact(contact.id, !!checked)}
-                                />
-                                <Label htmlFor={`contact-${contact.id}`} className="flex items-center gap-2 font-normal cursor-pointer">
-                                    <span className="font-medium">{contact.name}</span>
-                                    <span className="text-muted-foreground">{contact.phone_number_jid}</span>
-                                </Label>
-                            </div>
-                        ))}
-                    </div>
-                </ScrollArea>
-                 <p className="text-sm text-muted-foreground">{selectedContactIds.size} contato(s) selecionado(s).</p>
-             </div>
-        )}
-
-
-        <DialogFooter>
-            {step === 1 ? (
-                <>
-                  <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
-                  <Button onClick={() => setStep(2)} disabled={!message || !instanceName}>Avançar</Button>
-                </>
-            ) : (
-                 <>
-                  <Button variant="outline" onClick={() => setStep(1)}>Voltar</Button>
-                  <Button onClick={handleCreateCampaign} disabled={selectedContactIds.size === 0 || isLoading}>
-                    {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Enviar Campanha
-                  </Button>
-                </>
-            )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 export default function CampaignsPage() {
   const user = useAuth();
@@ -245,7 +70,11 @@ export default function CampaignsPage() {
             <h1 className="text-2xl font-bold flex items-center gap-2"><Send /> Campanhas</h1>
             <p className="text-muted-foreground">Envie mensagens em massa e acompanhe o progresso.</p>
           </div>
-          <CreateCampaignDialog />
+          <Button asChild>
+            <Link href="/campaigns/new/message">
+                <PlusCircle className="mr-2 h-4 w-4" /> Criar Campanha
+            </Link>
+          </Button>
         </header>
         <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
           {loading ? (

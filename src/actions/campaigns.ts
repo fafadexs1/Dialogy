@@ -52,12 +52,14 @@ export async function createCampaign(
     workspaceId: string,
     instanceName: string,
     message: string,
-    contactIds: string[]
+    // The contact IDs can now be prefixed with 'crm-' or 'csv-'.
+    // The backend doesn't need to know the source, just the contact data.
+    contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return { campaign: null, error: "Usuário não autenticado." };
     
-    if (!workspaceId || !instanceName || !message || contactIds.length === 0) {
+    if (!workspaceId || !instanceName || !message || contactIdentifiers.length === 0) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
     }
 
@@ -73,11 +75,52 @@ export async function createCampaign(
         );
         const newCampaign = campaignRes.rows[0];
 
-        // 2. Add recipients
-        const recipientValues = contactIds.map(contactId => `('${newCampaign.id}', '${contactId}')`).join(',');
-        await client.query(
-            `INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES ${recipientValues}`
-        );
+        // 2. Resolve contacts and add recipients
+        const crmContactIds = contactIdentifiers
+            .filter(c => c.id.startsWith('crm-'))
+            .map(c => c.id.replace('crm-', ''));
+            
+        const csvContactsData = contactIdentifiers
+            .filter(c => c.id.startsWith('csv-'));
+
+        let allContactIdsForCampaign: string[] = [];
+
+        // Add existing CRM contacts
+        if (crmContactIds.length > 0) {
+            allContactIdsForCampaign.push(...crmContactIds);
+        }
+        
+        // Handle CSV contacts: find existing by JID or create new ones
+        for (const csvContact of csvContactsData) {
+            if (!csvContact.phone_number_jid) continue; // Skip if no number
+            
+            let contactId;
+            const existingContactRes = await client.query(
+                `SELECT id FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2`,
+                [workspaceId, csvContact.phone_number_jid]
+            );
+
+            if (existingContactRes.rowCount > 0) {
+                contactId = existingContactRes.rows[0].id;
+            } else {
+                const newContactRes = await client.query(
+                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
+                    [workspaceId, csvContact.name, csvContact.phone_number_jid]
+                );
+                contactId = newContactRes.rows[0].id;
+            }
+            allContactIdsForCampaign.push(contactId);
+        }
+
+        // Remove duplicates and add to recipients table
+        const uniqueContactIds = [...new Set(allContactIdsForCampaign)];
+        if(uniqueContactIds.length > 0) {
+            const recipientValues = uniqueContactIds.map(contactId => `('${newCampaign.id}', '${contactId}')`).join(',');
+            await client.query(
+                `INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES ${recipientValues}`
+            );
+        }
+
 
         await client.query('COMMIT');
         
@@ -105,7 +148,7 @@ async function startCampaignSending(campaignId: string) {
         await client.query("UPDATE campaigns SET status = 'sending', started_at = NOW() WHERE id = $1", [campaignId]);
 
         const recipientsRes = await client.query(
-            `SELECT cr.id as recipient_id, c.id as contact_id, c.phone_number_jid, cam.message, cam.instance_name, cam.workspace_id
+            `SELECT cr.id as recipient_id, c.id as contact_id, c.name as contact_name, c.phone_number_jid, cam.message, cam.instance_name, cam.workspace_id
              FROM campaign_recipients cr
              JOIN contacts c ON cr.contact_id = c.id
              JOIN campaigns cam ON cr.campaign_id = cam.id
@@ -138,9 +181,12 @@ async function startCampaignSending(campaignId: string) {
                     chatId = newChatRes.rows[0].id;
                 }
                 
+                // Personalize message
+                const personalizedMessage = recipient.message.replace(/{{nome}}/gi, recipient.contact_name);
+
                 // Use a generic system agent ID for now. This could be improved.
                 const systemAgentId = '00000000-0000-0000-0000-000000000000'; 
-                const result = await sendAutomatedMessageAction(chatId, recipient.message, systemAgentId, true, recipient.instance_name);
+                const result = await sendAutomatedMessageAction(chatId, personalizedMessage, systemAgentId, true, recipient.instance_name);
 
                 if (!result.success) {
                     throw new Error(result.error || 'Falha no envio da mensagem.');

@@ -285,6 +285,7 @@ export interface EvolutionInstance {
     type: 'baileys' | 'wa_cloud';
     config_id: string;
     qrCode?: string;
+    webhook_url?: string;
 }
 
 export interface EvolutionInstanceCreationPayload {
