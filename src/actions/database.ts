@@ -23,6 +23,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       `CREATE TYPE public.message_status_enum AS ENUM ('default', 'deleted');`,
       `CREATE TYPE public.activity_type_enum AS ENUM ('ligacao', 'email', 'whatsapp', 'visita', 'viabilidade', 'contrato', 'agendamento', 'tentativa-contato', 'nota');`,
       `CREATE TYPE public.custom_field_type_enum AS ENUM ('text', 'number', 'date', 'email', 'tel', 'select');`,
+      `CREATE TYPE public.shortcut_type_enum AS ENUM ('global', 'private');`,
     ];
 
     for (const query of enumQueries) {
@@ -314,6 +315,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         created_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(workspace_id, name)
       );`,
+
+      `CREATE TABLE IF NOT EXISTS public.shortcuts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        type shortcut_type_enum NOT NULL DEFAULT 'private',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(workspace_id, name)
+      );`
     ];
     
     // Executa as queries de criação de tabela.

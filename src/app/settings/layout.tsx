@@ -1,8 +1,9 @@
+
 'use client';
 
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, User, Building, Shield, PlusCircle } from 'lucide-react';
+import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,7 @@ import { Button } from '@/components/ui/button';
 const settingsNavItems = [
     { href: '/settings/profile', label: 'Perfil', icon: User },
     { href: '/settings/workspace', label: 'Workspace', icon: Building },
+    { href: '/settings/shortcuts', label: 'Atalhos', icon: MessageSquareQuote },
     { href: '/settings/security', label: 'Segurança', icon: Shield },
 ]
 

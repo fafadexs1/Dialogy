@@ -369,3 +369,15 @@ export interface AgentPerformance {
     avg_first_response_time: string | null;
     avg_rating: string | null; // Mocked for now
 }
+
+export interface Shortcut {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  message: string;
+  type: 'global' | 'private';
+  created_at: string;
+  updated_at: string;
+  user_name?: string; // Optional: for displaying the creator's name
+}
