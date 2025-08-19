@@ -139,7 +139,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             {/* nome pode ser enorme/sem espaços -> min-w-0 + truncate */}
-            <p className="font-semibold truncate break-all">{chat.contact.name}</p>
+            <p className="font-semibold truncate break-all" title={chat.contact.name}>
+                {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
+            </p>
 
             {chat.tag && chat.color && (
               <Badge
