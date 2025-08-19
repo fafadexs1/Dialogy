@@ -151,7 +151,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                      <div className="flex items-center gap-2 truncate">
                         <p className="font-semibold truncate">{chat.contact.name}</p>
                          {chat.tag && chat.color && (
-                            <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent text-xs px-2 py-0.5">
+                            <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent text-xs px-2 py-0.5 flex-shrink-0">
                                 {chat.tag}
                             </Badge>
                         )}
@@ -169,7 +169,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     )}
                 </div>
                  <div className="flex items-center justify-between mt-0.5">
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 truncate">
                         {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
                     </div>
                     {chat.unreadCount && chat.unreadCount > 0 ? (
