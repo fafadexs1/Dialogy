@@ -77,18 +77,19 @@ export default function CampaignMessagePage() {
     (partial: Partial<LocalCampaignData>) => {
       // Atualiza local e store com segurança
       setLocalData((prev) => ({ ...prev, ...partial }));
-      setCampaignData((prev) => ({ ...prev, ...partial }));
     },
-    [setCampaignData]
+    []
   );
 
   const handleNext = () => {
+    // Garante que o estado mais recente do localData seja salvo na store antes de navegar
+    setCampaignData((prev) => ({ ...prev, ...localData }));
     router.push('/campaigns/new/audience');
   };
 
   const handleCancel = () => {
     clearCampaignData();
-    setLocalData(EMPTY_DATA);
+    router.push('/campaigns');
   };
 
   // Skeleton enquanto não hidratou (evita qualquer acesso prematuro)
