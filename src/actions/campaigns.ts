@@ -157,6 +157,7 @@ async function startCampaignSending(campaignId: string) {
         const recipients = recipientsRes.rows;
         console.log(`[CAMPAIGN_WORKER] Encontrados ${recipients.length} destinatários pendentes.`);
         
+        let hasFailures = false;
         for (const recipient of recipients) {
             let messageStatus: 'sent' | 'failed' = 'sent';
             let errorMessage: string | null = null;
@@ -193,6 +194,7 @@ async function startCampaignSending(campaignId: string) {
             } catch (err: any) {
                 messageStatus = 'failed';
                 errorMessage = err.message;
+                hasFailures = true;
                 console.error(`[CAMPAIGN_WORKER] Falha ao enviar para ${recipient.phone_number_jid}:`, err.message);
             }
 
@@ -209,9 +211,10 @@ async function startCampaignSending(campaignId: string) {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
-        await client.query("UPDATE campaigns SET status = 'completed', completed_at = NOW() WHERE id = $1", [campaignId]);
+        const finalStatus = hasFailures ? 'failed' : 'completed';
+        await client.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $1", [finalStatus, campaignId]);
         revalidatePath('/campaigns');
-        console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída.`);
+        console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída com status: ${finalStatus}.`);
 
     } catch (error) {
          console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
