@@ -31,7 +31,9 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
             SELECT 
                 c.*,
                 (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id) as total_recipients,
-                (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status = 'sent') as sent_recipients
+                (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status = 'sent') as sent_recipients,
+                'parallel' as channel,
+                c.updated_at as "lastUpdate"
             FROM campaigns c
             WHERE c.workspace_id = $1
             ORDER BY c.created_at DESC
@@ -39,7 +41,10 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
 
         const campaigns: Campaign[] = res.rows.map(row => ({
             ...row,
-            progress: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0
+            progress: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
+            recipients: row.total_recipients,
+            state: row.status,
+            deliveredPct: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
         }));
 
         return { campaigns };
@@ -259,6 +264,39 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
         await client.query('ROLLBACK');
         console.error('[DELETE_CAMPAIGN_ACTION]', error);
         return { success: false, error: 'Falha ao excluir a campanha no banco de dados.' };
+    } finally {
+        client.release();
+    }
+}
+
+export async function deleteCampaigns(campaignIds: string[]): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    const client = await db.connect();
+    try {
+        const campaignRes = await client.query('SELECT workspace_id FROM campaigns WHERE id = $1', [campaignIds[0]]);
+        if (campaignRes.rowCount === 0) {
+            return { success: false, error: 'Campanha não encontrada.' };
+        }
+        const { workspace_id } = campaignRes.rows[0];
+
+        // Permission check
+        if (!await hasPermission(session.user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+            return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
+        }
+
+        await client.query('BEGIN');
+        await client.query('DELETE FROM campaign_recipients WHERE campaign_id = ANY($1::uuid[])', [campaignIds]);
+        await client.query('DELETE FROM campaigns WHERE id = ANY($1::uuid[])', [campaignIds]);
+        await client.query('COMMIT');
+        
+        revalidatePath('/campaigns');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[DELETE_CAMPAIGNS_ACTION]', error);
+        return { success: false, error: 'Falha ao excluir as campanhas no banco de dados.' };
     } finally {
         client.release();
     }

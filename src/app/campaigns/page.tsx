@@ -40,7 +40,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
 import { useAuth } from "@/hooks/use-auth";
-import { getCampaigns, deleteCampaign } from "@/actions/campaigns";
+import { getCampaigns, deleteCampaign, deleteCampaigns } from "@/actions/campaigns";
 import type { Campaign } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -85,7 +85,7 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
     api: { name: "WhatsApp API Oficial", className: "bg-purple-500" },
   }
   // Fallback to parallel if channel is not defined
-  const current = channelInfo[channel] || channelInfo.parallel;
+  const current = channelInfo[channel || 'parallel'];
 
   return (
     <div className="inline-flex items-center gap-2 text-xs rounded-full border px-2.5 py-1 bg-background">
@@ -113,8 +113,7 @@ export default function CampaignsPage() {
     if (result.error) {
         toast({ title: 'Erro ao buscar campanhas', description: result.error, variant: 'destructive'});
     } else {
-        const campaignsWithChannel = (result.campaigns || []).map(c => ({...c, channel: 'parallel' as const}));
-        setCampaigns(campaignsWithChannel);
+        setCampaigns(result.campaigns || []);
     }
     setLoading(false);
   }, [user?.activeWorkspaceId, toast]);
@@ -145,8 +144,20 @@ export default function CampaignsPage() {
     } else {
         toast({ title: "Campanha excluída com sucesso!" });
         fetchCampaigns(); // Re-fetch the list
+        setSelected([]);
     }
   }
+  
+  const handleDeleteMultipleCampaigns = async () => {
+    const result = await deleteCampaigns(selected);
+    if (result.error) {
+        toast({ title: "Erro ao excluir campanhas", description: result.error, variant: "destructive" });
+    } else {
+        toast({ title: `${selected.length} campanhas excluídas com sucesso!` });
+        fetchCampaigns(); // Re-fetch the list
+        setSelected([]);
+    }
+  };
 
 
   if (!user) {
@@ -198,7 +209,7 @@ export default function CampaignsPage() {
                   <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="all">Todos</TabsTrigger>
                     <TabsTrigger value="parallel">Paralelo</TabsTrigger>
-                    <TabsTrigger value="api">API</TabsTrigger>
+                    <TabsTrigger value="api" disabled>API</TabsTrigger>
                   </TabsList>
                 </Tabs>
 
@@ -225,13 +236,29 @@ export default function CampaignsPage() {
                 <Separator />
 
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Dica: selecione várias campanhas para ações em lote.</p>
-                  {selected.length > 0 && (
+                   <p className="text-xs text-muted-foreground">Ações em lote:</p>
+                   {selected.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="secondary" className="gap-2"><Copy className="h-4 w-4"/>Duplicar</Button>
-                      <Button size="sm" variant="destructive" className="gap-2"><Trash2 className="h-4 w-4"/>Excluir</Button>
+                      <Button size="sm" variant="secondary" className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</Button>
+                      <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="destructive" className="gap-2"><Trash2 className="h-4 w-4"/>Excluir</Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Excluir {selected.length} campanhas?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Esta ação não pode ser desfeita. As campanhas selecionadas e seus históricos serão removidos permanentemente.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction onClick={handleDeleteMultipleCampaigns}>Excluir</AlertDialogAction>
+                              </AlertDialogFooter>
+                          </AlertDialogContent>
+                      </AlertDialog>
                     </div>
-                  )}
+                  ) : <p className="text-xs text-muted-foreground">Selecione uma ou mais campanhas para habilitar.</p>}
                 </div>
               </CardContent>
             </Card>
@@ -256,11 +283,11 @@ export default function CampaignsPage() {
                         aria-label="Selecionar todos"
                     />
                   </div>
-                  <div className="col-span-4">Nome</div>
+                  <div className="col-span-3">Nome</div>
                   <div className="col-span-2">Estado</div>
                   <div className="col-span-2">Destinatários</div>
                   <div className="col-span-2">Entrega</div>
-                  <div className="col-span-1 text-right">Ações</div>
+                  <div className="col-span-2 text-right">Ações</div>
                 </div>
 
                 {/* Rows */}
@@ -285,7 +312,7 @@ export default function CampaignsPage() {
                                 />
                             </div>
 
-                            <div className="col-span-4 flex flex-col items-start gap-1">
+                            <div className="col-span-3 flex flex-col items-start gap-1">
                                 <div className="font-medium leading-tight">{c.name}</div>
                                 <div className="flex items-center gap-3">
                                     <ChannelPill channel={c.channel} />
@@ -298,7 +325,7 @@ export default function CampaignsPage() {
                             </div>
 
                             <div className="col-span-2">
-                                <Badge variant="secondary" className="font-mono">{c.total_recipients} contato(s)</Badge>
+                                <Badge variant="secondary" className="font-mono">{c.recipients} contato(s)</Badge>
                             </div>
 
                             <div className="col-span-2">
@@ -308,7 +335,7 @@ export default function CampaignsPage() {
                                 </div>
                             </div>
 
-                            <div className="col-span-1">
+                            <div className="col-span-2">
                                 <div className="flex items-center justify-end gap-2">
                                  <AlertDialog>
                                     <DropdownMenu>
@@ -318,8 +345,8 @@ export default function CampaignsPage() {
                                         </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-44">
-                                            <DropdownMenuItem className="gap-2" disabled><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
-                                            <DropdownMenuItem className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
+                                            <DropdownMenuItem className="gap-2" ><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
+                                            <DropdownMenuItem className="gap-2" ><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
                                             <AlertDialogTrigger asChild>
                                                 <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600" onSelect={(e) => e.preventDefault()}>
                                                     <Trash2 className="h-4 w-4"/>Excluir
@@ -350,11 +377,8 @@ export default function CampaignsPage() {
                 {/* Footer */}
                 <div className="mt-4 flex items-center justify-between text-sm">
                   <div className="text-muted-foreground">
-                    <span className="font-medium">{selected.length}</span> selecionada(s)
+                    <span className="font-medium">{selected.length}</span> de {filtered.length} selecionada(s)
                   </div>
-                  <Button variant="outline" className="gap-2" disabled>
-                    Ações em lote <ChevronDown className="h-4 w-4" />
-                  </Button>
                 </div>
               </CardContent>
             </Card>
