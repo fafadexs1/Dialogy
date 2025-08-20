@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -47,7 +48,7 @@ export default function CampaignAudiencePage() {
     setIsHydrated(true);
   }, []);
 
-  // Sincroniza seleção vinda da store (somente após hidratar)
+  // Sincroniza seleção vinda da store (somente depois de hidratar)
   useEffect(() => {
     if (!isHydrated) return;
 
@@ -65,16 +66,8 @@ export default function CampaignAudiencePage() {
 
     setSelectedCrmContactIds(crmIds);
     setCsvContacts(csvData);
-    // dependemos de `campaignData` (objeto estável do Zustand) e do flag de hidratação
   }, [isHydrated, campaignData]);
 
-  // Redireciona se o passo anterior não foi preenchido (depois de hidratar)
-  useEffect(() => {
-    if (!isHydrated) return;
-    if (!campaignData?.message || !campaignData?.instanceName) {
-      router.replace('/campaigns/new/message');
-    }
-  }, [isHydrated, campaignData, router]);
 
   // Carregar contatos do CRM
   useEffect(() => {
@@ -82,6 +75,7 @@ export default function CampaignAudiencePage() {
     async function load() {
       try {
         if (user?.activeWorkspaceId) {
+          setLoadingCrm(true);
           const res = await getContacts(user.activeWorkspaceId);
           if (mounted) setCrmContacts(res.contacts || []);
         }
@@ -108,7 +102,7 @@ export default function CampaignAudiencePage() {
 
     const finalContacts: CampaignContact[] = [...crmSelection, ...csvContacts];
 
-    setCampaignData({ ...(campaignData ?? {}), contacts: finalContacts });
+    setCampaignData((prev) => ({ ...(prev ?? {}), contacts: finalContacts }));
     router.push('/campaigns/new/review');
   };
 
@@ -130,10 +124,10 @@ export default function CampaignAudiencePage() {
   const handleSelectCrmContact = (contactId: string, checked: boolean | 'indeterminate') => {
     const isChecked = checked === true;
     setSelectedCrmContactIds((prev) => {
-      const next = new Set(prev);
-      if (isChecked) next.add(contactId);
-      else next.delete(contactId);
-      return next;
+      const newSet = new Set(prev);
+      if (isChecked) newSet.add(contactId);
+      else newSet.delete(contactId);
+      return newSet;
     });
   };
 
@@ -188,11 +182,12 @@ export default function CampaignAudiencePage() {
   const isAllSelected = useMemo(() => {
     if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size === filteredCrmContacts.length;
-  }, [selectedCrmContactIds, filteredCrmContacts]);
+  }, [selectedCrmContactIds.size, filteredCrmContacts.length]);
 
   const isSomeSelected = useMemo(() => {
+    if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size > 0 && !isAllSelected;
-  }, [selectedCrmContactIds, isAllSelected]);
+  }, [selectedCrmContactIds.size, isAllSelected, filteredCrmContacts.length]);
 
   if (!isHydrated) {
     return (
