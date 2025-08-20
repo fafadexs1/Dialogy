@@ -73,6 +73,7 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
     parallel: { name: "WhatsApp Paralelo", className: "bg-sky-500" },
     api: { name: "WhatsApp API Oficial", className: "bg-purple-500" },
   }
+  // Fallback to parallel if channel is not defined
   const current = channelInfo[channel] || channelInfo.parallel;
 
   return (
@@ -138,7 +139,7 @@ export default function CampaignsPage() {
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/40">
       {/* Topbar */}
       <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold shadow-sm">
               <Send className="h-5 w-5"/>
@@ -162,7 +163,7 @@ export default function CampaignsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-6">
+      <main className="px-6 py-6">
         <div className="grid grid-cols-12 gap-6">
           {/* Sidebar */}
           <aside className="col-span-12 md:col-span-3">
@@ -226,14 +227,12 @@ export default function CampaignsPage() {
               <CardContent>
                 {/* Table header */}
                 <div className="grid grid-cols-12 items-center gap-4 border-y py-2 text-xs font-medium text-muted-foreground">
-                  <div className="col-span-1">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
+                  <div className="col-span-1 flex items-center">
+                    <Checkbox
                         checked={selected.length === filtered.length && filtered.length > 0}
                         onCheckedChange={(v) => toggleAll(Boolean(v))}
                         aria-label="Selecionar todos"
-                      />
-                    </div>
+                    />
                   </div>
                   <div className="col-span-4">Nome</div>
                   <div className="col-span-2">Estado</div>
@@ -256,55 +255,55 @@ export default function CampaignsPage() {
                     <ul className="divide-y">
                     {filtered.map((c) => (
                         <li key={c.id} className="grid grid-cols-12 items-center gap-4 py-3 hover:bg-muted/40 rounded-lg -mx-2 px-2">
-                        <div className="col-span-1">
-                            <div className="flex items-center gap-2">
-                            <Checkbox
-                                checked={selected.includes(c.id)}
-                                onCheckedChange={(v) => toggleRow(c.id, Boolean(v))}
-                                aria-label={`Selecionar ${c.name}`}
-                            />
+                            <div className="col-span-1 flex items-center">
+                                <Checkbox
+                                    checked={selected.includes(c.id)}
+                                    onCheckedChange={(v) => toggleRow(c.id, Boolean(v))}
+                                    aria-label={`Selecionar ${c.name}`}
+                                />
                             </div>
-                        </div>
 
-                        <div className="col-span-4 flex items-center gap-3">
-                             <ChannelPill channel={c.channel} />
-                             <div className="flex flex-col">
-                                <div className="font-medium leading-tight">{c.name}</div>
-                                <div className="text-xs text-muted-foreground">ID: {c.id}</div>
-                             </div>
-                        </div>
-
-                        <div className="col-span-2">
-                            <StateBadge state={c.status} />
-                        </div>
-
-                        <div className="col-span-2">
-                            <Badge variant="secondary" className="font-mono">{c.total_recipients} contato(s)</Badge>
-                        </div>
-
-                        <div className="col-span-2">
-                            <div className="flex items-center gap-3">
-                            <span className="w-10 text-right text-sm tabular-nums">{c.progress?.toFixed(0) ?? 0}%</span>
-                            <Progress value={c.progress ?? 0} />
+                            <div className="col-span-4 flex items-center gap-3">
+                                <div className="flex flex-col">
+                                    <div className="font-medium leading-tight">{c.name}</div>
+                                    <div className="flex items-center gap-2">
+                                        <ChannelPill channel={c.channel} />
+                                        <div className="text-xs text-muted-foreground">ID: {c.id}</div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="col-span-1">
-                            <div className="flex items-center justify-end gap-2">
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <MoreVertical className="h-4 w-4" />
-                                </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-44">
-                                <DropdownMenuItem className="gap-2" disabled><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600" disabled><Trash2 className="h-4 w-4"/>Excluir</DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <div className="col-span-2">
+                                <StateBadge state={c.status} />
                             </div>
-                        </div>
+
+                            <div className="col-span-2">
+                                <Badge variant="secondary" className="font-mono">{c.total_recipients} contato(s)</Badge>
+                            </div>
+
+                            <div className="col-span-2">
+                                <div className="flex items-center gap-3">
+                                <span className="w-10 text-right text-sm tabular-nums">{c.progress?.toFixed(0) ?? 0}%</span>
+                                <Progress value={c.progress ?? 0} />
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="flex items-center justify-end gap-2">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                        <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-44">
+                                    <DropdownMenuItem className="gap-2" disabled><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
+                                    <DropdownMenuItem className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
+                                    <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600" disabled><Trash2 className="h-4 w-4"/>Excluir</DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                </div>
+                            </div>
                         </li>
                     ))}
                     </ul>
