@@ -71,7 +71,7 @@ export default function CampaignsPage() {
             <p className="text-muted-foreground">Envie mensagens em massa e acompanhe o progresso.</p>
           </div>
           <Button asChild>
-            <Link href="/campaigns/new/message">
+            <Link href="/campaigns/new">
                 <PlusCircle className="mr-2 h-4 w-4" /> Criar Campanha
             </Link>
           </Button>
