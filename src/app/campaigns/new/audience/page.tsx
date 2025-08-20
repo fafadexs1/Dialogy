@@ -48,7 +48,7 @@ export default function CampaignAudiencePage() {
     setIsHydrated(true);
   }, []);
 
-  // Sincroniza seleção vinda da store (somente depois de hidratar)
+  // Sync with store (only after hydration)
   useEffect(() => {
     if (!isHydrated) return;
 
@@ -68,14 +68,25 @@ export default function CampaignAudiencePage() {
     setCsvContacts(csvData);
   }, [isHydrated, campaignData]);
 
+  // Redirect if the previous step was not completed (after hydration)
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!campaignData?.message || !campaignData?.instanceName) {
+      toast({
+        title: "Passo anterior incompleto",
+        description: "Por favor, defina a mensagem e a instância primeiro.",
+        variant: "default",
+      });
+      router.replace('/campaigns/new/message');
+    }
+  }, [isHydrated, campaignData, router, toast]);
 
-  // Carregar contatos do CRM
+  // Load CRM contacts
   useEffect(() => {
     let mounted = true;
     async function load() {
       try {
         if (user?.activeWorkspaceId) {
-          setLoadingCrm(true);
           const res = await getContacts(user.activeWorkspaceId);
           if (mounted) setCrmContacts(res.contacts || []);
         }
@@ -101,7 +112,7 @@ export default function CampaignAudiencePage() {
       .map((c) => ({ id: `crm-${c.id}`, name: c.name, phone_number_jid: c.phone_number_jid }));
 
     const finalContacts: CampaignContact[] = [...crmSelection, ...csvContacts];
-
+    
     setCampaignData((prev) => ({ ...(prev ?? {}), contacts: finalContacts }));
     router.push('/campaigns/new/review');
   };
@@ -124,10 +135,10 @@ export default function CampaignAudiencePage() {
   const handleSelectCrmContact = (contactId: string, checked: boolean | 'indeterminate') => {
     const isChecked = checked === true;
     setSelectedCrmContactIds((prev) => {
-      const newSet = new Set(prev);
-      if (isChecked) newSet.add(contactId);
-      else newSet.delete(contactId);
-      return newSet;
+      const next = new Set(prev);
+      if (isChecked) next.add(contactId);
+      else next.delete(contactId);
+      return next;
     });
   };
 
@@ -182,12 +193,11 @@ export default function CampaignAudiencePage() {
   const isAllSelected = useMemo(() => {
     if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size === filteredCrmContacts.length;
-  }, [selectedCrmContactIds.size, filteredCrmContacts.length]);
+  }, [selectedCrmContactIds, filteredCrmContacts]);
 
   const isSomeSelected = useMemo(() => {
-    if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size > 0 && !isAllSelected;
-  }, [selectedCrmContactIds.size, isAllSelected, filteredCrmContacts.length]);
+  }, [selectedCrmContactIds, isAllSelected]);
 
   if (!isHydrated) {
     return (
@@ -276,7 +286,7 @@ export default function CampaignAudiencePage() {
                                 />
                                 <Label
                                   htmlFor={`contact-${contact.id}`}
-                                  className="flex items-center gap-2 font-normal cursor-pointer"
+                                  className="flex items-center gap-2 font-normal cursor-pointer w-full"
                                 >
                                   <span className="font-medium">{contact.name}</span>
                                   <span className="text-muted-foreground">{contact.phone_number_jid}</span>
