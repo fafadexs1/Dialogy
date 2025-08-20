@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -20,9 +21,13 @@ export default function CampaignMessagePage() {
   const user = useAuth();
   const router = useRouter();
 
-  // Zustand store é a única fonte da verdade
+  // Zustand store
   const { campaignData, setCampaignData, clearCampaignData } = useCampaignState();
 
+  // Estados locais que espelham o store para controle do formulário
+  const [message, setMessage] = useState('');
+  const [instanceId, setInstanceId] = useState<string | undefined>(undefined);
+  
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -31,6 +36,15 @@ export default function CampaignMessagePage() {
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  // Sincroniza o estado local quando a store (reidratada) muda
+  useEffect(() => {
+    if (isHydrated) {
+      setMessage(campaignData?.message || '');
+      setInstanceId(campaignData?.instanceId || undefined);
+    }
+  }, [isHydrated, campaignData]);
+
 
   // Carrega instâncias da API
   useEffect(() => {
@@ -51,25 +65,30 @@ export default function CampaignMessagePage() {
     };
   }, [user?.activeWorkspaceId]);
 
-  // Funções que atualizam diretamente o Zustand
   const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setCampaignData((prev) => ({ ...prev, message: e.target.value }));
+    setMessage(e.target.value);
   };
-
+  
   const handleInstanceChange = (newInstanceId: string) => {
-    const selected = instances.find((i) => i.id === newInstanceId);
-    setCampaignData((prev) => ({
-      ...prev,
-      instanceId: newInstanceId,
-      instanceName: selected?.name ?? '',
-    }));
+    setInstanceId(newInstanceId);
   };
-
+  
   const handleNext = () => {
-    // Validação usa diretamente os dados da store
-    if (!campaignData?.message?.trim() || !campaignData?.instanceId) {
+    const selectedInstance = instances.find(i => i.id === instanceId);
+    
+    // Validação
+    if (!message.trim() || !instanceId || !selectedInstance) {
       return;
     }
+    
+    // Atualiza o estado global de uma vez antes de navegar
+    setCampaignData((prev) => ({
+      ...prev,
+      message: message.trim(),
+      instanceId: instanceId,
+      instanceName: selectedInstance.name,
+    }));
+    
     router.push('/campaigns/new/audience');
   };
 
@@ -78,7 +97,6 @@ export default function CampaignMessagePage() {
     router.push('/campaigns');
   };
 
-  // Skeleton enquanto a store não hidrata para evitar piscar de tela
   if (!isHydrated) {
     return (
       <MainLayout>
@@ -120,7 +138,7 @@ export default function CampaignMessagePage() {
                   <Label htmlFor="message">Mensagem da Campanha</Label>
                   <Textarea
                     id="message"
-                    value={campaignData?.message || ''}
+                    value={message}
                     onChange={handleMessageChange}
                     rows={6}
                     placeholder="Digite sua mensagem aqui... Use {{nome}} para personalizar com o nome do contato."
@@ -139,7 +157,7 @@ export default function CampaignMessagePage() {
                     </div>
                   ) : (
                     <Select
-                      value={campaignData?.instanceId || ''}
+                      value={instanceId}
                       onValueChange={handleInstanceChange}
                     >
                       <SelectTrigger id="instance">
@@ -154,11 +172,6 @@ export default function CampaignMessagePage() {
                       </SelectContent>
                     </Select>
                   )}
-                  {campaignData?.instanceName && (
-                    <p className="text-xs text-muted-foreground">
-                      Selecionada: <span className="font-medium">{campaignData.instanceName}</span>
-                    </p>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -167,7 +180,7 @@ export default function CampaignMessagePage() {
               <Button variant="outline" onClick={handleCancel}>
                 Cancelar
               </Button>
-              <Button onClick={handleNext} disabled={!campaignData?.message?.trim() || !campaignData?.instanceId}>
+              <Button onClick={handleNext} disabled={!message.trim() || !instanceId}>
                 Próximo Passo <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
