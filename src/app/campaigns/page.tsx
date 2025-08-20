@@ -61,7 +61,7 @@ function Progress({ value }: { value: number }) {
   );
 }
 
-function StateBadge({ state }: { state: Campaign['status'] }) {
+function StateBadge({ status }: { status: Campaign['status'] }) {
     const stateMap = {
         completed: { icon: <CheckCircle2 className="h-3.5 w-3.5" />, text: "Envio concluído", className: "bg-emerald-600 hover:bg-emerald-600" },
         sending: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "Enviando", className: "bg-blue-500 hover:bg-blue-500" },
@@ -70,7 +70,7 @@ function StateBadge({ state }: { state: Campaign['status'] }) {
         failed: { icon: <XCircle className="h-3.5 w-3.5" />, text: "Falhou", className: "bg-red-600 hover:bg-red-600" },
     };
 
-    const current = stateMap[state] || stateMap.draft;
+    const current = stateMap[status] || stateMap.draft;
 
     return (
       <Badge className={cn("gap-1", current.className)}>
@@ -321,7 +321,7 @@ export default function CampaignsPage() {
                             </div>
 
                             <div className="col-span-2">
-                                <StateBadge state={c.status} />
+                                <StateBadge status={c.status} />
                             </div>
 
                             <div className="col-span-2">

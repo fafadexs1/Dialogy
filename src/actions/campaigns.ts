@@ -33,7 +33,7 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
                 (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id) as total_recipients,
                 (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status = 'sent') as sent_recipients,
                 'parallel' as channel,
-                c.updated_at as "lastUpdate"
+                c.created_at as "lastUpdate"
             FROM campaigns c
             WHERE c.workspace_id = $1
             ORDER BY c.created_at DESC
@@ -43,7 +43,7 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
             ...row,
             progress: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
             recipients: parseInt(row.total_recipients, 10),
-            state: row.status, // Corrigido de row.state para row.status
+            status: row.status,
             deliveredPct: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
         }));
 

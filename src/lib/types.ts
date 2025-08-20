@@ -401,7 +401,6 @@ export interface Campaign {
   sent_recipients?: number;
   progress?: number;
   recipients?: number;
-  state?: CampaignStatus;
   deliveredPct?: number;
   lastUpdate?: string;
 }
