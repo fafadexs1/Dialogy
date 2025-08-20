@@ -21,7 +21,7 @@ async function internalSendMessage(
     senderId: string, // The user ID of the sender (could be an agent or the system for automated messages)
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
     }
@@ -108,7 +108,7 @@ async function internalSendMessage(
         revalidatePath(`/api/chats/${workspace_id}`);
         revalidatePath('/', 'layout');
 
-        return { success: true };
+        return { success: true, apiResponse };
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -290,7 +290,7 @@ export async function sendAutomatedMessageAction(
     agentId: string,
     isSystemAgent: boolean = false,
     instanceName?: string, // Opcional
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     const metadata = isSystemAgent ? { sentBy: 'system_agent' } : { sentBy: 'autopilot' };
     return internalSendMessage(chatId, content, agentId, metadata, instanceName);
 }

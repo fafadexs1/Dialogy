@@ -187,8 +187,8 @@ async function startCampaignSending(campaignId: string) {
                 const systemAgentId = '00000000-0000-0000-0000-000000000000'; 
                 const result = await sendAutomatedMessageAction(chatId, personalizedMessage, systemAgentId, true, recipient.instance_name);
 
-                if (!result.success) {
-                    throw new Error(result.error || 'Falha no envio da mensagem.');
+                if (!result.success || !result.apiResponse?.key?.id) {
+                    throw new Error(result.error || 'Falha na resposta da API ao enviar a mensagem.');
                 }
 
             } catch (err: any) {
