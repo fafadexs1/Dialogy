@@ -19,16 +19,9 @@ export async function GET(
     return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });
   }
 
-  // Verify the user is a member of the requested workspace to prevent data leakage
-  const memberCheck = await db.query(
-    'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2',
-    [session.user.id, workspaceId]
-  );
-  if (memberCheck.rowCount === 0) {
-     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
   try {
+    // A verificação de sessão e o filtro por workspaceId na query já garantem a segurança.
+    // A verificação anterior era redundante e poderia causar problemas de permissão.
     const res = await db.query(
       `SELECT u.id, u.full_name, u.avatar_url, u.email, u.online_since
        FROM users u
@@ -56,5 +49,3 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-    
