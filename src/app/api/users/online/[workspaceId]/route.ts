@@ -30,7 +30,7 @@ export async function GET(
 
   try {
     const res = await db.query(
-      `SELECT u.id, u.full_name, u.avatar_url, u.email
+      `SELECT u.id, u.full_name, u.avatar_url, u.email, u.online_since
        FROM users u
        JOIN user_workspace_roles uwr ON u.id = uwr.user_id
        WHERE u.online = true AND uwr.workspace_id = $1`,
@@ -46,9 +46,8 @@ export async function GET(
         avatar: user.avatar_url,
         email: user.email,
       } as User,
-      // In a real system, 'joined_at' would come from a login/presence timestamp.
-      // Here, we use the current time as an approximation.
-      joined_at: new Date().toISOString(), 
+      // Retorna o timestamp de quando o usuário ficou online, do banco de dados.
+      joined_at: new Date(user.online_since).toISOString(),
     }));
 
     return NextResponse.json(onlineAgents);
@@ -57,3 +56,5 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
+    

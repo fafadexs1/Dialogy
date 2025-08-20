@@ -52,29 +52,31 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
      const userId = currentUser.id;
 
      const handleVisibilityChange = () => {
-        // When the tab becomes visible again, ensure the user is marked as online.
-        // We no longer mark them as offline when hidden.
         if (document.visibilityState === 'visible') {
             updateUserOnlineStatus(userId, true);
         }
      }
 
      const handleBeforeUnload = () => {
-        // This is the only place we should mark the user as offline automatically.
-        updateUserOnlineStatus(userId, false);
+        // Usa navigator.sendBeacon para uma chamada mais confiável ao fechar a página.
+        // Ele envia uma pequena quantidade de dados de forma assíncrona, sem atrasar o descarregamento da página.
+        const payload = JSON.stringify({ userId });
+        navigator.sendBeacon('/api/users/offline', payload);
      }
      
-     // Set user to online when the provider mounts with a valid user
+     // Define o usuário como online quando o provedor é montado com um usuário válido.
      updateUserOnlineStatus(userId, true);
 
+     // Adiciona os event listeners
      window.addEventListener('beforeunload', handleBeforeUnload);
      document.addEventListener('visibilitychange', handleVisibilityChange);
 
      return () => {
-        // This might not run on tab close, but it's good practice for SPA navigation
-        updateUserOnlineStatus(userId, false); 
+        // Limpa os listeners quando o componente é desmontado
         window.removeEventListener('beforeunload', handleBeforeUnload);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
+        // Opcional: pode-se chamar a função de offline aqui também para cobrir navegações SPA
+        updateUserOnlineStatus(userId, false); 
      }
 
   }, [currentUser?.id]);
@@ -86,3 +88,5 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     </PresenceContext.Provider>
   );
 };
+
+    

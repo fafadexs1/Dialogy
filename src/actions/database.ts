@@ -81,7 +81,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           email TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
           last_active_workspace_id UUID,
-          online BOOLEAN DEFAULT false
+          online BOOLEAN DEFAULT false,
+          online_since TIMESTAMPTZ
       );`,
       
       `CREATE TABLE IF NOT EXISTS public.workspaces (
@@ -559,3 +560,5 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('Conexão com o banco de dados liberada.');
   }
 }
+
+    
