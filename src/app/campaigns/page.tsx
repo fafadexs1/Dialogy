@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useMemo, useState, useEffect, useCallback } from "react";
@@ -68,10 +69,6 @@ function StateBadge({ state }: { state: Campaign['status'] }) {
 }
 
 function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
-  const map: Record<Campaign['channel'], string> = {
-    parallel: "WhatsApp Paralelo",
-    api: "WhatsApp API Oficial",
-  };
    const channelInfo = {
     parallel: { name: "WhatsApp Paralelo", className: "bg-sky-500" },
     api: { name: "WhatsApp API Oficial", className: "bg-purple-500" },
@@ -104,7 +101,6 @@ export default function CampaignsPage() {
     if (result.error) {
         toast({ title: 'Erro ao buscar campanhas', description: result.error, variant: 'destructive'});
     } else {
-        // Mock channel for now as backend doesn't provide it
         const campaignsWithChannel = (result.campaigns || []).map(c => ({...c, channel: 'parallel' as const}));
         setCampaigns(campaignsWithChannel);
     }
@@ -267,13 +263,15 @@ export default function CampaignsPage() {
                                 onCheckedChange={(v) => toggleRow(c.id, Boolean(v))}
                                 aria-label={`Selecionar ${c.name}`}
                             />
-                            <ChannelPill channel={c.channel} />
                             </div>
                         </div>
 
-                        <div className="col-span-3">
-                            <div className="font-medium leading-tight">{c.name}</div>
-                            <div className="text-xs text-muted-foreground">ID: {c.id}</div>
+                        <div className="col-span-3 flex items-center gap-3">
+                             <ChannelPill channel={c.channel} />
+                             <div className="flex flex-col">
+                                <div className="font-medium leading-tight">{c.name}</div>
+                                <div className="text-xs text-muted-foreground">ID: {c.id}</div>
+                             </div>
                         </div>
 
                         <div className="col-span-2">
