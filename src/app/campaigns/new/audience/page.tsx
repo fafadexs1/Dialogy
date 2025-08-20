@@ -65,12 +65,13 @@ export default function CampaignAudiencePage() {
 
     setSelectedCrmContactIds(crmIds);
     setCsvContacts(csvData);
+    // dependemos de `campaignData` (objeto estável do Zustand) e do flag de hidratação
   }, [isHydrated, campaignData]);
 
   // Redireciona se o passo anterior não foi preenchido (depois de hidratar)
   useEffect(() => {
     if (!isHydrated) return;
-    if (!campaignData?.message || !campaignData?.instanceId) {
+    if (!campaignData?.message || !campaignData?.instanceName) {
       router.replace('/campaigns/new/message');
     }
   }, [isHydrated, campaignData, router]);
@@ -187,12 +188,11 @@ export default function CampaignAudiencePage() {
   const isAllSelected = useMemo(() => {
     if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size === filteredCrmContacts.length;
-  }, [selectedCrmContactIds.size, filteredCrmContacts.length]);
+  }, [selectedCrmContactIds, filteredCrmContacts]);
 
   const isSomeSelected = useMemo(() => {
-    if (filteredCrmContacts.length === 0) return false;
     return selectedCrmContactIds.size > 0 && !isAllSelected;
-  }, [selectedCrmContactIds.size, isAllSelected]);
+  }, [selectedCrmContactIds, isAllSelected]);
 
   if (!isHydrated) {
     return (
