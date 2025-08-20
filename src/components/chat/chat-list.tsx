@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useMemo } from 'react';
@@ -23,13 +24,15 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
   const [onlineSince, setOnlineSince] = React.useState('');
 
   React.useEffect(() => {
+    // This effect will only run on the client side, after hydration.
+    // This prevents a mismatch between server and client rendered HTML.
     if (agent.joined_at) {
       const updateOnlineTime = () => {
         const distance = formatDistanceToNow(new Date(agent.joined_at), { addSuffix: true, locale: ptBR });
         setOnlineSince(distance);
       };
       updateOnlineTime();
-      const interval = setInterval(updateOnlineTime, 60000);
+      const interval = setInterval(updateOnlineTime, 60000); // Update every minute
       return () => clearInterval(interval);
     }
   }, [agent.joined_at]);
@@ -37,7 +40,7 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
   return (
     <div className="flex flex-col gap-1">
       <p className="font-semibold">{agent.user.name}</p>
-      {onlineSince && <p className="text-xs text-muted-foreground">Online {onlineSince}</p>}
+      {onlineSince ? <p className="text-xs text-muted-foreground">Online {onlineSince}</p> : <p className='text-xs text-muted-foreground'>Carregando...</p>}
     </div>
   );
 };
@@ -304,3 +307,5 @@ export default function ChatList({
     </div>
   );
 }
+
+    
