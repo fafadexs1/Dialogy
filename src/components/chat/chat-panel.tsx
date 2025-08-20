@@ -369,6 +369,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const contentEditableRef = useRef<HTMLElement>(null);
   const processedMessageIds = useRef(new Set());
   const savedRange = useRef<Range | null>(null);
+  const userScrolledUpRef = useRef(false);
   
   const { toast } = useToast();
 
@@ -414,13 +415,27 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
 
   useEffect(() => {
-    if (scrollAreaRef.current) {
-        const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
-        if (viewport) {
-            viewport.scrollTop = viewport.scrollHeight;
-        }
+    const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      const handleScroll = () => {
+        const { scrollTop, scrollHeight, clientHeight } = viewport;
+        // User is considered "scrolled up" if they are more than a certain threshold from the bottom
+        const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100;
+        userScrolledUpRef.current = isScrolledUp;
+      };
+
+      viewport.addEventListener('scroll', handleScroll);
+      return () => viewport.removeEventListener('scroll', handleScroll);
+    }
+  }, []);
+
+  useEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
+    if (viewport && !userScrolledUpRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
     }
   }, [messages]);
+
 
   const runAiAgent = useCallback(async () => {
     const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
