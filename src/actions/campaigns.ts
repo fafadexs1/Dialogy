@@ -212,7 +212,7 @@ async function startCampaignSending(campaignId: string) {
         }
         
         const finalStatus = hasFailures ? 'failed' : 'completed';
-        await client.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $1", [finalStatus, campaignId]);
+        await client.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $2", [finalStatus, campaignId]);
         revalidatePath('/campaigns');
         console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída com status: ${finalStatus}.`);
 
