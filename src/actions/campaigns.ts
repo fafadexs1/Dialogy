@@ -42,8 +42,8 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
         const campaigns: Campaign[] = res.rows.map(row => ({
             ...row,
             progress: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
-            recipients: row.total_recipients,
-            state: row.status,
+            recipients: parseInt(row.total_recipients, 10),
+            state: row.status, // Corrigido de row.state para row.status
             deliveredPct: row.total_recipients > 0 ? (row.sent_recipients / row.total_recipients) * 100 : 0,
         }));
 

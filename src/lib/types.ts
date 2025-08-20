@@ -400,6 +400,10 @@ export interface Campaign {
   total_recipients?: number;
   sent_recipients?: number;
   progress?: number;
+  recipients?: number;
+  state?: CampaignStatus;
+  deliveredPct?: number;
+  lastUpdate?: string;
 }
 
 export interface CampaignRecipient {
