@@ -122,10 +122,10 @@ export async function createCampaign(
 
         await client.query('COMMIT');
         
+        // Now, start sending process and wait for it to complete.
+        await startCampaignSending(newCampaign.id);
+        
         revalidatePath('/campaigns');
-
-        // Start sending process in the background, don't await it
-        startCampaignSending(newCampaign.id);
 
         return { campaign: newCampaign };
 
