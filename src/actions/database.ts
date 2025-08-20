@@ -81,8 +81,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           email TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
           last_active_workspace_id UUID,
-          online BOOLEAN DEFAULT false,
-          online_since TIMESTAMPTZ
+          online BOOLEAN DEFAULT false
       );`,
       
       `CREATE TABLE IF NOT EXISTS public.workspaces (
@@ -363,19 +362,20 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     // --- Etapa 3: Adicionar colunas faltantes a tabelas existentes (Migrações) ---
     console.log('Verificando e aplicando migrações de colunas...');
-    try {
-        await client.query('ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS tag_id UUID REFERENCES public.tags(id) ON DELETE SET NULL;');
-        console.log('Coluna "tag_id" adicionada à tabela "teams".');
-    } catch (error: any) {
-        // Se a coluna já existe ou outro erro relacionado a ela, o IF NOT EXISTS deve prevenir.
-        // Se ainda houver erro, algo está fundamentalmente errado.
-        if (error.code === '42701') {
-             console.log('Coluna "tag_id" já existe em "teams". Ignorando.');
-        } else {
-            console.error('[DB_MIGRATE] Erro ao adicionar coluna `tag_id` a `teams`:', error.message)
+    const migrationQueries = [
+      'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS online_since TIMESTAMPTZ;',
+      'ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS tag_id UUID REFERENCES public.tags(id) ON DELETE SET NULL;'
+    ];
+    for (const query of migrationQueries) {
+        try {
+            await client.query(query);
+            console.log(`Migração executada com sucesso: ${query}`);
+        } catch (error: any) {
+            console.error(`[DB_MIGRATE] Erro ao executar a migração: ${query}`, error.message)
             throw error;
         }
     }
+
 
     const permissionQueries = [
       `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${appUser};`,
@@ -564,3 +564,5 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     
 
     
+
+      
