@@ -23,22 +23,21 @@ export default function CampaignReviewPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isHydrated, setIsHydrated] = useState(false);
 
-    // Ensure client-side code runs only after mounting
     useEffect(() => {
         setIsHydrated(true);
     }, []);
 
-    // Redirect if essential data is missing, but only after hydration
+    // Redirect if essential data is missing, but only after hydration and data has been assessed.
     useEffect(() => {
-        if (!isHydrated) return;
-
-        if (!campaignData?.message || !campaignData?.instanceName || !campaignData?.contacts || campaignData.contacts.length === 0) {
-            toast({
-                title: "Dados incompletos",
-                description: "Por favor, preencha os passos anteriores primeiro.",
-                variant: "destructive"
-            })
-            router.replace('/campaigns/new/message');
+        if (isHydrated && campaignData) {
+             if (!campaignData.message || !campaignData.instanceName || !campaignData.contacts || campaignData.contacts.length === 0) {
+                toast({
+                    title: "Dados incompletos",
+                    description: "Por favor, preencha os passos anteriores primeiro.",
+                    variant: "destructive"
+                });
+                router.replace('/campaigns/new/message');
+            }
         }
     }, [isHydrated, campaignData, router, toast]);
 
@@ -46,7 +45,6 @@ export default function CampaignReviewPage() {
         if (!user?.activeWorkspaceId || !campaignData?.contacts || !campaignData?.instanceName || !campaignData?.message) return;
         setIsSubmitting(true);
         
-        // The names are used for personalization, the JID is the key.
         const contactsToSend = campaignData.contacts.map(c => ({
             id: c.id, 
             name: c.name,
