@@ -65,13 +65,12 @@ export default function CampaignAudiencePage() {
 
     setSelectedCrmContactIds(crmIds);
     setCsvContacts(csvData);
-    // dependemos de `campaignData` (objeto estável do Zustand) e do flag de hidratação
   }, [isHydrated, campaignData]);
 
   // Redireciona se o passo anterior não foi preenchido (depois de hidratar)
   useEffect(() => {
     if (!isHydrated) return;
-    if (!campaignData?.message || !campaignData?.instanceName) {
+    if (!campaignData?.message || !campaignData?.instanceId) {
       router.replace('/campaigns/new/message');
     }
   }, [isHydrated, campaignData, router]);
@@ -108,7 +107,7 @@ export default function CampaignAudiencePage() {
 
     const finalContacts: CampaignContact[] = [...crmSelection, ...csvContacts];
 
-    setCampaignData((prev) => ({ ...(prev ?? {}), contacts: finalContacts }));
+    setCampaignData({ ...(campaignData ?? {}), contacts: finalContacts });
     router.push('/campaigns/new/review');
   };
 

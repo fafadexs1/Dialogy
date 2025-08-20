@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -24,10 +23,11 @@ export default function CampaignMessagePage() {
   // Zustand store
   const { campaignData, setCampaignData, clearCampaignData } = useCampaignState();
 
-  // Estado local "espelho" para evitar ler propriedades de undefined
+  // Estados locais "espelho"
   const [message, setMessage] = useState('');
-  const [instanceName, setInstanceName] = useState('');
-  
+  const [instanceId, setInstanceId] = useState<string>('');
+  const [instanceName, setInstanceName] = useState<string>('');
+
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -39,10 +39,10 @@ export default function CampaignMessagePage() {
 
   // Sincroniza o estado local quando a store estiver pronta
   useEffect(() => {
-    if (isHydrated) {
-      setMessage(campaignData?.message ?? '');
-      setInstanceName(campaignData?.instanceName ?? '');
-    }
+    if (!isHydrated) return;
+    setMessage(campaignData?.message ?? '');
+    setInstanceId(campaignData?.instanceId ?? '');
+    setInstanceName(campaignData?.instanceName ?? '');
   }, [isHydrated, campaignData]);
 
   // Carrega instâncias
@@ -67,15 +67,36 @@ export default function CampaignMessagePage() {
   const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newMessage = e.target.value;
     setMessage(newMessage);
-    setCampaignData((prev) => ({...prev, message: newMessage }));
+    setCampaignData((prev) => ({ ...prev, message: newMessage }));
   };
 
-  const handleInstanceChange = (newInstance: string) => {
-    setInstanceName(newInstance);
-    setCampaignData((prev) => ({...prev, instanceName: newInstance }));
+  // Quando o usuário selecionar uma instância, salvamos id + name no store
+  const handleInstanceChange = (newInstanceId: string) => {
+    setInstanceId(newInstanceId);
+    const selected = instances.find((i) => i.id === newInstanceId);
+    const selectedName = selected?.name ?? '';
+    setInstanceName(selectedName);
+
+    setCampaignData((prev) => ({
+      ...prev,
+      instanceId: newInstanceId,
+      instanceName: selectedName,
+    }));
   };
 
   const handleNext = () => {
+    // Validação simples local (a rota seguinte provavelmente também valida)
+    const validMessage = message.trim().length > 0;
+    if (!validMessage || !instanceId) return;
+
+    // Garante que o store está consistente antes de navegar
+    setCampaignData((prev) => ({
+      ...prev,
+      message: message.trim(),
+      instanceId,
+      instanceName,
+    }));
+
     router.push('/campaigns/new/audience');
   };
 
@@ -84,7 +105,7 @@ export default function CampaignMessagePage() {
     router.push('/campaigns');
   };
 
-  // Skeleton enquanto não hidratou (evita qualquer acesso prematuro)
+  // Skeleton enquanto não hidratou
   if (!isHydrated) {
     return (
       <MainLayout>
@@ -145,7 +166,8 @@ export default function CampaignMessagePage() {
                     </div>
                   ) : (
                     <Select
-                      value={instanceName || undefined}
+                      // shadcn Select prefere undefined quando vazio
+                      value={instanceId || undefined}
                       onValueChange={handleInstanceChange}
                     >
                       <SelectTrigger id="instance">
@@ -153,12 +175,17 @@ export default function CampaignMessagePage() {
                       </SelectTrigger>
                       <SelectContent>
                         {instances.map((inst) => (
-                          <SelectItem key={inst.id} value={inst.name}>
+                          <SelectItem key={inst.id} value={inst.id}>
                             {inst.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                  )}
+                  {instanceName && (
+                    <p className="text-xs text-muted-foreground">
+                      Selecionada: <span className="font-medium">{instanceName}</span>
+                    </p>
                   )}
                 </div>
               </CardContent>
@@ -168,7 +195,7 @@ export default function CampaignMessagePage() {
               <Button variant="outline" onClick={handleCancel}>
                 Cancelar
               </Button>
-              <Button onClick={handleNext} disabled={!message || !instanceName}>
+              <Button onClick={handleNext} disabled={!message.trim() || !instanceId}>
                 Próximo Passo <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>

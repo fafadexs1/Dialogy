@@ -12,6 +12,7 @@ interface CampaignContact {
 
 interface CampaignState {
     message?: string;
+    instanceId?: string;
     instanceName?: string;
     contacts?: CampaignContact[];
 }
@@ -23,6 +24,7 @@ interface CampaignActions {
 
 const initialState: CampaignState = {
     message: '',
+    instanceId: '',
     instanceName: '',
     contacts: [],
 };
