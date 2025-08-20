@@ -186,7 +186,8 @@ async function startCampaignSending(campaignId: string) {
                 // Use a generic system agent ID for now. This could be improved.
                 const systemAgentId = '00000000-0000-0000-0000-000000000000'; 
                 const result = await sendAutomatedMessageAction(chatId, personalizedMessage, systemAgentId, true, recipient.instance_name);
-
+                
+                // Check for the presence of the `key` object in the API response as a success indicator.
                 if (!result.success || !result.apiResponse?.key?.id) {
                     throw new Error(result.error || 'Falha na resposta da API ao enviar a mensagem.');
                 }
