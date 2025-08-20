@@ -10,6 +10,7 @@ import { getContacts } from '@/actions/crm';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { createCampaign } from '@/actions/campaigns';
 import type { Contact as ContactType, EvolutionInstance } from '@/lib/types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
 // ---------------------------------------------------------
@@ -163,6 +164,13 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
+const TEMPLATES = [
+  { id: "promo", label: "Promo relâmpago", text: `Olá ${PLACEHOLDER}! ⚡️ Só hoje temos 20% OFF em toda a loja. Responda *SIM* para receber o cupom.` },
+  { id: "boasvindas", label: "Boas-vindas", text: `Oi ${PLACEHOLDER} 👋 Bem-vindo(a)! Eu sou do time de atendimento. Posso te ajudar em algo agora?` },
+  { id: "cobranca", label: "Cobrança amigável", text: `Olá ${PLACEHOLDER}, tudo bem? Notamos um pagamento pendente. Precisa de ajuda para concluir?` },
+];
+
+
 // ---------------------------------------------------------
 // Página principal
 // ---------------------------------------------------------
@@ -256,7 +264,7 @@ export default function NewCampaignPage() {
       .filter((c) => selectedCrmIds.has(c.id))
       .map((c) => ({ id: `crm-${c.id}`, name: c.name, phone_number_jid: c.phone_number_jid }));
 
-    const allContactsToSend = [...selectedFromCrm, ...csvContacts];
+    const allContactsToSend = [...selectedFromCrm, ...csvContacts.map(c => ({...c, id: `csv-${c.id}`}))];
     
     const result = await createCampaign(user.activeWorkspaceId, instanceName, message, allContactsToSend);
     
@@ -316,6 +324,13 @@ export default function NewCampaignPage() {
                         <p className="text-muted-foreground">A variável <code className="rounded bg-muted px-1">{PLACEHOLDER}</code> será substituída.</p>
                         <span className={cx("tabular-nums", remainingClass)}>{remaining}</span>
                     </div>
+                     <div className="flex flex-wrap gap-2 pt-2">
+                        {TEMPLATES.map((t) => (
+                        <Button key={t.id} type="button" variant="secondary" onClick={() => setMessage(t.text)}>
+                            <Icon.Sparkles className="h-4 w-4" /> {t.label}
+                        </Button>
+                        ))}
+                    </div>
                     </div>
                     <div className="space-y-2 mt-6">
                         <label htmlFor="instance" className="text-sm font-medium leading-none">Instância de Envio</label>
@@ -341,13 +356,34 @@ export default function NewCampaignPage() {
                     <p className="text-sm text-muted-foreground">Selecione os contatos que receberão esta campanha.</p>
                 </CardHeader>
                 <CardContent>
-                    <Tabs value={tab} onValueChange={setTab}>
-                    <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="crm"><Icon.Users className="mr-2 h-4 w-4" /> Selecionar do CRM ({selectedCrmIds.size})</TabsTrigger>
-                        <TabsTrigger value="csv"><Icon.FileUp className="mr-2 h-4 w-4" /> Importar Arquivo ({csvContacts.length})</TabsTrigger>
-                    </TabsList>
+                   <div className="w-full">
+                  <div role="tablist" aria-orientation="horizontal" className="grid w-full grid-cols-2 h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+                    <button
+                      role="tab"
+                      aria-selected={tab === "crm"}
+                      className={cx(
+                        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all",
+                        tab === "crm" ? "bg-background text-foreground shadow-sm" : ""
+                      )}
+                      onClick={() => setTab("crm")}
+                    >
+                      <Icon.Users className="mr-2 h-4 w-4" /> Selecionar do CRM ({selectedCrmIds.size})
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={tab === "csv"}
+                      className={cx(
+                        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all",
+                        tab === "csv" ? "bg-background text-foreground shadow-sm" : ""
+                      )}
+                      onClick={() => setTab("csv")}
+                    >
+                      <Icon.FileUp className="mr-2 h-4 w-4" /> Importar Arquivo ({csvContacts.length})
+                    </button>
+                  </div>
 
-                    <TabsContent value="crm" className="mt-4 space-y-3">
+                  {tab === "crm" && (
+                    <div className="mt-4 space-y-3">
                         <div className="relative">
                             <Icon.Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
@@ -398,31 +434,37 @@ export default function NewCampaignPage() {
                             )}
                             </div>
                         </div>
-                    </TabsContent>
+                    </div>
+                  )}
 
-                    <TabsContent value="csv" className="mt-4">
-                        <div
-                            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                            onDragLeave={() => setDragActive(false)}
-                            onDrop={handleDrop}
-                            className={cx(
-                            "flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-8 text-center",
-                            dragActive ? "border-primary bg-primary/5" : "border-border"
-                            )}
-                            role="region"
-                            aria-label="Área para soltar arquivo CSV"
-                        >
-                            <Icon.Upload className="h-6 w-6" />
-                            <p className="text-sm">Arraste e solte seu arquivo CSV aqui</p>
-                            <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
-                            <input type="file" accept=".csv" className="absolute opacity-0 inset-0 cursor-pointer" />
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
-                        {csvContacts.length > 0 && 
+                  {tab === "csv" && (
+                     <div className="mt-4">
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragActive(true);
+                        }}
+                        onDragLeave={() => setDragActive(false)}
+                        onDrop={handleDrop}
+                        className={cx(
+                          "flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-8 text-center",
+                          dragActive ? "border-primary bg-primary/5" : "border-border"
+                        )}
+                        role="region"
+                        aria-label="Área para soltar arquivo CSV"
+                      >
+                        <Icon.Upload className="h-6 w-6" />
+                        <p className="text-sm">Arraste e solte seu arquivo CSV aqui</p>
+                        <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
+                        <input type="file" accept=".csv" className="absolute opacity-0 inset-0 cursor-pointer" />
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
+                       {csvContacts.length > 0 && 
                             <div className="mt-2 text-xs text-green-600 font-medium">{csvContacts.length} contatos importados do arquivo.</div>
                         }
-                    </TabsContent>
-                    </Tabs>
+                    </div>
+                  )}
+                </div>
                 </CardContent>
                 </Card>
             </div>
@@ -466,12 +508,14 @@ export default function NewCampaignPage() {
                 <div className="text-center font-semibold text-primary">{selectedCount} destinatário(s)</div>
                 <Button disabled={!canProceed || isSubmitting} onClick={handleSendCampaign}>
                 {isSubmitting ? <Icon.Loader2 className="animate-spin" /> : <Icon.Send />}
-                {isSubmitting ? 'Enviando...' : 'Revisar e Enviar'}
+                {isSubmitting ? 'Enviando...' : 'Revisar e Enviar Campanha'}
                 </Button>
             </div>
             </div>
         </div>
         </div>
     </MainLayout>
-  );
+  )
 }
+
+    
