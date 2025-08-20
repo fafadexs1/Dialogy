@@ -15,6 +15,7 @@ import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
+import { TagSelectionDialog } from './tag-selection-dialog';
 
 interface AgentTooltipContentProps {
   agent: OnlineAgent;
@@ -111,8 +112,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       onClick={() => onSelect(chat)}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
-      {/* TagSelectionDialog (lazy/portal) */}
-      {/* <TagSelectionDialog ... /> */}
+      <TagSelectionDialog 
+        isOpen={isTagDialogOpen}
+        setIsOpen={setIsTagDialogOpen}
+        chat={chat}
+        onUpdate={onUpdate}
+      />
 
       <div className="relative flex-shrink-0">
         <Avatar className="h-10 w-10 border">
@@ -307,5 +312,3 @@ export default function ChatList({
     </div>
   );
 }
-
-    
