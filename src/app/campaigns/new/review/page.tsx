@@ -27,17 +27,16 @@ export default function CampaignReviewPage() {
         setIsHydrated(true);
     }, []);
 
-    // Redirect if essential data is missing, but only after hydration and data has been assessed.
+    // Redirect if essential data is missing after hydration.
+    // This now runs only once after isHydrated becomes true.
     useEffect(() => {
-        if (isHydrated && campaignData) {
-             if (!campaignData.message || !campaignData.instanceName || !campaignData.contacts || campaignData.contacts.length === 0) {
-                toast({
-                    title: "Dados incompletos",
-                    description: "Por favor, preencha os passos anteriores primeiro.",
-                    variant: "destructive"
-                });
-                router.replace('/campaigns/new/message');
-            }
+        if (isHydrated && (!campaignData?.message || !campaignData.instanceName || !campaignData.contacts || campaignData.contacts.length === 0)) {
+            toast({
+                title: "Dados incompletos",
+                description: "Por favor, preencha os passos anteriores primeiro.",
+                variant: "destructive"
+            });
+            router.replace('/campaigns/new/message');
         }
     }, [isHydrated, campaignData, router, toast]);
 
