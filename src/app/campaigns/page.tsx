@@ -4,25 +4,55 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, PlusCircle, Send, FileText, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Loader2, Plus, CheckCircle, Circle, Edit, Trash2 } from 'lucide-react';
 import { getCampaigns } from '@/actions/campaigns';
 import type { Campaign } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
+import { FaWhatsapp } from 'react-icons/fa6';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 
-const statusConfig = {
-    draft: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, color: 'bg-gray-400' },
-    sending: { label: 'Enviando', icon: <Loader2 className="h-4 w-4 animate-spin" />, color: 'bg-blue-500' },
-    completed: { label: 'Concluída', icon: <CheckCircle className="h-4 w-4" />, color: 'bg-green-500' },
-    paused: { label: 'Pausada', icon: <Clock className="h-4 w-4" />, color: 'bg-yellow-500' },
-    failed: { label: 'Falhou', icon: <XCircle className="h-4 w-4" />, color: 'bg-red-500' },
+
+const statusConfig: { [key in Campaign['status']]: { label: string; icon: React.ReactNode; className: string } } = {
+    draft: { label: 'Rascunho', icon: <Circle className="h-2 w-2 text-gray-500 fill-current" />, className: 'text-gray-500' },
+    sending: { label: 'Enviando', icon: <Loader2 className="h-3 w-3 animate-spin text-blue-500" />, className: 'text-blue-500' },
+    completed: { label: 'Envio concluído', icon: <CheckCircle className="h-3 w-3 text-green-500" />, className: 'text-green-500' },
+    paused: { label: 'Pausada', icon: <Circle className="h-2 w-2 text-yellow-500 fill-current" />, className: 'text-yellow-500' },
+    failed: { label: 'Falhou', icon: <Circle className="h-2 w-2 text-red-500 fill-current" />, className: 'text-red-500' },
 };
 
+function CampaignActions() {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                    <span className="sr-only">Abrir menu</span>
+                    <MoreHorizontal className="h-4 w-4" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Editar
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" disabled>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Excluir
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    )
+}
 
 export default function CampaignsPage() {
   const user = useAuth();
@@ -32,7 +62,6 @@ export default function CampaignsPage() {
 
   const fetchCampaigns = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
-    // Do not set loading to true here to allow for background refresh
     const result = await getCampaigns(user.activeWorkspaceId);
     if (result.error) {
       toast({ title: "Erro ao buscar campanhas", description: result.error, variant: 'destructive' });
@@ -52,7 +81,7 @@ export default function CampaignsPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchCampaigns();
-    }, 5000); // Poll every 5 seconds
+    }, 5000); 
 
     return () => clearInterval(interval);
   }, [fetchCampaigns]);
@@ -64,69 +93,116 @@ export default function CampaignsPage() {
 
   return (
     <MainLayout>
-      <div className="flex flex-col flex-1 h-full">
-        <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2"><Send /> Campanhas</h1>
-            <p className="text-muted-foreground">Envie mensagens em massa e acompanhe o progresso.</p>
-          </div>
-          <Button asChild>
-            <Link href="/campaigns/new">
-                <PlusCircle className="mr-2 h-4 w-4" /> Criar Campanha
-            </Link>
-          </Button>
-        </header>
-        <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-          {loading ? (
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <Card><CardHeader><div className="h-6 bg-muted rounded w-3/4"></div></CardHeader><CardContent><div className="h-20 bg-muted rounded"></div></CardContent><CardFooter><div className="h-10 bg-muted rounded w-full"></div></CardFooter></Card>
-                <Card><CardHeader><div className="h-6 bg-muted rounded w-3/4"></div></CardHeader><CardContent><div className="h-20 bg-muted rounded"></div></CardContent><CardFooter><div className="h-10 bg-muted rounded w-full"></div></CardFooter></Card>
-             </div>
-          ) : campaigns.length === 0 ? (
-            <div className="text-center p-10 border-dashed border-2 rounded-lg mt-8">
-                <Send className="mx-auto h-12 w-12 text-muted-foreground" />
-                <h3 className="mt-4 text-lg font-medium">Nenhuma campanha criada ainda</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                    Clique em "Criar Campanha" para iniciar seu primeiro envio em massa.
-                </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {campaigns.map(campaign => {
-                const config = statusConfig[campaign.status];
-                return (
-                  <Card key={campaign.id} className="flex flex-col">
-                    <CardHeader>
-                      <CardTitle className="truncate">{campaign.name}</CardTitle>
-                      <CardDescription>
-                        Criada em {format(new Date(campaign.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="flex-grow space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center text-sm">
-                          <Badge style={{ backgroundColor: config.color }} className="text-white font-semibold flex items-center gap-1.5">
-                            {config.icon}
-                            {config.label}
-                          </Badge>
-                          <span className="font-semibold">{campaign.sent_recipients || 0} / {campaign.total_recipients || 0}</span>
-                        </div>
-                        <Progress value={campaign.progress || 0} />
-                      </div>
-                      <div className="p-3 bg-secondary/50 rounded-md border text-sm text-muted-foreground h-20 overflow-hidden relative">
-                         <p className='line-clamp-3'>{campaign.message}</p>
-                         <div className="absolute bottom-0 left-0 w-full h-8 bg-gradient-to-t from-secondary/50 to-transparent"></div>
-                      </div>
-                    </CardContent>
-                    <CardFooter>
-                       <Button variant="outline" className="w-full" disabled>Ver Detalhes</Button>
-                    </CardFooter>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-        </main>
+      <div className="flex flex-col flex-1 h-full bg-background">
+        <div className="flex flex-1 min-h-0">
+            {/* Sidebar de Campanhas */}
+            <aside className="w-64 flex-shrink-0 border-r bg-[#2c3e50] text-white">
+                <div className="p-4">
+                    <h2 className="text-xs uppercase font-bold tracking-wider text-gray-400">Campanhas por Canal</h2>
+                </div>
+                <nav className="p-2">
+                    <ul>
+                        <li>
+                            <Link href="/campaigns" className="block p-2 rounded-md bg-blue-500/30 text-white font-semibold">
+                                Campanhas
+                            </Link>
+                        </li>
+                         <li>
+                            <Link href="#" className="block p-2 rounded-md hover:bg-white/10 text-gray-300">
+                                WhatsApp
+                            </Link>
+                        </li>
+                        <li>
+                            <Link href="#" className="block p-2 rounded-md hover:bg-white/10 text-gray-300">
+                                WhatsApp Paralelo
+                            </Link>
+                        </li>
+                        <li>
+                            <Link href="#" className="block p-2 rounded-md hover:bg-white/10 text-gray-300">
+                                WhatsApp API Oficial
+                            </Link>
+                        </li>
+                    </ul>
+                </nav>
+            </aside>
+            
+            {/* Conteúdo Principal */}
+            <main className="flex-1 flex flex-col">
+                 <header className="p-4 border-b flex-shrink-0 flex justify-between items-center">
+                    <h1 className="text-xl font-bold">Campanhas</h1>
+                    <Button asChild>
+                        <Link href="/campaigns/new">
+                            <Plus className="mr-2 h-4 w-4" /> Nova campanha
+                        </Link>
+                    </Button>
+                </header>
+                
+                <div className="flex-1 overflow-y-auto">
+                    {/* Header da Tabela */}
+                    <div className="grid grid-cols-[auto,1fr,auto,auto,auto,auto,auto] gap-4 px-6 py-3 border-b bg-muted/50 text-xs font-semibold text-muted-foreground uppercase sticky top-0">
+                        <Checkbox disabled/>
+                        <div>Nome da Campanha</div>
+                        <div className="text-left">Estado</div>
+                        <div className="text-left">Destinatários</div>
+                        <div className="text-left">Entrega</div>
+                        <div className="text-left">Última Atualização</div>
+                        <div className="text-center">Ações</div>
+                    </div>
+
+                    {/* Corpo da Tabela */}
+                     <div className="divide-y">
+                         <div className="px-6 py-2 text-sm font-medium text-gray-600 flex items-center gap-2">
+                            <FaWhatsapp className="text-green-500"/>
+                            WhatsApp Paralelo
+                         </div>
+                        {loading ? (
+                            <div className="flex items-center justify-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary"/></div>
+                        ) : campaigns.length === 0 ? (
+                            <div className="text-center p-10">
+                                <h3 className="text-lg font-medium">Nenhuma campanha criada ainda</h3>
+                                <p className="mt-2 text-sm text-muted-foreground">
+                                    Clique em "Nova Campanha" para iniciar seu primeiro envio em massa.
+                                </p>
+                            </div>
+                        ) : (
+                            campaigns.map(campaign => {
+                                const config = statusConfig[campaign.status];
+                                return (
+                                <div key={campaign.id} className="grid grid-cols-[auto,1fr,auto,auto,auto,auto,auto] items-center gap-4 px-6 py-3 hover:bg-accent transition-colors">
+                                    <Checkbox />
+                                    <div className="font-medium">{campaign.name}</div>
+                                    <div className={`flex items-center gap-1.5 text-sm font-medium ${config.className}`}>
+                                        {config.icon}
+                                        {config.label}
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-xs font-semibold">
+                                            {campaign.total_recipients || 0} contatos
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 w-32">
+                                        <span className="text-sm font-semibold w-12 text-right">{campaign.progress?.toFixed(0) ?? 0}%</span>
+                                        <Progress value={campaign.progress || 0} className="h-2"/>
+                                    </div>
+                                    <div className="text-sm">
+                                        <p className="font-medium">{format(new Date(campaign.created_at), "MMM yyyy", { locale: ptBR })}</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Criado: {format(new Date(campaign.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                                        </p>
+                                    </div>
+                                    <div className="flex justify-center">
+                                        {campaign.status === 'draft' ? (
+                                            <Button variant="ghost" size="icon" className='text-green-500'><CheckCircle className="h-5 w-5"/></Button>
+                                        ) : <CampaignActions />}
+                                    </div>
+                                </div>
+                                )
+                            })
+                        )}
+                     </div>
+                </div>
+            </main>
+        </div>
       </div>
     </MainLayout>
   );
