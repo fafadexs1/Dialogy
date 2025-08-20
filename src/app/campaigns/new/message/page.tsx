@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCampaignState } from '../use-campaign-state';
 import { MainLayout } from '@/components/layout/main-layout';
@@ -20,32 +20,19 @@ export default function CampaignMessagePage() {
   const user = useAuth();
   const router = useRouter();
 
-  // Zustand store
+  // Zustand store é a única fonte da verdade
   const { campaignData, setCampaignData, clearCampaignData } = useCampaignState();
-
-  // Estados locais "espelho"
-  const [message, setMessage] = useState('');
-  const [instanceId, setInstanceId] = useState<string>('');
-  const [instanceName, setInstanceName] = useState<string>('');
 
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
 
-  // Saber quando o Zustand reidratou
+  // Garante que a store foi reidratada do localStorage antes de usar seus dados
   useEffect(() => {
     setIsHydrated(true);
   }, []);
 
-  // Sincroniza o estado local quando a store estiver pronta
-  useEffect(() => {
-    if (!isHydrated) return;
-    setMessage(campaignData?.message ?? '');
-    setInstanceId(campaignData?.instanceId ?? '');
-    setInstanceName(campaignData?.instanceName ?? '');
-  }, [isHydrated, campaignData]);
-
-  // Carrega instâncias
+  // Carrega instâncias da API
   useEffect(() => {
     let mounted = true;
     async function load() {
@@ -64,39 +51,25 @@ export default function CampaignMessagePage() {
     };
   }, [user?.activeWorkspaceId]);
 
+  // Funções que atualizam diretamente o Zustand
   const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newMessage = e.target.value;
-    setMessage(newMessage);
-    setCampaignData((prev) => ({ ...prev, message: newMessage }));
+    setCampaignData((prev) => ({ ...prev, message: e.target.value }));
   };
 
-  // Quando o usuário selecionar uma instância, salvamos id + name no store
   const handleInstanceChange = (newInstanceId: string) => {
-    setInstanceId(newInstanceId);
     const selected = instances.find((i) => i.id === newInstanceId);
-    const selectedName = selected?.name ?? '';
-    setInstanceName(selectedName);
-
     setCampaignData((prev) => ({
       ...prev,
       instanceId: newInstanceId,
-      instanceName: selectedName,
+      instanceName: selected?.name ?? '',
     }));
   };
 
   const handleNext = () => {
-    // Validação simples local (a rota seguinte provavelmente também valida)
-    const validMessage = message.trim().length > 0;
-    if (!validMessage || !instanceId) return;
-
-    // Garante que o store está consistente antes de navegar
-    setCampaignData((prev) => ({
-      ...prev,
-      message: message.trim(),
-      instanceId,
-      instanceName,
-    }));
-
+    // Validação usa diretamente os dados da store
+    if (!campaignData?.message?.trim() || !campaignData?.instanceId) {
+      return;
+    }
     router.push('/campaigns/new/audience');
   };
 
@@ -105,7 +78,7 @@ export default function CampaignMessagePage() {
     router.push('/campaigns');
   };
 
-  // Skeleton enquanto não hidratou
+  // Skeleton enquanto a store não hidrata para evitar piscar de tela
   if (!isHydrated) {
     return (
       <MainLayout>
@@ -147,7 +120,7 @@ export default function CampaignMessagePage() {
                   <Label htmlFor="message">Mensagem da Campanha</Label>
                   <Textarea
                     id="message"
-                    value={message}
+                    value={campaignData?.message || ''}
                     onChange={handleMessageChange}
                     rows={6}
                     placeholder="Digite sua mensagem aqui... Use {{nome}} para personalizar com o nome do contato."
@@ -166,8 +139,7 @@ export default function CampaignMessagePage() {
                     </div>
                   ) : (
                     <Select
-                      // shadcn Select prefere undefined quando vazio
-                      value={instanceId || undefined}
+                      value={campaignData?.instanceId || ''}
                       onValueChange={handleInstanceChange}
                     >
                       <SelectTrigger id="instance">
@@ -182,9 +154,9 @@ export default function CampaignMessagePage() {
                       </SelectContent>
                     </Select>
                   )}
-                  {instanceName && (
+                  {campaignData?.instanceName && (
                     <p className="text-xs text-muted-foreground">
-                      Selecionada: <span className="font-medium">{instanceName}</span>
+                      Selecionada: <span className="font-medium">{campaignData.instanceName}</span>
                     </p>
                   )}
                 </div>
@@ -195,7 +167,7 @@ export default function CampaignMessagePage() {
               <Button variant="outline" onClick={handleCancel}>
                 Cancelar
               </Button>
-              <Button onClick={handleNext} disabled={!message.trim() || !instanceId}>
+              <Button onClick={handleNext} disabled={!campaignData?.message?.trim() || !campaignData?.instanceId}>
                 Próximo Passo <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
