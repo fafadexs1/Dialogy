@@ -13,6 +13,7 @@ import { CampaignSteps } from '../campaign-steps';
 import { createCampaign } from '@/actions/campaigns';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function CampaignReviewPage() {
     const user = useAuth();
@@ -20,15 +21,29 @@ export default function CampaignReviewPage() {
     const { campaignData, clearCampaignData } = useCampaignState();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isHydrated, setIsHydrated] = useState(false);
 
+    // Ensure client-side code runs only after mounting
     useEffect(() => {
+        setIsHydrated(true);
+    }, []);
+
+    // Redirect if essential data is missing, but only after hydration
+    useEffect(() => {
+        if (!isHydrated) return;
+
         if (!campaignData?.message || !campaignData?.instanceName || !campaignData?.contacts || campaignData.contacts.length === 0) {
+            toast({
+                title: "Dados incompletos",
+                description: "Por favor, preencha os passos anteriores primeiro.",
+                variant: "destructive"
+            })
             router.replace('/campaigns/new/message');
         }
-    }, [campaignData, router]);
+    }, [isHydrated, campaignData, router, toast]);
 
     const handleSendCampaign = async () => {
-        if (!user?.activeWorkspaceId || !campaignData?.contacts) return;
+        if (!user?.activeWorkspaceId || !campaignData?.contacts || !campaignData?.instanceName || !campaignData?.message) return;
         setIsSubmitting(true);
         
         // The names are used for personalization, the JID is the key.
@@ -50,6 +65,24 @@ export default function CampaignReviewPage() {
         }
     }
 
+    if (!isHydrated || !campaignData) {
+        return (
+             <MainLayout>
+                <div className="flex flex-col flex-1 h-full bg-muted/40">
+                    <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                         <Skeleton className="h-8 w-48" />
+                         <Skeleton className="h-4 w-72 mt-2" />
+                    </header>
+                    <div className="flex-1 p-4 sm:p-6 flex flex-col items-center">
+                        <div className="w-full max-w-4xl space-y-6">
+                            <CampaignSteps currentStep="review" />
+                            <Skeleton className="h-96 w-full" />
+                        </div>
+                    </div>
+                </div>
+            </MainLayout>
+        )
+    }
 
     return (
         <MainLayout>
@@ -110,4 +143,3 @@ export default function CampaignReviewPage() {
         </MainLayout>
     );
 }
-
