@@ -22,6 +22,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,7 +40,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
 import { useAuth } from "@/hooks/use-auth";
-import { getCampaigns } from "@/actions/campaigns";
+import { getCampaigns, deleteCampaign } from "@/actions/campaigns";
 import type { Campaign } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -127,6 +138,17 @@ export default function CampaignsPage() {
     setSelected((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
   };
   
+  const handleDeleteCampaign = async (campaignId: string) => {
+    const result = await deleteCampaign(campaignId);
+    if (result.error) {
+        toast({ title: "Erro ao excluir campanha", description: result.error, variant: "destructive" });
+    } else {
+        toast({ title: "Campanha excluída com sucesso!" });
+        fetchCampaigns(); // Re-fetch the list
+    }
+  }
+
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -263,13 +285,11 @@ export default function CampaignsPage() {
                                 />
                             </div>
 
-                            <div className="col-span-4 flex items-center gap-3">
-                                <div className="flex flex-col">
-                                    <div className="font-medium leading-tight">{c.name}</div>
-                                    <div className="flex items-center gap-2">
-                                        <ChannelPill channel={c.channel} />
-                                        <div className="text-xs text-muted-foreground">ID: {c.id}</div>
-                                    </div>
+                            <div className="col-span-4 flex flex-col items-start gap-1">
+                                <div className="font-medium leading-tight">{c.name}</div>
+                                <div className="flex items-center gap-3">
+                                    <ChannelPill channel={c.channel} />
+                                    <div className="text-xs text-muted-foreground">ID: {c.id.split('-')[0]}</div>
                                 </div>
                             </div>
 
@@ -290,18 +310,36 @@ export default function CampaignsPage() {
 
                             <div className="col-span-1">
                                 <div className="flex items-center justify-end gap-2">
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                                        <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-44">
-                                    <DropdownMenuItem className="gap-2" disabled><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
-                                    <DropdownMenuItem className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
-                                    <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600" disabled><Trash2 className="h-4 w-4"/>Excluir</DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                 <AlertDialog>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                            <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-44">
+                                            <DropdownMenuItem className="gap-2" disabled><Send className="h-4 w-4"/>Reenviar</DropdownMenuItem>
+                                            <DropdownMenuItem className="gap-2" disabled><Copy className="h-4 w-4"/>Duplicar</DropdownMenuItem>
+                                            <AlertDialogTrigger asChild>
+                                                <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600" onSelect={(e) => e.preventDefault()}>
+                                                    <Trash2 className="h-4 w-4"/>Excluir
+                                                </DropdownMenuItem>
+                                            </AlertDialogTrigger>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Tem certeza que deseja excluir esta campanha?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                            Esta ação não pode ser desfeita. A campanha "{c.name}" e seu histórico serão removidos permanentemente.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => handleDeleteCampaign(c.id)}>Excluir</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
                                 </div>
                             </div>
                         </li>

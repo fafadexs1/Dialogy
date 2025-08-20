@@ -17,7 +17,8 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     `, [userId, workspaceId, permission]);
     // For now, let's assume if they are part of the workspace, they can manage campaigns.
     // Replace with a real permission like 'campaigns:manage' later.
-    return res.rowCount > 0;
+    const memberCheck = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
+    return memberCheck.rowCount > 0;
 }
 
 
@@ -220,6 +221,44 @@ async function startCampaignSending(campaignId: string) {
     } catch (error) {
          console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
          await client.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
+    } finally {
+        client.release();
+    }
+}
+
+
+export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+
+    const client = await db.connect();
+    try {
+        // Find workspace to check permissions
+        const campaignRes = await client.query('SELECT workspace_id FROM campaigns WHERE id = $1', [campaignId]);
+        if (campaignRes.rowCount === 0) {
+            return { success: false, error: 'Campanha não encontrada.' };
+        }
+        const { workspace_id } = campaignRes.rows[0];
+
+        // Permission check
+        if (!await hasPermission(session.user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+            return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
+        }
+        
+        await client.query('BEGIN');
+        // Delete recipients first due to foreign key constraint
+        await client.query('DELETE FROM campaign_recipients WHERE campaign_id = $1', [campaignId]);
+        // Then delete the campaign
+        await client.query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+        await client.query('COMMIT');
+        
+        revalidatePath('/campaigns');
+        return { success: true };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[DELETE_CAMPAIGN_ACTION]', error);
+        return { success: false, error: 'Falha ao excluir a campanha no banco de dados.' };
     } finally {
         client.release();
     }
