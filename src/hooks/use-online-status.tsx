@@ -34,18 +34,25 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
   useEffect(() => {
+    let pollingInterval: NodeJS.Timeout | null = null;
+
     if (currentUser?.activeWorkspaceId) {
       const workspaceId = currentUser.activeWorkspaceId;
-      // Fetch immediately on mount
+      // Fetch immediately on mount or when workspaceId becomes available
       fetchOnlineAgents(workspaceId);
 
       // Set up an interval to fetch every 30 seconds
-      const intervalId = setInterval(() => fetchOnlineAgents(workspaceId), 30000);
-      
-      // Clean up the interval when the component unmounts
-      return () => clearInterval(intervalId);
+      pollingInterval = setInterval(() => fetchOnlineAgents(workspaceId), 30000);
     }
-  }, [currentUser, fetchOnlineAgents]);
+    
+    // Clean up the interval when the component unmounts or workspaceId changes
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [currentUser?.activeWorkspaceId, fetchOnlineAgents]);
+
 
   useEffect(() => {
      if (!currentUser?.id) return;
@@ -88,5 +95,3 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     </PresenceContext.Provider>
   );
 };
-
-    
