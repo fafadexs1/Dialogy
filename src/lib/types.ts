@@ -393,6 +393,7 @@ export interface Campaign {
   message: string;
   instance_name: string;
   status: CampaignStatus;
+  channel: 'parallel' | 'api';
   created_at: string;
   started_at?: string;
   completed_at?: string;

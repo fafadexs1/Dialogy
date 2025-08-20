@@ -12,5 +12,5 @@ interface MainLayoutProps {
  * para garantir que a sidebar seja persistente durante as transições de página.
  */
 export function MainLayout({ children }: MainLayoutProps) {
-  return <div className="h-full">{children}</div>;
+  return <div className="h-full w-full">{children}</div>;
 }
