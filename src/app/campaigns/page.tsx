@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
@@ -235,11 +235,11 @@ export default function CampaignsPage() {
                       />
                     </div>
                   </div>
-                  <div className="col-span-3">Nome</div>
+                  <div className="col-span-4">Nome</div>
                   <div className="col-span-2">Estado</div>
                   <div className="col-span-2">Destinatários</div>
                   <div className="col-span-2">Entrega</div>
-                  <div className="col-span-2 text-right">Última atualização</div>
+                  <div className="col-span-1 text-right">Ações</div>
                 </div>
 
                 {/* Rows */}
@@ -266,7 +266,7 @@ export default function CampaignsPage() {
                             </div>
                         </div>
 
-                        <div className="col-span-3 flex items-center gap-3">
+                        <div className="col-span-4 flex items-center gap-3">
                              <ChannelPill channel={c.channel} />
                              <div className="flex flex-col">
                                 <div className="font-medium leading-tight">{c.name}</div>
@@ -289,11 +289,8 @@ export default function CampaignsPage() {
                             </div>
                         </div>
 
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                             <div className="flex items-center justify-end gap-2">
-                            <span className="text-xs text-muted-foreground">
-                                {format(new Date(c.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
-                            </span>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-8 w-8">
