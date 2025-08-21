@@ -151,7 +151,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
             </p>
 
-            {chat.tag && chat.color && (
+            {chat.tag && chat.color && chat.status !== 'atendimentos' && (
               <Badge
                 style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
                 className="border-transparent text-xs px-2 py-0.5 flex-shrink-0 max-w-[45%] truncate"
