@@ -1,10 +1,11 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save } from 'lucide-react';
+import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save, Copy } from 'lucide-react';
 import type { Role, WorkspaceMember } from '@/lib/types';
 import { getWorkspaceMembers, removeMemberAction, updateMemberRoleAction } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
@@ -45,6 +46,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 import { useFormStatus } from 'react-dom';
+
+function CopyButton({ textToCopy }: { textToCopy: string }) {
+    const { toast } = useToast();
+    const handleCopy = () => {
+        navigator.clipboard.writeText(textToCopy);
+        toast({ title: 'Copiado!', description: 'O ID foi copiado para a área de transferência.' });
+    };
+    return <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}><Copy className="h-3 w-3" /></Button>;
+}
 
 function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void, children: React.ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -261,7 +271,13 @@ export default function ManageMembersPage() {
                                                         </Avatar>
                                                         <div>
                                                             <p className="font-medium">{member.name}</p>
-                                                            <p className="text-sm text-muted-foreground">{member.email}</p>
+                                                            <div className="flex items-center gap-1">
+                                                                <p className="text-xs text-muted-foreground">{member.email}</p>
+                                                            </div>
+                                                            <div className="flex items-center gap-1 mt-1">
+                                                                <span className="text-xs font-mono text-muted-foreground">ID: {member.id}</span>
+                                                                <CopyButton textToCopy={member.id} />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </TableCell>

@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -8,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette, Tag as TagIcon } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette, Tag as TagIcon, Copy } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,6 +26,15 @@ const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', '
 const sortBusinessHours = (businessHours: BusinessHour[]) => {
   return [...businessHours].sort((a, b) => daysOrder.indexOf(a.day) - daysOrder.indexOf(b.day));
 };
+
+function CopyButton({ textToCopy }: { textToCopy: string }) {
+    const { toast } = useToast();
+    const handleCopy = () => {
+        navigator.clipboard.writeText(textToCopy);
+        toast({ title: 'Copiado!', description: 'O ID foi copiado para a área de transferência.' });
+    };
+    return <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}><Copy className="h-3 w-3" /></Button>;
+}
 
 
 function TeamSettingsContent({ 
@@ -117,6 +127,10 @@ function TeamSettingsContent({
               <div>
                 <CardTitle className="text-2xl">{team.name}</CardTitle>
                 <CardDescription>Gerencie as configurações gerais e membros da equipe.</CardDescription>
+                <div className="flex items-center gap-1 mt-2">
+                    <span className="text-xs font-mono text-muted-foreground">ID: {team.id}</span>
+                    <CopyButton textToCopy={team.id} />
+                </div>
               </div>
             </div>
              <Button variant="destructive" size="sm" onClick={handleRemoveTeam}>
