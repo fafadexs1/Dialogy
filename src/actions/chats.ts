@@ -54,9 +54,12 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
 
 
 export async function transferChatAction(
-    input: { chatId: string; teamId?: string; agentId?: string }
+    input: { chatId: string; teamId?: string; agentId?: string },
+    // Optional parameter to accept a session-like object from an API call
+    prefetchedSession?: { user: { id: string, name: string } }
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    
+    const session = prefetchedSession || await getServerSession(authOptions);
     if (!session?.user?.id || !session?.user?.name) {
         return { success: false, error: "Usuário não autenticado." };
     }
@@ -85,10 +88,14 @@ export async function transferChatAction(
             return { success: false, error: "Não é possível transferir um atendimento que já foi encerrado." };
         }
         
-        if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
-            await client.query('ROLLBACK');
-            return { success: false, error: "Você não tem permissão para transferir atendimentos." };
+        // System agents have implicit permission
+        if (!prefetchedSession) {
+             if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
+                await client.query('ROLLBACK');
+                return { success: false, error: "Você não tem permissão para transferir atendimentos." };
+            }
         }
+
 
         let finalAgentId = agentId;
         let transferTargetName = '';
