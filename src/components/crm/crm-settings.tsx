@@ -137,7 +137,8 @@ function OptionsManager({
                             <div className='flex items-center gap-2'>
                                 <span className='h-3 w-3 rounded-full' style={{backgroundColor: option.color}}></span>
                                 <div className='flex flex-col'>
-                                    <span>{option.label}</span>
+                                    <span className='font-medium'>{option.label}</span>
+                                    <span className="text-xs font-mono text-muted-foreground">ID: {option.id}</span>
                                     {(option as Tag).is_close_reason && (
                                         <span className='text-xs text-blue-500 font-semibold'>Motivo de Encerramento</span>
                                     )}
