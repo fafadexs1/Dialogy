@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -26,6 +27,7 @@ interface WebhookPayload {
         phone_number: string | undefined;
         email: string | undefined;
         avatar_url: string | undefined;
+        custom_fields: Record<string, any>;
     };
     message: {
         id: string;
@@ -40,6 +42,24 @@ interface WebhookPayload {
 async function getWorkspaceName(workspaceId: string): Promise<string> {
     const res = await db.query('SELECT name FROM workspaces WHERE id = $1', [workspaceId]);
     return res.rows[0]?.name || 'Unknown Workspace';
+}
+
+async function getContactWithCustomFields(contactId: string): Promise<Contact | null> {
+    const res = await db.query(
+        `SELECT 
+            c.*,
+            COALESCE(
+                (SELECT json_object_agg(cfd.label, cfv.value)
+                 FROM contact_custom_field_values cfv
+                 JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+                 WHERE cfv.contact_id = c.id),
+                '{}'::json
+            ) as custom_fields
+        FROM contacts c
+        WHERE c.id = $1`,
+        [contactId]
+    );
+    return res.rows[0] || null;
 }
 
 export async function dispatchMessageToWebhooks(
@@ -62,6 +82,13 @@ export async function dispatchMessageToWebhooks(
     }
 
     const workspaceName = await getWorkspaceName(chat.workspace_id);
+    const contactWithDetails = await getContactWithCustomFields(chat.contact.id);
+
+    if (!contactWithDetails) {
+        console.error(`[WEBHOOK_DISPATCHER] Erro crítico: Não foi possível encontrar detalhes do contato ${chat.contact.id}. Abortando.`);
+        return;
+    }
+
 
     const payload: WebhookPayload = {
         event: 'message.created',
@@ -80,11 +107,12 @@ export async function dispatchMessageToWebhooks(
             },
         },
         contact: {
-            id: chat.contact.id,
-            name: chat.contact.name,
-            phone_number: chat.contact.phone_number_jid,
-            email: chat.contact.email,
-            avatar_url: chat.contact.avatar_url,
+            id: contactWithDetails.id,
+            name: contactWithDetails.name,
+            phone_number: contactWithDetails.phone_number_jid,
+            email: contactWithDetails.email,
+            avatar_url: contactWithDetails.avatar_url,
+            custom_fields: contactWithDetails.custom_fields || {},
         },
         message: {
             id: message.id,
