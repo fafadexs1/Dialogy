@@ -1,31 +1,26 @@
 
 import { Pool } from 'pg';
 
-// Tipagem para garantir que o pool seja do tipo correto
+// Tipagem para garantir que o pool seja do tipo correto e único.
 declare global {
   // eslint-disable-next-line no-var
-  var pool: Pool | undefined;
+  var dbPool: Pool | undefined;
 }
 
-let db: Pool;
+// Usamos um singleton para o Pool de conexões.
+// Isso garante que apenas uma instância do pool seja criada e reutilizada
+// em toda a aplicação, prevenindo vazamentos de memória e conexão.
+const db = global.dbPool || new Pool({
+    connectionString: process.env.DATABASE_URL,
+    // Configurações adicionais do pool podem ser adicionadas aqui.
+    // Ex: max: 20, idleTimeoutMillis: 30000, etc.
+});
 
-// Em desenvolvimento, o "hot-reloading" pode recriar o módulo,
-// o que levaria a múltiplos pools. Usamos a variável global para prevenir isso.
-if (process.env.NODE_ENV === 'production') {
-  if (!global.pool) {
-    global.pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-    });
-  }
-  db = global.pool;
-} else {
-  // Em desenvolvimento, criamos um novo pool se ele não existir no escopo global.
-  if (!global.pool) {
-    global.pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-    });
-  }
-  db = global.pool;
+// Em desenvolvimento, o "hot-reloading" pode recriar o módulo.
+// Armazenamos o pool na variável global para que ele persista
+// entre as recargas e não crie novas conexões desnecessariamente.
+if (process.env.NODE_ENV !== 'production') {
+  global.dbPool = db;
 }
 
 export { db };

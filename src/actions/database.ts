@@ -6,16 +6,11 @@ import { Pool } from 'pg';
 
 export async function initializeDatabase(): Promise<{ success: boolean; message: string }> {
   console.log('Iniciando a inicialização do banco de dados...');
-  const adminPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
-
-  const client = await adminPool.connect();
+  // A conexão principal agora é gerenciada pelo módulo 'db', não precisamos de um novo pool aqui.
+  const client = await db.connect();
 
   try {
     // --- Etapa 1: Garantir que os Tipos ENUM existam ---
-    // Esses comandos são executados fora da transação principal porque CREATE TYPE
-    // não suporta "IF NOT EXISTS" e falharia dentro de um bloco de transação se o tipo já existisse.
     console.log('Verificando e criando tipos ENUM...');
     const enumQueries = [
       `CREATE TYPE public.chat_status_enum AS ENUM ('atendimentos', 'gerais', 'encerrados');`,
@@ -33,23 +28,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         await client.query(query);
       } catch (error: any) {
         if (error.code !== '42710') { // 42710 is 'duplicate_object'
-          throw error; // Se for um erro diferente, lança para o catch principal.
+          throw error;
         }
-        // Se o tipo já existe, ignora o erro e continua.
       }
     }
     
-    // Adicionar valor 'audio' ao enum de mensagem, se não existir.
-    // É mais seguro do que tentar dropar e recriar.
     try {
         await client.query("ALTER TYPE public.message_type_enum ADD VALUE IF NOT EXISTS 'audio'");
     } catch(error: any) {
-        // Ignora erros se o tipo já foi modificado ou se a transação está em um estado que não permite
         if (error.code !== '42710') {
           console.warn(`[DB_INIT] Não foi possível adicionar o valor 'audio' ao enum:`, error.message);
         }
     }
-
 
     console.log('Tipos ENUM verificados com sucesso.');
 
@@ -354,26 +344,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
       );`
     ];
     
-    // Executa as queries de criação de tabela.
     for (const query of setupQueries) {
         await client.query(query);
     }
     console.log('Schema de tabelas verificado com sucesso.');
 
-    // --- Etapa 3: Adicionar colunas faltantes a tabelas existentes (Migrações) ---
     console.log('Verificando e aplicando migrações de colunas...');
     const migrationQueries = [
       'ALTER TABLE public.users ADD COLUMN IF NOT EXISTS online_since TIMESTAMPTZ;',
       'ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS tag_id UUID REFERENCES public.tags(id) ON DELETE SET NULL;'
     ];
     for (const query of migrationQueries) {
-        try {
-            await client.query(query);
-            console.log(`Migração executada com sucesso: ${query}`);
-        } catch (error: any) {
-            console.error(`[DB_MIGRATE] Erro ao executar a migração: ${query}`, error.message)
-            throw error;
-        }
+        await client.query(query);
     }
 
 
@@ -391,29 +373,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     console.log('Populando a tabela de permissões...');
     const permissions = [
-        // Workspace
         { id: 'workspace:settings:view', description: 'Visualizar as configurações do workspace', category: 'Workspace' },
         { id: 'workspace:settings:edit', description: 'Editar as configurações do workspace', category: 'Workspace' },
         { id: 'workspace:invites:manage', description: 'Gerenciar convites para o workspace', category: 'Workspace' },
-        // Members
         { id: 'members:view', description: 'Visualizar membros do workspace', category: 'Membros' },
         { id: 'members:invite', description: 'Convidar novos membros', category: 'Membros' },
         { id: 'members:remove', description: 'Remover membros do workspace', category: 'Membros' },
-        // Roles & Permissions
         { id: 'permissions:view', description: 'Visualizar papéis e permissões', category: 'Permissões' },
         { id: 'permissions:edit', description: 'Criar, editar e atribuir papéis e permissões', category: 'Permissões' },
-        // Teams
         { id: 'teams:view', description: 'Visualizar equipes', category: 'Equipes' },
         { id: 'teams:edit', description: 'Criar, editar e gerenciar equipes e seus membros', category: 'Equipes' },
-        // Analytics
         { id: 'analytics:view', description: 'Visualizar a página de Analytics', category: 'Analytics' },
-        // Integrations
         { id: 'integrations:view', description: 'Visualizar integrações', category: 'Integrações' },
         { id: 'integrations:edit', description: 'Configurar integrações', category: 'Integrações' },
-        // Autopilot
         { id: 'autopilot:view', description: 'Visualizar configurações do Piloto Automático', category: 'Piloto Automático' },
         { id: 'autopilot:edit', description: 'Editar configurações e regras do Piloto Automático', category: 'Piloto Automático' },
-        // CRM
         { id: 'crm:view', description: 'Visualizar contatos e empresas no CRM', category: 'CRM' },
         { id: 'crm:edit', description: 'Criar e editar contatos e empresas no CRM', category: 'CRM' },
         { id: 'crm:delete', description: 'Deletar contatos e empresas no CRM', category: 'CRM' },
@@ -433,46 +407,38 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
           member_role_id UUID;
           autopilot_config_id UUID;
         BEGIN
-          -- Cria o papel de Administrador para o novo workspace (não é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
           ON CONFLICT (workspace_id, name) DO NOTHING
           RETURNING id INTO admin_role_id;
 
-          -- Se o papel foi criado agora (não existia), preenche as permissões
           IF admin_role_id IS NOT NULL THEN
             INSERT INTO public.role_permissions (role_id, permission_id)
             SELECT admin_role_id, id FROM public.permissions;
           ELSE
-            -- Se o papel já existia, pega o ID dele para usar depois
             SELECT id INTO admin_role_id FROM public.roles WHERE workspace_id = NEW.id AND name = 'Administrador';
           END IF;
 
-          -- Cria o papel de Membro para o novo workspace (este é o padrão para novos convidados)
           INSERT INTO public.roles (workspace_id, name, description, is_default)
           VALUES (NEW.id, 'Membro', 'Acesso às funcionalidades principais, mas não pode gerenciar configurações.', TRUE)
           ON CONFLICT (workspace_id, name) DO NOTHING
           RETURNING id INTO member_role_id;
           
-          -- Se o papel de membro foi criado agora, preenche as permissões
           IF member_role_id IS NOT NULL THEN
             INSERT INTO public.role_permissions (role_id, permission_id)
             SELECT member_role_id, id FROM public.permissions
             WHERE id IN ('workspace:settings:view', 'members:view', 'teams:view', 'crm:view', 'crm:edit', 'autopilot:view', 'autopilot:edit');
           END IF;
           
-          -- Atribui o papel de Administrador ao criador do workspace, se ele ainda não tiver um papel.
           INSERT INTO public.user_workspace_roles (user_id, workspace_id, role_id)
           VALUES (NEW.owner_id, NEW.id, admin_role_id)
           ON CONFLICT (user_id, workspace_id) DO NOTHING;
           
-          -- Cria uma configuração padrão do Autopilot para o dono do workspace
           INSERT INTO public.autopilot_configs (workspace_id, user_id, ai_model, knowledge_base)
           VALUES(NEW.id, NEW.owner_id, 'googleai/gemini-2.0-flash', 'Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.')
           ON CONFLICT (workspace_id, user_id) DO NOTHING
           RETURNING id INTO autopilot_config_id;
 
-          -- Se a configuração do Autopilot foi criada agora, cria uma regra de exemplo.
           IF autopilot_config_id IS NOT NULL THEN
             INSERT INTO public.autopilot_rules (config_id, name, trigger, action, enabled)
             VALUES (autopilot_config_id, 
@@ -504,7 +470,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
                 VALUES (
                     NEW.id,
                     day_name,
-                    -- Desabilita Sábado e Domingo por padrão
                     (day_name <> 'Sábado' AND day_name <> 'Domingo'), 
                     '09:00:00',
                     '18:00:00'
@@ -546,7 +511,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     return { success: true, message: 'Banco de dados verificado e atualizado com sucesso! Seus dados foram preservados.' };
 
   } catch (error) {
-    // A transação principal já foi iniciada, então damos rollback aqui.
     await client.query('ROLLBACK').catch(rollbackError => {
         console.error('Falha ao executar ROLLBACK:', rollbackError);
     });
@@ -556,13 +520,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     return { success: false, message: `Falha na inicialização do banco de dados: ${errorMessage}` };
   } finally {
     client.release();
-    await adminPool.end();
-    console.log('Conexão com o banco de dados liberada.');
+    // Não encerramos o pool aqui para que ele possa ser reutilizado pela aplicação.
   }
 }
-
-    
-
-    
-
-      
