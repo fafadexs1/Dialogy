@@ -21,8 +21,8 @@ function formatMessageDate(date: Date): string {
     return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
-async function fetchDataForWorkspace(workspaceId: string, userId: string) {
-    console.log(`--- [API_ROUTE] fetchDataForWorkspace: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
+async function fetchWorkspaceChats(workspaceId: string, userId: string) {
+    console.log(`--- [API_ROUTE] fetchWorkspaceChats: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);
     if (!workspaceId) return { chats: [] };
 
     // 1. Fetch all possible senders and create a map for quick lookup.
@@ -40,7 +40,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         return sendersMap.get(id);
     };
     
-    // 2. Fetch chats visible to the current user
+    // 2. Fetch chats visible to the current user with last message info
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -144,7 +144,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         instance_name: r.instance_name,
     }));
 
-    console.log(`[API_ROUTE] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);
+    console.log(`[API_ROUTE] fetchWorkspaceChats: Dados de chats e mensagens combinados para o usuário ${userId}.`);
     return { chats };
 }
 
@@ -164,7 +164,7 @@ export async function GET(
   }
 
   try {
-    const data = await fetchDataForWorkspace(workspaceId, session.user.id);
+    const data = await fetchWorkspaceChats(workspaceId, session.user.id);
     return NextResponse.json(data, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',

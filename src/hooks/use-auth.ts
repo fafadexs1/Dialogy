@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useSession } from 'next-auth/react';
 
@@ -25,19 +25,21 @@ export function useAuth(): User | null {
   const { data: session, status } = useSession();
   const [appUser, setAppUser] = useState<User | null>(null);
 
-  useEffect(() => {
-    async function loadUser() {
-        // Se a sessão está autenticada E (ou o usuário local é nulo ou o ID da sessão mudou)
-        if (status === 'authenticated' && session?.user?.id && (!appUser || appUser.id !== session.user.id)) {
-            const user = await fetchUserFromApi(session.user.id);
-            setAppUser(user);
-        } else if (status === 'unauthenticated') {
-            setAppUser(null);
-        }
+  const loadUser = useCallback(async () => {
+    if (status === 'authenticated' && session?.user?.id) {
+        const user = await fetchUserFromApi(session.user.id);
+        setAppUser(user);
+    } else if (status === 'unauthenticated') {
+        setAppUser(null);
     }
-    
-    loadUser();
-  }, [session, status, appUser]);
+  }, [session, status]);
+
+  useEffect(() => {
+    // Only load user if the user is not set or the session ID has changed
+    if (!appUser || (session?.user?.id && appUser.id !== session.user.id)) {
+      loadUser();
+    }
+  }, [session, appUser, loadUser]);
 
   return appUser;
 }

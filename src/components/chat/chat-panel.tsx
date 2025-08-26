@@ -74,7 +74,7 @@ import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider } from '../ui/tooltip';
 import { AudioPlayer } from './audio-player';
 import { AudioRecorder } from './audio-recorder';
 
