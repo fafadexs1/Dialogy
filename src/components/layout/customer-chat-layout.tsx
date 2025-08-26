@@ -19,12 +19,16 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingChatList, setIsLoadingChatList] = useState(true);
 
+  // This ref helps the polling interval know which chat is currently selected,
+  // without needing to be part of the useEffect dependency array.
   const selectedChatIdRef = useRef<string | null>(null);
 
   const fetchChatList = useCallback(async () => {
     if (!currentUser.activeWorkspaceId) return;
-    // Don't set loading for subsequent polls
-    if (isLoadingChatList) setIsLoadingChatList(true); 
+    
+    // Only show the main loader on the very first load.
+    // Subsequent polls will happen in the background.
+    if(isLoadingChatList) setIsLoadingChatList(true); 
 
     try {
         const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}`, { cache: 'no-store' });
@@ -37,12 +41,13 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
     } catch(e) {
         console.error("Failed to fetch chats", e);
     } finally {
-        setIsLoadingChatList(false);
+        // Only turn off the main loader, not the polling one.
+        if (isLoadingChatList) setIsLoadingChatList(false);
     }
   }, [currentUser.activeWorkspaceId, isLoadingChatList]);
 
   const fetchMessagesForChat = useCallback(async (chatId: string) => {
-    if (!currentUser.activeWorkspaceId) return;
+    if (!currentUser.activeWorkspaceId || !chatId) return;
     setIsLoadingMessages(true);
     try {
         const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}/${chatId}/messages`, { cache: 'no-store' });
@@ -61,35 +66,46 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
     }
   }, [currentUser.activeWorkspaceId]);
 
-  const handleSetSelectedChat = useCallback(async (chat: Chat) => {
-    setSelectedChat(chat);
-    selectedChatIdRef.current = chat.id;
-    setShowFullHistory(false);
-    fetchMessagesForChat(chat.id);
+  const handleSetSelectedChat = useCallback((chat: Chat) => {
+    // Only re-fetch if the chat is actually different
+    if (selectedChatIdRef.current !== chat.id) {
+        setSelectedChat(chat);
+        selectedChatIdRef.current = chat.id;
+        setShowFullHistory(false);
+        // Immediately fetch messages for the newly selected chat.
+        fetchMessagesForChat(chat.id);
+    }
   }, [fetchMessagesForChat]);
 
   // Initial data fetch and polling setup
   useEffect(() => {
-    fetchChatList(); // Initial fetch
+    fetchChatList(); // Initial fetch for the chat list
     const chatListInterval = setInterval(fetchChatList, 2000); // Poll chat list every 2 seconds
 
     return () => clearInterval(chatListInterval);
   }, [fetchChatList]);
   
+  // This effect handles polling for messages for the *currently selected* chat.
   useEffect(() => {
     let messagesInterval: NodeJS.Timeout | null = null;
-    if (selectedChatIdRef.current) {
-        messagesInterval = setInterval(() => {
-            fetchMessagesForChat(selectedChatIdRef.current!);
-        }, 1000); // Poll messages every 1 second for the active chat
-    }
+    
+    const pollMessages = () => {
+        if (selectedChatIdRef.current) {
+            fetchMessagesForChat(selectedChatIdRef.current);
+        }
+    };
+    
+    // Start polling immediately if a chat is selected
+    pollMessages(); 
+
+    messagesInterval = setInterval(pollMessages, 1000); // Poll messages every 1 second
 
     return () => {
         if (messagesInterval) {
             clearInterval(messagesInterval);
         }
     };
-  }, [fetchMessagesForChat, selectedChat?.id]);
+  }, [fetchMessagesForChat]); // This effect re-runs if fetchMessagesForChat changes, which it shouldn't often.
   
   // Fetch close reasons (less frequent update needed)
   useEffect(() => {
