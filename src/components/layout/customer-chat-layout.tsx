@@ -7,6 +7,7 @@ import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
+import { useAuth } from '@/hooks/use-auth';
 
 function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReasons }: {initialChats: Chat[], currentUser: User, initialCloseReasons: Tag[]}) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -82,11 +83,8 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
         if (currentChatId) {
             const updatedSelectedChat = latestChats.find(c => c.id === currentChatId);
             if (updatedSelectedChat) {
-                // To avoid visual glitches, only update messages if the new list is not empty
-                setSelectedChat(prevSelected => ({
-                ...updatedSelectedChat,
-                messages: updatedSelectedChat.messages.length > 0 ? updatedSelectedChat.messages : (prevSelected?.messages || [])
-                }));
+                 // Important: Update the entire selected chat object to get new messages.
+                 setSelectedChat(updatedSelectedChat);
             } else {
                 // If the previously selected chat no longer exists (e.g., closed by another agent), deselect it.
                 setSelectedChat(null);
@@ -156,29 +154,71 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
 export default function CustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [initialChats, setInitialChats] = useState<Chat[]>([]);
   const [initialCloseReasons, setInitialCloseReasons] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const auth = useAuth(); // Use auth hook to wait for user session
 
   useEffect(() => {
     // This is a client component, so we fetch initial data here.
     // The server component `page.tsx` will provide a loading skeleton.
     const fetchInitialData = async () => {
-        if (!currentUser.activeWorkspaceId) return;
+        if (!auth?.activeWorkspaceId) {
+            setLoading(false); // Stop loading if there's no workspace
+            return;
+        };
+        setLoading(true);
         try {
-            const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}`);
+            const response = await fetch(`/api/chats/${auth.activeWorkspaceId}`);
             if (!response.ok) return;
             const data = await response.json();
             setInitialChats(data.chats || []);
             
-            const tagsResult = await getTags(currentUser.activeWorkspaceId);
+            const tagsResult = await getTags(auth.activeWorkspaceId);
             if (!tagsResult.error) {
                 setInitialCloseReasons(tagsResult.tags?.filter(t => t.is_close_reason) || []);
             }
         } catch (error) {
             console.error("Error fetching initial layout data:", error);
+        } finally {
+            setLoading(false);
         }
     };
-    fetchInitialData();
-  }, [currentUser.activeWorkspaceId]);
+    if (auth) {
+        fetchInitialData();
+    }
+  }, [auth]);
   
+  if (loading || !auth) {
+      return (
+        <div className="flex flex-1 w-full min-h-0 h-full">
+          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
+              <div className="h-12 w-full rounded-md bg-muted animate-pulse" />
+              <div className="h-10 w-full rounded-md bg-muted animate-pulse" />
+              <div className="h-10 w-full rounded-md bg-muted animate-pulse" />
+              <div className="space-y-2 mt-4">
+                  <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+                  <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+                  <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+                  <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+              </div>
+          </div>
+          <div className="flex-1 flex flex-col min-w-0">
+              <div className="h-16 w-full bg-card animate-pulse" />
+              <div className="flex-1 p-6 space-y-4 bg-muted/20">
+                  <div className="h-10 w-1/2 ml-auto rounded-md bg-muted animate-pulse" />
+                  <div className="h-10 w-1/2 rounded-md bg-muted animate-pulse" />
+                  <div className="h-10 w-1/2 ml-auto rounded-md bg-muted animate-pulse" />
+              </div>
+              <div className="h-24 w-full bg-card animate-pulse" />
+          </div>
+           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+              <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+              <div className="h-24 w-full rounded-md bg-muted animate-pulse" />
+              <div className="h-32 w-full rounded-md bg-muted animate-pulse" />
+           </div>
+        </div>
+      )
+  }
+
   return (
     <ClientCustomerChatLayout 
         initialChats={initialChats}
