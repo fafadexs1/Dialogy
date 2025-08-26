@@ -47,16 +47,19 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
 };
 
 interface LastMessagePreviewProps {
-  message: Message;
+  chat: Chat;
 }
 
-const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
-  const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ chat }) => {
+  const content = chat.last_message_content || '';
+  const type = chat.last_message_type || 'text';
+  const metadata = chat.last_message_metadata || {};
+  const isMedia = metadata.mediaUrl || metadata.thumbnail;
 
   const getIcon = () => {
-    if (message.type === 'system') return null;
+    if (type === 'system') return null;
     if (!isMedia) return null;
-    const mimetype = message.metadata?.mimetype || '';
+    const mimetype = metadata.mimetype || '';
     if (mimetype.startsWith('image/')) return <ImageIcon className="h-4 w-4 flex-shrink-0" />;
     if (mimetype.startsWith('video/')) return <Video className="h-4 w-4 flex-shrink-0" />;
     if (mimetype.startsWith('audio/')) return <Mic className="h-4 w-4 flex-shrink-0" />;
@@ -65,18 +68,18 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
 
   const getTextContent = () => {
     let text = '';
-    if (message.type === 'system') {
-      text = message.content;
+    if (type === 'system') {
+      text = content;
     } else if (!isMedia) {
-      text = message.content;
-    } else if (message.content) {
-      text = message.content; // caption
+      text = content;
+    } else if (content) {
+      text = content; // caption
     } else {
-      const mimetype = message.metadata?.mimetype || '';
+      const mimetype = metadata.mimetype || '';
       if (mimetype.startsWith('image/')) text = 'Imagem';
       else if (mimetype.startsWith('video/')) text = 'Vídeo';
       else if (mimetype.startsWith('audio/')) text = 'Áudio';
-      else if (message.metadata?.fileName) text = message.metadata.fileName;
+      else if (metadata.fileName) text = metadata.fileName;
       else text = 'Arquivo';
     }
 
@@ -101,7 +104,7 @@ interface ChatListItemProps {
 }
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate }) => {
-  const lastMessage = chat.messages[chat.messages.length - 1];
+  const lastMessageTime = chat.last_message_time ? new Date(chat.last_message_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
   return (
@@ -173,15 +176,15 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             )}
           </div>
 
-          {lastMessage && (
-            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{lastMessage.timestamp}</p>
+          {lastMessageTime && (
+            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{lastMessageTime}</p>
           )}
         </div>
 
         {/* segunda linha (preview e badge de não lidos) */}
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0 overflow-hidden">
-            {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
+            {chat.last_message_content ? <LastMessagePreview chat={chat} /> : <div className="h-[20px]" />}
           </div>
           {chat.unreadCount && chat.unreadCount > 0 ? (
             <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
@@ -213,8 +216,8 @@ export default function ChatList({
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
-      const timeA = a.messages.length > 0 ? new Date(a.messages[a.messages.length - 1].createdAt).getTime() : 0;
-      const timeB = b.messages.length > 0 ? new Date(b.messages[b.messages.length - 1].createdAt).getTime() : 0;
+      const timeA = a.last_message_time ? new Date(a.last_message_time).getTime() : 0;
+      const timeB = b.last_message_time ? new Date(b.last_message_time).getTime() : 0;
       return timeB - timeA;
     });
 

@@ -373,9 +373,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   
   const { toast } = useToast();
 
-  const messagesToDisplay = showFullHistory
-    ? messages
-    : messages.filter(m => m.chat_id === chat?.id);
+  const messagesToDisplay = useMemo(() => {
+    if (!chat) return [];
+    if (showFullHistory) {
+      return chat.messages; // This should be the full history from the parent
+    }
+    // Filter only messages belonging to the current active chat instance
+    return chat.messages.filter(m => m.chat_id === chat.id);
+  }, [chat, showFullHistory]);
   
   const handleAiSwitchChange = (checked: boolean) => {
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);

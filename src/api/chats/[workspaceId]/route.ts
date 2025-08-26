@@ -5,7 +5,7 @@ import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgen
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { getServerSession } from 'next-auth';
+import { getServerSession } from 'next/auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
 const timeZone = 'America/Sao_Paulo';

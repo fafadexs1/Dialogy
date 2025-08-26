@@ -13,7 +13,7 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>(initialChats);
   const [closeReasons, setCloseReasons] = useState<Tag[]>(initialCloseReasons);
-  const [showFullHistory, setShowFullHistory] = useState(true);
+  const [showFullHistory, setShowFullHistory] = useState(false);
 
   // Use a ref to hold the current selected chat ID to avoid stale closures in interval
   const selectedChatIdRef = useRef<string | null>(null);
@@ -25,7 +25,7 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
    const handleSetSelectedChat = async (chat: Chat) => {
     // Optimistic Update: Set the selected chat immediately for instant UI feedback.
     setSelectedChat(chat);
-    setShowFullHistory(true);
+    setShowFullHistory(false); // Reset to show only current chat history by default
 
     if (chat.unreadCount && chat.unreadCount > 0) {
       // Optimistically update the unread count in the UI

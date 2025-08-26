@@ -155,6 +155,10 @@ export type Chat = {
   teamName?: string;
   tag?: string;
   color?: string;
+  last_message_content?: string;
+  last_message_type?: Message['type'];
+  last_message_metadata?: MessageMetadata;
+  last_message_time?: string;
 };
 
 export type InternalChannel = {
