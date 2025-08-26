@@ -102,7 +102,7 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
     if (currentUser.activeWorkspaceId) {
         // Fetch immediately and then set up polling
         updateData();
-        pollingInterval = setInterval(updateData, 5000); // Poll every 5 seconds
+        pollingInterval = setInterval(updateData, 900); // Poll every 900ms
     }
     
     return () => {
