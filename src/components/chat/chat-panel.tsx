@@ -49,7 +49,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction, assignChatToSelfAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
+import { sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
 import {
@@ -491,12 +491,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             
             if (chat) {
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
-                const sendResult = await sendAutomatedMessageAction(chat.id, textToSend, agentIdForMessage);
-                if (sendResult.success) {
-                    onActionSuccess();
-                } else {
-                    toast({ title: 'Erro ao Enviar Mensagem', description: sendResult.error, variant: 'destructive' });
-                }
+                await sendAutomatedMessageAction(chat.id, textToSend, agentIdForMessage);
+                // The revalidation will be handled by the polling mechanism
             }
         }
     } catch (error: any) {
@@ -509,7 +505,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     } finally {
         setIsAiTyping(false);
     }
-  }, [isAiAgentActive, chat, messages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
+  }, [isAiAgentActive, chat, messages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, toast]);
 
 
   useEffect(() => {
@@ -624,33 +620,33 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const handleFormSubmit = async () => {
     if (!chat) return;
 
-    // Capture current content and files
     const currentMessageText = htmlToWhatsappMarkdown(newMessage);
     const currentMediaFiles = [...mediaFiles];
-    
+
     // Optimistic UI update
-    if (currentMessageText.trim() || currentMediaFiles.length > 0) {
-        const tempId = `temp-${Date.now()}`;
-        const optimisticMessage: Message = {
-            id: tempId,
-            chat_id: chat.id,
-            workspace_id: chat.workspace_id,
-            content: currentMessageText,
-            type: 'text',
-            status: 'default',
-            api_message_status: 'PENDING',
-            from_me: true,
-            is_read: true,
-            sender: currentUser,
-            createdAt: new Date().toISOString(),
-            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            formattedDate: 'Hoje', // Simplified for optimistic update
-            metadata: currentMediaFiles.length > 0 ? { fileName: currentMediaFiles[0].name } : {}
-        };
-        setMessages(prev => [...prev, optimisticMessage]);
-    }
+    if (!currentMessageText.trim() && currentMediaFiles.length === 0) return;
     
-    // Clear the input fields immediately
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      chat_id: chat.id,
+      workspace_id: chat.workspace_id,
+      content: currentMessageText,
+      type: 'text',
+      status: 'default',
+      api_message_status: 'PENDING',
+      from_me: true,
+      is_read: true,
+      sender: currentUser,
+      createdAt: new Date().toISOString(),
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      formattedDate: 'Hoje',
+      metadata: currentMediaFiles.length > 0 ? { fileName: currentMediaFiles[0].name } : {}
+    };
+    
+    setMessages(prev => [...prev, optimisticMessage]);
+
+    // Clear inputs immediately
     setNewMessage('');
     setMediaFiles([]);
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
@@ -667,41 +663,64 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             }));
             result = await sendMediaAction(chat.id, currentMessageText, mediaData as any);
         } else {
-            if (!currentMessageText.trim()) return;
             result = await sendAgentMessageAction(chat.id, currentMessageText);
         }
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-            // Remove the optimistic message on failure
-            setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
-        
-        // Re-fetch data to get the final message from the server
-        onActionSuccess();
-
+        // No need to call onActionSuccess here, polling will update the final status
     } catch (error) {
         console.error("Error during message submission:", error);
-        toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
-        // Remove the optimistic message on critical error
-        setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
+        toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado.', variant: 'destructive' });
+        setMessages(prev => prev.filter(m => m.id !== tempId));
     }
-};
+  };
 
   const handleSendAudio = async (audioBase64: string, duration: number, mimetype: string) => {
     if (!chat) return;
 
-    const result = await sendMediaAction(chat.id, '', [{
-      base64: audioBase64,
-      mimetype: mimetype,
-      filename: 'audio_gravado.mp3',
-      mediatype: 'audio'
-    }]);
+    // Optimistic update for audio
+    const tempId = `temp-audio-${Date.now()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      chat_id: chat.id,
+      workspace_id: chat.workspace_id,
+      content: '',
+      type: 'audio',
+      status: 'default',
+      api_message_status: 'PENDING',
+      from_me: true,
+      is_read: true,
+      sender: currentUser,
+      createdAt: new Date().toISOString(),
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      formattedDate: 'Hoje',
+      metadata: {
+          mimetype,
+          duration,
+          mediaUrl: `data:${mimetype};base64,${audioBase64}` // Show local audio immediately
+      }
+    };
+    setMessages(prev => [...prev, optimisticMessage]);
 
-    if (result.success) {
-      onActionSuccess();
-    } else {
-      toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+    try {
+        const result = await sendMediaAction(chat.id, '', [{
+          base64: audioBase64,
+          mimetype: mimetype,
+          filename: 'audio_gravado.mp3',
+          mediatype: 'audio'
+        }]);
+
+        if (result.error) {
+          toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+          setMessages(prev => prev.filter(m => m.id !== tempId));
+        }
+    } catch (error) {
+        console.error("Error sending audio:", error);
+        toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar o áudio.', variant: 'destructive' });
+        setMessages(prev => prev.filter(m => m.id !== tempId));
     }
   };
 

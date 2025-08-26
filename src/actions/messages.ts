@@ -197,7 +197,7 @@ async function internalSendMedia(
                 };
             }
             
-            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload...`, JSON.stringify(apiPayload));
+            console.log(`[SEND_MEDIA_ACTION] Enviando para ${endpoint} com payload...`);
 
             const apiResponse = await fetchEvolutionAPI(
                 endpoint,

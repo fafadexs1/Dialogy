@@ -157,35 +157,34 @@ export default function CustomerChatLayout({ currentUser }: { currentUser: User 
   const [loading, setLoading] = useState(true);
   const auth = useAuth(); // Use auth hook to wait for user session
 
-  useEffect(() => {
-    // This is a client component, so we fetch initial data here.
-    // The server component `page.tsx` will provide a loading skeleton.
-    const fetchInitialData = async () => {
-        if (!auth?.activeWorkspaceId) {
-            setLoading(false); // Stop loading if there's no workspace
-            return;
-        };
-        setLoading(true);
-        try {
-            const response = await fetch(`/api/chats/${auth.activeWorkspaceId}`);
-            if (!response.ok) return;
-            const data = await response.json();
-            setInitialChats(data.chats || []);
-            
-            const tagsResult = await getTags(auth.activeWorkspaceId);
-            if (!tagsResult.error) {
-                setInitialCloseReasons(tagsResult.tags?.filter(t => t.is_close_reason) || []);
-            }
-        } catch (error) {
-            console.error("Error fetching initial layout data:", error);
-        } finally {
-            setLoading(false);
-        }
+  const fetchData = useCallback(async () => {
+    if (!auth?.activeWorkspaceId) {
+        setLoading(false);
+        return;
     };
-    if (auth) {
-        fetchInitialData();
+    setLoading(true);
+    try {
+        const response = await fetch(`/api/chats/${auth.activeWorkspaceId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        setInitialChats(data.chats || []);
+        
+        const tagsResult = await getTags(auth.activeWorkspaceId);
+        if (!tagsResult.error) {
+            setInitialCloseReasons(tagsResult.tags?.filter(t => t.is_close_reason) || []);
+        }
+    } catch (error) {
+        console.error("Error fetching initial layout data:", error);
+    } finally {
+        setLoading(false);
     }
   }, [auth]);
+
+  useEffect(() => {
+    if (auth) {
+        fetchData();
+    }
+  }, [auth, fetchData]);
   
   if (loading || !auth) {
       return (
