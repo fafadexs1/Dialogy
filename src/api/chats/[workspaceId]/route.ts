@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata } from '@/lib/types';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -41,6 +41,7 @@ async function fetchWorkspaceChats(workspaceId: string, userId: string) {
     };
     
     // 2. Fetch chats visible to the current user with last message info
+    // This query is now optimized to only fetch active chats or closed chats assigned to the user.
     const chatRes = await db.query(`
         WITH LastMessage AS (
             SELECT
@@ -81,49 +82,6 @@ async function fetchWorkspaceChats(workspaceId: string, userId: string) {
         ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId, userId]);
 
-    // 3. Fetch all messages for the selected chats to construct the full Chat object
-     const chatIds = chatRes.rows.map(r => r.id);
-     let allMessages: Message[] = [];
-     if (chatIds.length > 0) {
-        const messageRes = await db.query(`
-            SELECT m.*, c.contact_id
-            FROM messages m
-            JOIN chats c ON m.chat_id = c.id
-            WHERE m.chat_id = ANY($1::uuid[])
-            ORDER BY m.created_at ASC
-        `, [chatIds]);
-        
-        allMessages = messageRes.rows.map(m => {
-            const createdAtDate = new Date(m.created_at);
-            const zonedDate = toZonedTime(createdAtDate, timeZone);
-            return {
-                id: m.id,
-                chat_id: m.chat_id,
-                workspace_id: m.workspace_id,
-                content: m.content,
-                type: m.type,
-                status: m.status,
-                metadata: m.metadata,
-                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
-                createdAt: createdAtDate.toISOString(),
-                formattedDate: formatMessageDate(createdAtDate),
-                sender: getSenderById(m.sender_id),
-                from_me: m.from_me,
-                is_read: m.is_read,
-                message_id_from_api: m.message_id_from_api,
-                api_message_status: m.api_message_status
-            };
-        });
-     }
-     
-    const messagesByChatId = allMessages.reduce((acc, msg) => {
-        if (!acc[msg.chat_id]) {
-            acc[msg.chat_id] = [];
-        }
-        acc[msg.chat_id].push(msg);
-        return acc;
-    }, {} as Record<string, Message[]>);
-
 
     const chats: Chat[] = chatRes.rows.map(r => ({
         id: r.id,
@@ -131,7 +89,7 @@ async function fetchWorkspaceChats(workspaceId: string, userId: string) {
         workspace_id: r.workspace_id,
         contact: sendersMap.get(r.contact_id) as Contact, // Assuming contact will always be found
         agent: sendersMap.get(r.agent_id) as User | undefined,
-        messages: messagesByChatId[r.id] || [],
+        messages: [], // Messages will be fetched on demand
         assigned_at: r.assigned_at,
         unreadCount: parseInt(r.unread_count, 10),
         teamName: r.team_name,
@@ -144,7 +102,7 @@ async function fetchWorkspaceChats(workspaceId: string, userId: string) {
         instance_name: r.instance_name,
     }));
 
-    console.log(`[API_ROUTE] fetchWorkspaceChats: Dados de chats e mensagens combinados para o usuário ${userId}.`);
+    console.log(`[API_ROUTE] fetchWorkspaceChats: Dados de ${chats.length} chats combinados para o usuário ${userId}.`);
     return { chats };
 }
 

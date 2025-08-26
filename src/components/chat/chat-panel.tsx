@@ -81,6 +81,8 @@ import { AudioRecorder } from './audio-recorder';
 
 interface ChatPanelProps {
   chat: Chat | null;
+  messages: Message[];
+  isLoadingMessages: boolean;
   currentUser: User;
   onActionSuccess: () => void;
   closeReasons: Tag[];
@@ -351,12 +353,12 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+export default function ChatPanel({ chat, messages, isLoadingMessages, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [localMessages, setLocalMessages] = useState<Message[]>(messages);
   
   const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
   const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -372,14 +374,18 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   
   const { toast } = useToast();
 
+  useEffect(() => {
+    setLocalMessages(messages);
+  }, [messages]);
+
   const messagesToDisplay = useMemo(() => {
     if (!chat) return [];
     if (showFullHistory) {
-      return messages; // Show all messages from the state
+      return localMessages; // Show all messages from the state
     }
     // Filter only messages belonging to the current active chat instance
-    return messages.filter(m => m.chat_id === chat.id);
-  }, [chat, showFullHistory, messages]);
+    return localMessages.filter(m => m.chat_id === chat.id);
+  }, [chat, showFullHistory, localMessages]);
   
   const handleAiSwitchChange = (checked: boolean) => {
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
@@ -412,13 +418,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   }, [fetchAutopilotData, fetchShortcuts]);
 
   useEffect(() => {
-    if (chat) {
-        setMessages(chat.messages);
-    }
-  }, [chat]);
-
-
-  useEffect(() => {
     const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
     if (viewport) {
       const handleScroll = () => {
@@ -438,11 +437,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     if (viewport && !userScrolledUpRef.current) {
         viewport.scrollTop = viewport.scrollHeight;
     }
-  }, [messages]);
+  }, [localMessages]);
 
 
   const runAiAgent = useCallback(async () => {
-    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    const lastMessage = localMessages.length > 0 ? localMessages[localMessages.length - 1] : null;
 
     if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
         return;
@@ -463,7 +462,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         setIsAiTyping(true);
         processedMessageIds.current.add(lastMessage.id);
         console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
-        const chatHistoryForAI = messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+        const chatHistoryForAI = localMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         
         const activeRules = autopilotRules.filter(rule => rule.enabled);
 
@@ -491,8 +490,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             
             if (chat) {
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
-                await sendAutomatedMessageAction(chat.id, textToSend, agentIdForMessage);
-                // The revalidation will be handled by the polling mechanism
+                await sendAutomatedMessageAction(chat.id, textToSend, agentIdForMessage, true, chat.instance_name);
+                onActionSuccess();
             }
         }
     } catch (error: any) {
@@ -505,12 +504,12 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     } finally {
         setIsAiTyping(false);
     }
-  }, [isAiAgentActive, chat, messages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, toast]);
+  }, [isAiAgentActive, chat, localMessages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, toast, onActionSuccess]);
 
 
   useEffect(() => {
     runAiAgent();
-  }, [runAiAgent, messages]);
+  }, [runAiAgent, localMessages]);
   
   useEffect(() => {
     processedMessageIds.current.clear();
@@ -644,7 +643,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       metadata: currentMediaFiles.length > 0 ? { fileName: currentMediaFiles[0].name } : {}
     };
     
-    setMessages(prev => [...prev, optimisticMessage]);
+    setLocalMessages(prev => [...prev, optimisticMessage]);
 
     // Clear inputs immediately
     setNewMessage('');
@@ -668,13 +667,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-            setMessages(prev => prev.filter(m => m.id !== tempId));
+            setLocalMessages(prev => prev.filter(m => m.id !== tempId));
+        } else {
+            onActionSuccess();
         }
-        // No need to call onActionSuccess here, polling will update the final status
     } catch (error) {
         console.error("Error during message submission:", error);
         toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado.', variant: 'destructive' });
-        setMessages(prev => prev.filter(m => m.id !== tempId));
+        setLocalMessages(prev => prev.filter(m => m.id !== tempId));
     }
   };
 
@@ -703,7 +703,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
           mediaUrl: `data:${mimetype};base64,${audioBase64}` // Show local audio immediately
       }
     };
-    setMessages(prev => [...prev, optimisticMessage]);
+    setLocalMessages(prev => [...prev, optimisticMessage]);
 
     try {
         const result = await sendMediaAction(chat.id, '', [{
@@ -715,12 +715,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
         if (result.error) {
           toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
-          setMessages(prev => prev.filter(m => m.id !== tempId));
+          setLocalMessages(prev => prev.filter(m => m.id !== tempId));
+        } else {
+            onActionSuccess();
         }
     } catch (error) {
         console.error("Error sending audio:", error);
         toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar o áudio.', variant: 'destructive' });
-        setMessages(prev => prev.filter(m => m.id !== tempId));
+        setLocalMessages(prev => prev.filter(m => m.id !== tempId));
     }
   };
 
@@ -933,8 +935,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const showTextInput = !mediaFiles.length;
 
   const lastCustomerMessage = React.useMemo(() => 
-    messages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
-  , [messages]);
+    localMessages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
+  , [localMessages]);
 
 
   return (
@@ -967,7 +969,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
               <FileDown className="h-5 w-5"/>
           </Button>
           <ChatSummary 
-            chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+            chatHistory={localMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
             workspaceId={currentUser.activeWorkspaceId!} 
           />
           <Button variant="ghost" size="icon">
@@ -979,7 +981,15 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       <div className="flex-1 overflow-y-auto relative" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
-            {messagesToDisplay.map(renderMessageWithSeparator)}
+            {isLoadingMessages ? (
+                <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+            ) : messagesToDisplay.length === 0 ? (
+                <div className="text-center text-muted-foreground py-10">Nenhuma mensagem nesta conversa ainda.</div>
+            ) : (
+                messagesToDisplay.map(renderMessageWithSeparator)
+            )}
           </div>
         </ScrollArea>
         {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
@@ -1008,7 +1018,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
                         customerMessage={lastCustomerMessage?.content || ''}
-                        chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+                        chatHistory={localMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         workspaceId={currentUser.activeWorkspaceId!}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
