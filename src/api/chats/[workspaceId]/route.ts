@@ -1,11 +1,11 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { getServerSession } from 'next/auth';
+import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
 const timeZone = 'America/Sao_Paulo';
@@ -49,6 +49,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
                 type,
                 metadata,
                 created_at,
+                instance_name,
                 ROW_NUMBER() OVER(PARTITION BY chat_id ORDER BY created_at DESC) as rn
             FROM messages
         )
@@ -66,6 +67,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             lm.type as last_message_type,
             lm.metadata as last_message_metadata,
             lm.created_at as last_message_time,
+            lm.instance_name,
             COALESCE((SELECT COUNT(*) FROM messages msg WHERE msg.chat_id = c.id AND msg.is_read = FALSE AND msg.from_me = FALSE), 0) as unread_count
         FROM chats c
         LEFT JOIN LastMessage lm ON c.id = lm.chat_id AND lm.rn = 1
@@ -75,7 +77,7 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
             c.status IN ('gerais', 'atendimentos') OR 
             (c.status = 'encerrados' AND c.agent_id = $2)
         )
-        GROUP BY c.id, t.name, lm.content, lm.type, lm.metadata, lm.created_at
+        GROUP BY c.id, t.name, lm.content, lm.type, lm.metadata, lm.created_at, lm.instance_name
         ORDER BY last_message_time DESC NULLS LAST
     `, [workspaceId, userId]);
 
@@ -135,6 +137,11 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
         teamName: r.team_name,
         tag: r.tag,
         color: r.color,
+        last_message_content: r.last_message_content,
+        last_message_type: r.last_message_type,
+        last_message_metadata: r.last_message_metadata,
+        last_message_time: r.last_message_time,
+        instance_name: r.instance_name,
     }));
 
     console.log(`[API_ROUTE] fetchDataForWorkspace: Dados de chats e mensagens combinados para o usuário ${userId}.`);

@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -376,11 +375,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const messagesToDisplay = useMemo(() => {
     if (!chat) return [];
     if (showFullHistory) {
-      return chat.messages; // This should be the full history from the parent
+      return messages; // Show all messages from the state
     }
     // Filter only messages belonging to the current active chat instance
-    return chat.messages.filter(m => m.chat_id === chat.id);
-  }, [chat, showFullHistory]);
+    return messages.filter(m => m.chat_id === chat.id);
+  }, [chat, showFullHistory, messages]);
   
   const handleAiSwitchChange = (checked: boolean) => {
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
