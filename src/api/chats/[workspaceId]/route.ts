@@ -1,4 +1,6 @@
 
+'use server';
+
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
@@ -9,17 +11,6 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
 const timeZone = 'America/Sao_Paulo';
-
-function formatMessageDate(date: Date): string {
-    const zonedDate = toZonedTime(date, timeZone);
-    if (isToday(zonedDate)) {
-        return `Hoje`;
-    }
-    if (isYesterday(zonedDate)) {
-        return `Ontem`;
-    }
-    return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
-}
 
 async function fetchWorkspaceChats(workspaceId: string, userId: string) {
     console.log(`--- [API_ROUTE] fetchWorkspaceChats: Buscando dados para o workspace ID: ${workspaceId} e Usuário ID: ${userId} ---`);

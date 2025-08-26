@@ -61,8 +61,6 @@ function LoadingSkeleton() {
         <div className="flex flex-1 w-full min-h-0 h-full">
           <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
               <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
               <div className="space-y-2 mt-4">
                   <Skeleton className="h-16 w-full" />
                   <Skeleton className="h-16 w-full" />
@@ -71,13 +69,13 @@ function LoadingSkeleton() {
               </div>
           </div>
           <div className="flex-1 flex flex-col min-w-0">
-              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full border-b" />
               <div className="flex-1 p-6 space-y-4">
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
-                  <Skeleton className="h-10 w-1/2" />
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
+                  <Skeleton className="h-10 w-1/2 ml-auto rounded-lg" />
+                  <Skeleton className="h-12 w-2/3 rounded-lg" />
+                  <Skeleton className="h-10 w-1/2 ml-auto rounded-lg" />
               </div>
-              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full border-t" />
           </div>
            <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
               <Skeleton className="h-16 w-full" />

@@ -5,14 +5,26 @@ import { useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useSession } from 'next-auth/react';
 
+// Simple in-memory cache
+let userCache: User | null = null;
+let lastUserId: string | null = null;
+
 async function fetchUserFromApi(userId: string): Promise<User | null> {
+    // Check cache first
+    if (userCache && lastUserId === userId) {
+        return userCache;
+    }
+    
     try {
-        const response = await fetch(`/api/user/${userId}`);
+        const response = await fetch(`/api/user/${userId}`, { cache: 'no-store' });
         if (!response.ok) {
             console.error(`[USE_AUTH] fetchUserFromApi: Falha ao buscar usuário. Status: ${response.status}`);
             throw new Error('Failed to fetch user');
         }
         const user = await response.json();
+        // Update cache
+        userCache = user;
+        lastUserId = userId;
         return user;
     } catch (error) {
         console.error("[USE_AUTH] fetchUserFromApi: Erro na requisição:", error);
@@ -23,13 +35,15 @@ async function fetchUserFromApi(userId: string): Promise<User | null> {
 
 export function useAuth(): User | null {
   const { data: session, status } = useSession();
-  const [appUser, setAppUser] = useState<User | null>(null);
+  const [appUser, setAppUser] = useState<User | null>(userCache);
 
   const loadUser = useCallback(async () => {
     if (status === 'authenticated' && session?.user?.id) {
         const user = await fetchUserFromApi(session.user.id);
         setAppUser(user);
     } else if (status === 'unauthenticated') {
+        userCache = null;
+        lastUserId = null;
         setAppUser(null);
     }
   }, [session, status]);

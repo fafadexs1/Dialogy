@@ -17,11 +17,14 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoadingChatList, setIsLoadingChatList] = useState(true);
 
   const selectedChatIdRef = useRef<string | null>(null);
 
   const fetchChatList = useCallback(async () => {
     if (!currentUser.activeWorkspaceId) return;
+    // Don't set loading for subsequent polls
+    if (isLoadingChatList) setIsLoadingChatList(true); 
 
     try {
         const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}`, { cache: 'no-store' });
@@ -33,8 +36,10 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
         setChats(data.chats || []);
     } catch(e) {
         console.error("Failed to fetch chats", e);
+    } finally {
+        setIsLoadingChatList(false);
     }
-  }, [currentUser.activeWorkspaceId]);
+  }, [currentUser.activeWorkspaceId, isLoadingChatList]);
 
   const fetchMessagesForChat = useCallback(async (chatId: string) => {
     if (!currentUser.activeWorkspaceId) return;
@@ -56,23 +61,21 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
     }
   }, [currentUser.activeWorkspaceId]);
 
-  const handleSetSelectedChat = async (chat: Chat) => {
+  const handleSetSelectedChat = useCallback(async (chat: Chat) => {
     setSelectedChat(chat);
     selectedChatIdRef.current = chat.id;
     setShowFullHistory(false);
-    
-    // Immediately fetch messages for the selected chat
     fetchMessagesForChat(chat.id);
-  };
+  }, [fetchMessagesForChat]);
 
+  // Initial data fetch and polling setup
   useEffect(() => {
-    const chatListInterval = setInterval(() => {
-      fetchChatList();
-    }, 2000); // Poll chat list every 2 seconds
+    fetchChatList(); // Initial fetch
+    const chatListInterval = setInterval(fetchChatList, 2000); // Poll chat list every 2 seconds
 
     return () => clearInterval(chatListInterval);
   }, [fetchChatList]);
-
+  
   useEffect(() => {
     let messagesInterval: NodeJS.Timeout | null = null;
     if (selectedChatIdRef.current) {
@@ -87,7 +90,8 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
         }
     };
   }, [fetchMessagesForChat, selectedChat?.id]);
-
+  
+  // Fetch close reasons (less frequent update needed)
   useEffect(() => {
       if(currentUser.activeWorkspaceId){
           getTags(currentUser.activeWorkspaceId).then(tagsResult => {
@@ -97,6 +101,20 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
           });
       }
   }, [currentUser.activeWorkspaceId]);
+
+  if (isLoadingChatList) {
+       return (
+            <div className="flex flex-1 w-full min-h-0 h-full">
+                <Skeleton className="w-[360px] flex-shrink-0" />
+                <div className="flex-1 flex flex-col min-w-0">
+                    <Skeleton className="h-16 w-full" />
+                    <div className="flex-1 p-6"><Skeleton className="h-full w-full" /></div>
+                    <Skeleton className="h-24 w-full" />
+                </div>
+                <Skeleton className="w-1/4 hidden lg:block" />
+            </div>
+        )
+  }
 
   return (
     <div className="h-full flex-1 w-full min-h-0 flex">
