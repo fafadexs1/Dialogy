@@ -1,11 +1,48 @@
+
 'use client';
 
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
-import { SessionProvider } from 'next-auth/react';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
+import { SessionProvider, useSession } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { PageTransition } from '@/components/layout/page-transition';
+import { Sidebar } from '@/components/layout/sidebar';
+import { useAuth } from '@/hooks/use-auth';
 
+function AppStructure({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { status } = useSession();
+  const user = useAuth();
+
+  const transitionKey = pathname.split('?')[0];
+
+  const noSidebarRoutes = ['/login', '/register', '/setup'];
+  const shouldShowSidebar = !noSidebarRoutes.includes(pathname) && status === 'authenticated' && !!user;
+
+  return (
+    <div
+      className={cn(
+        'h-dvh w-full bg-background overflow-hidden',
+        shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
+      )}
+    >
+      {shouldShowSidebar && user && (
+        <aside className="w-auto shrink-0 overflow-y-auto border-r">
+          <Sidebar user={user} />
+        </aside>
+      )}
+      <div className="min-h-0 min-w-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto">
+           <PageTransition transitionKey={transitionKey} className="h-full">
+              {children}
+           </PageTransition>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function RootLayout({
   children,
@@ -23,9 +60,9 @@ export default function RootLayout({
       <body className="h-full font-body antialiased">
         <SessionProvider>
           <PresenceProvider>
-            <MainAppLayout>
+            <AppStructure>
               {children}
-            </MainAppLayout>
+            </AppStructure>
           </PresenceProvider>
         </SessionProvider>
         <Toaster />
