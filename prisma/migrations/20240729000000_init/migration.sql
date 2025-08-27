@@ -1,3 +1,5 @@
+CREATE SCHEMA IF NOT EXISTS auth;
+
 -- Creates a trigger function that inserts a new row into public.users
 -- whenever a new user is created in the auth.users table.
 create or replace function public.handle_new_user()
