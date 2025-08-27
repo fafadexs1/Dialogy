@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { cn } from '@/lib/utils';
 import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -12,19 +13,19 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const transitionKey = pathname.split('?')[0];
 
   const noSidebarRoutes = ['/login', '/register', '/setup'];
-  const shouldShowSidebar = !noSidebarRoutes.includes(pathname);
   
   const user = useAuth();
-  const hasSidebar = shouldShowSidebar && !!user;
+  
+  const shouldShowSidebar = user && !noSidebarRoutes.includes(pathname);
 
   return (
     <div
       className={cn(
         'h-dvh w-full bg-background overflow-hidden',
-        hasSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
+        shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
       )}
     >
-      {hasSidebar && (
+      {shouldShowSidebar && (
         <aside className="w-auto shrink-0 overflow-y-auto border-r">
           <Sidebar user={user} />
         </aside>

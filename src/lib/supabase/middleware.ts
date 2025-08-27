@@ -1,3 +1,4 @@
+
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { type NextRequest, NextResponse } from 'next/server'
 
@@ -17,18 +18,22 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value)
+          })
           response = NextResponse.next({
             request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          })
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options)
+          })
         },
       },
     }
   )
 
-  // This will refresh the session if expired - important!
-  await supabase.auth.getUser()
+  // IMPORTANTE: Este comando atualiza a sessão se ela tiver expirado.
+  await supabase.auth.getUser();
 
   return response
 }

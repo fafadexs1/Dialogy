@@ -4,7 +4,7 @@
 
 import CustomerList from '@/components/crm/customer-list';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2 } from 'lucide-react';
 
 export default function CrmPage() {

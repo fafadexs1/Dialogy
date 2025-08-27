@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useActionState, useOptimistic, useCallback } from 'react';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, MessageSquareQuote, Plus, Trash2, Edit, Save, Globe, Lock, AlertCircle } from 'lucide-react';
 import type { Shortcut } from '@/lib/types';
 import { Button } from '@/components/ui/button';

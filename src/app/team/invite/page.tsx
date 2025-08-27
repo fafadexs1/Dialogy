@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import { MainLayout } from '@/components/layout/main-layout';
@@ -7,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, Mail, UserPlus, Send } from 'lucide-react';
 
 

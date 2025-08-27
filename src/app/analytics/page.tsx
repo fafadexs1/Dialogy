@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { 
     BarChart, 
     Bar, 

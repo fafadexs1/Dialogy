@@ -1,10 +1,11 @@
 
+
 'use client';
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { useToast } from '@/hooks/use-toast';
 import { getContacts } from '@/actions/crm';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
@@ -517,5 +518,3 @@ export default function NewCampaignPage() {
     </MainLayout>
   )
 }
-
-    

@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';

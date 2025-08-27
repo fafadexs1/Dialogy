@@ -49,7 +49,7 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
         };
-        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Objeto de usuário montado:`, userObject);
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Objeto de usuário montado.`);
         return userObject;
     } catch (error) {
         console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Erro ao buscar dados:', error);
@@ -136,7 +136,7 @@ export default async function Home() {
   return (
     <MainLayout>
         <Suspense fallback={<LoadingSkeleton />}>
-            <CustomerChatLayout currentUser={user} />
+            <CustomerChatLayout initialUser={user} />
         </Suspense>
     </MainLayout>
   );

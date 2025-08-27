@@ -18,7 +18,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import CustomerProfile from './customer-profile';
 import { AddActivityForm } from './add-activity-form';
 import { LogAttemptForm } from './log-attempt-form';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { getContacts, getTags, getWorkspaceUsers, deleteContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';

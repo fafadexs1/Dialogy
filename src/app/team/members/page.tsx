@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useActionState } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save, Copy } from 'lucide-react';
 import type { Role, WorkspaceMember } from '@/lib/types';
 import { getWorkspaceMembers, removeMemberAction, updateMemberRoleAction } from '@/actions/members';

@@ -1,9 +1,10 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useOptimistic, useActionState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';

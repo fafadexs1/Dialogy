@@ -32,7 +32,7 @@ import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { getTags, createTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 

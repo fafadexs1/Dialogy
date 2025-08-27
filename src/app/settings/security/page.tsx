@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/use-auth.tsx";
 import { Loader2 } from "lucide-react";
 
 export default function SecurityPage() {

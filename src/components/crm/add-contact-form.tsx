@@ -31,7 +31,7 @@ import { AlertCircle } from 'lucide-react';
 import { saveContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Badge } from '../ui/badge';
 
 interface AddContactFormProps {

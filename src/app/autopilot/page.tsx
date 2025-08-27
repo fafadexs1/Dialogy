@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useActionState, useMemo } from 'react';
@@ -30,7 +31,7 @@ import { Label } from '@/components/ui/label';
 import { BarChart, ResponsiveContainer, XAxis, YAxis, Bar } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';

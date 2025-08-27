@@ -7,7 +7,7 @@ import { MainLayout } from '@/components/layout/main-layout';
 import type { User, Integration } from '@/lib/types';
 import { integrations as mockIntegrations } from '@/lib/mock-data';
 import { IntegrationCard } from '@/components/integrations/integration-card';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2 } from 'lucide-react';
 
 export default function IntegrationsPage() {

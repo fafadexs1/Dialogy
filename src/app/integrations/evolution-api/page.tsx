@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
@@ -29,7 +30,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { 
     getEvolutionApiConfig, 
     saveEvolutionApiConfig, 

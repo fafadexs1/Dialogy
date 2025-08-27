@@ -12,7 +12,7 @@ import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 

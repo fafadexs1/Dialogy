@@ -1,10 +1,11 @@
 
+
 'use client';
 
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
 import type { OnlineAgent } from '@/lib/types';
-import { useAuth } from './use-auth';
-import { updateUserOnlineStatus } from '@/actions/user';
+import { useAuth } from '@/hooks/use-auth.tsx';
+import { updateUserOnlineStatus, getOnlineAgents } from '@/actions/user';
 import { createClient } from '@/lib/supabase/client';
 
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -17,13 +18,9 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const currentUser = useAuth();
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
-  const fetchOnlineAgents = useCallback(async (workspaceId: string) => {
+  const fetchOnlineAgentsCallback = useCallback(async (workspaceId: string) => {
       try {
-        const response = await fetch(`/api/users/online/${workspaceId}`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch online users');
-        }
-        const agents: OnlineAgent[] = await response.json();
+        const agents = await getOnlineAgents(workspaceId);
         setOnlineAgents(agents);
       } catch (error) {
         console.error("Error fetching online agents:", error);
@@ -35,7 +32,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     if (!currentUser?.activeWorkspaceId) return;
     const workspaceId = currentUser.activeWorkspaceId;
     const supabase = createClient();
-    fetchOnlineAgents(workspaceId);
+    fetchOnlineAgentsCallback(workspaceId);
 
     const channel = supabase
       .channel('public:users')
@@ -44,7 +41,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         { event: 'UPDATE', schema: 'public', table: 'users' },
         (payload) => {
             if ('online' in payload.new || 'online_since' in payload.new) {
-                fetchOnlineAgents(workspaceId);
+                fetchOnlineAgentsCallback(workspaceId);
             }
         }
       )
@@ -53,7 +50,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.activeWorkspaceId, fetchOnlineAgents]);
+  }, [currentUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
 
 
   useEffect(() => {

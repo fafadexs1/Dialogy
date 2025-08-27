@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 import { useToast } from '@/hooks/use-toast';
 import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours } from '@/actions/teams';
 import { getTags } from '@/actions/crm';
