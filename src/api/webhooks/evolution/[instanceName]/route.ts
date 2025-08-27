@@ -2,10 +2,10 @@
 'use server';
 
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
-import type { Message, MessageMetadata, Chat, Contact, User } from '@/lib/types';
+import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
 
@@ -22,7 +22,6 @@ export async function POST(
 
     const { event, instance: instanceNameFromPayload } = payload;
     
-    // Validação para garantir que a instância na URL corresponde à do payload
     if (instanceNameFromUrl !== instanceNameFromPayload) {
         console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
         return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
@@ -66,10 +65,10 @@ async function handleMessagesUpdate(payload: any) {
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
     
     try {
-        await prisma.message.update({
-            where: { messageIdFromApi: keyId },
-            data: { apiMessageStatus: status.toUpperCase() },
-        });
+        await db.query(
+            `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2`,
+            [status.toUpperCase(), keyId]
+        );
         console.log(`[WEBHOOK_MSG_UPDATE] Status da mensagem ${keyId} atualizado com sucesso.`);
     } catch (error) {
         console.error('[WEBHOOK_MSG_UPDATE] Erro ao atualizar status da mensagem:', error);
@@ -78,6 +77,7 @@ async function handleMessagesUpdate(payload: any) {
 
 async function handleMessagesUpsert(payload: any) {
     const { instance: instanceName, data, sender, server_url } = payload;
+    const client = await db.connect();
     
     let savedChat: Chat | null = null;
     let savedMessage: Message | null = null;
@@ -135,79 +135,83 @@ async function handleMessagesUpsert(payload: any) {
     const contactPhone = sender || contactJid.split('@')[0];
     
     try {
-        const instance = await prisma.evolutionApiInstance.findFirst({
-            where: { name: instanceName },
-            include: { config: true },
-        });
+        await client.query('BEGIN');
 
-        if (!instance) throw new Error(`Instância '${instanceName}' não encontrada.`);
-        workspaceId = instance.config.workspaceId;
-        apiConfig = { api_url: instance.config.apiUrl!, api_key: instance.config.apiKey! };
-
-        // Upsert contact
-        contactData = await prisma.contact.upsert({
-            where: { phoneNumberJid_workspaceId: { phoneNumberJid: contactJid, workspaceId } },
-            update: { name: pushName || contactPhone },
-            create: {
-                workspaceId,
-                name: pushName || contactPhone,
-                phone: contactPhone,
-                phoneNumberJid: contactJid,
-            },
-        });
-
-        if (!contactData) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
-
-        let chat = await prisma.chat.findFirst({
-            where: {
-                workspaceId,
-                contactId: contactData.id,
-                status: { in: ['gerais', 'atendimentos'] }
-            },
-            orderBy: { assignedAt: 'desc' },
-            include: { contact: true, agent: true }
-        });
-
-        if (!chat) {
-            chat = await prisma.chat.create({
-                data: {
-                    workspaceId,
-                    contactId: contactData.id,
-                    status: 'gerais',
-                },
-                 include: { contact: true, agent: true }
-            });
+        const instanceRes = await client.query(
+            `SELECT ec.workspace_id, ec.api_url, ec.api_key 
+             FROM evolution_api_instances AS ei
+             JOIN evolution_api_configs AS ec ON ei.config_id = ec.id 
+             WHERE ei.name = $1`, [instanceName]
+        );
+        if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
+        
+        const { workspace_id, api_url, api_key } = instanceRes.rows[0];
+        workspaceId = workspace_id;
+        apiConfig = { api_url, api_key };
+        
+        let contactRes = await client.query(
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
+        );
+        
+        if (contactRes.rowCount === 0) {
+            contactRes = await client.query(
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
+            );
+        } else {
+            // Update name if it's different and not null
+            if (pushName && pushName !== contactRes.rows[0].name) {
+                contactRes = await client.query(
+                    'UPDATE contacts SET name = $1 WHERE id = $2 RETURNING *',
+                    [pushName, contactRes.rows[0].id]
+                );
+            }
         }
         
-        const messageResult = await prisma.message.create({
-            data: {
-                workspaceId,
-                chatId: chat.id,
-                // Mensagens de webhook são sempre do contato, nunca de um User ou SystemAgent.
-                // O sender é inferido pelo chat->contact
-                type: dbMessageType,
-                content,
-                metadata: JSON.stringify(metadata),
-                createdAt: new Date(),
-                messageIdFromApi: key.id,
-                senderFromApi: sender,
-                instanceName: instanceName,
-                statusFromApi: data.status,
-                sourceFromApi: data.source,
-                serverUrl: parsedUrl,
-                fromMe: key.fromMe,
-                apiMessageStatus: data.status?.toUpperCase(),
-                rawPayload: JSON.stringify(payload),
-            },
-            include: { sender: true, systemAgentSender: true }
-        });
+        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
+        contactData = contactRes.rows[0];
 
-        savedChat = chat as any; // Cast because Prisma type is slightly different from our app type
-        savedMessage = messageResult as any;
+        let chatRes = await client.query(
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
+        );
+        
+        let chat: Chat;
+        if (chatRes.rowCount > 0) {
+            chat = chatRes.rows[0];
+        } else {
+            const newChatRes = await client.query(
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
+                [workspaceId, contactData.id]
+            );
+            chat = newChatRes.rows[0];
+        }
+        chat.contact = contactData;
+
+        const messageResult = await client.query(
+            `INSERT INTO messages (
+                workspace_id, chat_id, type, content, metadata,
+                message_id_from_api, sender_from_api, instance_name,
+                status_from_api, source_from_api, server_url, from_me,
+                api_message_status, raw_payload
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+            [
+                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
+                instanceName, data.status, data.source, parsedUrl, key.fromMe,
+                data.status?.toUpperCase(), JSON.stringify(payload)
+            ]
+        );
+
+        await client.query('COMMIT');
+        
+        savedChat = chat;
+        savedMessage = messageResult.rows[0];
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem na transação:', error);
         return;
+    } finally {
+        client.release();
     }
     
     if (savedChat && savedMessage) {
@@ -215,7 +219,7 @@ async function handleMessagesUpsert(payload: any) {
             dispatchMessageToWebhooks(savedChat, savedMessage, instanceName),
         ];
 
-        if (contactData?.id && apiConfig && !contactData.avatarUrl) {
+        if (contactData?.id && apiConfig && !contactData.avatar_url) {
             postTransactionTasks.push(
                 updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
             );
@@ -226,15 +230,11 @@ async function handleMessagesUpsert(payload: any) {
         });
     }
 
-
     if (workspaceId) {
         revalidatePath(`/api/chats/${workspaceId}`);
     }
 }
 
-/**
- * Busca a foto de perfil de um contato e atualiza no banco de dados.
- */
 async function updateProfilePicture(contactId: string, contactJid: string, instanceName: string, apiConfig: { api_url: string; api_key: string; }) {
     try {
         console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
@@ -244,10 +244,7 @@ async function updateProfilePicture(contactId: string, contactJid: string, insta
             { method: 'POST', body: JSON.stringify({ number: contactJid }) }
         );
         if (profilePicRes?.profilePictureUrl) {
-            await prisma.contact.update({
-                where: { id: contactId },
-                data: { avatarUrl: profilePicRes.profilePictureUrl }
-            });
+            await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
             console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
         }
     } catch (picError) {
@@ -258,29 +255,28 @@ async function updateProfilePicture(contactId: string, contactJid: string, insta
 
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
-    if (!Array.isArray(data) || data.length === 0) {
-        console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou vazio.');
-        return;
-    }
+    if (!Array.isArray(data) || data.length === 0) return;
     
     const contactUpdate = data[0];
     const { id: remoteJid, profilePicUrl } = contactUpdate;
 
-    if (!remoteJid || !profilePicUrl) {
-        console.log('[WEBHOOK_CONTACT_UPDATE] JID ou URL da foto de perfil ausente.');
-        return;
-    }
+    if (!remoteJid || !profilePicUrl) return;
 
     try {
-        const instance = await prisma.evolutionApiInstance.findFirst({ where: { name: instanceName } });
-        if (!instance) return;
+        const instanceRes = await db.query('SELECT config_id FROM evolution_api_instances WHERE name = $1', [instanceName]);
+        if (instanceRes.rowCount === 0) return;
+        const configId = instanceRes.rows[0].config_id;
+        
+        const configRes = await db.query('SELECT workspace_id FROM evolution_api_configs WHERE id = $1', [configId]);
+        if(configRes.rowCount === 0) return;
+        const workspaceId = configRes.rows[0].workspace_id;
 
-        const result = await prisma.contact.updateMany({
-            where: { phoneNumberJid: remoteJid, workspaceId: instance.workspaceId },
-            data: { avatarUrl: profilePicUrl }
-        });
+        const result = await db.query(
+            `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
+            [profilePicUrl, remoteJid, workspaceId]
+        );
 
-        if (result.count > 0) {
+        if (result.rowCount > 0) {
             console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
         }
     } catch (error) {
@@ -290,10 +286,7 @@ async function handleContactsUpdate(payload: any) {
 
 async function handleChatsUpsert(payload: any) {
     const { instance: instanceName, data } = payload;
-     if (!Array.isArray(data) || data.length === 0) {
-        console.log('[WEBHOOK_CHAT_UPSERT] Payload inválido ou vazio.');
-        return;
-    }
+     if (!Array.isArray(data) || data.length === 0) return;
     
     for (const chatUpdate of data) {
         const { id: remoteJid, archive } = chatUpdate;

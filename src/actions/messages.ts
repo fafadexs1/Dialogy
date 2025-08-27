@@ -1,7 +1,7 @@
 
 'use server';
 
-import { prisma } from '@/lib/db';
+import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { MessageMetadata } from '@/lib/types';
@@ -25,61 +25,48 @@ async function internalSendMessage(
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
     }
-
+    const client = await db.connect();
     try {
-        const chatInfo = await prisma.chat.findUnique({
-            where: { id: chatId },
-            select: {
-                workspaceId: true,
-                status: true,
-                agentId: true,
-                contact: {
-                    select: { phoneNumberJid: true }
-                },
-                messages: {
-                    where: { instanceName: { not: null } },
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
-                    select: { instanceName: true }
-                }
-            }
-        });
+        await client.query('BEGIN');
 
-        if (!chatInfo) {
+        const chatInfoRes = await client.query(`
+            SELECT 
+                c.workspace_id, c.status, c.agent_id,
+                ct.phone_number_jid,
+                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name
+            FROM chats c
+            JOIN contacts ct ON c.contact_id = ct.id
+            WHERE c.id = $1
+        `, [chatId]);
+
+        if (chatInfoRes.rowCount === 0) {
             throw new Error('Chat não encontrado.');
         }
 
-        const { workspaceId, status: chatStatus, agentId: currentAgentId } = chatInfo;
-        const remoteJid = chatInfo.contact.phoneNumberJid;
-        const lastInstanceName = chatInfo.messages[0]?.instanceName;
-
-        // Define a instância a ser usada: a fornecida como parâmetro tem prioridade.
+        const chatInfo = chatInfoRes.rows[0];
+        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
+        
         const instanceName = instanceNameParam || lastInstanceName;
 
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
         if (chatStatus === 'gerais' && !currentAgentId && isFromHumanAgent) {
             console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} é 'gerais'. Atribuindo agente humano ${senderId}.`);
-            await prisma.chat.update({
-                where: { id: chatId },
-                data: {
-                    agentId: senderId,
-                    status: 'atendimentos',
-                    assignedAt: new Date(),
-                }
-            });
+            await client.query(
+                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
+                [senderId, chatId]
+            );
         }
         
         if (!remoteJid || !instanceName) {
             throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         }
 
-        const apiConfig = await prisma.evolutionApiConfig.findUnique({
-             where: { workspaceId: workspaceId }
-        });
-
-        if (!apiConfig) {
+        const apiConfigRes = await client.query('SELECT * FROM evolution_api_configs WHERE workspace_id = $1', [workspaceId]);
+        
+        if (apiConfigRes.rowCount === 0) {
             throw new Error('Configuração da Evolution API não encontrada para este workspace.');
         }
+        const apiConfig = apiConfigRes.rows[0];
         
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
@@ -96,45 +83,41 @@ async function internalSendMessage(
                 }),
             }
         );
-
-        // Identifica se o sender é um SystemAgent ou um User
-        let messageData: any = {
-            workspaceId: workspaceId,
-            chatId: chatId,
-            type: 'text',
-            content: content,
-            fromMe: true,
-            messageIdFromApi: apiResponse?.key?.id,
-            apiMessageStatus: 'SENT',
-            instanceName: instanceName,
-            metadata: metadata || undefined,
-            isRead: true,
-        };
-
-        if (metadata?.sentBy === 'system_agent') {
-            messageData.senderSystemAgentId = senderId;
-        } else {
-            messageData.senderUserId = senderId;
-        }
         
-        await prisma.message.create({ data: messageData });
+        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_id_system_agent' : 'sender_id_user';
+
+        await client.query(
+            `INSERT INTO messages (
+                workspace_id, chat_id, type, content, from_me, 
+                message_id_from_api, api_message_status, instance_name, 
+                metadata, is_read, ${senderColumn}
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [
+                workspaceId, chatId, 'text', content, true,
+                apiResponse?.key?.id, 'SENT', instanceName,
+                metadata || null, true, senderId
+            ]
+        );
         
+        await client.query('COMMIT');
         revalidatePath(`/api/chats/${workspaceId}`);
         revalidatePath('/', 'layout');
 
         return { success: true, apiResponse };
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('[SEND_MESSAGE_ACTION] Erro:', error);
         const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
         return { success: false, error: `Falha ao enviar mensagem: ${errorMessage}` };
+    } finally {
+        client.release();
     }
 }
 
 
 /**
  * Internal function to handle media sending logic.
- * Can be called by agent-triggered actions or automated system actions.
  */
 async function internalSendMedia(
     chatId: string,
@@ -148,41 +131,39 @@ async function internalSendMedia(
     }[],
     senderId: string,
     metadata?: MessageMetadata,
-    instanceNameParam?: string, // Opcional: nome da instância para usar
+    instanceNameParam?: string,
 ): Promise<{ success: boolean; error?: string }> {
-     if (!chatId || !mediaFiles || mediaFiles.length === 0) {
+    if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
     }
-
+    const client = await db.connect();
     try {
-        const chatInfo = await prisma.chat.findUnique({
-            where: { id: chatId },
-            select: {
-                workspaceId: true,
-                contact: { select: { phoneNumberJid: true } },
-                messages: {
-                    where: { instanceName: { not: null } },
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
-                    select: { instanceName: true }
-                }
-            }
-        });
+        await client.query('BEGIN');
 
-        if (!chatInfo) throw new Error('Chat não encontrado.');
-        const { workspaceId } = chatInfo;
-        const remoteJid = chatInfo.contact.phoneNumberJid;
-        const lastInstanceName = chatInfo.messages[0]?.instanceName;
+        const chatInfoRes = await client.query(`
+            SELECT c.workspace_id, ct.phone_number_jid, 
+                   (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name
+            FROM chats c
+            JOIN contacts ct ON c.contact_id = ct.id
+            WHERE c.id = $1
+        `, [chatId]);
+
+        if (chatInfoRes.rowCount === 0) throw new Error('Chat não encontrado.');
+        
+        const { workspace_id: workspaceId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfoRes.rows[0];
         const instanceName = instanceNameParam || lastInstanceName;
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         
-        const apiConfig = await prisma.evolutionApiConfig.findUnique({ where: { workspaceId } });
-        if (!apiConfig) throw new Error('Configuração da Evolution API não encontrada.');
+        const apiConfigRes = await client.query('SELECT * FROM evolution_api_configs WHERE workspace_id = $1', [workspaceId]);
+        if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
+        const apiConfig = apiConfigRes.rows[0];
         
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
             : remoteJid;
+        
+        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_id_system_agent' : 'sender_id_user';
 
         for (const file of mediaFiles) {
             let endpoint: string;
@@ -216,44 +197,39 @@ async function internalSendMedia(
                 }
             }
 
-            let messageData: any = {
-                workspaceId: workspaceId,
-                chatId: chatId,
-                type: dbMessageType,
-                content: dbContent,
-                fromMe: true,
-                messageIdFromApi: apiResponse?.key?.id,
-                apiMessageStatus: apiResponse?.status || 'SENT',
-                metadata: dbMetadata,
-                instanceName: instanceName,
-                isRead: true,
-            };
-
-            if (metadata?.sentBy === 'system_agent') {
-                messageData.senderSystemAgentId = senderId;
-            } else {
-                messageData.senderUserId = senderId;
-            }
-
-            await prisma.message.create({ data: messageData });
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me,
+                    message_id_from_api, api_message_status, instance_name,
+                    metadata, is_read, ${senderColumn}
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    workspaceId, chatId, dbMessageType, dbContent, true,
+                    apiResponse?.key?.id, apiResponse?.status || 'SENT', instanceName,
+                    dbMetadata, true, senderId
+                ]
+            );
         }
         
+        await client.query('COMMIT');
         revalidatePath(`/api/chats/${workspaceId}`);
         revalidatePath('/', 'layout');
 
         return { success: true };
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
         const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao enviar mídia.";
         return { success: false, error: errorMessage };
-    } 
+    } finally {
+        client.release();
+    }
 }
 
 
 /**
  * Action specifically for sending messages from the UI (human agents).
- * It gets the senderId from the session.
  */
 export async function sendAgentMessageAction(
     chatId: string,
@@ -270,15 +246,14 @@ export async function sendAgentMessageAction(
 }
 
 /**
- * Action for sending automated messages (e.g., from Autopilot or System Agents).
- * The senderId is passed explicitly.
+ * Action for sending automated messages.
  */
 export async function sendAutomatedMessageAction(
     chatId: string,
     content: string,
     agentId: string,
     isSystemAgent: boolean = false,
-    instanceName?: string, // Opcional
+    instanceName?: string,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     const metadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     return internalSendMessage(chatId, content, agentId, metadata, instanceName);
@@ -309,7 +284,7 @@ export async function sendMediaAction(
 }
 
 /**
- * Action for sending media from automated systems (System Agents).
+ * Action for sending media from automated systems.
  */
 export async function sendAutomatedMediaAction(
      chatId: string,
@@ -322,7 +297,7 @@ export async function sendAutomatedMediaAction(
         thumbnail?: string; 
     }[],
     agentId: string,
-    instanceName?: string, // Opcional
+    instanceName?: string,
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
 }

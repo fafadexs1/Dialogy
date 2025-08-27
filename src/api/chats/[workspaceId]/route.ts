@@ -1,12 +1,12 @@
 
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { db } from '@/lib/db';
 import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 const timeZone = 'America/Sao_Paulo';
 
@@ -26,132 +26,107 @@ async function fetchDataForWorkspace(workspaceId: string, userId: string) {
     if (!workspaceId) return { chats: [] };
     
     // Fetch chats visible to the current user (Gerais, Atendimentos, and their own Encerrados)
-    const chatRes = await prisma.chat.findMany({
-        where: {
-            workspaceId,
-            OR: [
-                { status: { in: ['gerais', 'atendimentos'] } },
-                { status: 'encerrados', agentId: userId }
-            ]
-        },
-        include: {
-            contact: true,
-            agent: true,
-            team: true,
-            messages: {
-                orderBy: {
-                    createdAt: 'desc',
-                },
-                take: 1,
-            },
-            _count: {
-                select: {
-                    messages: {
-                        where: {
-                            isRead: false,
-                            fromMe: false,
-                        }
-                    }
-                }
-            }
-        },
-        orderBy: {
-            // This is tricky, Prisma doesn't easily allow ordering by a relation's field.
-            // We'll sort in application code.
-            createdAt: 'desc', 
-        }
-    });
+    const chatQuery = `
+        SELECT 
+            c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color,
+            json_build_object(
+                'id', ct.id, 'name', ct.name, 'email', ct.email, 'phone_number_jid', ct.phone_number_jid, 'avatar_url', ct.avatar_url
+            ) as contact,
+            json_build_object(
+                'id', a.id, 'name', a.full_name, 'avatar', a.avatar_url
+            ) as agent,
+            t.name as team_name,
+            (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as source,
+            (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as instance_name,
+            (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_read = FALSE AND m.from_me = FALSE) as unread_count,
+            (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) as last_message_time
+        FROM chats c
+        JOIN contacts ct ON c.contact_id = ct.id
+        LEFT JOIN users a ON c.agent_id = a.id
+        LEFT JOIN teams t ON c.agent_id = ANY(SELECT tm.user_id FROM team_members tm WHERE tm.team_id = t.id)
+        WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos') OR (c.status = 'encerrados' AND c.agent_id = $2))
+        ORDER BY last_message_time DESC NULLS LAST;
+    `;
+    const chatRes = await db.query(chatQuery, [workspaceId, userId]);
 
-    const chats: Chat[] = chatRes.map(r => ({
-        id: r.id,
-        status: r.status,
-        workspace_id: r.workspaceId,
-        contact: r.contact,
-        agent: r.agent,
-        messages: r.messages, // Will be replaced or enriched later
-        source: r.messages[0]?.sourceFromApi,
-        instance_name: r.messages[0]?.instanceName,
-        assigned_at: r.assignedAt?.toISOString(),
-        unreadCount: r._count.messages,
-        teamName: r.team?.name,
-        tag: r.tag,
-        color: r.color,
-    })).sort((a, b) => {
-        const timeA = a.messages[0] ? new Date(a.messages[0].createdAt).getTime() : 0;
-        const timeB = b.messages[0] ? new Date(b.messages[0].createdAt).getTime() : 0;
-        return timeB - timeA;
-    });
+    const chats: Chat[] = chatRes.rows.map(r => ({
+        ...r,
+        agent: r.agent.id ? r.agent : undefined,
+        messages: [],
+        unreadCount: parseInt(r.unread_count, 10),
+    }));
 
     // Fetch message history for all unique contact IDs in the visible chats.
     const contactIds = [...new Set(chats.map(c => c.contact?.id).filter(Boolean))] as string[];
 
     let allMessagesForContacts: any[] = [];
     if (contactIds.length > 0) {
-        allMessagesForContacts = await prisma.message.findMany({
-            where: {
-                chat: {
-                    contactId: { in: contactIds },
-                    workspaceId: workspaceId,
-                }
-            },
-            include: {
-                sender: true,
-                systemAgentSender: true,
-            },
-            orderBy: {
-                createdAt: 'asc'
-            }
-        });
+        const messagesQuery = `
+            SELECT 
+                m.*,
+                sender_user.id as user_id, sender_user.full_name as user_name, sender_user.avatar_url as user_avatar,
+                sender_agent.id as agent_id, sender_agent.name as agent_name, sender_agent.avatar_url as agent_avatar,
+                ct.id as contact_id
+            FROM messages m
+            JOIN chats ch ON m.chat_id = ch.id
+            JOIN contacts ct ON ch.contact_id = ct.id
+            LEFT JOIN users sender_user ON m.sender_id_user = sender_user.id
+            LEFT JOIN system_agents sender_agent ON m.sender_id_system_agent = sender_agent.id
+            WHERE ch.contact_id = ANY($1::uuid[]) AND m.workspace_id = $2
+            ORDER BY m.created_at ASC
+        `;
+        const messagesRes = await db.query(messagesQuery, [contactIds, workspaceId]);
+        allMessagesForContacts = messagesRes.rows;
     }
 
     const messagesByContact: { [key: string]: Message[] } = {};
     for (const m of allMessagesForContacts) {
-        const contactId = m.chat.contactId;
+        const contactId = m.contact_id;
         if (!messagesByContact[contactId]) {
             messagesByContact[contactId] = [];
         }
         
-        const createdAtDate = new Date(m.createdAt);
+        const createdAtDate = new Date(m.created_at);
         const zonedDate = toZonedTime(createdAtDate, timeZone);
 
-        // Determine the sender (User or SystemAgent)
         let sender: MessageSender;
-        if (m.sender) {
-            sender = { ...m.sender, type: 'user' };
-        } else if (m.systemAgentSender) {
-            sender = { ...m.systemAgentSender, type: 'system_agent' };
+        if (m.user_id) {
+            sender = { id: m.user_id, name: m.user_name, avatar: m.user_avatar, type: 'user' };
+        } else if (m.agent_id) {
+            sender = { id: m.agent_id, name: m.agent_name, avatar: m.agent_avatar, type: 'system_agent' };
         } else {
-            // Fallback for contact-sent messages (from webhook)
-            sender = { ...chats.find(c => c.id === m.chatId)?.contact, type: 'contact' };
+             const chatForMessage = chats.find(c => c.id === m.chat_id);
+             sender = { ...chatForMessage?.contact, type: 'contact' };
         }
         
         messagesByContact[contactId].push({
             id: m.id,
-            chat_id: m.chatId,
-            workspace_id: m.workspaceId,
+            chat_id: m.chat_id,
+            workspace_id: m.workspace_id,
             content: m.content || '',
             type: m.type as Message['type'],
-            status: 'default', // Assuming default status
+            status: m.content === 'Mensagem apagada' ? 'deleted' : 'default', // Infer status
             metadata: m.metadata as MessageMetadata,
             timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
             createdAt: createdAtDate.toISOString(),
             formattedDate: formatMessageDate(createdAtDate),
             sender: sender, 
-            instance_name: m.instanceName,
-            source_from_api: m.sourceFromApi,
-            api_message_status: m.apiMessageStatus,
-            message_id_from_api: m.messageIdFromApi,
-            from_me: m.fromMe,
-            is_read: m.isRead,
+            instance_name: m.instance_name,
+            source_from_api: m.source_from_api,
+            api_message_status: m.api_message_status,
+            message_id_from_api: m.message_id_from_api,
+            from_me: m.from_me,
+            is_read: m.is_read,
         });
     }
 
     // Assign full message history to each chat
     chats.forEach(chat => {
       if (chat.contact?.id && messagesByContact[chat.contact.id]) {
-        chat.messages = messagesByContact[chat.contact.id];
+        // Filter messages for this specific chat ID
+        chat.messages = messagesByContact[chat.contact.id].filter(m => m.chat_id === chat.id);
       } else {
-        chat.messages = []; // Ensure it's an empty array if no history found
+        chat.messages = [];
       }
     });
 
@@ -163,7 +138,9 @@ export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
