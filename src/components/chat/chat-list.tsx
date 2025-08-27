@@ -143,12 +143,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         )}
       </div>
 
-      {/* coluna de texto */}
       <div className="flex-1 min-w-0">
-        {/* primeira linha (nome, tags, hora) */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-            {/* nome pode ser enorme/sem espaços -> min-w-0 + truncate */}
             <p className="font-semibold truncate break-all" title={chat.contact.name}>
                 {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
             </p>
@@ -156,7 +153,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             {chat.tag && chat.color && chat.status !== 'atendimentos' && (
               <Badge
                 style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
-                className="border-transparent text-xs px-2 py-0.5 flex-shrink-0 max-w-[45%] truncate"
+                className="border-transparent text-xs px-2 py-0.5 flex-shrink-0"
                 title={chat.tag}
               >
                 {chat.tag}
@@ -180,7 +177,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           )}
         </div>
 
-        {/* segunda linha (preview e badge de não lidos) */}
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0 overflow-hidden">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
@@ -249,9 +245,7 @@ export default function ChatList({
   );
 
   return (
-    // RAIZ DA COLUNA ESQUERDA — largura fixa + altura cheia + prepara rolagem
     <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card min-h-0">
-      {/* Header (fixo) */}
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -265,7 +259,6 @@ export default function ChatList({
         </div>
       </div>
 
-      {/* Agentes Online (fixo) */}
       <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
           Agentes Online ({onlineAgents.length})
@@ -289,7 +282,6 @@ export default function ChatList({
         </TooltipProvider>
       </div>
 
-      {/* Abas + Lista (rolável) */}
       <Tabs defaultValue="gerais" className="flex-1 min-h-0 flex flex-col">
         <div className="p-2 flex-shrink-0">
           <TabsList className="grid w-full grid-cols-3">
@@ -299,7 +291,6 @@ export default function ChatList({
           </TabsList>
         </div>
 
-        {/* Área rolável verdadeira */}
         <ScrollArea className="flex-1 min-h-0 pr-2">
           <TabsContent value="gerais" className="m-0">
             {renderChatList(sortedChats.gerais)}

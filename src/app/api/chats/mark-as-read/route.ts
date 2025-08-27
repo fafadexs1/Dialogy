@@ -96,5 +96,3 @@ async function sendReceiptToWhatsApp(
     });
     console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
 }
-
-    
