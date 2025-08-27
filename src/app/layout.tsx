@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
