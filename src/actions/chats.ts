@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -25,8 +26,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  * Esta ação é chamada pelo botão "Assumir Atendimento".
  */
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -63,8 +63,7 @@ export async function transferChatAction(
     // Optional parameter to accept a session-like object from an API call
     prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
 ): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     
     let sessionToUse = prefetchedSession;
     
@@ -207,8 +206,7 @@ export async function closeChatAction(
     reasonTagId: string | null,
     notes: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !user.user_metadata.full_name) {
@@ -286,8 +284,7 @@ export async function closeChatAction(
 
 
 export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -332,8 +329,7 @@ function formatMessageDate(date: Date): string {
 }
 
 export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]> }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !workspaceId) {
@@ -447,3 +443,5 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {} };
     }
 }
+
+    

@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -19,8 +20,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return "Usuário não autenticado.";
     
@@ -52,8 +52,7 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 }
 
 export async function getWorkspaceInvites(workspaceId: string): Promise<{invites: WorkspaceInvite[] | null, error?: string}> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { invites: null, error: "Usuário não autenticado."};
     
@@ -86,8 +85,7 @@ export async function getWorkspaceInvites(workspaceId: string): Promise<{invites
 }
 
 export async function revokeWorkspaceInvite(inviteId: string): Promise<{success: boolean, error?: string}> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado."};
 
@@ -113,8 +111,7 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{success:
 
 
 export async function joinWorkspaceAction(prevState: any, formData: FormData): Promise<{ success: boolean; error: string | null }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };
@@ -203,3 +200,5 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
     revalidatePath('/', 'layout');
     redirect('/');
 }
+
+    

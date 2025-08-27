@@ -7,8 +7,7 @@ import { cookies } from 'next/headers';
 
 
 export async function GET(request: Request) {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
 
     const { data: { user: authUser } } = await supabase.auth.getUser();
 
@@ -65,3 +64,5 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
+
+    

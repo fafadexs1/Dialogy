@@ -16,8 +16,7 @@ interface MarkAsReadPayload {
 }
 
 export async function POST(request: Request) {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -97,3 +96,5 @@ async function sendReceiptToWhatsApp(
     });
     console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
 }
+
+    

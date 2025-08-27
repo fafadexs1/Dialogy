@@ -54,8 +54,7 @@ export async function getAnalyticsData(
     filters: { teamId?: string; agentId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
@@ -143,8 +142,7 @@ export async function getAgentPerformance(
     filters: { teamId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
     
@@ -218,8 +216,7 @@ export async function getAgentPerformance(
 }
 
 export async function getWorkspaceMembers(workspaceId: string, teamId?: string): Promise<{ members: User[] | null, error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: null, error: "Usuário não autenticado." };
 
@@ -247,3 +244,5 @@ export async function getWorkspaceMembers(workspaceId: string, teamId?: string):
         return { members: null, error: "Falha ao buscar usuários do workspace." };
     }
 }
+
+    

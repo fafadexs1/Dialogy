@@ -236,8 +236,7 @@ export async function sendAgentMessageAction(
     chatId: string,
     content: string,
 ): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -275,8 +274,7 @@ export async function sendMediaAction(
         thumbnail?: string; 
     }[]
 ): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -302,3 +300,5 @@ export async function sendAutomatedMediaAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
 }
+
+    

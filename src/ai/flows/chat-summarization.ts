@@ -38,8 +38,7 @@ const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
 
 
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated.");
@@ -97,3 +96,5 @@ const summarizeChatFlow = ai.defineFlow(
     return output;
   }
 );
+
+    

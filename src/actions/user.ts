@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
@@ -12,8 +13,7 @@ export async function updateUserOnlineStatus(userId: string, isOnline: boolean) 
     return;
   }
   
-  const cookieStore = cookies()
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
 
   try {
     const { error } = await supabase
@@ -71,3 +71,5 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
         return [];
     }
 }
+
+    

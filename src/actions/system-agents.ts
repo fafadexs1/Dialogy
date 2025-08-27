@@ -17,8 +17,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { agents: null, error: "Usuário não autenticado." };
 
@@ -40,8 +39,7 @@ export async function createSystemAgent(
     workspaceId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -84,8 +82,7 @@ export async function updateSystemAgent(
     agentId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -126,8 +123,7 @@ export async function updateSystemAgent(
 
 
 export async function deleteSystemAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -150,3 +146,5 @@ export async function deleteSystemAgent(agentId: string): Promise<{ success: boo
 }
 
 // TODO: Add a 'toggleSystemAgentActive' action
+
+    

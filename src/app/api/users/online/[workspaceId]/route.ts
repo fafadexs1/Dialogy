@@ -9,8 +9,7 @@ export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
   
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) {
@@ -50,3 +49,5 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
+    

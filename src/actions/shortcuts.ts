@@ -19,8 +19,7 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
 }
 
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { shortcuts: null, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -45,8 +44,7 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
 
 
 export async function saveShortcut(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -103,8 +101,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
 
 export async function deleteShortcut(shortcutId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -129,3 +126,5 @@ export async function deleteShortcut(shortcutId: string): Promise<{ success: boo
         return { success: false, error: "Falha ao excluir o atalho." };
     }
 }
+
+    

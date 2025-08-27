@@ -44,8 +44,7 @@ const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
 
 
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated.");
@@ -111,3 +110,5 @@ const generateSmartRepliesFlow = ai.defineFlow(
     return output;
   }
 );
+
+    

@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -16,8 +17,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
@@ -73,8 +73,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
 }
 
 export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ team: Team | null; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { team: null, error: "Usuário não autenticado." };
     
@@ -115,8 +114,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 }
 
 export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     
@@ -153,8 +151,7 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 }
 
 export async function deleteTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -177,8 +174,7 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
 
 
 export async function addTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -200,8 +196,7 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
 }
 
 export async function removeTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -223,8 +218,7 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 }
 
 export async function updateBusinessHours(teamId: string, day: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -255,8 +249,7 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
 }
 
 export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
@@ -300,3 +293,5 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
 }
+
+    

@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
@@ -87,8 +88,7 @@ function LoadingSkeleton() {
 }
 
 export default async function Home() {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
 
   const { data: { user: authUser } } = await supabase.auth.getUser();
 
@@ -116,3 +116,5 @@ export default async function Home() {
     </Suspense>
   );
 }
+
+    

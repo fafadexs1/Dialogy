@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -16,8 +17,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { roles: [], permissions: [], error: "Usuário não autenticado." };
 
@@ -56,8 +56,7 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
 }
 
 export async function updateRolePermissionAction(roleId: string, permissionId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -93,8 +92,7 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
 }
 
 export async function createRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -128,8 +126,7 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
 }
 
 export async function updateRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -165,8 +162,7 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
 }
 
 export async function deleteRoleAction(roleId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -201,3 +197,5 @@ export async function deleteRoleAction(roleId: string, workspaceId: string): Pro
         return { success: false, error: "Falha ao remover o papel no banco de dados." };
     }
 }
+
+    

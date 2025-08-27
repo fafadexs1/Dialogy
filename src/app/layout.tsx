@@ -54,8 +54,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient(cookies());
   
   const { data: { user: authUser } } = await supabase.auth.getUser();
   
@@ -83,3 +82,5 @@ export default async function RootLayout({
     </html>
   );
 }
+
+    
