@@ -3,7 +3,6 @@
 
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import Image from 'next/image';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace, EvolutionInstanceCreationPayload } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -389,178 +388,174 @@ export default function EvolutionApiPage() {
 
     if (!user) {
         return (
-            <MainAppLayout user={user}>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainAppLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         )
     }
 
     return (
-        <MainAppLayout user={user}>
-            <div className="flex flex-col flex-1 h-full">
-                <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
-                    <h1 className="text-2xl font-bold flex items-center gap-2"><Settings /> Conexões com a Evolution API</h1>
-                    <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name || '...'}</span></p>
-                </header>
-                <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
-                   { isLoading ? (
-                        <Card>
-                            <CardHeader><Skeleton className="h-8 w-1/2" /></CardHeader>
-                            <CardContent><Skeleton className="h-10 w-full" /></CardContent>
-                            <CardFooter><Skeleton className="h-10 w-32" /></CardFooter>
-                        </Card>
-                   ) : (
-                    <form action={saveAction}>
-                        <input type="hidden" name="workspaceId" value={activeWorkspace?.id || ''} />
-                        <input type="hidden" name="configId" value={config?.id || ''} />
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
-                                <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
-                            </CardHeader>
-                            <CardContent className="grid md:grid-cols-2 gap-6">
+        <div className="flex flex-col flex-1 h-full">
+            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                <h1 className="text-2xl font-bold flex items-center gap-2"><Settings /> Conexões com a Evolution API</h1>
+                <p className="text-muted-foreground">Gerencie suas instâncias da API do WhatsApp para o workspace: <span className='font-semibold'>{activeWorkspace?.name || '...'}</span></p>
+            </header>
+            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-8">
+               { isLoading ? (
+                    <Card>
+                        <CardHeader><Skeleton className="h-8 w-1/2" /></CardHeader>
+                        <CardContent><Skeleton className="h-10 w-full" /></CardContent>
+                        <CardFooter><Skeleton className="h-10 w-32" /></CardFooter>
+                    </Card>
+               ) : (
+                <form action={saveAction}>
+                    <input type="hidden" name="workspaceId" value={activeWorkspace?.id || ''} />
+                    <input type="hidden" name="configId" value={config?.id || ''} />
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2"><Settings /> Configuração Global da API</CardTitle>
+                            <CardDescription>Insira os dados do seu servidor da Evolution API. Estes dados serão usados para todas as instâncias deste workspace.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="grid md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="global-api-url">URL da API</Label>
+                                <Input name="apiUrl" id="global-api-url" placeholder="Ex: http://localhost:8080" defaultValue={config?.api_url || ''} />
+                            </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="global-api-url">URL da API</Label>
-                                    <Input name="apiUrl" id="global-api-url" placeholder="Ex: http://localhost:8080" defaultValue={config?.api_url || ''} />
-                                </div>
-                                    <div className="space-y-2">
-                                    <Label htmlFor="global-api-key">Chave da API (Global API Key)</Label>
-                                    <Input name="apiKey" id="global-api-key" type="password" defaultValue={config?.api_key || ''} placeholder="••••••••••••••••••••••••••" />
-                                </div>
-                            </CardContent>
-                            <CardFooter>
-                                <SaveConfigButton />
-                            </CardFooter>
-                        </Card>
-                   </form>
-                   )}
+                                <Label htmlFor="global-api-key">Chave da API (Global API Key)</Label>
+                                <Input name="apiKey" id="global-api-key" type="password" defaultValue={config?.api_key || ''} placeholder="••••••••••••••••••••••••••" />
+                            </div>
+                        </CardContent>
+                        <CardFooter>
+                            <SaveConfigButton />
+                        </CardFooter>
+                    </Card>
+               </form>
+               )}
 
-                    <div>
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-bold">Minhas Instâncias</h2>
-                             <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-                                <DialogTrigger asChild>
-                                    <Button disabled={!config?.api_url || !config?.api_key || isLoading}>
-                                        <Plus className="mr-2 h-4 w-4" />
-                                        Adicionar Instância
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="max-w-2xl">
-                                    <DialogHeader>
-                                        <DialogTitle>Criar Nova Instância</DialogTitle>
-                                        <DialogDescription>
-                                            Configure uma nova instância para conectar um número de WhatsApp com todas as opções.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <AddInstanceForm 
-                                        configId={config?.id}
-                                        onFormSubmit={handleCreationSuccess}
-                                    />
-                                </DialogContent>
-                            </Dialog>
-                        </div>
-                        
-                         {!config?.api_url || !config?.api_key ? (
-                             <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
-                                <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground" />
-                                <h3 className="mt-4 text-lg font-medium">Configure sua API Global</h3>
-                                <p className="mt-2 text-sm text-muted-foreground">
-                                    Para gerenciar instâncias, por favor, insira e salve a URL e a Chave da sua API Evolution nas configurações acima.
-                                </p>
-                            </div>
-                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                {instances.map(instance => {
-                                    const statusInfo = getStatusInfo(instance.status);
-                                    const isLoadingInstance = instanceStates[instance.id]?.loading;
-                                    return (
-                                        <Card key={instance.id} className="flex flex-col">
-                                            <CardHeader>
-                                                <div className="flex justify-between items-start">
-                                                    <div className="max-w-[80%] break-words space-y-2">
-                                                        <CardTitle className="flex items-center gap-2">
-                                                            <Server className="h-5 w-5 text-primary"/>
-                                                            {instance.name}
-                                                        </CardTitle>
-                                                        <InstanceTypeBadge type={instance.type} />
-                                                    </div>
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                                                                <MoreVertical className="h-4 w-4" />
-                                                            </Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end">
-                                                            <DropdownMenuItem disabled>
-                                                                <Edit className="mr-2 h-4 w-4" />
-                                                                Editar
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuItem onClick={() => handleRemoveInstance(instance.id)} className="text-destructive">
-                                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                                Remover
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </div>
-                                            </CardHeader>
-                                            <CardContent className="flex-grow space-y-4">
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        {isLoadingInstance ? (
-                                                            <>
-                                                                <Loader2 className="h-4 w-4 animate-spin"/>
-                                                                <span className="text-sm font-medium">Aguarde...</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
-                                                                <span className="text-sm font-medium">{statusInfo.text}</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {instance.type === 'baileys' && instance.status === 'pending' && (
-                                                    <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
-                                                        {instance.qrCode ? (
-                                                            <Image src={instance.qrCode} alt="QR Code" width={200} height={200} className="w-full h-auto object-contain" />
-                                                        ) : (
-                                                            <div className="flex flex-col items-center justify-center text-muted-foreground">
-                                                                <Loader2 className="h-12 w-12 animate-spin"/>
-                                                                <p className="mt-2 text-sm">Gerando QR Code...</p>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </CardContent>
-                                            <CardFooter className="p-4 border-t">
-                                                {instance.status === 'connected' ? (
-                                                    <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
-                                                        {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PowerOff className="mr-2 h-4 w-4"/>}
-                                                        Desconectar
-                                                    </Button>
-                                                ) : (
-                                                    <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance || instance.type === 'wa_cloud'}>
-                                                        {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
-                                                        {instance.type === 'wa_cloud' ? 'Conexão Automática' : 'Conectar'}
-                                                    </Button>
-                                                )}
-                                            </CardFooter>
-                                        </Card>
-                                    )
-                                })}
-                                {instances.length === 0 && !isLoading && (
-                                    <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
-                                        <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
-                                        <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-bold">Minhas Instâncias</h2>
+                         <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+                            <DialogTrigger asChild>
+                                <Button disabled={!config?.api_url || !config?.api_key || isLoading}>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Adicionar Instância
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-2xl">
+                                <DialogHeader>
+                                    <DialogTitle>Criar Nova Instância</DialogTitle>
+                                    <DialogDescription>
+                                        Configure uma nova instância para conectar um número de WhatsApp com todas as opções.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <AddInstanceForm 
+                                    configId={config?.id}
+                                    onFormSubmit={handleCreationSuccess}
+                                />
+                            </DialogContent>
+                        </Dialog>
                     </div>
-                </main>
-            </div>
-        </MainAppLayout>
+                    
+                     {!config?.api_url || !config?.api_key ? (
+                         <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
+                            <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground" />
+                            <h3 className="mt-4 text-lg font-medium">Configure sua API Global</h3>
+                            <p className="mt-2 text-sm text-muted-foreground">
+                                Para gerenciar instâncias, por favor, insira e salve a URL e a Chave da sua API Evolution nas configurações acima.
+                            </p>
+                        </div>
+                     ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {instances.map(instance => {
+                                const statusInfo = getStatusInfo(instance.status);
+                                const isLoadingInstance = instanceStates[instance.id]?.loading;
+                                return (
+                                    <Card key={instance.id} className="flex flex-col">
+                                        <CardHeader>
+                                            <div className="flex justify-between items-start">
+                                                <div className="max-w-[80%] break-words space-y-2">
+                                                    <CardTitle className="flex items-center gap-2">
+                                                        <Server className="h-5 w-5 text-primary"/>
+                                                        {instance.name}
+                                                    </CardTitle>
+                                                    <InstanceTypeBadge type={instance.type} />
+                                                </div>
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                            <MoreVertical className="h-4 w-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuItem disabled>
+                                                            <Edit className="mr-2 h-4 w-4" />
+                                                            Editar
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleRemoveInstance(instance.id)} className="text-destructive">
+                                                            <Trash2 className="mr-2 h-4 w-4" />
+                                                            Remover
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="flex-grow space-y-4">
+                                            <div className="space-y-1">
+                                                <div className="flex items-center gap-2">
+                                                    {isLoadingInstance ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin"/>
+                                                            <span className="text-sm font-medium">Aguarde...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className={`h-2.5 w-2.5 rounded-full ${statusInfo.color}`}></div>
+                                                            <span className="text-sm font-medium">{statusInfo.text}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {instance.type === 'baileys' && instance.status === 'pending' && (
+                                                <div className="text-center p-4 border-dashed border-2 rounded-lg aspect-square flex flex-col items-center justify-center bg-secondary/50">
+                                                    {instance.qrCode ? (
+                                                        <Image src={instance.qrCode} alt="QR Code" width={200} height={200} className="w-full h-auto object-contain" />
+                                                    ) : (
+                                                        <div className="flex flex-col items-center justify-center text-muted-foreground">
+                                                            <Loader2 className="h-12 w-12 animate-spin"/>
+                                                            <p className="mt-2 text-sm">Gerando QR Code...</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </CardContent>
+                                        <CardFooter className="p-4 border-t">
+                                            {instance.status === 'connected' ? (
+                                                <Button variant="destructive" className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance}>
+                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PowerOff className="mr-2 h-4 w-4"/>}
+                                                    Desconectar
+                                                </Button>
+                                            ) : (
+                                                <Button className="w-full" onClick={() => handleToggleConnection(instance)} disabled={isLoadingInstance || instance.type === 'wa_cloud'}>
+                                                    {isLoadingInstance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4"/>}
+                                                    {instance.type === 'wa_cloud' ? 'Conexão Automática' : 'Conectar'}
+                                                </Button>
+                                            )}
+                                        </CardFooter>
+                                    </Card>
+                                )
+                            })}
+                            {instances.length === 0 && !isLoading && (
+                                <div className="col-span-full text-center p-10 border-dashed border-2 rounded-lg">
+                                    <p className="text-muted-foreground">Nenhuma instância criada ainda.</p>
+                                    <p className="text-sm text-muted-foreground">Adicione uma para começar a conectar números de WhatsApp.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </main>
+        </div>
     );
 }
