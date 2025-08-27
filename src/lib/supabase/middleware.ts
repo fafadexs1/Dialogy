@@ -17,6 +17,8 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
+          // If the cookie is set, update the request cookies as well.
+          // This will make sure that the server-side pass gets the updated cookie.
           request.cookies.set({
             name,
             value,
@@ -34,6 +36,8 @@ export async function updateSession(request: NextRequest) {
           })
         },
         remove(name: string, options: CookieOptions) {
+          // If the cookie is removed, update the request cookies as well.
+          // This will make sure that the server-side pass gets the updated cookie.
           request.cookies.set({
             name,
             value: '',
@@ -54,7 +58,7 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // this will refresh session if expired - important!
+  // This will refresh the session if expired - important!
   await supabase.auth.getUser()
 
   return response
