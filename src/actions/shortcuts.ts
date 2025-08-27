@@ -63,14 +63,18 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
     try {
         if (id) {
             // Update
-            const shortcutRes = await db.query('SELECT user_id FROM shortcuts WHERE id = $1', [id]);
+            const shortcutRes = await db.query('SELECT user_id, type FROM shortcuts WHERE id = $1', [id]);
             if (shortcutRes.rowCount === 0) return { success: false, error: "Atalho não encontrado."};
-            const ownerId = shortcutRes.rows[0].user_id;
+            const { user_id: ownerId, type: oldType } = shortcutRes.rows[0];
 
             // Permission check: only owner or admin can edit
             const isAdmin = await hasAdminPermission(userId, workspaceId);
             if (userId !== ownerId && !isAdmin) {
                  return { success: false, error: "Você não tem permissão para editar este atalho." };
+            }
+             // Admins can change type, but owners of private shortcuts can't make them global
+            if (type === 'global' && userId === ownerId && !isAdmin && oldType === 'private') {
+                return { success: false, error: 'Apenas administradores podem criar atalhos globais.' };
             }
 
             await db.query(
@@ -82,6 +86,10 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
         } else {
             // Create
+            if (type === 'global' && !await hasAdminPermission(userId, workspaceId)) {
+                return { success: false, error: 'Apenas administradores podem criar atalhos globais.' };
+            }
+            
             await db.query(
                 'INSERT INTO shortcuts (workspace_id, user_id, name, message, type) VALUES ($1, $2, $3, $4, $5)',
                 [workspaceId, userId, name, message, type]
@@ -93,7 +101,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
     } catch (error: any) {
         console.error("[SAVE_SHORTCUT] Error:", error);
          if (error.code === '23505') { // unique_violation
-            return { success: false, error: "Já existe um atalho com este nome neste workspace." };
+            return { success: false, error: "Já existe um atalho com este nome. Os atalhos devem ter nomes únicos (seja global ou privado)." };
         }
         return { success: false, error: "Falha ao salvar atalho no banco de dados." };
     }
@@ -126,5 +134,3 @@ export async function deleteShortcut(shortcutId: string): Promise<{ success: boo
         return { success: false, error: "Falha ao excluir o atalho." };
     }
 }
-
-    
