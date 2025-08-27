@@ -1,11 +1,9 @@
 -- CreateEnum
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'chatstatusenum') THEN
-        CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
-    END IF;
-END
-$$;
+DO $$ BEGIN
+    CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -240,7 +238,7 @@ CREATE TABLE "chats" (
     "assigned_at" TIMESTAMP(3),
     "closed_at" TIMESTAMP(3),
     "close_reason_tag_id" TEXT,
-    "closeNotes" TEXT,
+    "close_notes" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "chats_pkey" PRIMARY KEY ("id")
@@ -555,3 +553,95 @@ ALTER TABLE "evolution_api_configs" ADD CONSTRAINT "evolution_api_configs_worksp
 
 -- AddForeignKey
 ALTER TABLE "evolution_api_instances" ADD CONSTRAINT "evolution_api_instances_config_id_fkey" FOREIGN KEY ("config_id") REFERENCES "evolution_api_configs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Creates a trigger function that inserts a new row into public.users
+-- whenever a new user is created in the auth.users table.
+CREATE SCHEMA IF NOT EXISTS auth;
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.users (id, full_name, email, avatar_url, password_hash, updated_at)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'full_name',
+    new.email,
+    new.raw_user_meta_data->>'avatar_url',
+    new.encrypted_password,
+    now()
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Inserts a row into public.workspaces and related tables when a new user signs up.
+create or replace function public.setup_workspace_defaults()
+returns trigger as $$
+declare
+  new_workspace_id uuid;
+  admin_role_id uuid;
+  member_role_id uuid;
+  all_permissions text[] := array[
+    'workspace:view', 'workspace:edit', 'workspace:delete',
+    'members:view', 'members:invite', 'members:remove',
+    'permissions:view', 'permissions:edit',
+    'teams:view', 'teams:edit',
+    'crm:view', 'crm:edit', 'crm:delete',
+    'chats:view', 'chats:assign', 'chats:transfer',
+    'campaigns:view', 'campaigns:manage', 'campaigns:delete',
+    'automations:view', 'automations:manage',
+    'integrations:view', 'integrations:manage',
+    'billing:view', 'billing:manage'
+  ];
+  member_permissions text[] := array[
+    'workspace:view',
+    'members:view', 'members:invite',
+    'teams:view',
+    'crm:view', 'crm:edit',
+    'chats:view', 'chats:assign', 'chats:transfer',
+    'campaigns:view'
+  ];
+  permission text;
+begin
+    -- 1. Create a new workspace for the user
+    insert into public.workspaces (name, owner_id)
+    values (new.raw_user_meta_data->>'full_name' || '''s Workspace', new.id)
+    returning id into new_workspace_id;
+
+    -- 2. Create default roles for the new workspace
+    insert into public.roles (workspace_id, name, description, is_default)
+    values
+        (new_workspace_id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', false),
+        (new_workspace_id, 'Membro', 'Acesso a funcionalidades do dia-a-dia como chats e contatos.', true)
+    returning id into admin_role_id, member_role_id;
+    
+    -- 3. Assign permissions to the Administrator role
+    foreach permission in array all_permissions
+    loop
+        insert into public.role_permissions (role_id, permission_id)
+        values (admin_role_id, permission);
+    end loop;
+    
+    -- 4. Assign permissions to the Member role
+    foreach permission in array member_permissions
+    loop
+        insert into public.role_permissions (role_id, permission_id)
+        values (member_role_id, permission);
+    end loop;
+
+    -- 5. Make the new user an Administrator of their new workspace
+    insert into public.user_workspace_roles (user_id, workspace_id, role_id)
+    values (new.id, new_workspace_id, admin_role_id);
+    
+    -- 6. Set the new workspace as the user's last active one in auth table
+    update auth.users set raw_user_meta_data = raw_user_meta_data || 
+        jsonb_build_object('last_active_workspace_id', new_workspace_id)
+    where id = new.id;
+
+    return new;
+end;
+$$ language plpgsql security definer;
+
+-- Trigger to execute the workspace setup after a new user is created
+create or replace trigger on_new_user_setup
+  after insert on public.users
+  for each row execute procedure public.setup_workspace_defaults();
