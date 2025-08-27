@@ -353,7 +353,6 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const contactIds = [...new Set(chatRes.rows.map(r => r.contact_id).filter(Boolean))];
         const agentIds = [...new Set(chatRes.rows.map(r => r.agent_id).filter(Boolean))];
 
-        // Safe queries
         const contactsPromise = contactIds.length > 0
             ? db.query('SELECT * FROM contacts WHERE id::text = ANY($1::text[])', [contactIds])
             : Promise.resolve({ rows: [] });

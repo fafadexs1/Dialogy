@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { type Chat, type Tag } from '@/lib/types';
+import { type Chat, type Tag, User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,7 +14,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTags } from '@/actions/crm';
-import { useAuth } from '@/hooks/use-auth';
 import { toast } from '@/hooks/use-toast';
 import { Check, Loader2, Search } from 'lucide-react';
 import { updateChatTagAction } from '@/actions/chats';
@@ -24,10 +23,10 @@ interface TagSelectionDialogProps {
   setIsOpen: (open: boolean) => void;
   chat: Chat;
   onUpdate: () => void;
+  user: User | null;
 }
 
-export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate }: TagSelectionDialogProps) {
-  const user = useAuth();
+export function TagSelectionDialog({ isOpen, setIsOpen, chat, onUpdate, user }: TagSelectionDialogProps) {
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');

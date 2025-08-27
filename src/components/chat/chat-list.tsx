@@ -98,9 +98,10 @@ interface ChatListItemProps {
   isSelected: boolean;
   onSelect: (chat: Chat) => void;
   onUpdate: () => void;
+  currentUser: User | null;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
   const lastMessage = chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
@@ -117,6 +118,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         setIsOpen={setIsTagDialogOpen}
         chat={chat}
         onUpdate={onUpdate}
+        user={currentUser}
       />
 
       <div className="relative flex-shrink-0">
@@ -235,6 +237,7 @@ export default function ChatList({
             isSelected={selectedChat?.id === chat.id}
             onSelect={setSelectedChat}
             onUpdate={onUpdate}
+            currentUser={currentUser}
           />
         ))
       ) : (
