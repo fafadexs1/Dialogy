@@ -10,9 +10,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 // MODELS
-
 
 model User {
   id                      String                  @id @default(uuid())
@@ -36,39 +34,40 @@ model User {
   createdContacts         Contact[]               @relation("ContactOwner")
   createdTags             Tag[]                   @relation("TagCreator")
   registeredActivities    Activity[]
-  sentMessages            Message[]
+  sentMessages            Message[]               @relation("MessageSenderUser")
   createdCampaigns        Campaign[]
   autopilotConfigs        AutopilotConfig[]
   shortcuts               Shortcut[]
-  createdSystemAgents     SystemAgent[]
+  createdSystemAgents     SystemAgent[]           @relation("AgentCreator")
+  assignedChats           Chat[]                  @relation("ChatAgent")
 
   @@map("users")
 }
 
 model Workspace {
-  id                    String                @id @default(uuid())
-  name                  String
-  avatarUrl             String?               @map("avatar_url")
-  ownerId               String                @map("owner_id")
-  createdAt             DateTime              @default(now()) @map("created_at")
-  updatedAt             DateTime              @updatedAt @map("updated_at")
+  id                      String                  @id @default(uuid())
+  name                    String
+  avatarUrl               String?                 @map("avatar_url")
+  ownerId                 String                  @map("owner_id")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
 
   // Relations
-  owner                 User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  roles                 Role[]
-  users                 UserWorkspaceRole[]
-  invites               WorkspaceInvite[]
-  teams                 Team[]
-  contacts              Contact[]
-  tags                  Tag[]
-  customFieldDefinitions CustomFieldDefinition[]
-  shortcuts             Shortcut[]
-  systemAgents          SystemAgent[]
-  chats                 Chat[]
-  messages              Message[]
-  autopilotConfigs      AutopilotConfig[]
-  campaigns             Campaign[]
-  evolutionApiConfigs   EvolutionApiConfig[]
+  owner                   User                    @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  roles                   Role[]
+  users                   UserWorkspaceRole[]
+  invites                 WorkspaceInvite[]
+  teams                   Team[]
+  contacts                Contact[]
+  tags                    Tag[]
+  customFieldDefinitions  CustomFieldDefinition[]
+  shortcuts               Shortcut[]
+  systemAgents            SystemAgent[]
+  chats                   Chat[]
+  messages                Message[]
+  autopilotConfigs        AutopilotConfig[]
+  campaigns               Campaign[]
+  evolutionApiConfigs     EvolutionApiConfig[]
 
   @@map("workspaces")
 }
@@ -87,7 +86,6 @@ model UserWorkspaceRole {
   @@id([userId, workspaceId])
   @@map("user_workspace_roles")
 }
-
 
 model Role {
   id                  String                @id @default(uuid())
@@ -174,6 +172,7 @@ model Team {
   owner             User            @relation("TeamOwner", fields: [ownerId], references: [id])
   members           TeamMember[]
   businessHours     BusinessHour[]
+  chats             Chat[]
 
   @@unique([workspaceId, name])
   @@map("teams")
@@ -212,7 +211,7 @@ model Contact {
   name                String
   email               String?
   phone               String?
-  phoneNumberJid      String?                     @unique @map("phone_number_jid")
+  phoneNumberJid      String?                     @map("phone_number_jid")
   address             String?
   avatarUrl           String?                     @map("avatar_url")
   ownerId             String?                     @map("owner_id")
@@ -227,6 +226,7 @@ model Contact {
   chats               Chat[]
   campaignRecipients  CampaignRecipient[]
 
+  @@unique([phoneNumberJid, workspaceId])
   @@map("contacts")
 }
 
@@ -335,8 +335,8 @@ model SystemAgent {
 
   // Relations
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator       User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  messages      Message[]
+  creator       User      @relation("AgentCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  messages      Message[] @relation("MessageSenderSystemAgent")
 
   @@unique([workspaceId, name])
   @@map("system_agents")
@@ -353,57 +353,67 @@ model Chat {
   workspaceId       String            @map("workspace_id")
   contactId         String            @map("contact_id")
   agentId           String?           @map("agent_id")
+  teamId            String?           @map("team_id")
   status            ChatStatusEnum
   tag               String?
   color             String?
   assignedAt        DateTime?         @map("assigned_at")
   closedAt          DateTime?         @map("closed_at")
   closeReasonTagId  String?           @map("close_reason_tag_id")
-  closeNotes        String?           @map("close_notes")
+  closeNotes        String?
   createdAt         DateTime          @default(now()) @map("created_at")
 
   // Relations
   workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact           Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  agent             User?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent             User?             @relation("ChatAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
   messages          Message[]
 
   @@map("chats")
 }
 
 model Message {
-  id                  String    @id @default(uuid())
-  workspaceId         String    @map("workspace_id")
-  chatId              String    @map("chat_id")
-  senderId            String?   @map("sender_id") // Can be User ID or SystemAgent ID
-  type                String    // 'text', 'system', 'audio', etc.
-  content             String?
-  fromMe              Boolean   @default(false) @map("from_me")
-  isRead              Boolean   @default(false) @map("is_read")
-  createdAt           DateTime  @default(now()) @map("created_at")
+  id                      String      @id @default(uuid())
+  workspaceId             String      @map("workspace_id")
+  chatId                  String      @map("chat_id")
+
+  // Remetente como User (chave distinta)
+  senderUserId            String?     @map("sender_user_id")
+  // Remetente como SystemAgent (chave distinta)
+  senderSystemAgentId     String?     @map("sender_system_agent_id")
+
+  type                    String      // 'text', 'system', 'audio', etc.
+  content                 String?
+  fromMe                  Boolean     @default(false) @map("from_me")
+  isRead                  Boolean     @default(false) @map("is_read")
+  createdAt               DateTime    @default(now()) @map("created_at")
   
   // Fields from API
-  messageIdFromApi    String?   @unique @map("message_id_from_api")
-  apiMessageStatus    String?   @map("api_message_status") // 'SENT', 'DELIVERED', 'READ'
-  instanceName        String?   @map("instance_name")
+  messageIdFromApi        String?     @unique @map("message_id_from_api")
+  apiMessageStatus        String?     @map("api_message_status") // 'SENT', 'DELIVERED', 'READ'
+  instanceName            String?     @map("instance_name")
   
   // Fields for webhook payload debugging
-  senderFromApi       String?   @map("sender_from_api")
-  statusFromApi       String?   @map("status_from_api")
-  sourceFromApi       String?   @map("source_from_api")
-  serverUrl           String?   @map("server_url")
-  rawPayload          Json?     @map("raw_payload")
-  metadata            Json?
+  senderFromApi           String?     @map("sender_from_api")
+  statusFromApi           String?     @map("status_from_api")
+  sourceFromApi           String?     @map("source_from_api")
+  serverUrl               String?     @map("server_url")
+  rawPayload              Json?       @map("raw_payload")
+  metadata                Json?
 
   // Relations
-  workspace           Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  chat                Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  sender              User?       @relation(fields: [senderId], references: [id], onDelete: SetNull)
-  systemAgentSender   SystemAgent? @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  workspace               Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chat                    Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  // Relação com User (usa senderUserId)
+  sender                  User?        @relation("MessageSenderUser", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  // Relação com SystemAgent (usa senderSystemAgentId)
+  systemAgentSender       SystemAgent? @relation("MessageSenderSystemAgent", fields: [senderSystemAgentId], references: [id], onDelete: SetNull)
 
   @@map("messages")
 }
-
 
 model AutopilotConfig {
   id              String            @id @default(uuid())
@@ -440,20 +450,20 @@ model AutopilotRule {
 }
 
 model AutopilotUsageLog {
-    id              String    @id @default(uuid())
-    configId        String    @map("config_id")
-    flowName        String    @map("flow_name")
-    ruleName        String?   @map("rule_name")
-    modelName       String    @map("model_name")
-    inputTokens     Int       @map("input_tokens")
-    outputTokens    Int       @map("output_tokens")
-    totalTokens     Int       @map("total_tokens")
-    createdAt       DateTime  @default(now()) @map("created_at")
+  id              String    @id @default(uuid())
+  configId        String    @map("config_id")
+  flowName        String    @map("flow_name")
+  ruleName        String?   @map("rule_name")
+  modelName       String    @map("model_name")
+  inputTokens     Int       @map("input_tokens")
+  outputTokens    Int       @map("output_tokens")
+  totalTokens     Int       @map("total_tokens")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-    // Relations
-    config          AutopilotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  // Relations
+  config          AutopilotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
-    @@map("autopilot_usage_logs")
+  @@map("autopilot_usage_logs")
 }
 
 model Campaign {
@@ -507,7 +517,7 @@ model EvolutionApiConfig {
 
 model EvolutionApiInstance {
   id          String              @id @default(uuid())
-  name        String              
+  name        String
   type        String              // 'baileys' or 'wa_cloud'
   configId    String              @map("config_id")
   webhookUrl  String?             @map("webhook_url")
@@ -518,3 +528,11 @@ model EvolutionApiInstance {
   @@unique([configId, name])
   @@map("evolution_api_instances")
 }
+
+Remember, the XML structure you generate is the only mechanism for applying changes to the user's code. Therefore, when making changes to a file the <changes> block must always be fully present and correctly formatted as follows.
+
+<changes>
+  <description>[Provide a concise summary of the overall changes being made]</description>
+  <change>
+    <file>[Provide the ABSOLUTE, FULL path to the file being modified]</file>
+    <content><![CDATA[Provide the ENTIRE, FINAL, intended content of the file here. Do NOT provide diffs or partial snippets. Ensure all code is properly escaped within the CDATA section.
