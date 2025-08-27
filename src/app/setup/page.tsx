@@ -29,13 +29,13 @@ export default function SetupPage() {
             Configuração do Banco de Dados
           </CardTitle>
           <CardDescription>
-            Este assistente irá configurar as tabelas e estruturas necessárias no seu banco de dados PostgreSQL. Clique no botão abaixo para começar.
+            Este assistente irá configurar as tabelas e estruturas necessárias no seu banco de dados PostgreSQL, incluindo permissões padrão. Clique no botão abaixo para começar.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={handleInitialize} disabled={loading} className="w-full">
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {loading ? 'Inicializando...' : 'Inicializar Banco de Dados'}
+            {loading ? 'Inicializando...' : 'Verificar e Configurar Banco de Dados'}
           </Button>
 
           {result && (
