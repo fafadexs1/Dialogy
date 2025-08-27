@@ -1,5 +1,11 @@
 -- CreateEnum
-CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'chatstatusenum') THEN
+        CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+    END IF;
+END
+$$;
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -245,8 +251,8 @@ CREATE TABLE "messages" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "chat_id" TEXT NOT NULL,
-    "sender_user_id" TEXT,
-    "sender_system_agent_id" TEXT,
+    "sender_id_user" TEXT,
+    "sender_id_system_agent" TEXT,
     "type" TEXT NOT NULL,
     "content" TEXT,
     "from_me" BOOLEAN NOT NULL DEFAULT false,
@@ -515,10 +521,10 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_workspace_id_fkey" FOREIGN KEY (
 ALTER TABLE "messages" ADD CONSTRAINT "messages_chat_id_fkey" FOREIGN KEY ("chat_id") REFERENCES "chats"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_user_id_fkey" FOREIGN KEY ("sender_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_user_fkey" FOREIGN KEY ("sender_id_user") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_system_agent_id_fkey" FOREIGN KEY ("sender_system_agent_id") REFERENCES "system_agents"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_system_agent_fkey" FOREIGN KEY ("sender_id_system_agent") REFERENCES "system_agents"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "autopilot_configs" ADD CONSTRAINT "autopilot_configs_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "workspaces"("id") ON DELETE CASCADE ON UPDATE CASCADE;
