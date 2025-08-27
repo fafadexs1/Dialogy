@@ -62,16 +62,16 @@ export async function createWorkspaceAction(
     
     console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e usuário ${userId} definido como Administrador.`);
 
-  } catch (error) {
+  } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('[CREATE_WORKSPACE] Erro:', error);
-    return { success: false, error: 'Ocorreu um erro no servidor ao criar o workspace.' };
+    // Retorna a mensagem de erro específica do banco de dados
+    return { success: false, error: error.message || 'Ocorreu um erro desconhecido no servidor.' };
   } finally {
     client.release();
   }
 
   revalidatePath('/', 'layout');
-  revalidatePath('/settings/workspace');
   
   // Return success state instead of redirecting
   return { success: true, error: null };
