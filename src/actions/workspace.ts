@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { revalidatePath } from 'next/cache';
@@ -12,7 +11,9 @@ export async function createWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = createClient(cookies());
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { success: false, error: 'Usuário não autenticado.' };
@@ -46,13 +47,25 @@ export async function createWorkspaceAction(
     );
     const adminRoleId = adminRoleRes.rows[0].id;
 
-    // 3. Associar o usuário criador ao papel de Administrador.
+    // 3. Buscar todas as permissões disponíveis no sistema.
+    const permissionsRes = await client.query('SELECT id FROM permissions');
+    const permissions = permissionsRes.rows;
+
+    // 4. Atribuir TODAS as permissões ao papel de Administrador recém-criado.
+    if (permissions.length > 0) {
+      const rolePermissionValues = permissions.map(p => `('${adminRoleId}', '${p.id}')`).join(',');
+      await client.query(`INSERT INTO role_permissions (role_id, permission_id) VALUES ${rolePermissionValues}`);
+    } else {
+      console.warn(`[CREATE_WORKSPACE] Nenhuma permissão encontrada no banco de dados para atribuir ao Administrador.`);
+    }
+
+    // 5. Associar o usuário criador ao papel de Administrador.
     await client.query(
       'INSERT INTO user_workspace_roles (user_id, workspace_id, role_id) VALUES ($1, $2, $3)',
       [userId, newWorkspaceId, adminRoleId]
     );
 
-    // 4. Atualizar o workspace ativo do usuário
+    // 6. Atualizar o workspace ativo do usuário
     await client.query(
         'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
         [newWorkspaceId, userId]
@@ -60,7 +73,7 @@ export async function createWorkspaceAction(
 
     await client.query('COMMIT');
     
-    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e usuário ${userId} definido como Administrador.`);
+    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado, usuário ${userId} definido como Administrador com ${permissions.length} permissões.`);
 
   } catch (error: any) {
     await client.query('ROLLBACK');
@@ -79,23 +92,24 @@ export async function createWorkspaceAction(
 
 
 export async function updateWorkspaceAction(
-  prevState: string | null,
+  prevState: any,
   formData: FormData
-): Promise<string | null> {
-    const supabase = createClient(cookies());
+): Promise<{ success: boolean; error: string | null }> {
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-        return 'Usuário não autenticado.';
+        return { success: false, error: 'Usuário não autenticado.' };
     }
 
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
 
     if (!workspaceName) {
-        return 'O nome do workspace é obrigatório.';
+        return { success: false, error: 'O nome do workspace é obrigatório.' };
     }
      if (!workspaceId) {
-        return 'ID do workspace não encontrado.';
+        return { success: false, error: 'ID do workspace não encontrado.' };
     }
     
     // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
@@ -105,17 +119,18 @@ export async function updateWorkspaceAction(
         console.log(`[UPDATE_WORKSPACE] Workspace ${workspaceId} atualizado para o nome "${workspaceName}".`);
     } catch (error) {
         console.error('[UPDATE_WORKSPACE] Erro:', error);
-        return "Ocorreu um erro no servidor ao atualizar o workspace.";
+        return { success: false, error: "Ocorreu um erro no servidor ao atualizar o workspace." };
     }
 
     revalidatePath('/', 'layout');
     revalidatePath('/settings/workspace');
 
-    return null;
+    return { success: true, error: null };
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const supabase = createClient(cookies());
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
@@ -132,5 +147,3 @@ export async function switchWorkspaceAction(workspaceId: string) {
     
     revalidatePath('/', 'layout');
 }
-
-    
