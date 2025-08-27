@@ -339,59 +339,50 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
     const userId = user.id;
 
     try {
+        // Step 1: Fetch chats visible to the user
         const chatQuery = `
             SELECT 
-                c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color,
-                json_build_object(
-                    'id', ct.id, 'name', ct.name, 'email', ct.email, 'phone_number_jid', ct.phone_number_jid, 'avatar_url', ct.avatar_url
-                ) as contact,
-                json_build_object(
-                    'id', a.id, 'name', a.full_name, 'avatar', a.avatar_url
-                ) as agent,
+                c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color, c.contact_id, c.agent_id,
                 t.name as team_name,
                 (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as source,
                 (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as instance_name,
-                (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_read = FALSE AND m.from_me = FALSE) as unread_count,
-                (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) as last_message_time
+                (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_read = FALSE AND m.from_me = FALSE) as unread_count
             FROM chats c
-            JOIN contacts ct ON c.contact_id = ct.id
-            LEFT JOIN users a ON c.agent_id = a.id
-            LEFT JOIN team_members tm ON a.id = tm.user_id
+            LEFT JOIN team_members tm ON c.agent_id = tm.user_id
             LEFT JOIN teams t ON tm.team_id = t.id
             WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos') OR (c.status = 'encerrados' AND c.agent_id = $2))
-            ORDER BY last_message_time DESC NULLS LAST;
         `;
         const chatRes = await db.query(chatQuery, [workspaceId, userId]);
-
-        const chats: Chat[] = chatRes.rows.map(r => ({
-            ...r,
-            agent: r.agent.id ? r.agent : undefined,
-            messages: [], // Will be populated next
-            unreadCount: parseInt(r.unread_count, 10),
-            teamName: r.team_name,
-        }));
         
-        const chatIds = chats.map(c => c.id);
+        const chatIds = chatRes.rows.map(r => r.id);
         if (chatIds.length === 0) {
             return { chats: [], messagesByChat: {} };
         }
 
-        const messagesQuery = `
-            SELECT 
-                m.*,
-                sender_user.id as user_id, sender_user.full_name as user_name, sender_user.avatar_url as user_avatar,
-                sender_agent.id as agent_id, sender_agent.name as agent_name, sender_agent.avatar_url as agent_avatar,
-                ct.id as contact_id, ct.name as contact_name, ct.avatar_url as contact_avatar
-            FROM messages m
-            JOIN chats ch ON m.chat_id = ch.id
-            JOIN contacts ct ON ch.contact_id = ct.id
-            LEFT JOIN users sender_user ON m.sender_id_user = sender_user.id
-            LEFT JOIN system_agents sender_agent ON m.sender_id_system_agent = sender_agent.id
-            WHERE m.chat_id = ANY($1::uuid[])
-            ORDER BY m.created_at ASC
-        `;
-        const messagesRes = await db.query(messagesQuery, [chatIds]);
+        // Step 2: Fetch all necessary related data in batches
+        const contactIds = [...new Set(chatRes.rows.map(r => r.contact_id).filter(Boolean))];
+        const agentIds = [...new Set(chatRes.rows.map(r => r.agent_id).filter(Boolean))];
 
+        const [contactsRes, agentsRes, messagesRes] = await Promise.all([
+            db.query('SELECT * FROM contacts WHERE id = ANY($1::uuid[])', [contactIds]),
+            db.query('SELECT id, full_name, avatar_url FROM users WHERE id = ANY($1::uuid[])', [agentIds]),
+            db.query(`
+                SELECT 
+                    m.*,
+                    u.full_name as user_name, u.avatar_url as user_avatar,
+                    sa.name as agent_name, sa.avatar_url as agent_avatar
+                FROM messages m
+                LEFT JOIN users u ON m.sender_id_user = u.id
+                LEFT JOIN system_agents sa ON m.sender_id_system_agent = sa.id
+                WHERE m.chat_id = ANY($1::uuid[])
+                ORDER BY m.chat_id, m.created_at ASC
+            `, [chatIds])
+        ]);
+
+        const contactsById = new Map(contactsRes.rows.map(c => [c.id, c]));
+        const agentsById = new Map(agentsRes.rows.map(a => [a.id, a]));
+
+        // Step 3: Process messages and group them by chat
         const messagesByChat: Record<string, Message[]> = {};
         for (const m of messagesRes.rows) {
             if (!messagesByChat[m.chat_id]) {
@@ -400,16 +391,25 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
             
             const createdAtDate = new Date(m.created_at);
             const zonedDate = toZonedTime(createdAtDate, timeZone);
-
-            let sender: MessageSender;
-            if (m.user_id) {
-                sender = { id: m.user_id, name: m.user_name, avatar: m.user_avatar, type: 'user' };
-            } else if (m.agent_id) {
-                sender = { id: m.agent_id, name: m.agent_name, avatar: m.agent_avatar, type: 'system_agent' };
-            } else {
-                 sender = { id: m.contact_id, name: m.contact_name, avatar: m.contact_avatar, type: 'contact' };
-            }
             
+            let sender: MessageSender;
+            if (m.sender_id_user && agentsById.has(m.sender_id_user)) {
+                const userSender = agentsById.get(m.sender_id_user);
+                sender = { id: userSender.id, name: userSender.full_name, avatar: userSender.avatar_url, type: 'user' };
+            } else if (m.sender_id_system_agent) {
+                // This part might need a separate fetch or to be included in the initial batch fetches if system agents are stored in a different table
+                sender = { id: m.sender_id_system_agent, name: m.agent_name, avatar: m.agent_avatar, type: 'system_agent' };
+            } else {
+                 // Fallback for contact-sent messages
+                 const chat = chatRes.rows.find(c => c.id === m.chat_id);
+                 if (chat && contactsById.has(chat.contact_id)) {
+                    const contactSender = contactsById.get(chat.contact_id);
+                    sender = { id: contactSender.id, name: contactSender.name, avatar: contactSender.avatar_url, type: 'contact' };
+                 } else {
+                    sender = undefined; // Should not happen
+                 }
+            }
+
             messagesByChat[m.chat_id].push({
                 id: m.id,
                 chat_id: m.chat_id,
@@ -421,7 +421,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate),
-                sender: sender, 
+                sender: sender,
                 instance_name: m.instance_name,
                 source_from_api: m.source_from_api,
                 api_message_status: m.api_message_status,
@@ -430,12 +430,35 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 is_read: m.is_read,
             });
         }
+        
+        // Step 4: Assemble the final Chat objects
+        const chats: Chat[] = chatRes.rows.map(r => {
+            const contact = contactsById.get(r.contact_id);
+            const agent = agentsById.get(r.agent_id);
+            const chatMessages = messagesByChat[r.id] || [];
 
-        // Attach the first message to each chat for preview purposes
-        chats.forEach(chat => {
-            chat.messages = messagesByChat[chat.id]?.slice(-1) || [];
+            return {
+                id: r.id,
+                status: r.status,
+                workspace_id: r.workspace_id,
+                contact: contact as Contact,
+                agent: agent ? { id: agent.id, name: agent.full_name, avatar: agent.avatar_url } : undefined,
+                messages: chatMessages.slice(-1), // Attach only last message for preview
+                source: r.source,
+                instance_name: r.instance_name,
+                assigned_at: r.assigned_at,
+                unreadCount: parseInt(r.unread_count, 10),
+                teamName: r.team_name,
+                tag: r.tag,
+                color: r.color,
+            };
+        }).sort((a, b) => {
+            const timeA = a.messages[0] ? new Date(a.messages[0].createdAt).getTime() : 0;
+            const timeB = b.messages[0] ? new Date(b.messages[0].createdAt).getTime() : 0;
+            return timeB - timeA;
         });
 
+        // Step 5: Return both the lean chat list and the full message history map
         return { chats, messagesByChat };
 
     } catch (error) {
@@ -443,5 +466,3 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {} };
     }
 }
-
-    
