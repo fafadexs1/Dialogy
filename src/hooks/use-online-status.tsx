@@ -66,6 +66,12 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
             const updatedUser = payload.new as User;
             console.log('[PRESENCE] User online status changed:', updatedUser);
 
+            // Safety check: ensure updatedUser and its name property exist
+            if (!updatedUser || !updatedUser.name) {
+                console.warn('[PRESENCE] Received an update for a user without a name. Skipping.');
+                return;
+            }
+
             setOnlineAgents(prevAgents => {
                 const agentExists = prevAgents.some(a => a.user.id === updatedUser.id);
 
