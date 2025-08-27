@@ -49,7 +49,7 @@ export async function createWorkspaceAction(
     const adminRoleId = adminRoleRes.rows[0].id;
 
     // 3. Buscar todas as permissões disponíveis no sistema.
-    const permissionsRes = await client.query('SELECT id FROM permissions');
+    const permissionsRes = await client.query('SELECT id::text FROM permissions');
     const permissions = permissionsRes.rows;
 
     // 4. Atribuir TODAS as permissões ao papel de Administrador recém-criado.
