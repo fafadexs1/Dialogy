@@ -1,18 +1,21 @@
-export { default } from "next-auth/middleware"
+import { type NextRequest } from 'next/server';
+import { updateSession } from '@/lib/supabase/middleware';
+
+export async function middleware(request: NextRequest) {
+  // updateSession will take care of refreshing the session cookie
+  // if it's expired.
+  return await updateSession(request);
+}
 
 export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - login (the login page)
-     * - register (the register page)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - setup (database setup page)
-     * - join (workspace invite page)
+     * Feel free to modify this pattern to include more paths.
      */
-    '/((?!api|login|register|_next/static|_next/image|favicon.ico|setup|join).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
-}
+};

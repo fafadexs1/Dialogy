@@ -5,7 +5,7 @@ import { useState, useEffect, createContext, useContext, ReactNode, useCallback 
 import type { OnlineAgent } from '@/lib/types';
 import { useAuth } from './use-auth';
 import { updateUserOnlineStatus } from '@/actions/user';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 
 // 1. Create a Context for the presence state
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -37,6 +37,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!currentUser?.activeWorkspaceId) return;
     const workspaceId = currentUser.activeWorkspaceId;
+    const supabase = createClient();
     fetchOnlineAgents(workspaceId);
 
     const channel = supabase

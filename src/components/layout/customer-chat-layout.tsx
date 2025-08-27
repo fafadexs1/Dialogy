@@ -9,7 +9,7 @@ import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { useAuth } from '@/hooks/use-auth';
 import { Skeleton } from '../ui/skeleton';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 
 function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -79,6 +79,8 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
 
   useEffect(() => {
     if (!currentUser.activeWorkspaceId) return;
+    
+    const supabase = createClient();
 
     const chatsChannel = supabase
       .channel('public:chats')
@@ -126,6 +128,8 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
       <ChatPanel
         key={selectedChat?.id}
         chat={selectedChat}
+        messages={messages}
+        isLoadingMessages={isLoadingMessages}
         currentUser={currentUser}
         onActionSuccess={fetchChatList}
         closeReasons={closeReasons}
