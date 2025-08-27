@@ -64,16 +64,17 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
     const supabase = createClient();
 
     const handleChange = (payload: any) => {
+        console.log('[REALTIME] Mudança detectada:', payload);
         fetchData();
     };
 
     const chatsChannel = supabase
-      .channel('public-chats-listener')
+      .channel('public:chats')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
 
     const messagesChannel = supabase
-      .channel('public-messages-listener')
+      .channel('public:messages')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
 
