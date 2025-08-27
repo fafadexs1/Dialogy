@@ -163,7 +163,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             {chat.teamName && chat.status === 'atendimentos' && (
               <Badge
                 variant="secondary"
-                className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 flex-shrink-0 max-w-[45%] truncate"
+                className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 flex-shrink-0"
                 title={chat.teamName}
               >
                 <Users className="h-3 w-3" />
