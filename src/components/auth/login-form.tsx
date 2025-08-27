@@ -1,60 +1,31 @@
 
 'use client';
 
-import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { signIn } from 'next-auth/react';
+import { useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
+import { login } from '@/actions/auth';
+
+function LoginButton() {
+  const { pending } = useFormStatus();
+  return (
+      <Button type="submit" className="w-full" disabled={pending}>
+          {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {pending ? 'Entrando...' : 'Entrar'}
+      </Button>
+  )
+}
 
 export function LoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/';
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setLoading(true);
-    setErrorMessage(null);
-
-    const formData = new FormData(event.currentTarget);
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
-
-    try {
-      const result = await signIn('credentials', {
-        redirect: false, // We will handle the redirect manually
-        email,
-        password,
-      });
-
-      if (result?.error) {
-        console.error(`[LOGIN_FORM] Login error: ${result.error}`);
-        setErrorMessage('Credenciais inválidas. Verifique seu e-mail e senha.');
-        setLoading(false);
-      } else if (result?.ok) {
-        // Explicitly redirect to the callbackUrl or home page
-        router.push(callbackUrl);
-      } else {
-        console.error('[LOGIN_FORM] Login request failed without a specific NextAuth error.');
-        setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
-        setLoading(false);
-      }
-    } catch (error) {
-        console.error('[LOGIN_FORM] Catastrophic error in handleSubmit:', error);
-        setErrorMessage('Ocorreu um erro de rede. Tente novamente.');
-        setLoading(false);
-    }
-  };
-
+  const [state, formAction] = useActionState(login, { success: false, message: null });
+  
   return (
-    <form onSubmit={handleSubmit}>
+    <form action={formAction}>
       <Card>
         <CardHeader>
           <CardTitle>Login</CardTitle>
@@ -68,7 +39,6 @@ export function LoginForm() {
               type="email"
               placeholder="agente@dialogy.com"
               required
-              disabled={loading}
               autoComplete="email"
             />
           </div>
@@ -79,23 +49,19 @@ export function LoginForm() {
               name="password"
               type="password"
               required
-              disabled={loading}
               autoComplete="current-password"
             />
           </div>
-          {errorMessage && (
+          {state?.message && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Erro de Login</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
+              <AlertDescription>{state.message}</AlertDescription>
             </Alert>
           )}
         </CardContent>
         <CardFooter>
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {loading ? 'Entrando...' : 'Entrar'}
-          </Button>
+          <LoginButton />
         </CardFooter>
       </Card>
     </form>

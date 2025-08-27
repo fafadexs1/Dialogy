@@ -1,44 +1,70 @@
 
 'use server';
 
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { db } from '@/lib/db';
 
-// A função de login foi removida pois o fluxo agora é gerenciado
-// inteiramente pelo NextAuth e pelo formulário do lado do cliente.
-// Manter uma Server Action para isso era redundante e adicionava complexidade.
+export async function login(prevState: any, formData: FormData) {
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
 
-export async function register(
-  prevState: string | undefined,
-  formData: FormData
-) {
-  try {
-    const name = formData.get('name') as string;
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
 
-    if (!name || !email || !password) {
-        return "Todos os campos são obrigatórios.";
-    }
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-    const existingUser = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (existingUser.rows.length > 0) {
-        return "Este e-mail já está em uso.";
-    }
-
-    // A senha agora é salva em texto plano, sem criptografia.
-    await db.query('INSERT INTO public.users (full_name, email, password_hash) VALUES ($1, $2, $3)', [name, email, password]);
-    console.log(`[REGISTER_ACTION] Usuário ${email} registrado com sucesso (senha não criptografada).`);
-
-  } catch(error) {
-     console.error('[REGISTER_ACTION] Erro:', error);
-     return "Ocorreu um erro durante o registro. Tente novamente.";
+  if (error) {
+    console.error('[LOGIN_ACTION] Erro:', error);
+    return { success: false, message: 'Credenciais inválidas. Verifique seu e-mail e senha.' };
   }
-  
-  // Redireciona para a página de login com um parâmetro de sucesso
-  redirect('/login?registered=true');
+
+  return redirect('/');
 }
 
-// A ação de signOut foi removida. A lógica agora está no lado do cliente
-// (no componente Sidebar) para garantir um redirecionamento correto
-// e uma experiência de usuário mais fluida, usando o hook `signOut` do next-auth/react.
+export async function register(prevState: any, formData: FormData) {
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+
+  const name = formData.get('name') as string;
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  
+  if (!name || !email || !password) {
+    return { success: false, message: "Todos os campos são obrigatórios." };
+  }
+
+  // Desabilita a confirmação por e-mail, conforme solicitado.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${process.env.NEXTAUTH_URL}/`,
+      data: {
+        full_name: name,
+        avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${name}`,
+      },
+    },
+  });
+
+  if (error || !data.user) {
+    console.error('[REGISTER_ACTION] Erro no Supabase:', error);
+    return { success: false, message: error?.message || "Ocorreu um erro durante o registro. Tente novamente."};
+  }
+
+  // O trigger do banco de dados (na tabela auth.users) irá copiar o novo usuário
+  // para a tabela public.users automaticamente.
+
+  // Redireciona para a página de login com um parâmetro de sucesso
+  return redirect('/login?registered=true');
+}
+
+export async function signOut() {
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  await supabase.auth.signOut();
+  return redirect('/login');
+}

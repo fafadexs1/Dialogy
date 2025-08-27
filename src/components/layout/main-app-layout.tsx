@@ -1,3 +1,4 @@
+
 'use client';
 
 import { usePathname } from 'next/navigation';
@@ -10,11 +11,9 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const transitionKey = pathname.split('?')[0];
 
-  // Check which pages should not display the sidebar
   const noSidebarRoutes = ['/login', '/register', '/setup'];
   const shouldShowSidebar = !noSidebarRoutes.includes(pathname);
   
-  // useAuth hook now safely called within the SessionProvider
   const user = useAuth();
   const hasSidebar = shouldShowSidebar && !!user;
 

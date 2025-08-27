@@ -7,15 +7,12 @@ import { useAuth } from './use-auth';
 import { updateUserOnlineStatus } from '@/actions/user';
 import { createClient } from '@/lib/supabase/client';
 
-// 1. Create a Context for the presence state
 const PresenceContext = createContext<OnlineAgent[]>([]);
 
-// 2. Create a custom hook to easily access the context
 export const usePresence = () => {
   return useContext(PresenceContext);
 };
 
-// 3. Create the Provider component
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const currentUser = useAuth();
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
@@ -30,7 +27,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         setOnlineAgents(agents);
       } catch (error) {
         console.error("Error fetching online agents:", error);
-        setOnlineAgents([]); // Clear on error
+        setOnlineAgents([]);
       }
     }, []);
 
@@ -45,7 +42,11 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'users' },
-        () => fetchOnlineAgents(workspaceId)
+        (payload) => {
+            if ('online' in payload.new || 'online_since' in payload.new) {
+                fetchOnlineAgents(workspaceId);
+            }
+        }
       )
       .subscribe();
 
@@ -66,24 +67,18 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
      }
 
      const handleBeforeUnload = () => {
-        // Usa navigator.sendBeacon para uma chamada mais confiável ao fechar a página.
-        // Ele envia uma pequena quantidade de dados de forma assíncrona, sem atrasar o descarregamento da página.
         const payload = JSON.stringify({ userId });
         navigator.sendBeacon('/api/users/offline', payload);
      }
      
-     // Define o usuário como online quando o provedor é montado com um usuário válido.
      updateUserOnlineStatus(userId, true);
 
-     // Adiciona os event listeners
      window.addEventListener('beforeunload', handleBeforeUnload);
      document.addEventListener('visibilitychange', handleVisibilityChange);
 
      return () => {
-        // Limpa os listeners quando o componente é desmontado
         window.removeEventListener('beforeunload', handleBeforeUnload);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
-        // Opcional: pode-se chamar a função de offline aqui também para cobrir navegações SPA
         updateUserOnlineStatus(userId, false); 
      }
 

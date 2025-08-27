@@ -3,49 +3,54 @@
 import { MainLayout } from '@/components/layout/main-layout';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
-import { db } from '@/lib/db';
 import type { User, Workspace } from '@/lib/types';
 import { redirect } from 'next/navigation';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { updateUserOnlineStatus } from '@/actions/user';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Suspense } from 'react';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { db } from '@/lib/db';
 
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
     console.log(`--- [PAGE_SERVER] fetchUserAndWorkspaces: Buscando dados para o usuário ID: ${userId} ---`);
     if (!userId) return null;
     try {
-        // Fetch user
-        const userRes = await db.query('SELECT id, full_name, avatar_url, email, last_active_workspace_id FROM users WHERE id = $1', [userId]);
-        if (userRes.rows.length === 0) {
-            console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Nenhum usuário encontrado com o ID:', userId);
-            return null;
+        const dbUser = await db.user.findUnique({
+          where: { id: userId },
+        });
+
+        if (!dbUser) {
+           console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Nenhum usuário encontrado com o ID:', userId);
+           return null;
         }
-        const dbUser = userRes.rows[0];
-        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.full_name}`);
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.fullName}`);
 
-        // Fetch user's workspaces from the correct table
-        const uwRes = await db.query('SELECT workspace_id FROM user_workspace_roles WHERE user_id = $1', [userId]);
-        const workspaceIds = uwRes.rows.map(r => r.workspace_id);
-        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: IDs dos workspaces do usuário: ${workspaceIds.join(', ')}`);
+        const userWorkspaceRoles = await db.userWorkspaceRole.findMany({
+            where: { userId: userId },
+            include: {
+                workspace: {
+                    select: { id: true, name: true, avatarUrl: true }
+                }
+            }
+        });
 
-        let workspaces: Workspace[] = [];
-        if (workspaceIds.length > 0) {
-            const wsRes = await db.query('SELECT id, name, avatar_url FROM workspaces WHERE id = ANY($1)', [workspaceIds]);
-            workspaces = wsRes.rows.map(r => ({ id: r.id, name: r.name, avatar: r.avatar_url }));
-        }
-
-        const userObject = {
+        const workspaces: Workspace[] = userWorkspaceRoles.map(role => ({
+            id: role.workspace.id,
+            name: role.workspace.name,
+            avatar: role.workspace.avatarUrl || ''
+        }));
+        
+        const userObject: User = {
             id: dbUser.id,
-            name: dbUser.full_name,
-            firstName: dbUser.full_name.split(' ')[0] || '',
-            lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
-            avatar: dbUser.avatar_url,
+            name: dbUser.fullName,
+            firstName: dbUser.fullName.split(' ')[0] || '',
+            lastName: dbUser.fullName.split(' ').slice(1).join(' ') || '',
+            avatar: dbUser.avatarUrl || undefined,
             email: dbUser.email,
             workspaces,
-            activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
+            activeWorkspaceId: dbUser.lastActiveWorkspaceId || workspaces[0]?.id,
         };
         console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Objeto de usuário montado:`, userObject);
         return userObject;
@@ -91,11 +96,14 @@ function LoadingSkeleton() {
 
 export default async function Home() {
   console.log("--- [PAGE_SERVER] Renderizando a página Home ---");
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
 
-  if (!session?.user?.id) {
+  const { data: { session }} = await supabase.auth.getSession();
+
+  if (!session) {
     console.log("[PAGE_SERVER] Usuário não autenticado. Redirecionando para /login.");
-    redirect('/login');
+    return redirect('/login');
   }
   
   const userId = session.user.id;

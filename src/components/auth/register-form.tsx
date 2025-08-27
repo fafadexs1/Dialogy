@@ -23,7 +23,7 @@ function RegisterButton() {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" className="w-full" aria-disabled={pending}>
+    <Button type="submit" className="w-full" disabled={pending}>
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {pending ? 'Registrando...' : 'Criar Conta'}
     </Button>
@@ -31,7 +31,7 @@ function RegisterButton() {
 }
 
 export function RegisterForm() {
-  const [errorMessage, formAction] = useActionState(register, undefined);
+  const [state, formAction] = useActionState(register, { success: false, message: null });
 
   return (
     <form action={formAction}>
@@ -73,11 +73,11 @@ export function RegisterForm() {
                 autoComplete="new-password"
             />
           </div>
-          {errorMessage && (
+          {state?.message && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Erro no Registro</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
+              <AlertDescription>{state.message}</AlertDescription>
             </Alert>
           )}
         </CardContent>

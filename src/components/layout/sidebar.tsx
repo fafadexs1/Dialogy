@@ -37,10 +37,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
-import { signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { updateUserOnlineStatus } from '@/actions/user';
+import { signOut } from '@/actions/auth';
 
 interface SidebarProps {
   user: User;
@@ -50,8 +50,6 @@ const mainNavItems = [
   { href: '/', icon: MessageSquare, label: 'Central de Atendimento' },
   { href: '/crm', icon: Users, label: 'CRM 360º' },
   { href: '/campaigns', icon: Send, label: 'Campanhas' },
-  // A automação agora será um Dropdown separado
-  // { href: '/autopilot', icon: Bot, label: 'Piloto Automático' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
@@ -59,7 +57,7 @@ const mainNavItems = [
 function SignOutMenuItem({ userId }: { userId: string }) {
     const handleSignOut = async () => {
         await updateUserOnlineStatus(userId, false);
-        signOut({ callbackUrl: '/login' });
+        await signOut();
     }
 
     return (
@@ -112,7 +110,6 @@ export function Sidebar({ user }: SidebarProps) {
               </Tooltip>
             ))}
 
-            {/* Menu de Automações */}
             <DropdownMenu>
                 <Tooltip>
                     <TooltipTrigger asChild>

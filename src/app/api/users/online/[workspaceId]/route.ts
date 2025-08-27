@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import type { OnlineAgent, User } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 
 export async function GET(
