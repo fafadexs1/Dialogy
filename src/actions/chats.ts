@@ -374,12 +374,12 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
             let sender: MessageSender;
             if (m.from_me) {
                 // Sent by an agent or system
-                if (m.sender_id_user && agentsById.has(m.sender_id_user)) {
-                    const agentSender = agentsById.get(m.sender_id_user);
+                if (m.sender_user_id && agentsById.has(m.sender_user_id)) {
+                    const agentSender = agentsById.get(m.sender_user_id);
                     sender = { id: agentSender.id, name: agentSender.full_name, avatar: agentSender.avatar_url, type: 'user' };
-                } else if (m.sender_id_system_agent && systemAgents.has(m.sender_id_system_agent)) {
+                } else if (m.sender_system_agent_id && systemAgents.has(m.sender_system_agent_id)) {
                     // Logic to fetch/map system agents if they exist
-                    const systemAgentSender = systemAgents.get(m.sender_id_system_agent)!;
+                    const systemAgentSender = systemAgents.get(m.sender_system_agent_id)!;
                     sender = { ...systemAgentSender, type: 'system_agent' };
                 } else {
                     // Fallback to current user if sender info is missing on an "from_me" message

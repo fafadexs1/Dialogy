@@ -85,7 +85,7 @@ async function internalSendMessage(
             }
         );
         
-        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_id_system_agent' : 'sender_id_user';
+        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         await client.query(
             `INSERT INTO messages (
@@ -164,7 +164,7 @@ async function internalSendMedia(
             ? remoteJid.replace('@lid', '@s.whatsapp.net') 
             : remoteJid;
         
-        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_id_system_agent' : 'sender_id_user';
+        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         for (const file of mediaFiles) {
             let endpoint: string;
@@ -300,5 +300,3 @@ export async function sendAutomatedMediaAction(
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
 }
-
-    
