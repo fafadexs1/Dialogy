@@ -99,11 +99,11 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
         revalidatePath('/settings/shortcuts');
         return { success: true, error: null };
     } catch (error: any) {
-        console.error("[SAVE_SHORTCUT] Error:", error);
+        console.error("[SAVE_SHORTCUT] Detailed Error:", error);
          if (error.code === '23505') { // unique_violation
             return { success: false, error: "Já existe um atalho com este nome. Os atalhos devem ter nomes únicos (seja global ou privado)." };
         }
-        return { success: false, error: "Falha ao salvar atalho no banco de dados." };
+        return { success: false, error: `Falha ao salvar atalho no banco de dados. Detalhe: ${error.message}` };
     }
 }
 
