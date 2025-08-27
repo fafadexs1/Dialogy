@@ -34,11 +34,13 @@ model User {
   createdContacts         Contact[]               @relation("ContactOwner")
   createdTags             Tag[]                   @relation("TagCreator")
   registeredActivities    Activity[]
+  // Mensagens em que o usuário é o remetente
   sentMessages            Message[]               @relation("MessageSenderUser")
   createdCampaigns        Campaign[]
   autopilotConfigs        AutopilotConfig[]
   shortcuts               Shortcut[]
-  createdSystemAgents     SystemAgent[]           @relation("AgentCreator")
+  createdSystemAgents     SystemAgent[]
+  // Chats em que o usuário é o agente responsável (lado oposto de Chat.agent)
   assignedChats           Chat[]                  @relation("ChatAgent")
 
   @@map("users")
@@ -172,7 +174,6 @@ model Team {
   owner             User            @relation("TeamOwner", fields: [ownerId], references: [id])
   members           TeamMember[]
   businessHours     BusinessHour[]
-  chats             Chat[]
 
   @@unique([workspaceId, name])
   @@map("teams")
@@ -211,7 +212,7 @@ model Contact {
   name                String
   email               String?
   phone               String?
-  phoneNumberJid      String?                     @map("phone_number_jid")
+  phoneNumberJid      String?                     @unique @map("phone_number_jid")
   address             String?
   avatarUrl           String?                     @map("avatar_url")
   ownerId             String?                     @map("owner_id")
@@ -226,7 +227,6 @@ model Contact {
   chats               Chat[]
   campaignRecipients  CampaignRecipient[]
 
-  @@unique([phoneNumberJid, workspaceId])
   @@map("contacts")
 }
 
@@ -335,7 +335,7 @@ model SystemAgent {
 
   // Relations
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator       User      @relation("AgentCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  creator       User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
   messages      Message[] @relation("MessageSenderSystemAgent")
 
   @@unique([workspaceId, name])
@@ -353,7 +353,6 @@ model Chat {
   workspaceId       String            @map("workspace_id")
   contactId         String            @map("contact_id")
   agentId           String?           @map("agent_id")
-  teamId            String?           @map("team_id")
   status            ChatStatusEnum
   tag               String?
   color             String?
@@ -367,7 +366,6 @@ model Chat {
   workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact           Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
   agent             User?             @relation("ChatAgent", fields: [agentId], references: [id], onDelete: SetNull)
-  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
   messages          Message[]
 
   @@map("chats")
@@ -377,11 +375,7 @@ model Message {
   id                      String      @id @default(uuid())
   workspaceId             String      @map("workspace_id")
   chatId                  String      @map("chat_id")
-
-  // Remetente como User (chave distinta)
-  senderUserId            String?     @map("sender_user_id")
-  // Remetente como SystemAgent (chave distinta)
-  senderSystemAgentId     String?     @map("sender_system_agent_id")
+  senderId                String?     @map("sender_id")
 
   type                    String      // 'text', 'system', 'audio', etc.
   content                 String?
@@ -405,12 +399,9 @@ model Message {
   // Relations
   workspace               Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   chat                    Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderUser              User?        @relation("MessageSenderUser", fields: [senderId], references: [id], onDelete: SetNull, name: "SenderUser")
+  senderSystemAgent       SystemAgent? @relation("MessageSenderSystemAgent", fields: [senderId], references: [id], onDelete: SetNull, name: "SenderSystemAgent")
 
-  // Relação com User (usa senderUserId)
-  sender                  User?        @relation("MessageSenderUser", fields: [senderUserId], references: [id], onDelete: SetNull)
-
-  // Relação com SystemAgent (usa senderSystemAgentId)
-  systemAgentSender       SystemAgent? @relation("MessageSenderSystemAgent", fields: [senderSystemAgentId], references: [id], onDelete: SetNull)
 
   @@map("messages")
 }
@@ -529,10 +520,4 @@ model EvolutionApiInstance {
   @@map("evolution_api_instances")
 }
 
-Remember, the XML structure you generate is the only mechanism for applying changes to the user's code. Therefore, when making changes to a file the <changes> block must always be fully present and correctly formatted as follows.
-
-<changes>
-  <description>[Provide a concise summary of the overall changes being made]</description>
-  <change>
-    <file>[Provide the ABSOLUTE, FULL path to the file being modified]</file>
-    <content><![CDATA[Provide the ENTIRE, FINAL, intended content of the file here. Do NOT provide diffs or partial snippets. Ensure all code is properly escaped within the CDATA section.
+    
