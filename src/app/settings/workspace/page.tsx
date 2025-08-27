@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2 } from 'lucide-react';
-import type { User, Workspace, WorkspaceInvite } from '@/lib/types';
+import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow, TableHead } from '@
 import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite } from '@/actions/invites';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useSettings } from '../settings-context';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -54,7 +55,8 @@ function CopyButton({ text }: { text: string }) {
     )
 }
 
-export default function WorkspaceSettingsPage({ user }: { user: User | null }) {
+export default function WorkspaceSettingsPage() {
+    const { user } = useSettings();
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [workspaceName, setWorkspaceName] = useState('');
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
@@ -64,6 +66,13 @@ export default function WorkspaceSettingsPage({ user }: { user: User | null }) {
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
     
     const { toast } = useToast();
+
+    const fetchInvites = async (workspaceId: string) => {
+        const result = await getWorkspaceInvites(workspaceId);
+        if (!result.error) {
+            setInvites(result.invites || []);
+        }
+    }
 
     useEffect(() => {
         if (user?.activeWorkspaceId && user.workspaces) {
@@ -75,13 +84,6 @@ export default function WorkspaceSettingsPage({ user }: { user: User | null }) {
             }
         }
     }, [user]);
-
-    const fetchInvites = async (workspaceId: string) => {
-        const result = await getWorkspaceInvites(workspaceId);
-        if (!result.error) {
-            setInvites(result.invites || []);
-        }
-    }
 
     useEffect(() => {
         if (updateError === null) {

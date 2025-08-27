@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import type { User as UserType } from '@/lib/types';
+import { SettingsProvider, useSettings } from './settings-context';
 
 const settingsNavItems = [
     { href: '/settings/profile', label: 'Perfil', icon: User },
@@ -16,40 +16,17 @@ const settingsNavItems = [
     { href: '/settings/security', label: 'Segurança', icon: Shield },
 ]
 
-export default function SettingsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [user, setUser] = useState<UserType | null>(null);
+  const { user, loading } = useSettings();
 
-  useEffect(() => {
-    const fetchUser = async () => {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-            setUser(await res.json());
-        }
-    };
-    fetchUser();
-  }, []);
-
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
-  
-  // Clone children to pass the user prop down to them
-  const childrenWithProps = React.Children.map(children, child => {
-    if (React.isValidElement(child)) {
-      // @ts-ignore
-      return React.cloneElement(child, { user });
-    }
-    return child;
-  });
 
   return (
     <div className="flex flex-col flex-1 h-full">
@@ -86,9 +63,22 @@ export default function SettingsLayout({
                </nav>
           </aside>
           <main className="flex-1 overflow-y-auto p-6">
-               {childrenWithProps}
+               {children}
           </main>
       </div>
     </div>
+  );
+}
+
+
+export default function SettingsLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <SettingsProvider>
+      <SettingsLayoutContent>{children}</SettingsLayoutContent>
+    </SettingsProvider>
   );
 }

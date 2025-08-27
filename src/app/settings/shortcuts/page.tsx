@@ -25,6 +25,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useSettings } from '../settings-context';
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
     const { pending } = useFormStatus();
@@ -38,7 +39,8 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 }
 
 
-export default function ShortcutsPage({ user }: { user: User | null }) {
+export default function ShortcutsPage() {
+    const { user } = useSettings();
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingShortcut, setEditingShortcut] = useState<Shortcut | null>(null);
@@ -56,7 +58,7 @@ export default function ShortcutsPage({ user }: { user: User | null }) {
             setShortcuts(result.shortcuts || []);
         }
         setLoading(false);
-    }, []);
+    }, [toast]);
 
      useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -72,8 +74,10 @@ export default function ShortcutsPage({ user }: { user: User | null }) {
             setIsFormVisible(false);
             setEditingShortcut(null);
             if(user?.activeWorkspaceId) fetchData(user.activeWorkspaceId);
+        } else if (state.error) {
+            toast({ title: "Erro ao Salvar", description: state.error, variant: "destructive" });
         }
-    }, [state, fetchData, user?.activeWorkspaceId]);
+    }, [state, fetchData, user?.activeWorkspaceId, toast]);
 
     const handleEdit = (shortcut: Shortcut) => {
         setEditingShortcut(shortcut);

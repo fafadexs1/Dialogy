@@ -2,9 +2,10 @@
 'use client';
 
 import { Loader2 } from "lucide-react";
-import type { User } from '@/lib/types';
+import { useSettings } from "../settings-context";
 
-export default function ProfilePage({ user }: { user: User | null }) {
+export default function ProfilePage() {
+    const { user } = useSettings();
     
     if (!user) {
         return <div className="flex items-center justify-center h-full">
