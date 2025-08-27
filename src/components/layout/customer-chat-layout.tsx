@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -11,6 +12,9 @@ import { getChatsAndMessages } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from '../ui/button';
 
 function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -19,27 +23,39 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // This ref helps us keep track of the selected chat ID to avoid race conditions in subscriptions
   const selectedChatIdRef = useRef<string | null>(null);
   
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isInitial = false) => {
     if (!initialUser.activeWorkspaceId) return;
-    // Don't set loading to true on every refetch, only on initial load
-    // setIsLoading(true);
+    
+    if (isInitial) {
+        setIsLoading(true);
+        setFetchError(null);
+    }
     
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+        
+        if (error) {
+            throw new Error(error);
+        }
+        
         setChats(fetchedChats || []);
         setMessagesByChat(fetchedMessagesByChat || {});
+        setFetchError(null); // Clear previous errors on success
         
-    } catch(e) {
+    } catch(e: any) {
         console.error("Failed to fetch chat data", e);
-        toast({ title: "Erro ao carregar conversas", description: "Não foi possível buscar os dados do chat.", variant: "destructive" });
+        const errorMessage = e.message || "Não foi possível buscar os dados do chat.";
+        toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
+        setFetchError(errorMessage);
     } finally {
-        setIsLoading(false);
+        if(isInitial) setIsLoading(false);
     }
   }, [initialUser.activeWorkspaceId]);
 
@@ -54,7 +70,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   }, [fetchData, messagesByChat]);
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
   }, [fetchData]);
 
   useEffect(() => {
@@ -93,7 +109,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
       }
   }, [initialUser.activeWorkspaceId]);
   
-  if (isLoading && chats.length === 0) {
+  if (isLoading) {
       return (
          <div className="flex flex-1 w-full min-h-0 h-full">
           <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
@@ -124,6 +140,25 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
         </div>
       );
   }
+
+  if (fetchError) {
+      return (
+        <div className="flex flex-1 w-full min-h-0 h-full items-center justify-center p-6">
+            <Alert variant="destructive" className="max-w-xl">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Erro Crítico ao Carregar Dados</AlertTitle>
+                <AlertDescription className='break-all'>
+                    Não foi possível carregar os dados das conversas. Por favor, verifique o console do servidor para mais detalhes.
+                    <p className="mt-2 text-xs font-mono p-2 bg-secondary rounded">Detalhe: {fetchError}</p>
+                </AlertDescription>
+                 <Button onClick={() => fetchData(true)} className="mt-4">
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Tentar Novamente
+                </Button>
+            </Alert>
+        </div>
+      )
+  }
   
   // Enrich the selected chat object with the full message history for the panel
   const enrichedSelectedChat = selectedChat ? {
@@ -138,13 +173,13 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={initialUser}
-        onUpdate={fetchData}
+        onUpdate={() => fetchData()}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={enrichedSelectedChat}
         currentUser={initialUser}
-        onActionSuccess={fetchData}
+        onActionSuccess={() => fetchData()}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
@@ -152,8 +187,8 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
       <ContactPanel
         chat={enrichedSelectedChat}
         currentUser={initialUser}
-        onTransferSuccess={fetchData}
-        onContactUpdate={fetchData}
+        onTransferSuccess={() => fetchData()}
+        onContactUpdate={() => fetchData()}
       />
     </div>
   );

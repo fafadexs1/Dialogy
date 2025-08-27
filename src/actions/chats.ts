@@ -326,12 +326,12 @@ function formatMessageDate(date: Date): string {
     return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
-export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]> }> {
+export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]>, error?: string }> {
     const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !workspaceId) {
-        return { chats: [], messagesByChat: {} };
+        return { chats: [], messagesByChat: {}, error: "Usuário ou workspace não encontrado." };
     }
     
     const userId = user.id;
@@ -452,8 +452,8 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
 
         return { chats, messagesByChat };
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("[GET_CHATS_ACTION] Error:", error);
-        return { chats: [], messagesByChat: {} };
+        return { chats: [], messagesByChat: {}, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
