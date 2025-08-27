@@ -7,63 +7,21 @@ import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
+import { useAuth } from '@/hooks/use-auth';
+import { Skeleton } from '../ui/skeleton';
+import { supabase } from '@/lib/supabase';
 
-function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReasons }: {initialChats: Chat[], currentUser: User, initialCloseReasons: Tag[]}) {
+function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
-  const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [closeReasons, setCloseReasons] = useState<Tag[]>(initialCloseReasons);
-  const [showFullHistory, setShowFullHistory] = useState(true);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  // Use a ref to hold the current selected chat ID to avoid stale closures in interval
   const selectedChatIdRef = useRef<string | null>(null);
-  useEffect(() => {
-      selectedChatIdRef.current = selectedChat?.id || null;
-  }, [selectedChat]);
 
-
-   const handleSetSelectedChat = async (chat: Chat) => {
-    // Optimistic Update: Set the selected chat immediately for instant UI feedback.
-    setSelectedChat(chat);
-    setShowFullHistory(true);
-
-    if (chat.unreadCount && chat.unreadCount > 0) {
-      // Optimistically update the unread count in the UI
-      setChats(prevChats => 
-          prevChats.map(c => 
-              c.id === chat.id ? { ...c, unreadCount: 0 } : c
-          )
-      );
-      
-      const unreadMessages = chat.messages.filter(m => !m.from_me && !m.is_read);
-      const messageDbIdsToUpdate = unreadMessages.map(m => m.id);
-
-      if (messageDbIdsToUpdate.length > 0) {
-        const payload = {
-            messageIds: messageDbIdsToUpdate,
-            instanceName: chat.instance_name,
-            messagesToMark: chat.instance_name ? unreadMessages
-                .filter(m => m.message_id_from_api)
-                .map(m => ({
-                    remoteJid: chat.contact.phone_number_jid!,
-                    fromMe: false,
-                    id: m.message_id_from_api!,
-                })) : undefined,
-        };
-
-        // Fire and forget the API call. The UI is already updated.
-        // If it fails, the next poll will correct the unread count anyway.
-        fetch('/api/chats/mark-as-read', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        }).catch(err => {
-            console.error("Failed to mark messages as read in the background:", err);
-        });
-      }
-    }
-  };
-  
-  const updateData = useCallback(async () => {
+  const fetchChatList = useCallback(async () => {
     if (!currentUser.activeWorkspaceId) return;
 
     try {
@@ -73,48 +31,79 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
             return;
         }
         const data = await response.json();
-        const latestChats = data.chats as Chat[];
-
-        setChats(latestChats);
-
-        // After fetching, find the currently selected chat in the new list and update it
-        const currentChatId = selectedChatIdRef.current;
-        if (currentChatId) {
-            const updatedSelectedChat = latestChats.find(c => c.id === currentChatId);
-            if (updatedSelectedChat) {
-                // To avoid visual glitches, only update messages if the new list is not empty
-                setSelectedChat(prevSelected => ({
-                ...updatedSelectedChat,
-                messages: updatedSelectedChat.messages.length > 0 ? updatedSelectedChat.messages : (prevSelected?.messages || [])
-                }));
-            } else {
-                // If the previously selected chat no longer exists (e.g., closed by another agent), deselect it.
-                setSelectedChat(null);
-            }
-        }
+        setChats(data.chats || []);
     } catch(e) {
         console.error("Failed to fetch chats", e);
     }
-}, [currentUser.activeWorkspaceId]);
+  }, [currentUser.activeWorkspaceId]);
 
+  const fetchMessagesForChat = useCallback(async (chatId: string) => {
+    if (!currentUser.activeWorkspaceId) return;
+    setIsLoadingMessages(true);
 
-  // Initial data load and polling setup
-  useEffect(() => {
-    let pollingInterval: NodeJS.Timeout | null = null;
-    if (currentUser.activeWorkspaceId) {
-        // Fetch immediately and then set up polling
-        updateData();
-        pollingInterval = setInterval(updateData, 5000); // Poll every 5 seconds
-    }
-    
-    return () => {
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
+    try {
+        const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}/${chatId}/messages`);
+        if (!response.ok) {
+            console.error("Failed to fetch messages, status:", response.status);
+            setMessages([]);
+            return;
         }
-    };
-  }, [currentUser.activeWorkspaceId, updateData]);
+        const data = await response.json();
+        setMessages(data.messages || []);
+    } catch(e) {
+        console.error("Failed to fetch messages for chat", chatId, e);
+        setMessages([]);
+    } finally {
+        setIsLoadingMessages(false);
+    }
+  }, [currentUser.activeWorkspaceId]);
 
-  // Fetch close reasons
+  const handleSetSelectedChat = async (chat: Chat) => {
+    setSelectedChat(chat);
+    selectedChatIdRef.current = chat.id;
+    setShowFullHistory(false);
+    
+    // Immediately fetch messages for the selected chat
+    fetchMessagesForChat(chat.id);
+  };
+
+  useEffect(() => {
+    fetchChatList();
+  }, [fetchChatList]);
+
+  useEffect(() => {
+    if (selectedChatIdRef.current) {
+      fetchMessagesForChat(selectedChatIdRef.current);
+    }
+  }, [fetchMessagesForChat, selectedChat?.id]);
+
+  useEffect(() => {
+    if (!currentUser.activeWorkspaceId) return;
+
+    const chatsChannel = supabase
+      .channel('public:chats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, () => {
+        fetchChatList();
+      })
+      .subscribe();
+
+    const messagesChannel = supabase
+      .channel('public:messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, payload => {
+        const message = payload.new as { chat_id: string };
+        if (selectedChatIdRef.current === message.chat_id) {
+          fetchMessagesForChat(message.chat_id);
+        }
+        fetchChatList();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chatsChannel);
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [currentUser.activeWorkspaceId, fetchChatList, fetchMessagesForChat]);
+
   useEffect(() => {
       if(currentUser.activeWorkspaceId){
           getTags(currentUser.activeWorkspaceId).then(tagsResult => {
@@ -132,21 +121,23 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={currentUser}
-        onUpdate={updateData}
+        onUpdate={fetchChatList}
       />
       <ChatPanel 
         key={selectedChat?.id} 
         chat={selectedChat} 
+        messages={messages}
+        isLoadingMessages={isLoadingMessages}
         currentUser={currentUser} 
-        onActionSuccess={updateData}
+        onActionSuccess={fetchChatList}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
       <ContactPanel 
         chat={selectedChat} 
-        onTransferSuccess={updateData}
-        onContactUpdate={updateData}
+        onTransferSuccess={fetchChatList}
+        onContactUpdate={fetchChatList}
       />
     </div>
   );
@@ -154,36 +145,41 @@ function ClientCustomerChatLayout({ initialChats, currentUser, initialCloseReaso
 
 
 export default function CustomerChatLayout({ currentUser }: { currentUser: User }) {
-  const [initialChats, setInitialChats] = useState<Chat[]>([]);
-  const [initialCloseReasons, setInitialCloseReasons] = useState<Tag[]>([]);
-
-  useEffect(() => {
-    // This is a client component, so we fetch initial data here.
-    // The server component `page.tsx` will provide a loading skeleton.
-    const fetchInitialData = async () => {
-        if (!currentUser.activeWorkspaceId) return;
-        try {
-            const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}`);
-            if (!response.ok) return;
-            const data = await response.json();
-            setInitialChats(data.chats || []);
-            
-            const tagsResult = await getTags(currentUser.activeWorkspaceId);
-            if (!tagsResult.error) {
-                setInitialCloseReasons(tagsResult.tags?.filter(t => t.is_close_reason) || []);
-            }
-        } catch (error) {
-            console.error("Error fetching initial layout data:", error);
-        }
-    };
-    fetchInitialData();
-  }, [currentUser.activeWorkspaceId]);
+  if (!currentUser) {
+    return (
+        <div className="flex flex-1 w-full min-h-0 h-full">
+          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <div className="space-y-2 mt-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+              </div>
+          </div>
+          <div className="flex-1 flex flex-col min-w-0">
+              <Skeleton className="h-16 w-full" />
+              <div className="flex-1 p-6 space-y-4">
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+                  <Skeleton className="h-10 w-1/2" />
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+              </div>
+              <Skeleton className="h-24 w-full" />
+          </div>
+           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-32 w-full" />
+           </div>
+        </div>
+    )
+  }
   
   return (
     <ClientCustomerChatLayout 
-        initialChats={initialChats}
         currentUser={currentUser}
-        initialCloseReasons={initialCloseReasons}
     />
   );
 }
