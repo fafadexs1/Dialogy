@@ -348,7 +348,8 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
 }
 
 
-export default function TeamPage({ user }: { user: User | null }) {
+export default function TeamPage() {
+    const [user, setUser] = useState<User | null>(null);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allMembers, setAllMembers] = useState<User[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
@@ -358,24 +359,33 @@ export default function TeamPage({ user }: { user: User | null }) {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const { toast } = useToast();
-    const [workspaceId, setWorkspaceId] = useState<string | undefined>();
-
+    
     useEffect(() => {
-        if(user) {
-            setWorkspaceId(user.activeWorkspaceId);
-        }
-    }, [user]);
+        const fetchUser = async () => {
+            try {
+                const res = await fetch('/api/user');
+                if (res.ok) {
+                    setUser(await res.json());
+                } else {
+                    setLoading(false);
+                }
+            } catch (e) {
+                setLoading(false);
+            }
+        };
+        fetchUser();
+    }, []);
 
     useEffect(() => {
         const fetchData = async () => {
-            if (!workspaceId) return;
+            if (!user?.activeWorkspaceId) return;
             setLoading(true);
             try {
                 const [teamsData, membersData, rolesData, tagsData] = await Promise.all([
-                    getTeams(workspaceId),
-                    getWorkspaceMembers(workspaceId),
-                    getRolesAndPermissions(workspaceId),
-                    getTags(workspaceId)
+                    getTeams(user.activeWorkspaceId),
+                    getWorkspaceMembers(user.activeWorkspaceId),
+                    getRolesAndPermissions(user.activeWorkspaceId),
+                    getTags(user.activeWorkspaceId)
                 ]);
 
                 if (teamsData.error) throw new Error(teamsData.error);
@@ -403,8 +413,8 @@ export default function TeamPage({ user }: { user: User | null }) {
             }
         };
 
-        if(workspaceId) fetchData();
-    }, [workspaceId, toast, selectedTeamId]);
+        if(user) fetchData();
+    }, [user, toast, selectedTeamId]);
 
     const handleTeamUpdate = (teamId: string, updatedTeam: Team) => {
         setTeams(prev => prev.map(t => t.id === teamId ? updatedTeam : t));
@@ -508,7 +518,7 @@ export default function TeamPage({ user }: { user: User | null }) {
             <main className="flex-1 overflow-y-auto">
                 <div className="max-w-4xl mx-auto py-6 px-4">
                     {isCreating ? (
-                       workspaceId && <CreateTeamContent workspaceId={workspaceId} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
+                       user.activeWorkspaceId && <CreateTeamContent workspaceId={user.activeWorkspaceId} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
                     ) : selectedTeam ? (
                         <TeamSettingsContent 
                             key={selectedTeam.id}
