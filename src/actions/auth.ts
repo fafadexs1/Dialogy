@@ -59,8 +59,9 @@ export async function register(prevState: any, formData: FormData) {
   // O trigger do banco de dados (na tabela auth.users) irá copiar o novo usuário
   // para a tabela public.users automaticamente.
 
-  // Redireciona para a página de login com um parâmetro de sucesso
-  return redirect('/login?registered=true');
+  // Em vez de redirecionar, retorna um estado de sucesso.
+  // O redirecionamento será tratado no lado do cliente.
+  return { success: true, message: null };
 }
 
 export async function signOut() {

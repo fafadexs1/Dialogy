@@ -1,8 +1,9 @@
 
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { register } from '@/actions/auth';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,6 +33,15 @@ function RegisterButton() {
 
 export function RegisterForm() {
   const [state, formAction] = useActionState(register, { success: false, message: null });
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state.success) {
+      // Redireciona no lado do cliente após o sucesso da ação
+      router.push('/login?registered=true');
+    }
+  }, [state.success, router]);
+
 
   return (
     <form action={formAction}>
