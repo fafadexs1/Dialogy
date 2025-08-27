@@ -48,7 +48,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     const tablesToUpdate = [
         'workspaces', 'roles', 'teams', 
         'contacts', 'tags',
-        'activities', 'custom_field_definitions', 'contact_custom_field_values', 
+        'activities', 'custom_field_definitions',
         'chats', 'messages', 'workspace_invites', 'user_invites',
         'system_agents', 'autopilot_configs', 
         'autopilot_rules', 'autopilot_usage_logs', 'evolution_api_configs', 
@@ -56,9 +56,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     ];
     console.log('[DB_SETUP] Configurando IDs padrão para as tabelas...');
     for (const table of tablesToUpdate) {
-        await client.query(`
-            ALTER TABLE "${table}" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();
+        // Checa se a coluna 'id' existe antes de tentar alterá-la.
+        const idCheck = await client.query(`
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = '${table}' AND column_name = 'id'
         `);
+        if (idCheck.rowCount > 0) {
+            await client.query(`
+                ALTER TABLE "${table}" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();
+            `);
+        } else {
+             console.log(`[DB_SETUP] Tabela '${table}' pulada: coluna 'id' não encontrada.`);
+        }
     }
     console.log('[DB_SETUP] IDs padrão configurados.');
 
