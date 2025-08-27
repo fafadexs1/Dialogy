@@ -96,14 +96,14 @@ export default async function Home() {
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
 
-  const { data: { session }} = await supabase.auth.getSession();
+  const { data: { user: authUser } } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!authUser) {
     console.log("[PAGE_SERVER] Usuário não autenticado. Redirecionando para /login.");
     return redirect('/login');
   }
   
-  const userId = session.user.id;
+  const userId = authUser.id;
   console.log("[PAGE_SERVER] Sessão encontrada para o usuário ID:", userId);
 
   await updateUserOnlineStatus(userId, true);
