@@ -1,6 +1,6 @@
 
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase';
 import type { OnlineAgent, User } from '@/lib/types';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
@@ -20,17 +20,19 @@ export async function GET(
   }
 
   try {
-    // A verificação de sessão e o filtro por workspaceId na query já garantem a segurança.
-    // A verificação anterior era redundante e poderia causar problemas de permissão.
-    const res = await db.query(
-      `SELECT u.id, u.full_name, u.avatar_url, u.email, u.online_since
-       FROM users u
-       JOIN user_workspace_roles uwr ON u.id = uwr.user_id
-       WHERE u.online = true AND uwr.workspace_id = $1`,
-      [workspaceId]
-    );
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select(
+        'id, full_name, avatar_url, email, online_since, user_workspace_roles!inner(workspace_id)'
+      )
+      .eq('online', true)
+      .eq('user_workspace_roles.workspace_id', workspaceId);
 
-    const onlineAgents: OnlineAgent[] = res.rows.map(user => ({
+    if (error) {
+      throw error;
+    }
+
+    const onlineAgents: OnlineAgent[] = (data || []).map(user => ({
       user: {
         id: user.id,
         name: user.full_name,

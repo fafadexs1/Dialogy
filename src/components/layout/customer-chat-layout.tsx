@@ -123,19 +123,17 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
         currentUser={currentUser}
         onUpdate={fetchChatList}
       />
-      <ChatPanel 
-        key={selectedChat?.id} 
-        chat={selectedChat} 
-        messages={messages}
-        isLoadingMessages={isLoadingMessages}
-        currentUser={currentUser} 
+      <ChatPanel
+        key={selectedChat?.id}
+        chat={selectedChat}
+        currentUser={currentUser}
         onActionSuccess={fetchChatList}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
-      <ContactPanel 
-        chat={selectedChat} 
+      <ContactPanel
+        chat={selectedChat}
         onTransferSuccess={fetchChatList}
         onContactUpdate={fetchChatList}
       />
@@ -178,7 +176,7 @@ export default function CustomerChatLayout({ currentUser }: { currentUser: User 
   }
   
   return (
-    <ClientCustomerChatLayout 
+    <ClientCustomerChatLayout
         currentUser={currentUser}
     />
   );

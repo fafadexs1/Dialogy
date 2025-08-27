@@ -5,6 +5,7 @@ import { useState, useEffect, createContext, useContext, ReactNode, useCallback 
 import type { OnlineAgent } from '@/lib/types';
 import { useAuth } from './use-auth';
 import { updateUserOnlineStatus } from '@/actions/user';
+import { supabase } from '@/lib/supabase';
 
 // 1. Create a Context for the presence state
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -34,22 +35,21 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
   useEffect(() => {
-    let pollingInterval: NodeJS.Timeout | null = null;
+    if (!currentUser?.activeWorkspaceId) return;
+    const workspaceId = currentUser.activeWorkspaceId;
+    fetchOnlineAgents(workspaceId);
 
-    if (currentUser?.activeWorkspaceId) {
-      const workspaceId = currentUser.activeWorkspaceId;
-      // Fetch immediately on mount or when workspaceId becomes available
-      fetchOnlineAgents(workspaceId);
+    const channel = supabase
+      .channel('public:users')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'users' },
+        () => fetchOnlineAgents(workspaceId)
+      )
+      .subscribe();
 
-      // Set up an interval to fetch every 30 seconds
-      pollingInterval = setInterval(() => fetchOnlineAgents(workspaceId), 30000);
-    }
-    
-    // Clean up the interval when the component unmounts or workspaceId changes
     return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
+      supabase.removeChannel(channel);
     };
   }, [currentUser?.activeWorkspaceId, fetchOnlineAgents]);
 

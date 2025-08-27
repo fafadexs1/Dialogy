@@ -2,6 +2,7 @@
 'use server';
 
 import { db } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase';
 
 export async function updateUserOnlineStatus(userId: string, isOnline: boolean) {
   if (!userId) {
@@ -9,16 +10,22 @@ export async function updateUserOnlineStatus(userId: string, isOnline: boolean) 
     return;
   }
   try {
-    // Ao ficar online, atualiza o timestamp. Ao ficar offline, define como NULL.
-    const query = isOnline
-      ? 'UPDATE users SET online = $1, online_since = NOW() WHERE id = $2'
-      : "UPDATE users SET online = $1, online_since = NULL WHERE id = $2";
+    const { error } = await supabaseAdmin
+      .from('users')
+      .update({
+        online: isOnline,
+        online_since: isOnline ? new Date().toISOString() : null,
+      })
+      .eq('id', userId);
 
-    await db.query(query, [isOnline, userId]);
-    console.log(`[UPDATE_USER_STATUS] Status do usuário ${userId} atualizado para: ${isOnline ? 'Online' : 'Offline'}`);
+    if (error) {
+      throw error;
+    }
+
+    console.log(
+      `[UPDATE_USER_STATUS] Status do usuário ${userId} atualizado para: ${isOnline ? 'Online' : 'Offline'}`,
+    );
   } catch (error) {
     console.error('[UPDATE_USER_STATUS] Erro ao atualizar status do usuário:', error);
   }
 }
-
-    
