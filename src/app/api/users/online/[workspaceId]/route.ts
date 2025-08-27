@@ -1,15 +1,17 @@
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/server';
 import type { OnlineAgent, User } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../auth/[...nextauth]/route';
+import { cookies } from 'next/headers';
 
 export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -20,7 +22,7 @@ export async function GET(
   }
 
   try {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from('users')
       .select(
         'id, full_name, avatar_url, email, online_since, user_workspace_roles!inner(workspace_id)'

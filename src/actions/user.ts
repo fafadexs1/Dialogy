@@ -1,16 +1,20 @@
 
 'use server';
 
-import { db } from '@/lib/db';
-import { supabaseAdmin } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 export async function updateUserOnlineStatus(userId: string, isOnline: boolean) {
   if (!userId) {
     console.error('[UPDATE_USER_STATUS] User ID não fornecido.');
     return;
   }
+  
+  const cookieStore = cookies()
+  const supabase = createClient(cookieStore);
+
   try {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('users')
       .update({
         online: isOnline,
