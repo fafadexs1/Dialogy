@@ -319,6 +319,7 @@ export default function CustomerList({ user }: { user: User }) {
                 contact={editingContact}
                 workspaceId={user.activeWorkspaceId}
                 agents={agents}
+                user={user}
             />
         )}
         {selectedContact && (

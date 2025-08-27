@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
@@ -31,7 +30,6 @@ import { AlertCircle } from 'lucide-react';
 import { saveContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { Badge } from '../ui/badge';
 
 interface AddContactFormProps {
@@ -41,6 +39,7 @@ interface AddContactFormProps {
     contact: Contact | null;
     workspaceId: string;
     agents: User[];
+    user: User | null;
 }
 
 function SaveButton() {
@@ -117,8 +116,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
     )
 }
 
-export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId, agents }: AddContactFormProps) {
-  const user = useAuth();
+export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId, agents, user }: AddContactFormProps) {
   const [state, formAction] = useActionState(saveContactAction, { success: false, error: null });
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
