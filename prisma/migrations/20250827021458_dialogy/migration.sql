@@ -1,12 +1,8 @@
 -- CreateEnum
-DO $$ BEGIN
-    CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
 
 -- CreateTable
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT NOT NULL,
     "full_name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
@@ -22,7 +18,7 @@ CREATE TABLE "users" (
 );
 
 -- CreateTable
-CREATE TABLE "workspaces" (
+CREATE TABLE IF NOT EXISTS "workspaces" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "avatar_url" TEXT,
@@ -34,7 +30,7 @@ CREATE TABLE "workspaces" (
 );
 
 -- CreateTable
-CREATE TABLE "user_workspace_roles" (
+CREATE TABLE IF NOT EXISTS "user_workspace_roles" (
     "user_id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
@@ -44,7 +40,7 @@ CREATE TABLE "user_workspace_roles" (
 );
 
 -- CreateTable
-CREATE TABLE "roles" (
+CREATE TABLE IF NOT EXISTS "roles" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
@@ -55,7 +51,7 @@ CREATE TABLE "roles" (
 );
 
 -- CreateTable
-CREATE TABLE "permissions" (
+CREATE TABLE IF NOT EXISTS "permissions" (
     "id" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "category" TEXT NOT NULL,
@@ -64,7 +60,7 @@ CREATE TABLE "permissions" (
 );
 
 -- CreateTable
-CREATE TABLE "role_permissions" (
+CREATE TABLE IF NOT EXISTS "role_permissions" (
     "role_id" TEXT NOT NULL,
     "permission_id" TEXT NOT NULL,
 
@@ -72,7 +68,7 @@ CREATE TABLE "role_permissions" (
 );
 
 -- CreateTable
-CREATE TABLE "workspace_invites" (
+CREATE TABLE IF NOT EXISTS "workspace_invites" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
@@ -86,7 +82,7 @@ CREATE TABLE "workspace_invites" (
 );
 
 -- CreateTable
-CREATE TABLE "user_invites" (
+CREATE TABLE IF NOT EXISTS "user_invites" (
     "invite_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "used_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -95,7 +91,7 @@ CREATE TABLE "user_invites" (
 );
 
 -- CreateTable
-CREATE TABLE "teams" (
+CREATE TABLE IF NOT EXISTS "teams" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -108,7 +104,7 @@ CREATE TABLE "teams" (
 );
 
 -- CreateTable
-CREATE TABLE "team_members" (
+CREATE TABLE IF NOT EXISTS "team_members" (
     "team_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
 
@@ -116,7 +112,7 @@ CREATE TABLE "team_members" (
 );
 
 -- CreateTable
-CREATE TABLE "business_hours" (
+CREATE TABLE IF NOT EXISTS "business_hours" (
     "id" TEXT NOT NULL,
     "team_id" TEXT NOT NULL,
     "day_of_week" TEXT NOT NULL,
@@ -128,7 +124,7 @@ CREATE TABLE "business_hours" (
 );
 
 -- CreateTable
-CREATE TABLE "contacts" (
+CREATE TABLE IF NOT EXISTS "contacts" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -144,7 +140,7 @@ CREATE TABLE "contacts" (
 );
 
 -- CreateTable
-CREATE TABLE "tags" (
+CREATE TABLE IF NOT EXISTS "tags" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "label" TEXT NOT NULL,
@@ -157,7 +153,7 @@ CREATE TABLE "tags" (
 );
 
 -- CreateTable
-CREATE TABLE "contact_tags" (
+CREATE TABLE IF NOT EXISTS "contact_tags" (
     "contact_id" TEXT NOT NULL,
     "tag_id" TEXT NOT NULL,
 
@@ -165,7 +161,7 @@ CREATE TABLE "contact_tags" (
 );
 
 -- CreateTable
-CREATE TABLE "activities" (
+CREATE TABLE IF NOT EXISTS "activities" (
     "id" TEXT NOT NULL,
     "contact_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
@@ -177,7 +173,7 @@ CREATE TABLE "activities" (
 );
 
 -- CreateTable
-CREATE TABLE "custom_field_definitions" (
+CREATE TABLE IF NOT EXISTS "custom_field_definitions" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "label" TEXT NOT NULL,
@@ -189,7 +185,7 @@ CREATE TABLE "custom_field_definitions" (
 );
 
 -- CreateTable
-CREATE TABLE "contact_custom_field_values" (
+CREATE TABLE IF NOT EXISTS "contact_custom_field_values" (
     "contact_id" TEXT NOT NULL,
     "field_id" TEXT NOT NULL,
     "value" TEXT NOT NULL,
@@ -198,7 +194,7 @@ CREATE TABLE "contact_custom_field_values" (
 );
 
 -- CreateTable
-CREATE TABLE "shortcuts" (
+CREATE TABLE IF NOT EXISTS "shortcuts" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
@@ -212,7 +208,7 @@ CREATE TABLE "shortcuts" (
 );
 
 -- CreateTable
-CREATE TABLE "system_agents" (
+CREATE TABLE IF NOT EXISTS "system_agents" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -227,7 +223,7 @@ CREATE TABLE "system_agents" (
 );
 
 -- CreateTable
-CREATE TABLE "chats" (
+CREATE TABLE IF NOT EXISTS "chats" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "contact_id" TEXT NOT NULL,
@@ -238,14 +234,14 @@ CREATE TABLE "chats" (
     "assigned_at" TIMESTAMP(3),
     "closed_at" TIMESTAMP(3),
     "close_reason_tag_id" TEXT,
-    "close_notes" TEXT,
+    "closeNotes" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "chats_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "messages" (
+CREATE TABLE IF NOT EXISTS "messages" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "chat_id" TEXT NOT NULL,
@@ -270,7 +266,7 @@ CREATE TABLE "messages" (
 );
 
 -- CreateTable
-CREATE TABLE "autopilot_configs" (
+CREATE TABLE IF NOT EXISTS "autopilot_configs" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
@@ -284,7 +280,7 @@ CREATE TABLE "autopilot_configs" (
 );
 
 -- CreateTable
-CREATE TABLE "autopilot_rules" (
+CREATE TABLE IF NOT EXISTS "autopilot_rules" (
     "id" TEXT NOT NULL,
     "config_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -296,7 +292,7 @@ CREATE TABLE "autopilot_rules" (
 );
 
 -- CreateTable
-CREATE TABLE "autopilot_usage_logs" (
+CREATE TABLE IF NOT EXISTS "autopilot_usage_logs" (
     "id" TEXT NOT NULL,
     "config_id" TEXT NOT NULL,
     "flow_name" TEXT NOT NULL,
@@ -311,7 +307,7 @@ CREATE TABLE "autopilot_usage_logs" (
 );
 
 -- CreateTable
-CREATE TABLE "campaigns" (
+CREATE TABLE IF NOT EXISTS "campaigns" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "created_by_id" TEXT NOT NULL,
@@ -327,7 +323,7 @@ CREATE TABLE "campaigns" (
 );
 
 -- CreateTable
-CREATE TABLE "campaign_recipients" (
+CREATE TABLE IF NOT EXISTS "campaign_recipients" (
     "id" TEXT NOT NULL,
     "campaign_id" TEXT NOT NULL,
     "contact_id" TEXT NOT NULL,
@@ -339,7 +335,7 @@ CREATE TABLE "campaign_recipients" (
 );
 
 -- CreateTable
-CREATE TABLE "evolution_api_configs" (
+CREATE TABLE IF NOT EXISTS "evolution_api_configs" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "api_url" TEXT,
@@ -349,7 +345,7 @@ CREATE TABLE "evolution_api_configs" (
 );
 
 -- CreateTable
-CREATE TABLE "evolution_api_instances" (
+CREATE TABLE IF NOT EXISTS "evolution_api_instances" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -360,49 +356,49 @@ CREATE TABLE "evolution_api_instances" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "roles_workspace_id_name_key" ON "roles"("workspace_id", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "roles_workspace_id_name_key" ON "roles"("workspace_id", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "workspace_invites_code_key" ON "workspace_invites"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "workspace_invites_code_key" ON "workspace_invites"("code");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "teams_workspace_id_name_key" ON "teams"("workspace_id", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "teams_workspace_id_name_key" ON "teams"("workspace_id", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "business_hours_team_id_day_of_week_key" ON "business_hours"("team_id", "day_of_week");
+CREATE UNIQUE INDEX IF NOT EXISTS "business_hours_team_id_day_of_week_key" ON "business_hours"("team_id", "day_of_week");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "contacts_phone_number_jid_key" ON "contacts"("phone_number_jid");
+CREATE UNIQUE INDEX IF NOT EXISTS "contacts_phone_number_jid_key" ON "contacts"("phone_number_jid");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "tags_workspace_id_value_key" ON "tags"("workspace_id", "value");
+CREATE UNIQUE INDEX IF NOT EXISTS "tags_workspace_id_value_key" ON "tags"("workspace_id", "value");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "shortcuts_workspace_id_name_key" ON "shortcuts"("workspace_id", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "shortcuts_workspace_id_name_key" ON "shortcuts"("workspace_id", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "system_agents_token_key" ON "system_agents"("token");
+CREATE UNIQUE INDEX IF NOT EXISTS "system_agents_token_key" ON "system_agents"("token");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "system_agents_workspace_id_name_key" ON "system_agents"("workspace_id", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "system_agents_workspace_id_name_key" ON "system_agents"("workspace_id", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "messages_message_id_from_api_key" ON "messages"("message_id_from_api");
+CREATE UNIQUE INDEX IF NOT EXISTS "messages_message_id_from_api_key" ON "messages"("message_id_from_api");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "autopilot_configs_workspace_id_user_id_key" ON "autopilot_configs"("workspace_id", "user_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "autopilot_configs_workspace_id_user_id_key" ON "autopilot_configs"("workspace_id", "user_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "campaign_recipients_campaign_id_contact_id_key" ON "campaign_recipients"("campaign_id", "contact_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "campaign_recipients_campaign_id_contact_id_key" ON "campaign_recipients"("campaign_id", "contact_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "evolution_api_configs_workspace_id_key" ON "evolution_api_configs"("workspace_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "evolution_api_configs_workspace_id_key" ON "evolution_api_configs"("workspace_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "evolution_api_instances_config_id_name_key" ON "evolution_api_instances"("config_id", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "evolution_api_instances_config_id_name_key" ON "evolution_api_instances"("config_id", "name");
 
 -- AddForeignKey
 ALTER TABLE "workspaces" ADD CONSTRAINT "workspaces_owner_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -554,94 +550,32 @@ ALTER TABLE "evolution_api_configs" ADD CONSTRAINT "evolution_api_configs_worksp
 -- AddForeignKey
 ALTER TABLE "evolution_api_instances" ADD CONSTRAINT "evolution_api_instances_config_id_fkey" FOREIGN KEY ("config_id") REFERENCES "evolution_api_configs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- Creates a trigger function that inserts a new row into public.users
--- whenever a new user is created in the auth.users table.
-CREATE SCHEMA IF NOT EXISTS auth;
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.users (id, full_name, email, avatar_url, password_hash, updated_at)
-  values (
-    new.id,
-    new.raw_user_meta_data->>'full_name',
-    new.email,
-    new.raw_user_meta_data->>'avatar_url',
-    new.encrypted_password,
-    now()
-  );
-  return new;
-end;
-$$ language plpgsql security definer;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ChatStatusEnum') THEN
+        CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+    END IF;
+END
+$$;
 
--- Inserts a row into public.workspaces and related tables when a new user signs up.
-create or replace function public.setup_workspace_defaults()
-returns trigger as $$
-declare
-  new_workspace_id uuid;
-  admin_role_id uuid;
-  member_role_id uuid;
-  all_permissions text[] := array[
-    'workspace:view', 'workspace:edit', 'workspace:delete',
-    'members:view', 'members:invite', 'members:remove',
-    'permissions:view', 'permissions:edit',
-    'teams:view', 'teams:edit',
-    'crm:view', 'crm:edit', 'crm:delete',
-    'chats:view', 'chats:assign', 'chats:transfer',
-    'campaigns:view', 'campaigns:manage', 'campaigns:delete',
-    'automations:view', 'automations:manage',
-    'integrations:view', 'integrations:manage',
-    'billing:view', 'billing:manage'
-  ];
-  member_permissions text[] := array[
-    'workspace:view',
-    'members:view', 'members:invite',
-    'teams:view',
-    'crm:view', 'crm:edit',
-    'chats:view', 'chats:assign', 'chats:transfer',
-    'campaigns:view'
-  ];
-  permission text;
-begin
-    -- 1. Create a new workspace for the user
-    insert into public.workspaces (name, owner_id)
-    values (new.raw_user_meta_data->>'full_name' || '''s Workspace', new.id)
-    returning id into new_workspace_id;
-
-    -- 2. Create default roles for the new workspace
-    insert into public.roles (workspace_id, name, description, is_default)
-    values
-        (new_workspace_id, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', false),
-        (new_workspace_id, 'Membro', 'Acesso a funcionalidades do dia-a-dia como chats e contatos.', true)
-    returning id into admin_role_id, member_role_id;
-    
-    -- 3. Assign permissions to the Administrator role
-    foreach permission in array all_permissions
-    loop
-        insert into public.role_permissions (role_id, permission_id)
-        values (admin_role_id, permission);
-    end loop;
-    
-    -- 4. Assign permissions to the Member role
-    foreach permission in array member_permissions
-    loop
-        insert into public.role_permissions (role_id, permission_id)
-        values (member_role_id, permission);
-    end loop;
-
-    -- 5. Make the new user an Administrator of their new workspace
-    insert into public.user_workspace_roles (user_id, workspace_id, role_id)
-    values (new.id, new_workspace_id, admin_role_id);
-    
-    -- 6. Set the new workspace as the user's last active one in auth table
-    update auth.users set raw_user_meta_data = raw_user_meta_data || 
-        jsonb_build_object('last_active_workspace_id', new_workspace_id)
-    where id = new.id;
-
-    return new;
-end;
-$$ language plpgsql security definer;
-
--- Trigger to execute the workspace setup after a new user is created
-create or replace trigger on_new_user_setup
-  after insert on public.users
-  for each row execute procedure public.setup_workspace_defaults();
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'handle_new_user') THEN
+    CREATE OR REPLACE FUNCTION public.handle_new_user()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      INSERT INTO public.users (id, full_name, email, avatar_url, password_hash, updated_at)
+      VALUES (
+        new.id,
+        new.raw_user_meta_data->>'full_name',
+        new.email,
+        new.raw_user_meta_data->>'avatar_url',
+        new.encrypted_password,
+        now()
+      );
+      RETURN new;
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
+  END IF;
+END
+$$;
