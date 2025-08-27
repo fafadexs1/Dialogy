@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -91,7 +90,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
             }
             
             await db.query(
-                'INSERT INTO shortcuts (workspace_id, user_id, name, message, type) VALUES ($1, $2, $3, $4, $5)',
+                'INSERT INTO shortcuts (workspace_id, user_id, name, message, type, updated_at) VALUES ($1, $2, $3, $4, $5, NOW())',
                 [workspaceId, userId, name, message, type]
             );
         }
