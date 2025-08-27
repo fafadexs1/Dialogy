@@ -23,7 +23,9 @@ function CreateWorkspaceForm() {
 
     useEffect(() => {
         if (state.success) {
-            router.push('/');
+            // On success, refresh the page. The server will see the user now has an
+            // active workspace and render the main app instead of the onboarding.
+            router.refresh();
         }
     }, [state, router]);
 
