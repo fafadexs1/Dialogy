@@ -44,7 +44,7 @@ export default function SetupPage() {
               <div>
                 <p className="font-semibold">{result.success ? 'Sucesso!' : 'Erro!'}</p>
                 <p>{result.message}</p>
-                 {result.success && <p className="mt-2">Você pode agora <Link href="/login" className="underline font-bold">ir para a página de login</Link>.</p>}
+                 {result.success && <p className="mt-2">Você pode agora <Link href="/register" className="underline font-bold">ir para a página de registro</Link>.</p>}
               </div>
             </div>
           )}
