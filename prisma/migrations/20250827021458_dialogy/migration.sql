@@ -1,5 +1,11 @@
 -- CreateEnum
-CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ChatStatusEnum') THEN
+        CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
+    END IF;
+END
+$$;
 
 -- CreateTable
 CREATE TABLE IF NOT EXISTS "users" (
@@ -234,7 +240,7 @@ CREATE TABLE IF NOT EXISTS "chats" (
     "assigned_at" TIMESTAMP(3),
     "closed_at" TIMESTAMP(3),
     "close_reason_tag_id" TEXT,
-    "closeNotes" TEXT,
+    "close_notes" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "chats_pkey" PRIMARY KEY ("id")
@@ -550,32 +556,27 @@ ALTER TABLE "evolution_api_configs" ADD CONSTRAINT "evolution_api_configs_worksp
 -- AddForeignKey
 ALTER TABLE "evolution_api_instances" ADD CONSTRAINT "evolution_api_instances_config_id_fkey" FOREIGN KEY ("config_id") REFERENCES "evolution_api_configs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ChatStatusEnum') THEN
-        CREATE TYPE "ChatStatusEnum" AS ENUM ('gerais', 'atendimentos', 'encerrados');
-    END IF;
-END
-$$;
+-- Manually create the handle_new_user function and trigger
+-- This should be run manually in the Supabase SQL editor if it doesn't exist,
+-- but we include it here to be idempotent.
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
-DO $$
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'handle_new_user') THEN
-    CREATE OR REPLACE FUNCTION public.handle_new_user()
-    RETURNS TRIGGER AS $$
-    BEGIN
-      INSERT INTO public.users (id, full_name, email, avatar_url, password_hash, updated_at)
-      VALUES (
-        new.id,
-        new.raw_user_meta_data->>'full_name',
-        new.email,
-        new.raw_user_meta_data->>'avatar_url',
-        new.encrypted_password,
-        now()
-      );
-      RETURN new;
-    END;
-    $$ LANGUAGE plpgsql SECURITY DEFINER;
-  END IF;
-END
-$$;
+  INSERT INTO public.users (id, full_name, email, avatar_url, password_hash, updated_at)
+  VALUES (
+    new.id,
+    new.raw_user_meta_data->>'full_name',
+    new.email,
+    new.raw_user_meta_data->>'avatar_url',
+    new.encrypted_password,
+    now() -- Set updated_at on creation
+  );
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
