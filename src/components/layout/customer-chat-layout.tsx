@@ -7,9 +7,11 @@ import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag } from '@/lib/types';
 import { getTags } from '@/actions/crm';
+import { getChatsAndMessages } from '@/actions/chats';
 import { useAuth } from '@/hooks/use-auth';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -17,94 +19,74 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // This ref helps us keep track of the selected chat ID to avoid race conditions in subscriptions
   const selectedChatIdRef = useRef<string | null>(null);
 
-  const fetchChatList = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!currentUser.activeWorkspaceId) return;
-
+    setIsLoading(true);
+    
     try {
-        const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}`, { cache: 'no-store' });
-        if (!response.ok) {
-            console.error("Failed to fetch chats, status:", response.status);
-            return;
+        const { chats: fetchedChats, messagesByChat } = await getChatsAndMessages(currentUser.activeWorkspaceId);
+        setChats(fetchedChats || []);
+        
+        // If a chat is selected, update its messages from the new data
+        if (selectedChatIdRef.current && messagesByChat[selectedChatIdRef.current]) {
+            setMessages(messagesByChat[selectedChatIdRef.current]);
         }
-        const data = await response.json();
-        setChats(data.chats || []);
+        
     } catch(e) {
-        console.error("Failed to fetch chats", e);
-    }
-  }, [currentUser.activeWorkspaceId]);
-
-  const fetchMessagesForChat = useCallback(async (chatId: string) => {
-    if (!currentUser.activeWorkspaceId) return;
-    setIsLoadingMessages(true);
-
-    try {
-        const response = await fetch(`/api/chats/${currentUser.activeWorkspaceId}/${chatId}/messages`);
-        if (!response.ok) {
-            console.error("Failed to fetch messages, status:", response.status);
-            setMessages([]);
-            return;
-        }
-        const data = await response.json();
-        setMessages(data.messages || []);
-    } catch(e) {
-        console.error("Failed to fetch messages for chat", chatId, e);
-        setMessages([]);
+        console.error("Failed to fetch chat data", e);
+        toast({ title: "Erro ao carregar conversas", description: "Não foi possível buscar os dados do chat.", variant: "destructive" });
     } finally {
-        setIsLoadingMessages(false);
+        setIsLoading(false);
     }
   }, [currentUser.activeWorkspaceId]);
 
-  const handleSetSelectedChat = async (chat: Chat) => {
-    setSelectedChat(chat);
+  const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
+    setSelectedChat(chat);
     setShowFullHistory(false);
     
-    // Immediately fetch messages for the selected chat
-    fetchMessagesForChat(chat.id);
-  };
+    // We fetch data again to ensure we have the latest messages for the selected chat
+    fetchData(); 
+  }, [fetchData]);
 
   useEffect(() => {
-    fetchChatList();
-  }, [fetchChatList]);
-
-  useEffect(() => {
-    if (selectedChatIdRef.current) {
-      fetchMessagesForChat(selectedChatIdRef.current);
-    }
-  }, [fetchMessagesForChat, selectedChat?.id]);
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     if (!currentUser.activeWorkspaceId) return;
     
     const supabase = createClient();
 
+    const handleChange = (payload: any) => {
+        // A smart refetch that only triggers if the change is relevant
+        const relevantChatId = payload.new?.chat_id || payload.old?.id;
+        const currentSelectedId = selectedChatIdRef.current;
+        
+        // Always refetch the list, but only refetch messages if the change affects the selected chat
+        fetchData();
+    };
+
     const chatsChannel = supabase
-      .channel('public:chats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, () => {
-        fetchChatList();
-      })
+      .channel('public-chats-listener')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
 
     const messagesChannel = supabase
-      .channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, payload => {
-        const message = payload.new as { chat_id: string };
-        if (selectedChatIdRef.current === message.chat_id) {
-          fetchMessagesForChat(message.chat_id);
-        }
-        fetchChatList();
-      })
+      .channel('public-messages-listener')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${currentUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
 
     return () => {
       supabase.removeChannel(chatsChannel);
       supabase.removeChannel(messagesChannel);
     };
-  }, [currentUser.activeWorkspaceId, fetchChatList, fetchMessagesForChat]);
+  }, [currentUser.activeWorkspaceId, fetchData]);
 
   useEffect(() => {
       if(currentUser.activeWorkspaceId){
@@ -115,6 +97,38 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
           });
       }
   }, [currentUser.activeWorkspaceId]);
+  
+  if (isLoading && chats.length === 0) {
+      return (
+         <div className="flex flex-1 w-full min-h-0 h-full">
+          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <div className="space-y-2 mt-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+              </div>
+          </div>
+          <div className="flex-1 flex flex-col min-w-0">
+              <Skeleton className="h-16 w-full" />
+              <div className="flex-1 p-6 space-y-4">
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+                  <Skeleton className="h-10 w-1/2" />
+                  <Skeleton className="h-10 w-1/2 ml-auto" />
+              </div>
+              <Skeleton className="h-24 w-full" />
+          </div>
+           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-32 w-full" />
+           </div>
+        </div>
+      );
+  }
 
   return (
     <div className="h-full flex-1 w-full min-h-0 flex">
@@ -123,23 +137,21 @@ function ClientCustomerChatLayout({ currentUser }: { currentUser: User }) {
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={currentUser}
-        onUpdate={fetchChatList}
+        onUpdate={fetchData}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={selectedChat}
-        messages={messages}
-        isLoadingMessages={isLoadingMessages}
         currentUser={currentUser}
-        onActionSuccess={fetchChatList}
+        onActionSuccess={fetchData}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
       />
       <ContactPanel
         chat={selectedChat}
-        onTransferSuccess={fetchChatList}
-        onContactUpdate={fetchChatList}
+        onTransferSuccess={fetchData}
+        onContactUpdate={fetchData}
       />
     </div>
   );
@@ -185,3 +197,5 @@ export default function CustomerChatLayout({ currentUser }: { currentUser: User 
     />
   );
 }
+
+    

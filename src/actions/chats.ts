@@ -5,6 +5,12 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata } from '@/lib/types';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
+
+const timeZone = 'America/Sao_Paulo';
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -314,3 +320,135 @@ export async function updateChatTagAction(chatId: string, tagId: string): Promis
         return { success: false, error: "Falha ao atualizar a etiqueta no servidor." };
     }
 }
+
+// --- NEW ACTION to fetch data ---
+
+function formatMessageDate(date: Date): string {
+    const zonedDate = toZonedTime(date, timeZone);
+    if (isToday(zonedDate)) {
+        return `Hoje`;
+    }
+    if (isYesterday(zonedDate)) {
+        return `Ontem`;
+    }
+    return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
+}
+
+export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]> }> {
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.user?.id || !workspaceId) {
+        return { chats: [], messagesByChat: {} };
+    }
+    
+    const userId = session.user.id;
+
+    try {
+        const chatQuery = `
+            SELECT 
+                c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color,
+                json_build_object(
+                    'id', ct.id, 'name', ct.name, 'email', ct.email, 'phone_number_jid', ct.phone_number_jid, 'avatar_url', ct.avatar_url
+                ) as contact,
+                json_build_object(
+                    'id', a.id, 'name', a.full_name, 'avatar', a.avatar_url
+                ) as agent,
+                t.name as team_name,
+                (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as source,
+                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as instance_name,
+                (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.is_read = FALSE AND m.from_me = FALSE) as unread_count,
+                (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) as last_message_time
+            FROM chats c
+            JOIN contacts ct ON c.contact_id = ct.id
+            LEFT JOIN users a ON c.agent_id = a.id
+            LEFT JOIN team_members tm ON a.id = tm.user_id
+            LEFT JOIN teams t ON tm.team_id = t.id
+            WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos') OR (c.status = 'encerrados' AND c.agent_id = $2))
+            ORDER BY last_message_time DESC NULLS LAST;
+        `;
+        const chatRes = await db.query(chatQuery, [workspaceId, userId]);
+
+        const chats: Chat[] = chatRes.rows.map(r => ({
+            ...r,
+            agent: r.agent.id ? r.agent : undefined,
+            messages: [], // Will be populated next
+            unreadCount: parseInt(r.unread_count, 10),
+            teamName: r.team_name,
+        }));
+        
+        const chatIds = chats.map(c => c.id);
+        if (chatIds.length === 0) {
+            return { chats: [], messagesByChat: {} };
+        }
+
+        const messagesQuery = `
+            SELECT 
+                m.*,
+                sender_user.id as user_id, sender_user.full_name as user_name, sender_user.avatar_url as user_avatar,
+                sender_agent.id as agent_id, sender_agent.name as agent_name, sender_agent.avatar_url as agent_avatar,
+                ct.id as contact_id, ct.name as contact_name, ct.avatar_url as contact_avatar
+            FROM messages m
+            JOIN chats ch ON m.chat_id = ch.id
+            JOIN contacts ct ON ch.contact_id = ct.id
+            LEFT JOIN users sender_user ON m.sender_id_user = sender_user.id
+            LEFT JOIN system_agents sender_agent ON m.sender_id_system_agent = sender_agent.id
+            WHERE m.chat_id = ANY($1::uuid[])
+            ORDER BY m.created_at ASC
+        `;
+        const messagesRes = await db.query(messagesQuery, [chatIds]);
+
+        const messagesByChat: Record<string, Message[]> = {};
+        for (const m of messagesRes.rows) {
+            if (!messagesByChat[m.chat_id]) {
+                messagesByChat[m.chat_id] = [];
+            }
+            
+            const createdAtDate = new Date(m.created_at);
+            const zonedDate = toZonedTime(createdAtDate, timeZone);
+
+            let sender: MessageSender;
+            if (m.user_id) {
+                sender = { id: m.user_id, name: m.user_name, avatar: m.user_avatar, type: 'user' };
+            } else if (m.agent_id) {
+                sender = { id: m.agent_id, name: m.agent_name, avatar: m.agent_avatar, type: 'system_agent' };
+            } else {
+                 sender = { id: m.contact_id, name: m.contact_name, avatar: m.contact_avatar, type: 'contact' };
+            }
+            
+            messagesByChat[m.chat_id].push({
+                id: m.id,
+                chat_id: m.chat_id,
+                workspace_id: m.workspace_id,
+                content: m.content || '',
+                type: m.type as Message['type'],
+                status: m.content === 'Mensagem apagada' ? 'deleted' : 'default',
+                metadata: m.metadata as MessageMetadata,
+                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
+                createdAt: createdAtDate.toISOString(),
+                formattedDate: formatMessageDate(createdAtDate),
+                sender: sender, 
+                instance_name: m.instance_name,
+                source_from_api: m.source_from_api,
+                api_message_status: m.api_message_status,
+                message_id_from_api: m.message_id_from_api,
+                from_me: m.from_me,
+                is_read: m.is_read,
+            });
+        }
+
+        // Attach the first message to each chat for preview purposes
+        chats.forEach(chat => {
+            chat.messages = messagesByChat[chat.id]?.slice(-1) || [];
+        });
+
+        return { chats, messagesByChat };
+
+    } catch (error) {
+        console.error("[GET_CHATS_ACTION] Error:", error);
+        return { chats: [], messagesByChat: {} };
+    }
+}
+
+    

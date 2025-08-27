@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -409,7 +408,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
   useEffect(() => {
     if (chat) {
-        setMessages(chat.messages);
+        // This is a direct prop now, not a state
+        // setMessages(chat.messages);
     }
   }, [chat]);
 
@@ -434,11 +434,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     if (viewport && !userScrolledUpRef.current) {
         viewport.scrollTop = viewport.scrollHeight;
     }
-  }, [messages]);
+  }, [chat?.messages]); // Depend on the messages prop from chat
 
 
   const runAiAgent = useCallback(async () => {
-    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    const lastMessage = chat?.messages?.length > 0 ? chat.messages[chat.messages.length - 1] : null;
 
     if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
         return;
@@ -459,7 +459,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         setIsAiTyping(true);
         processedMessageIds.current.add(lastMessage.id);
         console.log('[AUTOPILOT] Verificando mensagem:', lastMessage.content);
-        const chatHistoryForAI = messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+        const chatHistoryForAI = chat.messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
         
         const activeRules = autopilotRules.filter(rule => rule.enabled);
 
@@ -505,12 +505,12 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     } finally {
         setIsAiTyping(false);
     }
-  }, [isAiAgentActive, chat, messages, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
+  }, [isAiAgentActive, chat, currentUser.id, isAiTyping, autopilotRules, autopilotConfig, onActionSuccess, toast]);
 
 
   useEffect(() => {
     runAiAgent();
-  }, [runAiAgent, messages]);
+  }, [runAiAgent, chat?.messages]);
   
   useEffect(() => {
     processedMessageIds.current.clear();
@@ -624,28 +624,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const currentMessageText = htmlToWhatsappMarkdown(newMessage);
     const currentMediaFiles = [...mediaFiles];
     
-    // Optimistic UI update
-    if (currentMessageText.trim() || currentMediaFiles.length > 0) {
-        const tempId = `temp-${Date.now()}`;
-        const optimisticMessage: Message = {
-            id: tempId,
-            chat_id: chat.id,
-            workspace_id: chat.workspace_id,
-            content: currentMessageText,
-            type: 'text',
-            status: 'default',
-            api_message_status: 'PENDING',
-            from_me: true,
-            is_read: true,
-            sender: currentUser,
-            createdAt: new Date().toISOString(),
-            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            formattedDate: 'Hoje', // Simplified for optimistic update
-            metadata: currentMediaFiles.length > 0 ? { fileName: currentMediaFiles[0].name } : {}
-        };
-        setMessages(prev => [...prev, optimisticMessage]);
-    }
-    
     // Clear the input fields immediately
     setNewMessage('');
     setMediaFiles([]);
@@ -669,18 +647,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-            // Remove the optimistic message on failure
-            setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
         }
         
-        // Re-fetch data to get the final message from the server
+        // Let the subscription handle the UI update
         onActionSuccess();
 
     } catch (error) {
         console.error("Error during message submission:", error);
         toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
-        // Remove the optimistic message on critical error
-        setMessages(prev => prev.filter(m => m.id !== `temp-${Date.now()}`));
     }
 };
 
@@ -788,7 +762,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
 
   const renderMessageWithSeparator = (message: Message, index: number) => {
-    const prevMessage = messagesToDisplay[index - 1];
+    const prevMessage = (chat?.messages || [])[index - 1];
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isFromMe = !!message.from_me;
@@ -910,8 +884,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const showTextInput = !mediaFiles.length;
 
   const lastCustomerMessage = React.useMemo(() => 
-    messages.slice().reverse().find(m => !m.from_me && m.type !== 'system')
-  , [messages]);
+    (chat.messages || []).slice().reverse().find(m => !m.from_me && m.type !== 'system')
+  , [chat.messages]);
 
 
   return (
@@ -919,7 +893,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       <header className="flex h-16 items-center justify-between border-b bg-card px-6 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9 border">
-            <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} data-ai-hint="person" />
+            <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
           <h2 className="font-semibold">{chat.contact.name}</h2>
@@ -944,7 +918,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
               <FileDown className="h-5 w-5"/>
           </Button>
           <ChatSummary 
-            chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+            chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
             workspaceId={currentUser.activeWorkspaceId!} 
           />
           <Button variant="ghost" size="icon">
@@ -956,7 +930,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       <div className="flex-1 overflow-y-auto relative" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
-            {messagesToDisplay.map(renderMessageWithSeparator)}
+            {(chat.messages || []).map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>
         {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
@@ -985,7 +959,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
                     <SmartReplies 
                         customerMessage={lastCustomerMessage?.content || ''}
-                        chatHistory={messages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
+                        chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
                         workspaceId={currentUser.activeWorkspaceId!}
                         onSelectReply={(reply) => {
                           setNewMessage(reply);
@@ -1075,3 +1049,5 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     </main>
   );
 }
+
+    
