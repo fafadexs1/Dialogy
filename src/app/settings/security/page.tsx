@@ -1,21 +1,10 @@
+
 'use client';
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
 import type { User } from "@/lib/types";
 
-export default function SecurityPage() {
-    const [user, setUser] = useState<User | null>(null);
-    
-    useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                setUser(await res.json());
-            }
-        };
-        fetchUser();
-    }, []);
+export default function SecurityPage({ user }: { user: User | null }) {
 
     if (!user) {
         return <div className="flex items-center justify-center h-full">

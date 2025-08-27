@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import { useActionState, useEffect, useState, useRef } from 'react';
@@ -55,8 +54,7 @@ function CopyButton({ text }: { text: string }) {
     )
 }
 
-export default function WorkspaceSettingsPage() {
-    const [user, setUser] = useState<User | null>(null);
+export default function WorkspaceSettingsPage({ user }: { user: User | null }) {
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [workspaceName, setWorkspaceName] = useState('');
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
@@ -68,23 +66,15 @@ export default function WorkspaceSettingsPage() {
     const { toast } = useToast();
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                const userData = await res.json();
-                setUser(userData);
-                 if (userData?.activeWorkspaceId && userData.workspaces) {
-                    const workspace = userData.workspaces.find((ws: Workspace) => ws.id === userData.activeWorkspaceId);
-                    if (workspace) {
-                        setActiveWorkspace(workspace);
-                        setWorkspaceName(workspace.name);
-                        fetchInvites(workspace.id);
-                    }
-                }
+        if (user?.activeWorkspaceId && user.workspaces) {
+            const workspace = user.workspaces.find((ws: Workspace) => ws.id === user.activeWorkspaceId);
+            if (workspace) {
+                setActiveWorkspace(workspace);
+                setWorkspaceName(workspace.name);
+                fetchInvites(workspace.id);
             }
-        };
-        fetchUser();
-    }, []);
+        }
+    }, [user]);
 
     const fetchInvites = async (workspaceId: string) => {
         const result = await getWorkspaceInvites(workspaceId);

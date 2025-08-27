@@ -3,7 +3,6 @@
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { useToast } from '@/hooks/use-toast';
 import { getContacts } from '@/actions/crm';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
@@ -173,8 +172,7 @@ const TEMPLATES = [
 // ---------------------------------------------------------
 // Página principal
 // ---------------------------------------------------------
-export default function NewCampaignPage() {
-  const [user, setUser] = useState<User | null>(null);
+export default function NewCampaignPage({ user }: { user: User | null }) {
   const router = useRouter();
   const { toast } = useToast();
 
@@ -197,16 +195,6 @@ export default function NewCampaignPage() {
   
   const [selectedCrmIds, setSelectedCrmIds] = useState(() => new Set());
   
-  useEffect(() => {
-    const fetchUser = async () => {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-            setUser(await res.json());
-        }
-    };
-    fetchUser();
-  }, []);
-
   // Fetch initial data
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
@@ -291,16 +279,13 @@ export default function NewCampaignPage() {
 
   if (!user) {
     return (
-      <MainAppLayout user={null}>
         <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary"/>
         </div>
-      </MainAppLayout>
     )
   }
 
   return (
-    <MainAppLayout user={user}>
         <div className="flex flex-col min-h-dvh bg-gradient-to-b from-background to-muted/50">
         {/* Header com gradiente e stepper */}
         <header className="border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -533,6 +518,5 @@ export default function NewCampaignPage() {
             </div>
         </div>
         </div>
-    </MainAppLayout>
   )
 }

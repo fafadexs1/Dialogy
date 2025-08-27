@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useActionState, useOptimistic, useCallback } from 'react';
@@ -39,8 +38,7 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 }
 
 
-export default function ShortcutsPage() {
-    const [user, setUser] = useState<User | null>(null);
+export default function ShortcutsPage({ user }: { user: User | null }) {
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingShortcut, setEditingShortcut] = useState<Shortcut | null>(null);
@@ -61,20 +59,12 @@ export default function ShortcutsPage() {
     }, []);
 
      useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                const userData = await res.json();
-                setUser(userData);
-                if (userData.activeWorkspaceId) {
-                    fetchData(userData.activeWorkspaceId);
-                }
-            } else {
-                setLoading(false);
-            }
-        };
-        fetchUser();
-    }, [fetchData]);
+        if (user?.activeWorkspaceId) {
+            fetchData(user.activeWorkspaceId);
+        } else if (user) {
+            setLoading(false);
+        }
+    }, [user, fetchData]);
 
     useEffect(() => {
         if(state.success) {

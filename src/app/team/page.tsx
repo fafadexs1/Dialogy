@@ -17,7 +17,6 @@ import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeam
 import { getTags } from '@/actions/crm';
 import { getWorkspaceMembers } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
@@ -349,7 +348,7 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
 }
 
 
-export default function TeamPage() {
+export default function TeamPage({ user }: { user: User | null }) {
     const [teams, setTeams] = useState<Team[]>([]);
     const [allMembers, setAllMembers] = useState<User[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
@@ -360,21 +359,12 @@ export default function TeamPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const { toast } = useToast();
     const [workspaceId, setWorkspaceId] = useState<string | undefined>();
-    const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                const userData = await res.json();
-                setUser(userData);
-                setWorkspaceId(userData.activeWorkspaceId);
-            } else {
-                setLoading(false);
-            }
-        };
-        fetchUser();
-    }, []);
+        if(user) {
+            setWorkspaceId(user.activeWorkspaceId);
+        }
+    }, [user]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -414,8 +404,7 @@ export default function TeamPage() {
         };
 
         if(workspaceId) fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [workspaceId, toast]);
+    }, [workspaceId, toast, selectedTeamId]);
 
     const handleTeamUpdate = (teamId: string, updatedTeam: Team) => {
         setTeams(prev => prev.map(t => t.id === teamId ? updatedTeam : t));
@@ -447,16 +436,13 @@ export default function TeamPage() {
 
     if (loading || !user) {
         return (
-            <MainAppLayout user={user}>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainAppLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         );
     }
 
   return (
-    <MainAppLayout user={user}>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0 bg-card">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="h-6 w-6"/>Gestão de Equipes</h1>
@@ -543,6 +529,5 @@ export default function TeamPage() {
             </main>
         </div>
       </div>
-    </MainAppLayout>
   );
 }

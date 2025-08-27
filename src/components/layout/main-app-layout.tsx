@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import { usePathname } from 'next/navigation';
@@ -7,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
 import type { User } from '@/lib/types';
+import React from 'react';
 
 export function MainAppLayout({ user, children }: { user: User | null, children: React.ReactNode }) {
   const pathname = usePathname();

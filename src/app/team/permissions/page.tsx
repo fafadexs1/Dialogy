@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useState, useEffect, useOptimistic, useActionState, useRef } from 'react';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, Role, Permission } from '@/lib/types';
 import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -312,16 +311,13 @@ export default function PermissionsPage() {
 
     if (loading || !user) {
         return (
-            <MainAppLayout user={user}>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainAppLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         );
     }
     
     return (
-        <MainAppLayout user={user}>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                 <div>
@@ -373,6 +369,5 @@ export default function PermissionsPage() {
                 )}
             </main>
         </div>
-        </MainAppLayout>
     );
 }

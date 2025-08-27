@@ -1,7 +1,6 @@
 
 'use client';
 
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,16 +26,13 @@ export default function InviteMemberPage() {
     
     if (!user) {
         return (
-            <MainAppLayout user={null}>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainAppLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         )
     }
 
     return (
-        <MainAppLayout user={user}>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                 <h1 className="text-2xl font-bold flex items-center gap-2"><UserPlus /> Convidar Membros</h1>
@@ -79,6 +75,5 @@ export default function InviteMemberPage() {
                 </Card>
             </main>
         </div>
-        </MainAppLayout>
     )
 }

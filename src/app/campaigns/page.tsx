@@ -18,7 +18,6 @@ import {
   XCircle,
   PauseCircle,
 } from "lucide-react";
-import { MainAppLayout } from "@/components/layout/main-app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,8 +95,7 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
 }
 
 // --------- Main component ----------
-export default function CampaignsPage() {
-  const [user, setUser] = useState<User | null>(null);
+export default function CampaignsPage({ user }: { user: User | null }) {
   const { toast } = useToast();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,16 +103,6 @@ export default function CampaignsPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [channel, setChannel] = useState<Campaign['channel'] | "all">("all");
-
-  useEffect(() => {
-    const fetchUser = async () => {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-            setUser(await res.json());
-        }
-    };
-    fetchUser();
-  }, []);
 
   const fetchCampaigns = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -174,16 +162,13 @@ export default function CampaignsPage() {
 
   if (!user) {
     return (
-      <MainAppLayout user={null}>
         <div className="min-h-screen flex items-center justify-center">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
         </div>
-      </MainAppLayout>
     )
   }
 
   return (
-    <MainAppLayout user={user}>
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/40">
       {/* Topbar */}
       <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -401,6 +386,5 @@ export default function CampaignsPage() {
         </div>
       </main>
     </div>
-    </MainAppLayout>
   );
 }

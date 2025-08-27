@@ -1,15 +1,13 @@
 
-
 'use client';
 
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-// This layout now only defines the inner structure for settings pages.
-// The main layout with the sidebar is handled by the root page.
+import { useEffect, useState } from 'react';
+import type { User as UserType } from '@/lib/types';
 
 const settingsNavItems = [
     { href: '/settings/profile', label: 'Perfil', icon: User },
@@ -24,6 +22,34 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [user, setUser] = useState<UserType | null>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+  
+  // Clone children to pass the user prop down to them
+  const childrenWithProps = React.Children.map(children, child => {
+    if (React.isValidElement(child)) {
+      // @ts-ignore
+      return React.cloneElement(child, { user });
+    }
+    return child;
+  });
 
   return (
     <div className="flex flex-col flex-1 h-full">
@@ -60,7 +86,7 @@ export default function SettingsLayout({
                </nav>
           </aside>
           <main className="flex-1 overflow-y-auto p-6">
-               {children}
+               {childrenWithProps}
           </main>
       </div>
     </div>

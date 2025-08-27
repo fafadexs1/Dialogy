@@ -41,8 +41,7 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
   );
 }
 
-export default function CustomerList() {
-  const [user, setUser] = useState<User | null>(null);
+export default function CustomerList({ user }: { user: User }) {
   const [customers, setCustomers] = useState<Contact[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [agents, setAgents] = useState<User[]>([]);
@@ -64,16 +63,6 @@ export default function CustomerList() {
   const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   
-  useEffect(() => {
-    const fetchUser = async () => {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-            setUser(await res.json());
-        }
-    };
-    fetchUser();
-  }, []);
-
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     setLoading(true);
@@ -172,15 +161,7 @@ export default function CustomerList() {
     setItemsPerPage(Number(value));
     setCurrentPage(1); // Reset to first page
   };
-
-  if (!user) {
-    return (
-        <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-        </div>
-    )
-  }
-
+  
   return (
      <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-card shadow-sm p-4 border-b border-border flex-shrink-0">

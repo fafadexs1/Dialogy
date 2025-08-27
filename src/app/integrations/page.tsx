@@ -6,7 +6,6 @@ import type { User, Integration } from '@/lib/types';
 import { integrations as mockIntegrations } from '@/lib/mock-data';
 import { IntegrationCard } from '@/components/integrations/integration-card';
 import { Loader2 } from 'lucide-react';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 export default function IntegrationsPage() {
     const [integrations] = React.useState<Integration[]>(mockIntegrations);
@@ -24,16 +23,13 @@ export default function IntegrationsPage() {
 
     if (!user) {
          return (
-            <MainAppLayout user={user}>
               <div className="flex items-center justify-center h-full">
                   <Loader2 className="h-8 w-8 animate-spin text-primary"/>
               </div>
-            </MainAppLayout>
         )
     }
 
     return (
-        <MainAppLayout user={user}>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                 <h1 className="text-2xl font-bold">Extensões</h1>
@@ -45,6 +41,5 @@ export default function IntegrationsPage() {
                 </div>
             </main>
         </div>
-        </MainAppLayout>
     );
 }
