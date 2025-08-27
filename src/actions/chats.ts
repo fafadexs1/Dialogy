@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -16,11 +15,8 @@ const timeZone = 'America/Sao_Paulo';
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
-        SELECT 1
-        FROM user_workspace_roles uwr
-        JOIN role_permissions rp ON uwr.role_id = rp.role_id
-        WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND rp.permission_id = $3
-    `, [userId, workspaceId, permission]);
+        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
+    `, [userId, workspaceId]);
     return res.rowCount > 0;
 }
 
@@ -451,5 +447,3 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {} };
     }
 }
-
-    
