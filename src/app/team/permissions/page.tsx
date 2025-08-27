@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useOptimistic, useActionState, useRef } from 'react';
+import React, { useState, useEffect, useOptimistic, useActionState, useRef, startTransition } from 'react';
 import type { User, Role, Permission } from '@/lib/types';
 import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -119,7 +119,9 @@ function PermissionsMatrix({
     );
 
     const handlePermissionChange = async (roleId: string, permissionId: string, checked: boolean) => {
-        setOptimisticRoles({ roleId, permissionId, checked });
+        startTransition(() => {
+            setOptimisticRoles({ roleId, permissionId, checked });
+        });
         const result = await updateRolePermissionAction(roleId, permissionId, checked);
         if (result.error) {
             toast({ title: "Erro ao Salvar", description: result.error, variant: "destructive" });
@@ -219,11 +221,11 @@ function PermissionsMatrix({
                                                     <div className="text-xs text-muted-foreground font-mono">{permission.id}</div>
                                                 </td>
                                                 {optimisticRoles.map(role => (
-                                                    <td key={`${role.id}-${permission.id}`} className="text-center">
+                                                    <td key={`${'${role.id}'}-'${permission.id}'}`} className="text-center">
                                                         <Checkbox
                                                             checked={role.permissions.some(p => p.id === permission.id)}
                                                             onCheckedChange={(checked) => handlePermissionChange(role.id, permission.id, !!checked)}
-                                                            id={`${role.id}-${permission.id}`}
+                                                            id={`'${role.id}'}-'${permission.id}'`}
                                                             disabled={role.name === 'Administrador'}
                                                         />
                                                     </td>

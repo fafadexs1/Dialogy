@@ -41,6 +41,7 @@ export async function createWorkspaceAction(
         `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE) RETURNING id`,
         [newWorkspaceId]
     );
+    // CRIAÇÃO DO PAPEL DE MEMBRO - CORREÇÃO
     await client.query(
         `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Membro', 'Acesso às funcionalidades principais, mas com permissões limitadas.', TRUE)`,
         [newWorkspaceId]
