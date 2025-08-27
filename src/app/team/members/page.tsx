@@ -40,7 +40,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 import { useFormStatus } from 'react-dom';
 
@@ -56,6 +56,7 @@ function CopyButton({ textToCopy }: { textToCopy: string }) {
 function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void, children: React.ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
     const [state, formAction] = useActionState(updateMemberRoleAction, { success: false, error: undefined });
+    const { toast } = useToast();
 
     useEffect(() => {
         if(state.success) {
@@ -113,6 +114,7 @@ function SubmitButton() {
 }
 
 function MemberActions({ member, workspaceId, roles, onMutate }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void }) {
+    const { toast } = useToast();
     
     const handleRemoveMember = async () => {
         const result = await removeMemberAction(member.id, workspaceId);
@@ -175,6 +177,7 @@ export default function ManageMembersPage() {
     const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
         const fetchUser = async () => {
