@@ -46,21 +46,26 @@ export async function POST(request: Request) {
 
             // 2. Primary Action: Update our database
             await client.query(
-                'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
+                'UPDATE messages SET is_read = TRUE WHERE id::text = ANY($1::text[])',
                 [messageIdsToUpdate]
             );
             console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
             
             // 3. Secondary Action (Fire and Forget): Send read receipt to WhatsApp API
             const chatInfoRes = await client.query(
-                `SELECT c.instance_name, ct.phone_number_jid as remoteJid
-                 FROM chats c
-                 JOIN contacts ct on c.contact_id = ct.id
-                 WHERE c.id = $1`, [chatId]
+                 `SELECT ct.phone_number_jid as "remoteJid", m.instance_name 
+                 FROM chats c 
+                 JOIN contacts ct on c.contact_id = ct.id 
+                 JOIN messages m on c.id = m.chat_id
+                 WHERE c.id = $1 
+                 AND m.instance_name IS NOT NULL
+                 ORDER BY m.created_at DESC
+                 LIMIT 1`,
+                 [chatId]
             );
 
             if (chatInfoRes.rowCount > 0) {
-                 const { instance_name: instanceName, remotejid: remoteJid } = chatInfoRes.rows[0];
+                 const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
                  const messagesToMarkForApi = unreadMessages
                     .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))
                     .filter(m => m.id);
