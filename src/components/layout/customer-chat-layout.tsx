@@ -109,48 +109,55 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
 
   // Effect to mark messages as read
   useEffect(() => {
-      if (!selectedChat || !currentChatMessages.length) return;
+    if (!selectedChat || !currentChatMessages.length) return;
 
-      const unreadMessages = currentChatMessages.filter(m => !m.from_me && !m.is_read);
-      if (unreadMessages.length > 0) {
-          const messageIds = unreadMessages.map(m => m.id);
-          const messagesToMarkForApi = unreadMessages.map(m => ({
-              id: m.message_id_from_api,
-              remoteJid: m.sender?.id, // Assuming sender id is the remoteJid
-              fromMe: false, // We are marking received messages
-          })).filter(m => m.id && m.remoteJid);
-          
-          console.log(`[MARK_AS_READ] Marking ${messageIds.length} messages as read.`);
+    const unreadMessages = currentChatMessages.filter(m => !m.from_me && !m.is_read);
+    
+    // Ensure the sender object and contact JID are available before proceeding.
+    const canMarkAsRead = unreadMessages.length > 0 && selectedChat.contact?.phone_number_jid;
 
-          // Optimistically update UI
-          const updatedMessages = { ...messagesByChat };
-          updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => 
-              messageIds.includes(m.id) ? { ...m, is_read: true } : m
-          );
-          setMessagesByChat(updatedMessages);
+    if (canMarkAsRead) {
+        const messageIds = unreadMessages.map(m => m.id);
+        const remoteJid = selectedChat.contact.phone_number_jid!;
 
-          // Call API to mark as read
-          fetch('/api/chats/mark-as-read', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                  messageIds, 
-                  instanceName: selectedChat.instance_name, 
-                  messagesToMark: messagesToMarkForApi,
-              })
-          }).then(res => {
-              if (!res.ok) {
-                  // Revert optimistic update on failure
-                  console.error("Failed to mark messages as read");
-                  fetchData(); // Refetch to get the correct state
-              }
-          }).catch(() => {
-              // Revert optimistic update on failure
-              console.error("Failed to mark messages as read");
-              fetchData();
-          });
-      }
-  }, [selectedChat, currentChatMessages, messagesByChat, fetchData]);
+        const messagesToMarkForApi = unreadMessages
+            .map(m => ({
+                id: m.message_id_from_api,
+                remoteJid: remoteJid, // Use the correct JID from the chat contact
+                fromMe: false,
+            }))
+            .filter(m => m.id && m.remoteJid);
+        
+        console.log(`[MARK_AS_READ] Marking ${messageIds.length} messages as read.`);
+
+        // Optimistically update UI
+        const updatedMessages = { ...messagesByChat };
+        updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => 
+            messageIds.includes(m.id) ? { ...m, is_read: true } : m
+        );
+        setMessagesByChat(updatedMessages);
+
+        // Call API to mark as read
+        fetch('/api/chats/mark-as-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                messageIds, 
+                instanceName: selectedChat.instance_name, 
+                messagesToMark: messagesToMarkForApi,
+            })
+        }).then(res => {
+            if (!res.ok) {
+                console.error("Failed to mark messages as read");
+                fetchData(); // Revert optimistic update on failure
+            }
+        }).catch(() => {
+            console.error("Failed to mark messages as read");
+            fetchData(); // Revert optimistic update on failure
+        });
+    }
+}, [selectedChat, currentChatMessages, messagesByChat, fetchData]);
+
   
   if (isLoading) {
       return (
