@@ -17,40 +17,37 @@ async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
     console.log(`--- [PAGE_SERVER] fetchUserAndWorkspaces: Buscando dados para o usuário ID: ${userId} ---`);
     if (!userId) return null;
     try {
-        const dbUser = await db.user.findUnique({
-          where: { id: userId },
-        });
+        const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
 
-        if (!dbUser) {
+        if (userRes.rowCount === 0) {
            console.error('[PAGE_SERVER] fetchUserAndWorkspaces: Nenhum usuário encontrado com o ID:', userId);
            return null;
         }
-        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.fullName}`);
+        const dbUser = userRes.rows[0];
+        console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Usuário encontrado: ${dbUser.full_name}`);
 
-        const userWorkspaceRoles = await db.userWorkspaceRole.findMany({
-            where: { userId: userId },
-            include: {
-                workspace: {
-                    select: { id: true, name: true, avatarUrl: true }
-                }
-            }
-        });
+        const workspacesRes = await db.query(`
+            SELECT w.id, w.name, w.avatar_url
+            FROM workspaces w
+            JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
+            WHERE uwr.user_id = $1
+        `, [userId]);
 
-        const workspaces: Workspace[] = userWorkspaceRoles.map(role => ({
-            id: role.workspace.id,
-            name: role.workspace.name,
-            avatar: role.workspace.avatarUrl || ''
+        const workspaces: Workspace[] = workspacesRes.rows.map(r => ({
+            id: r.id,
+            name: r.name,
+            avatar: r.avatar_url || ''
         }));
         
         const userObject: User = {
             id: dbUser.id,
-            name: dbUser.fullName,
-            firstName: dbUser.fullName.split(' ')[0] || '',
-            lastName: dbUser.fullName.split(' ').slice(1).join(' ') || '',
-            avatar: dbUser.avatarUrl || undefined,
+            name: dbUser.full_name,
+            firstName: dbUser.full_name.split(' ')[0] || '',
+            lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
+            avatar: dbUser.avatar_url || undefined,
             email: dbUser.email,
             workspaces,
-            activeWorkspaceId: dbUser.lastActiveWorkspaceId || workspaces[0]?.id,
+            activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
         };
         console.log(`[PAGE_SERVER] fetchUserAndWorkspaces: Objeto de usuário montado:`, userObject);
         return userObject;
