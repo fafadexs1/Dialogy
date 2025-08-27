@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
@@ -44,6 +43,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 import { useFormStatus } from 'react-dom';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 function CopyButton({ textToCopy }: { textToCopy: string }) {
     const { toast } = useToast();
@@ -177,6 +177,19 @@ export default function ManageMembersPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if(res.ok) {
+                setUser(await res.json());
+            } else {
+                 setLoading(false);
+                 setError("Falha ao carregar dados do usuário.");
+            }
+        };
+        fetchUser();
+    }, []);
+
     const fetchData = React.useCallback(async (workspaceId: string) => {
         if (!workspaceId) return;
         setLoading(true);
@@ -205,33 +218,25 @@ export default function ManageMembersPage() {
     }, []);
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if(res.ok) {
-                const userData = await res.json();
-                setUser(userData);
-                if(userData.activeWorkspaceId) {
-                    fetchData(userData.activeWorkspaceId);
-                }
-            } else {
-                 setLoading(false);
-                 setError("Falha ao carregar dados do usuário.");
-            }
-        };
-        fetchUser();
-    }, [fetchData]);
+        if (user?.activeWorkspaceId) {
+            fetchData(user.activeWorkspaceId);
+        }
+    }, [user, fetchData]);
 
-    if (loading) {
+    if (loading || !user) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainAppLayout user={user}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainAppLayout>
         );
     }
     
     const activeWorkspace = user?.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
     return (
+        <MainAppLayout user={user}>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                 <h1 className="text-2xl font-bold flex items-center gap-2"><ShieldAlert /> Gerenciar Membros</h1>
@@ -324,5 +329,6 @@ export default function ManageMembersPage() {
                 </Card>
             </main>
         </div>
+        </MainAppLayout>
     )
 }

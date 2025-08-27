@@ -2,8 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -28,7 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { getSystemAgents, createSystemAgent, deleteSystemAgent, updateSystemAgent } from '@/actions/system-agents';
-import { type SystemAgent } from '@/lib/types';
+import { type SystemAgent, type User } from '@/lib/types';
 import { Loader2, PlusCircle, MoreVertical, Edit, Trash2, Copy, Rocket, KeyRound, Webhook, Save } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -117,12 +116,22 @@ function CopyButton({ textToCopy }: { textToCopy: string }) {
 }
 
 export default function RobotsPage() {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [agents, setAgents] = useState<SystemAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<SystemAgent | null>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -138,8 +147,10 @@ export default function RobotsPage() {
   }, [user?.activeWorkspaceId, toast]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (user) {
+        fetchData();
+    }
+  }, [user, fetchData]);
   
   const handleSuccess = () => {
     setIsModalOpen(false);
@@ -163,11 +174,11 @@ export default function RobotsPage() {
   }
 
   if (!user) {
-    return <MainLayout><div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary"/></div></MainLayout>;
+    return <MainAppLayout user={user}><div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary"/></div></MainAppLayout>;
   }
 
   return (
-    <MainLayout user={user}>
+    <MainAppLayout user={user}>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
           <div>
@@ -269,6 +280,6 @@ export default function RobotsPage() {
           )}
         </main>
       </div>
-    </MainLayout>
+    </MainAppLayout>
   );
 }

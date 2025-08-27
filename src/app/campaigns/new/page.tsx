@@ -1,16 +1,14 @@
 
-
 'use client';
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
-import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth.tsx';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { useToast } from '@/hooks/use-toast';
 import { getContacts } from '@/actions/crm';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { createCampaign } from '@/actions/campaigns';
-import type { Contact as ContactType, EvolutionInstance } from '@/lib/types';
+import type { Contact as ContactType, EvolutionInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
@@ -176,7 +174,7 @@ const TEMPLATES = [
 // Página principal
 // ---------------------------------------------------------
 export default function NewCampaignPage() {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
   const { toast } = useToast();
 
@@ -199,6 +197,16 @@ export default function NewCampaignPage() {
   
   const [selectedCrmIds, setSelectedCrmIds] = useState(() => new Set());
   
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
+
   // Fetch initial data
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
@@ -281,8 +289,18 @@ export default function NewCampaignPage() {
   const remaining = maxChars - message.length;
   const remainingClass = remaining < 0 ? "text-red-600" : remaining < 50 ? "text-amber-600" : "text-muted-foreground";
 
+  if (!user) {
+    return (
+      <MainAppLayout user={null}>
+        <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+        </div>
+      </MainAppLayout>
+    )
+  }
+
   return (
-    <MainLayout>
+    <MainAppLayout user={user}>
         <div className="flex flex-col min-h-dvh bg-gradient-to-b from-background to-muted/50">
         {/* Header com gradiente e stepper */}
         <header className="border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -515,6 +533,6 @@ export default function NewCampaignPage() {
             </div>
         </div>
         </div>
-    </MainLayout>
+    </MainAppLayout>
   )
 }

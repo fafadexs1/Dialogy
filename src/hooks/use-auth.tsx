@@ -1,3 +1,3 @@
-// Este arquivo foi movido para use-auth.tsx para suportar JSX.
-// O conteúdo foi migrado para evitar erros de compilação.
-// DEPRECATED: This hook is no longer in use and will be removed. User data is now passed via props.
+
+// DEPRECATED: This hook is no longer in use and has been removed.
+// User data is now passed down from server components via props or fetched via API routes.

@@ -1,10 +1,9 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import Image from 'next/image';
-import { MainLayout } from '@/components/layout/main-layout';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace, EvolutionInstanceCreationPayload } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -30,7 +29,6 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { 
     getEvolutionApiConfig, 
     saveEvolutionApiConfig, 
@@ -242,7 +240,7 @@ function SaveConfigButton() {
 }
 
 export default function EvolutionApiPage() {
-    const user = useAuth();
+    const [user, setUser] = useState<User | null>(null);
     const [instances, setInstances] = useState<EvolutionInstance[]>([]);
     const [config, setConfig] = useState<EvolutionApiConfig | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -252,6 +250,17 @@ export default function EvolutionApiPage() {
     
     const { toast } = useToast();
     const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                const userData = await res.json();
+                setUser(userData);
+            }
+        };
+        fetchUser();
+    }, []);
 
     const fetchData = useCallback(async (workspaceId: string) => {
         setIsLoading(true);
@@ -380,16 +389,16 @@ export default function EvolutionApiPage() {
 
     if (!user) {
         return (
-            <MainLayout>
+            <MainAppLayout user={user}>
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary"/>
                 </div>
-            </MainLayout>
+            </MainAppLayout>
         )
     }
 
     return (
-        <MainLayout>
+        <MainAppLayout user={user}>
             <div className="flex flex-col flex-1 h-full">
                 <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
                     <h1 className="text-2xl font-bold flex items-center gap-2"><Settings /> Conexões com a Evolution API</h1>
@@ -552,6 +561,6 @@ export default function EvolutionApiPage() {
                     </div>
                 </main>
             </div>
-        </MainLayout>
+        </MainAppLayout>
     );
 }

@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -18,7 +17,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import CustomerProfile from './customer-profile';
 import { AddActivityForm } from './add-activity-form';
 import { LogAttemptForm } from './log-attempt-form';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { getContacts, getTags, getWorkspaceUsers, deleteContactAction } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -44,7 +42,7 @@ function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (acti
 }
 
 export default function CustomerList() {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const [customers, setCustomers] = useState<Contact[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [agents, setAgents] = useState<User[]>([]);
@@ -66,6 +64,16 @@ export default function CustomerList() {
   const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
+
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     setLoading(true);
@@ -93,8 +101,10 @@ export default function CustomerList() {
   }, [user?.activeWorkspaceId]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (user) {
+        fetchData();
+    }
+  }, [user, fetchData]);
 
 
   const handleAction = useCallback(async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {

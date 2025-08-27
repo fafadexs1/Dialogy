@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useOptimistic, useActionState, useRef } from 'react';
@@ -257,6 +256,7 @@ function CreateRoleButton() {
 
 // --- Main Page Component ---
 export default function PermissionsPage() {
+    const [user, setUser] = useState<User | null>(null);
     const [roles, setRoles] = useState<Role[]>([]);
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [loading, setLoading] = useState(true);
@@ -269,6 +269,7 @@ export default function PermissionsPage() {
             const res = await fetch('/api/user');
             if (res.ok) {
                 const userData = await res.json();
+                setUser(userData);
                 setWorkspaceId(userData.activeWorkspaceId);
             }
         };
@@ -299,23 +300,28 @@ export default function PermissionsPage() {
     }, [workspaceId]);
 
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        if (workspaceId) {
+            fetchData();
+        }
+    }, [workspaceId, fetchData]);
     
     const handleSuccess = () => {
         setIsCreateModalOpen(false);
         fetchData();
     }
 
-    if (loading) {
+    if (loading || !user) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainAppLayout user={user}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainAppLayout>
         );
     }
     
     return (
+        <MainAppLayout user={user}>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
                 <div>
@@ -367,5 +373,6 @@ export default function PermissionsPage() {
                 )}
             </main>
         </div>
+        </MainAppLayout>
     );
 }

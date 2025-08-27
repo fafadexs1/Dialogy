@@ -3,6 +3,10 @@
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
+import type { User } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 
 export default function RootLayout({
@@ -10,6 +14,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  
+  // Await the user data here to pass down
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+
   return (
     <html lang="en" className="h-full bg-background light" suppressHydrationWarning>
       <head>
@@ -20,7 +30,9 @@ export default function RootLayout({
       </head>
       <body className="h-full font-body antialiased">
             <PresenceProvider>
-                {children}
+              <MainAppLayout user={authUser as User | null}>
+                  {children}
+              </MainAppLayout>
             </PresenceProvider>
         <Toaster />
       </body>

@@ -18,6 +18,7 @@ import {
   XCircle,
   PauseCircle,
 } from "lucide-react";
+import { MainAppLayout } from "@/components/layout/main-app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,9 +40,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
-import { useAuth } from "@/hooks/use-auth";
 import { getCampaigns, deleteCampaign, deleteCampaigns } from "@/actions/campaigns";
-import type { Campaign } from "@/lib/types";
+import type { Campaign, User } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -97,7 +97,7 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
 
 // --------- Main component ----------
 export default function CampaignsPage() {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,6 +105,16 @@ export default function CampaignsPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [channel, setChannel] = useState<Campaign['channel'] | "all">("all");
+
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
 
   const fetchCampaigns = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -119,8 +129,10 @@ export default function CampaignsPage() {
   }, [user?.activeWorkspaceId, toast]);
 
   useEffect(() => {
-    fetchCampaigns();
-  }, [fetchCampaigns]);
+    if (user) {
+        fetchCampaigns();
+    }
+  }, [user, fetchCampaigns]);
 
   const filtered = useMemo(() => {
     return campaigns.filter((c) =>
@@ -162,13 +174,16 @@ export default function CampaignsPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      </div>
+      <MainAppLayout user={null}>
+        <div className="min-h-screen flex items-center justify-center">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+      </MainAppLayout>
     )
   }
 
   return (
+    <MainAppLayout user={user}>
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/40">
       {/* Topbar */}
       <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -386,5 +401,6 @@ export default function CampaignsPage() {
         </div>
       </main>
     </div>
+    </MainAppLayout>
   );
 }

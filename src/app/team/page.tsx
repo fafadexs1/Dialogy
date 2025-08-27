@@ -1,9 +1,7 @@
 
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, Team, BusinessHour, Role, Tag } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +17,7 @@ import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeam
 import { getTags } from '@/actions/crm';
 import { getWorkspaceMembers } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
@@ -363,14 +362,15 @@ export default function TeamPage() {
     const [workspaceId, setWorkspaceId] = useState<string | undefined>();
     const [user, setUser] = useState<User | null>(null);
 
-    // This is a temporary solution to get user data until a proper global context is established
     useEffect(() => {
         const fetchUser = async () => {
-            const res = await fetch('/api/user'); // This assumes there's an API route to get the logged-in user
+            const res = await fetch('/api/user');
             if (res.ok) {
                 const userData = await res.json();
                 setUser(userData);
                 setWorkspaceId(userData.activeWorkspaceId);
+            } else {
+                setLoading(false);
             }
         };
         fetchUser();
@@ -445,15 +445,18 @@ export default function TeamPage() {
     const filteredTeams = teams.filter(team => team.name.toLowerCase().includes(searchTerm.toLowerCase()));
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
 
-    if (loading) {
+    if (loading || !user) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-            </div>
+            <MainAppLayout user={user}>
+                <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            </MainAppLayout>
         );
     }
 
   return (
+    <MainAppLayout user={user}>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0 bg-card">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="h-6 w-6"/>Gestão de Equipes</h1>
@@ -540,5 +543,6 @@ export default function TeamPage() {
             </main>
         </div>
       </div>
+    </MainAppLayout>
   );
 }

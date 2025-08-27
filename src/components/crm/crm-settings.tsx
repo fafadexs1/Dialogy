@@ -1,9 +1,8 @@
 
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { CustomFieldDefinition, SelectableOption, Tag } from '@/lib/types';
+import type { CustomFieldDefinition, SelectableOption, Tag, User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,7 +31,6 @@ import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { getTags, createTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 
@@ -158,7 +156,7 @@ function OptionsManager({
 
 
 export function CrmSettings({ children }: { children: React.ReactNode }) {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
@@ -167,6 +165,16 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        }
+    };
+    fetchUser();
+  }, []);
 
   const fetchAllData = React.useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -183,8 +191,10 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
   }, [user?.activeWorkspaceId]);
 
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+    if (user) {
+        fetchAllData();
+    }
+  }, [user, fetchAllData]);
 
   const handleAddTag = async (label: string, color: string, isCloseReason: boolean) => {
     if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
