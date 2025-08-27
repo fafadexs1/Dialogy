@@ -117,14 +117,17 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
         console.log(`[MARK_AS_READ] Marking messages as read for chat ${selectedChat.id}.`);
 
         // Optimistically update UI to remove unread count immediately
-        const updatedChats = chats.map(c => 
+        setChats(prevChats => prevChats.map(c => 
             c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c
-        );
-        setChats(updatedChats);
+        ));
         
-        const updatedMessages = { ...messagesByChat };
-        updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => ({ ...m, is_read: true }));
-        setMessagesByChat(updatedMessages);
+        setMessagesByChat(prevMessages => {
+            const updatedMessages = { ...prevMessages };
+            if (updatedMessages[selectedChat.id]) {
+                updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => ({ ...m, is_read: true }));
+            }
+            return updatedMessages;
+        });
         
         // Call API in the background
         fetch('/api/chats/mark-as-read', {
@@ -142,7 +145,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
             fetchData();
         });
     }
-}, [selectedChat, currentChatMessages, chats, messagesByChat, fetchData]);
+}, [selectedChat, currentChatMessages, fetchData]);
 
   
   if (isLoading) {
