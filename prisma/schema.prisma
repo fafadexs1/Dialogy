@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // MODELS
@@ -34,13 +35,11 @@ model User {
   createdContacts         Contact[]               @relation("ContactOwner")
   createdTags             Tag[]                   @relation("TagCreator")
   registeredActivities    Activity[]
-  // Mensagens em que o usuário é o remetente
   sentMessages            Message[]               @relation("MessageSenderUser")
   createdCampaigns        Campaign[]
   autopilotConfigs        AutopilotConfig[]
   shortcuts               Shortcut[]
-  createdSystemAgents     SystemAgent[]
-  // Chats em que o usuário é o agente responsável (lado oposto de Chat.agent)
+  createdSystemAgents     SystemAgent[]           @relation("SystemAgentCreator")
   assignedChats           Chat[]                  @relation("ChatAgent")
 
   @@map("users")
@@ -335,7 +334,7 @@ model SystemAgent {
 
   // Relations
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator       User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  creator       User      @relation("SystemAgentCreator", fields: [createdById], references: [id], onDelete: Cascade)
   messages      Message[] @relation("MessageSenderSystemAgent")
 
   @@unique([workspaceId, name])
@@ -375,7 +374,11 @@ model Message {
   id                      String      @id @default(uuid())
   workspaceId             String      @map("workspace_id")
   chatId                  String      @map("chat_id")
-  senderId                String?     @map("sender_id")
+
+  // Remetente como User (chave distinta)
+  senderUserId            String?     @map("sender_user_id")
+  // Remetente como SystemAgent (chave distinta)
+  senderSystemAgentId     String?     @map("sender_system_agent_id")
 
   type                    String      // 'text', 'system', 'audio', etc.
   content                 String?
@@ -399,9 +402,12 @@ model Message {
   // Relations
   workspace               Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   chat                    Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  senderUser              User?        @relation("MessageSenderUser", fields: [senderId], references: [id], onDelete: SetNull, name: "SenderUser")
-  senderSystemAgent       SystemAgent? @relation("MessageSenderSystemAgent", fields: [senderId], references: [id], onDelete: SetNull, name: "SenderSystemAgent")
 
+  // Relação com User (usa senderUserId)
+  sender                  User?        @relation("MessageSenderUser", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  // Relação com SystemAgent (usa senderSystemAgentId)
+  systemAgentSender       SystemAgent? @relation("MessageSenderSystemAgent", fields: [senderSystemAgentId], references: [id], onDelete: SetNull)
 
   @@map("messages")
 }
@@ -519,5 +525,3 @@ model EvolutionApiInstance {
   @@unique([configId, name])
   @@map("evolution_api_instances")
 }
-
-    
