@@ -44,12 +44,13 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Extensão pgcrypto garantida.');
 
     // --- 2. Garante UUIDs para as tabelas principais ---
+    // Removidas tabelas de junção que não possuem uma coluna 'id' primária.
     const tablesToUpdate = [
-        'workspaces', 'roles', 'user_workspace_roles', 'teams', 
-        'team_members', 'contacts', 'tags', 'contact_tags', 
+        'workspaces', 'roles', 'teams', 
+        'contacts', 'tags',
         'activities', 'custom_field_definitions', 'contact_custom_field_values', 
         'chats', 'messages', 'workspace_invites', 'user_invites',
-        'role_permissions', 'system_agents', 'autopilot_configs', 
+        'system_agents', 'autopilot_configs', 
         'autopilot_rules', 'autopilot_usage_logs', 'evolution_api_configs', 
         'evolution_api_instances', 'shortcuts', 'campaigns', 'campaign_recipients'
     ];
