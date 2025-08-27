@@ -221,11 +221,11 @@ function PermissionsMatrix({
                                                     <div className="text-xs text-muted-foreground font-mono">{permission.id}</div>
                                                 </td>
                                                 {optimisticRoles.map(role => (
-                                                    <td key={`${'${role.id}'}-'${permission.id}'}`} className="text-center">
+                                                    <td key={`${role.id}-${permission.id}`} className="text-center">
                                                         <Checkbox
                                                             checked={role.permissions.some(p => p.id === permission.id)}
                                                             onCheckedChange={(checked) => handlePermissionChange(role.id, permission.id, !!checked)}
-                                                            id={`'${role.id}'}-'${permission.id}'`}
+                                                            id={`${role.id}-${permission.id}`}
                                                             disabled={role.name === 'Administrador'}
                                                         />
                                                     </td>
