@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useState, useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,11 +13,19 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { joinWorkspaceAction } from '@/actions/invites';
+import { useRouter } from 'next/navigation';
 
 
 function CreateWorkspaceForm() {
-    const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
+    const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
     const { pending } = useFormStatus();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (state.success) {
+            router.push('/');
+        }
+    }, [state, router]);
 
     return (
          <form action={formAction}>
@@ -39,11 +47,11 @@ function CreateWorkspaceForm() {
                         disabled={pending}
                     />
                 </div>
-                    {errorMessage && (
+                    {state.error && (
                     <Alert variant="destructive" className="mt-4">
                         <AlertCircle className="h-4 w-4" />
                         <AlertTitle>Erro ao criar workspace</AlertTitle>
-                        <AlertDescription>{errorMessage}</AlertDescription>
+                        <AlertDescription>{state.error}</AlertDescription>
                     </Alert>
                 )}
             </CardContent>
@@ -128,5 +136,3 @@ export function WorkspaceOnboarding({ user }: { user: User }) {
     </div>
   );
 }
-
-    

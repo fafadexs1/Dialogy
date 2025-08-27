@@ -8,20 +8,20 @@ import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 
 export async function createWorkspaceAction(
-  prevState: string | null,
+  prevState: any,
   formData: FormData
-): Promise<string | null> {
+): Promise<{ success: boolean; error: string | null }> {
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return 'Usuário não autenticado.';
+    return { success: false, error: 'Usuário não autenticado.' };
   }
   const userId = user.id;
   const workspaceName = formData.get('workspaceName') as string;
 
   if (!workspaceName) {
-    return 'O nome do workspace é obrigatório.';
+    return { success: false, error: 'O nome do workspace é obrigatório.' };
   }
 
   const client = await db.connect();
@@ -65,15 +65,16 @@ export async function createWorkspaceAction(
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[CREATE_WORKSPACE] Erro:', error);
-    return 'Ocorreu um erro no servidor ao criar o workspace.';
+    return { success: false, error: 'Ocorreu um erro no servidor ao criar o workspace.' };
   } finally {
     client.release();
   }
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
-  // Redireciona para a página principal após a criação bem-sucedida.
-  redirect('/');
+  
+  // Return success state instead of redirecting
+  return { success: true, error: null };
 }
 
 
