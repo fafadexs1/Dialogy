@@ -2,9 +2,9 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -22,7 +22,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  * Esta ação é chamada pelo botão "Assumir Atendimento".
  */
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return { success: false, error: "Usuário não autenticado." };
     }
@@ -56,15 +58,25 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
 export async function transferChatAction(
     input: { chatId: string; teamId?: string; agentId?: string },
     // Optional parameter to accept a session-like object from an API call
-    prefetchedSession?: { user: { id: string, name: string } }
+    prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
 ): Promise<{ success: boolean; error?: string }> {
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
     
-    const session = prefetchedSession || await getServerSession(authOptions);
-    if (!session?.user?.id || !session?.user?.name) {
+    let sessionToUse = prefetchedSession;
+    
+    if (!sessionToUse) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            sessionToUse = { user: { id: session.user.id, name: session.user.user_metadata.full_name, email: session.user.email } };
+        }
+    }
+
+    if (!sessionToUse?.user?.id || !sessionToUse?.user?.name) {
         return { success: false, error: "Usuário não autenticado." };
     }
-    const currentAgentId = session.user.id;
-    const currentAgentName = session.user.name;
+    const currentAgentId = sessionToUse.user.id;
+    const currentAgentName = sessionToUse.user.name;
 
     const { chatId, teamId, agentId } = input;
 
@@ -192,13 +204,16 @@ export async function closeChatAction(
     reasonTagId: string | null,
     notes: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id || !session?.user?.name) {
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.user?.id || !session.user.user_metadata.full_name) {
         return { success: false, error: "Usuário não autenticado." };
     }
 
     const currentAgentId = session.user.id;
-    const currentAgentName = session.user.name;
+    const currentAgentName = session.user.user_metadata.full_name;
 
     if (!chatId) {
         return { success: false, error: "ID do chat é obrigatório." };
@@ -268,7 +283,9 @@ export async function closeChatAction(
 
 
 export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return { success: false, error: "Usuário não autenticado." };
     }

@@ -3,9 +3,9 @@
 
 import { db } from '@/lib/db';
 import type { Shortcut } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 async function hasAdminPermission(userId: string, workspaceId: string): Promise<boolean> {
     const res = await db.query(`
@@ -18,7 +18,9 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
 }
 
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { shortcuts: null, error: "Usuário não autenticado." };
     const userId = session.user.id;
 
@@ -42,7 +44,9 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
 
 
 export async function saveShortcut(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     const userId = session.user.id;
 
@@ -98,7 +102,9 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
 
 export async function deleteShortcut(shortcutId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     const userId = session.user.id;
     

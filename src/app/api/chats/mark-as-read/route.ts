@@ -1,9 +1,9 @@
 
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
 import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 interface MarkAsReadPayload {
     messageIds: string[];
@@ -16,7 +16,9 @@ interface MarkAsReadPayload {
 }
 
 export async function POST(request: Request) {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

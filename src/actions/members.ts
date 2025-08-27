@@ -3,9 +3,9 @@
 
 import { db } from '@/lib/db';
 import type { Role, WorkspaceMember } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -18,7 +18,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { members: [], error: "Usuário não autenticado." };
     
     // Check if the user has permission to view members
@@ -68,7 +70,9 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
 }
 
 export async function removeMemberAction(memberId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     if (!await hasPermission(session.user.id, workspaceId, 'members:remove')) {
@@ -101,7 +105,9 @@ export async function updateMemberRoleAction(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const memberId = formData.get('memberId') as string;

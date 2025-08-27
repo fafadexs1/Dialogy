@@ -14,8 +14,8 @@ import {z} from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import type { AutopilotConfig } from '@/lib/types';
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 const SummarizeChatInputSchema = z.object({
   chatHistory: z.string().describe('The complete chat history to summarize.'),
@@ -37,7 +37,9 @@ const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
 
 
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) {
     throw new Error("User not authenticated.");
   }

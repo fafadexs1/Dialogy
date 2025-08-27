@@ -4,8 +4,8 @@
 
 import { db } from '@/lib/db';
 import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 // Helper to add agent and team filters to a query
 const addFilters = (
@@ -54,7 +54,9 @@ export async function getAnalyticsData(
     filters: { teamId?: string; agentId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return null;
 
     try {
@@ -141,7 +143,9 @@ export async function getAgentPerformance(
     filters: { teamId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return null;
     
     try {
@@ -214,7 +218,9 @@ export async function getAgentPerformance(
 }
 
 export async function getWorkspaceMembers(workspaceId: string, teamId?: string): Promise<{ members: User[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { members: null, error: "Usuário não autenticado." };
 
     try {

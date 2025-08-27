@@ -13,8 +13,8 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 
 const SmartRepliesInputSchema = z.object({
@@ -43,7 +43,9 @@ const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
 
 
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) {
     throw new Error("User not authenticated.");
   }

@@ -2,12 +2,12 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import type { WorkspaceInvite } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -22,7 +22,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return "Usuário não autenticado.";
     
     const workspaceId = formData.get('workspaceId') as string;
@@ -53,7 +55,9 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 }
 
 export async function getWorkspaceInvites(workspaceId: string): Promise<{invites: WorkspaceInvite[] | null, error?: string}> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { invites: null, error: "Usuário não autenticado."};
     
     if (!await hasPermission(session.user.id, workspaceId, 'workspace:invites:manage')) {
@@ -85,7 +89,9 @@ export async function getWorkspaceInvites(workspaceId: string): Promise<{invites
 }
 
 export async function revokeWorkspaceInvite(inviteId: string): Promise<{success: boolean, error?: string}> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado."};
 
     try {
@@ -110,7 +116,9 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{success:
 
 
 export async function joinWorkspaceAction(prevState: any, formData: FormData): Promise<{ success: boolean; error: string | null }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };
     }

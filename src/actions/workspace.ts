@@ -3,15 +3,17 @@
 
 import { revalidatePath } from 'next/cache';
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 export async function createWorkspaceAction(
   prevState: string | null,
   formData: FormData
 ): Promise<string | null> {
-  const session = await getServerSession(authOptions);
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user?.id) {
     return 'Usuário não autenticado.';
   }
@@ -66,7 +68,9 @@ export async function updateWorkspaceAction(
   prevState: string | null,
   formData: FormData
 ): Promise<string | null> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return 'Usuário não autenticado.';
     }
@@ -98,7 +102,9 @@ export async function updateWorkspaceAction(
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
         return;

@@ -4,10 +4,9 @@
 
 import { db } from '@/lib/db';
 import type { Contact, Tag, User, Activity, CustomFieldDefinition } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
-
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -21,7 +20,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function getContacts(workspaceId: string): Promise<{ contacts: Contact[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { contacts: null, error: "Usuário não autenticado." };
 
     if (!await hasPermission(session.user.id, workspaceId, 'crm:view')) {
@@ -74,7 +75,9 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
 }
 
 export async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const workspaceId = formData.get('workspaceId') as string;
@@ -165,7 +168,9 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 }
 
 export async function deleteContactAction(contactId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     
     const client = await db.connect();
@@ -200,7 +205,9 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
 // --- TAGS ACTIONS ---
 
 export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { tags: null, error: "Usuário não autenticado." };
 
     try {
@@ -218,7 +225,9 @@ export async function createTag(
     color: string, 
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     // Basic permission check
@@ -248,7 +257,9 @@ export async function updateTag(
     color: string, 
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     try {
@@ -276,7 +287,9 @@ export async function updateTag(
 
 
 export async function deleteTag(tagId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     try {
@@ -305,7 +318,9 @@ export async function deleteTag(tagId: string): Promise<{ success: boolean; erro
 // --- CUSTOM FIELDS ---
 
 export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ fields: CustomFieldDefinition[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { fields: null, error: "Usuário não autenticado." };
 
     try {
@@ -321,7 +336,9 @@ export async function createCustomFieldDefinition(
     workspaceId: string,
     field: Omit<CustomFieldDefinition, 'id'>
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
@@ -343,7 +360,9 @@ export async function createCustomFieldDefinition(
 
 
 export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     try {
@@ -369,7 +388,9 @@ export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ su
 
 
 export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { users: null, error: "Usuário não autenticado." };
 
     try {
@@ -392,7 +413,9 @@ export async function addActivityAction(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string | null; }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const contactId = formData.get('contactId') as string;

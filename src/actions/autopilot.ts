@@ -2,10 +2,10 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -19,7 +19,10 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
     rules: NexusFlowInstance[] | null,
     error?: string
 }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
+
     if (!session?.user?.id) {
         return { config: null, rules: null, error: "Usuário não autenticado." };
     }
@@ -62,7 +65,10 @@ export async function saveAutopilotConfig(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
+
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
@@ -122,7 +128,9 @@ export async function saveAutopilotRule(
     configId: string, 
     rule: Omit<NexusFlowInstance, 'enabled'>
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
 
     try {
@@ -159,7 +167,9 @@ export async function saveAutopilotRule(
 
 
 export async function deleteAutopilotRule(ruleId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
 
     try {
@@ -173,7 +183,9 @@ export async function deleteAutopilotRule(ruleId: string): Promise<{ success: bo
 }
 
 export async function toggleAutopilotRule(ruleId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
     
     try {
@@ -214,7 +226,9 @@ export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
 
 
 export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: AutopilotUsageLog[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { logs: null, error: "Usuário não autenticado." };
     
     // We can assume if the user is fetching logs, they have access to the config.

@@ -2,11 +2,11 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import type { Campaign, CampaignRecipient, Contact } from '@/lib/types';
 import { sendAutomatedMessageAction } from './messages';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -23,7 +23,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { campaigns: null, error: "Usuário não autenticado." };
 
     try {
@@ -60,7 +62,9 @@ export async function createCampaign(
     message: string,
     contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
 ): Promise<{ campaign: Campaign | null, error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { campaign: null, error: "Usuário não autenticado." };
     
     if (!workspaceId || !instanceName || !message || contactIdentifiers.length === 0) {
@@ -233,7 +237,9 @@ async function startCampaignSending(campaignId: string) {
 
 
 export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const client = await db.connect();
@@ -270,7 +276,9 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
 }
 
 export async function deleteCampaigns(campaignIds: string[]): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const client = await db.connect();

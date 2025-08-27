@@ -2,11 +2,11 @@
 'use server';
 
 import { prisma } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { MessageMetadata } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 
 /**
@@ -259,7 +259,9 @@ export async function sendAgentMessageAction(
     chatId: string,
     content: string,
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
@@ -297,7 +299,9 @@ export async function sendMediaAction(
         thumbnail?: string; 
     }[]
 ): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
         return { success: false, error: 'Usuário não autenticado.' };
     }

@@ -3,9 +3,9 @@
 
 import { db } from '@/lib/db';
 import type { Team, User, BusinessHour, Role } from '@/lib/types';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -19,7 +19,9 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { teams: [], error: "Usuário não autenticado." };
 
     if (!await hasPermission(session.user.id, workspaceId, 'teams:view')) {
@@ -74,7 +76,9 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
 }
 
 export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ team: Team | null; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { team: null, error: "Usuário não autenticado." };
     
     if (!await hasPermission(session.user.id, data.workspaceId, 'teams:edit')) {
@@ -83,8 +87,8 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
     try {
         const teamRes = await db.query(
-            'INSERT INTO teams (workspace_id, name, role_id) VALUES ($1, $2, $3) RETURNING id, name, color, role_id, tag_id',
-            [data.workspaceId, data.name, data.roleId]
+            'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id, tag_id',
+            [data.workspaceId, data.name, data.roleId, session.user.id]
         );
         
         const newTeam = teamRes.rows[0];
@@ -114,7 +118,9 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 }
 
 export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
     
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
@@ -150,7 +156,9 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 }
 
 export async function deleteTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
@@ -172,7 +180,9 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
 
 
 export async function addTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-     const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
@@ -193,7 +203,9 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
 }
 
 export async function removeTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-     const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
@@ -214,7 +226,9 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 }
 
 export async function updateBusinessHours(teamId: string, day: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
@@ -244,7 +258,9 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
 }
 
 export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
-    const session = await getServerSession(authOptions);
+    const cookieStore = cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return { teams: [], error: "Usuário não autenticado." };
 
     // You might want to add a permission check here as well, e.g., 'teams:view'
