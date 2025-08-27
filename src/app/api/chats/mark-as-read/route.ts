@@ -4,15 +4,11 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
+import type { Message } from '@/lib/types';
+import { revalidatePath } from 'next/cache';
 
 interface MarkAsReadPayload {
-    messageIds: string[];
-    instanceName?: string;
-    messagesToMark?: {
-        remoteJid: string;
-        fromMe: boolean;
-        id: string;
-    }[];
+    chatId: string;
 }
 
 export async function POST(request: Request) {
@@ -24,31 +20,70 @@ export async function POST(request: Request) {
     
     try {
         const body: MarkAsReadPayload = await request.json();
-        const { messageIds, instanceName, messagesToMark } = body;
+        const { chatId } = body;
 
-        if (!messageIds || messageIds.length === 0) {
-            return NextResponse.json({ error: 'Message IDs are required.' }, { status: 400 });
-        }
-
-        // --- 1. Primary Action: Update our database ---
-        // This is the most critical part.
-        await db.query(
-            'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
-            [messageIds]
-        );
-        console.log(`[MARK_AS_READ_API] ${messageIds.length} messages marked as read in the database.`);
-
-        // --- 2. Secondary Action: Send read receipt to WhatsApp API ---
-        // This is "fire and forget". We don't block the response for this.
-        // It's a nice-to-have for the user on the other end.
-        if (instanceName && messagesToMark && messagesToMark.length > 0) {
-            sendReceiptToWhatsApp(instanceName, messagesToMark).catch(error => {
-                // We only log the error, we don't fail the request because of it.
-                console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${instanceName}:`, error.message);
-            });
+        if (!chatId) {
+            return NextResponse.json({ error: 'Chat ID is required.' }, { status: 400 });
         }
         
-        return NextResponse.json({ success: true });
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            
+            // 1. Find all unread messages for this chat
+            const unreadMessagesRes = await client.query(
+                `SELECT id, message_id_from_api, from_me FROM messages WHERE chat_id = $1 AND from_me = FALSE AND is_read = FALSE`,
+                [chatId]
+            );
+            const unreadMessages: Pick<Message, 'id' | 'message_id_from_api' | 'from_me'>[] = unreadMessagesRes.rows;
+            
+            if (unreadMessages.length === 0) {
+                 await client.query('ROLLBACK');
+                 return NextResponse.json({ success: true, message: 'No unread messages.' });
+            }
+
+            const messageIdsToUpdate = unreadMessages.map(m => m.id);
+
+            // 2. Primary Action: Update our database
+            await client.query(
+                'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
+                [messageIdsToUpdate]
+            );
+            console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
+            
+            // 3. Secondary Action (Fire and Forget): Send read receipt to WhatsApp API
+            const chatInfoRes = await client.query(
+                `SELECT c.instance_name, ct.phone_number_jid as remoteJid
+                 FROM chats c
+                 JOIN contacts ct on c.contact_id = ct.id
+                 WHERE c.id = $1`, [chatId]
+            );
+
+            if (chatInfoRes.rowCount > 0) {
+                 const { instance_name: instanceName, remotejid: remoteJid } = chatInfoRes.rows[0];
+                 const messagesToMarkForApi = unreadMessages
+                    .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))
+                    .filter(m => m.id);
+
+                if (instanceName && remoteJid && messagesToMarkForApi.length > 0) {
+                     sendReceiptToWhatsApp(instanceName, messagesToMarkForApi).catch(error => {
+                        console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${instanceName}:`, error.message);
+                    });
+                }
+            }
+
+            await client.query('COMMIT');
+            
+            // Revalidate the main path to trigger data refetch on the client.
+            revalidatePath('/', 'layout');
+
+            return NextResponse.json({ success: true });
+        } catch (dbError) {
+             await client.query('ROLLBACK');
+             throw dbError; // Rethrow to be caught by the outer catch block
+        } finally {
+            client.release();
+        }
 
     } catch (error: any) {
         console.error('[MARK_AS_READ_API] Error processing request:', error);
@@ -63,7 +98,7 @@ export async function POST(request: Request) {
  */
 async function sendReceiptToWhatsApp(
     instanceName: string,
-    messagesToMark: { remoteJid: string; fromMe: boolean; id: string }[]
+    messagesToMark: { remoteJid: string; fromMe: boolean; id: string | undefined }[]
 ): Promise<void> {
     
     // Find the API config for the given instance
@@ -81,6 +116,11 @@ async function sendReceiptToWhatsApp(
     
     const { api_url, api_key } = instanceRes.rows[0];
     const apiConfig = { api_url, api_key };
+    
+    if (!apiConfig.api_url || !apiConfig.api_key) {
+      console.warn(`[MARK_AS_READ_API] API config incomplete for instance ${instanceName}.`);
+      return;
+    }
 
     const payload = {
         read: {

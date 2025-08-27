@@ -111,52 +111,38 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   useEffect(() => {
     if (!selectedChat || !currentChatMessages.length) return;
 
-    const unreadMessages = currentChatMessages.filter(m => !m.from_me && !m.is_read);
-    
-    // Ensure the sender object and contact JID are available before proceeding.
-    const canMarkAsRead = unreadMessages.length > 0 && selectedChat.contact?.phone_number_jid;
+    const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
 
-    if (canMarkAsRead) {
-        const messageIds = unreadMessages.map(m => m.id);
-        const remoteJid = selectedChat.contact.phone_number_jid!;
+    if (hasUnread) {
+        console.log(`[MARK_AS_READ] Marking messages as read for chat ${selectedChat.id}.`);
 
-        const messagesToMarkForApi = unreadMessages
-            .map(m => ({
-                id: m.message_id_from_api,
-                remoteJid: remoteJid, // Use the correct JID from the chat contact
-                fromMe: false,
-            }))
-            .filter(m => m.id && m.remoteJid);
-        
-        console.log(`[MARK_AS_READ] Marking ${messageIds.length} messages as read.`);
-
-        // Optimistically update UI
-        const updatedMessages = { ...messagesByChat };
-        updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => 
-            messageIds.includes(m.id) ? { ...m, is_read: true } : m
+        // Optimistically update UI to remove unread count immediately
+        const updatedChats = chats.map(c => 
+            c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c
         );
+        setChats(updatedChats);
+        
+        const updatedMessages = { ...messagesByChat };
+        updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => ({ ...m, is_read: true }));
         setMessagesByChat(updatedMessages);
-
-        // Call API to mark as read
+        
+        // Call API in the background
         fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                messageIds, 
-                instanceName: selectedChat.instance_name, 
-                messagesToMark: messagesToMarkForApi,
-            })
+            body: JSON.stringify({ chatId: selectedChat.id })
         }).then(res => {
             if (!res.ok) {
-                console.error("Failed to mark messages as read");
-                fetchData(); // Revert optimistic update on failure
+                console.error("Failed to mark messages as read on the server. Re-fetching to sync.");
+                // If the API call fails, refetch data to get the correct state
+                fetchData();
             }
         }).catch(() => {
-            console.error("Failed to mark messages as read");
-            fetchData(); // Revert optimistic update on failure
+            console.error("Failed to mark messages as read on the server. Re-fetching to sync.");
+            fetchData();
         });
     }
-}, [selectedChat, currentChatMessages, messagesByChat, fetchData]);
+}, [selectedChat, currentChatMessages, chats, messagesByChat, fetchData]);
 
   
   if (isLoading) {
