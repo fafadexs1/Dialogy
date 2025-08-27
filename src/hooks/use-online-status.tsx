@@ -14,9 +14,6 @@ export const usePresence = () => {
 };
 
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
-  // We can't use useAuth() here as it creates a circular dependency
-  // and the provider is at a higher level.
-  // Instead, we will fetch a simplified user object for the provider's own use.
   const [localUser, setLocalUser] = useState<User | null>(null);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
@@ -42,8 +39,16 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     if (!localUser?.activeWorkspaceId) return;
     const workspaceId = localUser.activeWorkspaceId;
     const supabase = createClient();
+    
+    // Initial fetch
     fetchOnlineAgentsCallback(workspaceId);
 
+    // Set up polling every 2 seconds
+    const intervalId = setInterval(() => {
+      fetchOnlineAgentsCallback(workspaceId);
+    }, 2000);
+
+    // Set up real-time subscription for faster updates
     const channel = supabase
       .channel('public:users')
       .on(
@@ -58,6 +63,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
       .subscribe();
 
     return () => {
+      clearInterval(intervalId); // Clear interval on cleanup
       supabase.removeChannel(channel);
     };
   }, [localUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
