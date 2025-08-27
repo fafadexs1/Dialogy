@@ -56,8 +56,8 @@ export async function getAnalyticsData(
 ): Promise<AnalyticsData | null> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
 
     try {
         const baseParams: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
@@ -145,8 +145,8 @@ export async function getAgentPerformance(
 ): Promise<AgentPerformance[] | null> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
     
     try {
         let query = `
@@ -220,8 +220,8 @@ export async function getAgentPerformance(
 export async function getWorkspaceMembers(workspaceId: string, teamId?: string): Promise<{ members: User[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { members: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { members: null, error: "Usuário não autenticado." };
 
     try {
         let query = `

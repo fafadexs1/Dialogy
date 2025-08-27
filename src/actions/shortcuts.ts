@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -20,9 +21,9 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { shortcuts: null, error: "Usuário não autenticado." };
-    const userId = session.user.id;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { shortcuts: null, error: "Usuário não autenticado." };
+    const userId = user.id;
 
     try {
         const res = await db.query(`
@@ -46,9 +47,9 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
 export async function saveShortcut(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
-    const userId = session.user.id;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
+    const userId = user.id;
 
     const id = formData.get('id') as string | null;
     // Garante que o nome seja salvo em minúsculas e sem a barra inicial
@@ -104,9 +105,9 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 export async function deleteShortcut(shortcutId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
-    const userId = session.user.id;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
+    const userId = user.id;
     
     try {
         const shortcutRes = await db.query('SELECT user_id, workspace_id FROM shortcuts WHERE id = $1', [shortcutId]);

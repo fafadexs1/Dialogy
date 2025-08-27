@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -21,10 +22,10 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { teams: [], error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { teams: [], error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:view')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:view')) {
          return { teams: [], error: "Acesso não autorizado." };
     }
 
@@ -78,17 +79,17 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
 export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ team: Team | null; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { team: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { team: null, error: "Usuário não autenticado." };
     
-    if (!await hasPermission(session.user.id, data.workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, data.workspaceId, 'teams:edit')) {
          return { team: null, error: "Você não tem permissão para criar equipes." };
     }
 
     try {
         const teamRes = await db.query(
             'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id, tag_id',
-            [data.workspaceId, data.name, data.roleId, session.user.id]
+            [data.workspaceId, data.name, data.roleId, user.id]
         );
         
         const newTeam = teamRes.rows[0];
@@ -120,14 +121,14 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
     
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
          return { success: false, error: "Você não tem permissão para editar equipes." };
     }
 
@@ -158,14 +159,14 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 export async function deleteTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
     
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
          return { success: false, error: "Você não tem permissão para remover equipes." };
     }
 
@@ -182,14 +183,14 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
 export async function addTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
     
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
          return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
     
@@ -205,14 +206,14 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
 export async function removeTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
     
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
          return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
 
@@ -228,14 +229,14 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 export async function updateBusinessHours(teamId: string, day: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
     if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
     const workspaceId = teamRes.rows[0].workspace_id;
     
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
          return { success: false, error: "Você não tem permissão para editar horários." };
     }
     
@@ -260,11 +261,11 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
 export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { teams: [], error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { teams: [], error: "Usuário não autenticado." };
 
     // You might want to add a permission check here as well, e.g., 'teams:view'
-    if (!await hasPermission(session.user.id, workspaceId, 'teams:view')) {
+    if (!await hasPermission(user.id, workspaceId, 'teams:view')) {
         return { teams: [], error: "Acesso não autorizado." };
     }
 

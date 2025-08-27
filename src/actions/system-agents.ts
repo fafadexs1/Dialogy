@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -18,10 +19,10 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { agents: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { agents: null, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'automations:manage')) {
+    if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
          return { agents: null, error: "Acesso não autorizado." };
     }
 
@@ -41,10 +42,10 @@ export async function createSystemAgent(
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'automations:manage')) {
+    if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
         return { success: false, error: "Você não tem permissão para criar agentes." };
     }
 
@@ -66,7 +67,7 @@ export async function createSystemAgent(
     try {
         const res = await db.query(
             'INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [workspaceId, data.name, data.avatar_url, data.webhook_url || null, token, session.user.id]
+            [workspaceId, data.name, data.avatar_url, data.webhook_url || null, token, user.id]
         );
         revalidatePath('/automations/robots');
         return { success: true, agent: res.rows[0] };
@@ -85,15 +86,15 @@ export async function updateSystemAgent(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         const agentRes = await db.query('SELECT workspace_id FROM system_agents WHERE id = $1', [agentId]);
         if (agentRes.rowCount === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
-        if (!await hasPermission(session.user.id, workspaceId, 'automations:manage')) {
+        if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
             return { success: false, error: "Você não tem permissão para editar agentes." };
         }
         
@@ -127,15 +128,15 @@ export async function updateSystemAgent(
 export async function deleteSystemAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         const agentRes = await db.query('SELECT workspace_id FROM system_agents WHERE id = $1', [agentId]);
         if(agentRes.rowCount === 0) return { success: false, error: 'Agente não encontrado.'};
         const workspaceId = agentRes.rows[0].workspace_id;
 
-        if (!await hasPermission(session.user.id, workspaceId, 'automations:manage')) {
+        if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
             return { success: false, error: "Você não tem permissão para remover agentes." };
         }
 

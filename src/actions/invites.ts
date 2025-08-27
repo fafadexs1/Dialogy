@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -24,8 +25,8 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return "Usuário não autenticado.";
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return "Usuário não autenticado.";
     
     const workspaceId = formData.get('workspaceId') as string;
     const expiresInSeconds = Number(formData.get('expiresIn'));
@@ -33,7 +34,7 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 
     if (!workspaceId || !expiresInSeconds) return "Parâmetros inválidos.";
     
-    if (!await hasPermission(session.user.id, workspaceId, 'workspace:invites:manage')) {
+    if (!await hasPermission(user.id, workspaceId, 'workspace:invites:manage')) {
         return "Você não tem permissão para criar convites.";
     }
 
@@ -43,7 +44,7 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 
         await db.query(
             'INSERT INTO workspace_invites (workspace_id, code, created_by, expires_at, max_uses) VALUES ($1, $2, $3, $4, $5)',
-            [workspaceId, code, session.user.id, expiresAt, maxUses]
+            [workspaceId, code, user.id, expiresAt, maxUses]
         );
         
         revalidatePath('/settings/workspace');
@@ -57,10 +58,10 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 export async function getWorkspaceInvites(workspaceId: string): Promise<{invites: WorkspaceInvite[] | null, error?: string}> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { invites: null, error: "Usuário não autenticado."};
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { invites: null, error: "Usuário não autenticado."};
     
-    if (!await hasPermission(session.user.id, workspaceId, 'workspace:invites:manage')) {
+    if (!await hasPermission(user.id, workspaceId, 'workspace:invites:manage')) {
         return { invites: null, error: "Acesso não autorizado." };
     }
     
@@ -91,8 +92,8 @@ export async function getWorkspaceInvites(workspaceId: string): Promise<{invites
 export async function revokeWorkspaceInvite(inviteId: string): Promise<{success: boolean, error?: string}> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado."};
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado."};
 
     try {
         // First get workspace_id from invite to check permissions
@@ -100,7 +101,7 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{success:
         if(inviteRes.rowCount === 0) return { success: false, error: "Convite não encontrado."};
         
         const { workspace_id } = inviteRes.rows[0];
-         if (!await hasPermission(session.user.id, workspace_id, 'workspace:invites:manage')) {
+         if (!await hasPermission(user.id, workspace_id, 'workspace:invites:manage')) {
             return { success: false, error: "Você não tem permissão para gerenciar convites." };
         }
 
@@ -118,11 +119,11 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{success:
 export async function joinWorkspaceAction(prevState: any, formData: FormData): Promise<{ success: boolean; error: string | null }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };
     }
-    const userId = session.user.id;
+    const userId = user.id;
     const inviteCode = formData.get('inviteCode') as string;
 
     if (!inviteCode) {

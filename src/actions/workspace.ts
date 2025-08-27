@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { revalidatePath } from 'next/cache';
@@ -13,11 +14,11 @@ export async function createWorkspaceAction(
 ): Promise<string | null> {
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user?.id) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     return 'Usuário não autenticado.';
   }
-  const userId = session.user.id;
+  const userId = user.id;
   const workspaceName = formData.get('workspaceName') as string;
 
   if (!workspaceName) {
@@ -70,8 +71,8 @@ export async function updateWorkspaceAction(
 ): Promise<string | null> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return 'Usuário não autenticado.';
     }
 
@@ -104,12 +105,12 @@ export async function updateWorkspaceAction(
 export async function switchWorkspaceAction(workspaceId: string) {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
         return;
     }
-    const userId = session.user.id;
+    const userId = user.id;
     
     try {
         await db.query('UPDATE users SET last_active_workspace_id = $1 WHERE id = $2', [workspaceId, userId]);

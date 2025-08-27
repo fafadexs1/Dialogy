@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -30,11 +31,11 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return { success: false, error: "Usuário não autenticado." };
     }
-    const currentAgentId = session.user.id;
+    const currentAgentId = user.id;
 
     if (!chatId) {
         return { success: false, error: "ID do Chat é obrigatório." };
@@ -72,9 +73,9 @@ export async function transferChatAction(
     let sessionToUse = prefetchedSession;
     
     if (!sessionToUse) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            sessionToUse = { user: { id: session.user.id, name: session.user.user_metadata.full_name, email: session.user.email } };
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            sessionToUse = { user: { id: user.id, name: user.user_metadata.full_name, email: user.email } };
         }
     }
 
@@ -212,14 +213,14 @@ export async function closeChatAction(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!session?.user?.id || !session.user.user_metadata.full_name) {
+    if (!user || !user.user_metadata.full_name) {
         return { success: false, error: "Usuário não autenticado." };
     }
 
-    const currentAgentId = session.user.id;
-    const currentAgentName = session.user.user_metadata.full_name;
+    const currentAgentId = user.id;
+    const currentAgentName = user.user_metadata.full_name;
 
     if (!chatId) {
         return { success: false, error: "ID do chat é obrigatório." };
@@ -291,8 +292,8 @@ export async function closeChatAction(
 export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return { success: false, error: "Usuário não autenticado." };
     }
     
@@ -337,13 +338,13 @@ function formatMessageDate(date: Date): string {
 export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]> }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!session?.user?.id || !workspaceId) {
+    if (!user || !workspaceId) {
         return { chats: [], messagesByChat: {} };
     }
     
-    const userId = session.user.id;
+    const userId = user.id;
 
     try {
         const chatQuery = `

@@ -22,10 +22,10 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getContacts(workspaceId: string): Promise<{ contacts: Contact[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { contacts: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { contacts: null, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'crm:view')) {
+    if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
          return { contacts: null, error: "Acesso não autorizado." };
     }
 
@@ -77,11 +77,11 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
 export async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const workspaceId = formData.get('workspaceId') as string;
-    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
          return { success: false, error: "Você não tem permissão para editar contatos." };
     }
 
@@ -170,8 +170,8 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 export async function deleteContactAction(contactId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
     
     const client = await db.connect();
     try {
@@ -180,7 +180,7 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
         if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
         const { workspace_id } = contactRes.rows[0];
 
-        if (!await hasPermission(session.user.id, workspace_id, 'crm:delete')) {
+        if (!await hasPermission(user.id, workspace_id, 'crm:delete')) {
             await client.query('ROLLBACK');
             return { success: false, error: "Você não tem permissão para excluir contatos." };
         }
@@ -207,8 +207,8 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
 export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { tags: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { tags: null, error: "Usuário não autenticado." };
 
     try {
         const res = await db.query('SELECT id, label, value, color, is_close_reason FROM tags WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
@@ -227,11 +227,11 @@ export async function createTag(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     // Basic permission check
-    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
         return { success: false, error: "Você não tem permissão para criar etiquetas." };
     }
     
@@ -259,15 +259,15 @@ export async function updateTag(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
         if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
         const workspaceId = tagRes.rows[0].workspace_id;
 
-        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para editar etiquetas." };
         }
         
@@ -289,15 +289,15 @@ export async function updateTag(
 export async function deleteTag(tagId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
         if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
         const workspaceId = tagRes.rows[0].workspace_id;
 
-        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para apagar etiquetas." };
         }
 
@@ -320,8 +320,8 @@ export async function deleteTag(tagId: string): Promise<{ success: boolean; erro
 export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ fields: CustomFieldDefinition[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { fields: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { fields: null, error: "Usuário não autenticado." };
 
     try {
         const res = await db.query('SELECT id, label, type, placeholder, options FROM custom_field_definitions WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
@@ -338,10 +338,10 @@ export async function createCustomFieldDefinition(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
         return { success: false, error: "Você não tem permissão para criar campos." };
     }
     
@@ -362,15 +362,15 @@ export async function createCustomFieldDefinition(
 export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         const fieldRes = await db.query('SELECT workspace_id FROM custom_field_definitions WHERE id = $1', [fieldId]);
         if (fieldRes.rowCount === 0) return { success: false, error: "Campo não encontrado." };
         const workspaceId = fieldRes.rows[0].workspace_id;
 
-        if (!await hasPermission(session.user.id, workspaceId, 'crm:edit')) {
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para apagar campos." };
         }
 
@@ -390,8 +390,8 @@ export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ su
 export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { users: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { users: null, error: "Usuário não autenticado." };
 
     try {
         const res = await db.query(`
@@ -415,8 +415,8 @@ export async function addActivityAction(
 ): Promise<{ success: boolean; error?: string | null; }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const contactId = formData.get('contactId') as string;
     
@@ -437,7 +437,7 @@ export async function addActivityAction(
         type: formData.get('type') as Activity['type'],
         notes: notes,
         date: new Date().toISOString(),
-        user_id: session.user.id,
+        user_id: user.id,
     };
     
     if(!contactId || !activity.type || !activity.notes) {
@@ -449,7 +449,7 @@ export async function addActivityAction(
         if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
         const { workspace_id } = contactRes.rows[0];
 
-        if (!await hasPermission(session.user.id, workspace_id, 'crm:edit')) {
+        if (!await hasPermission(user.id, workspace_id, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para adicionar atividades." };
         }
         

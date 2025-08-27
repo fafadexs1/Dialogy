@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -25,8 +26,8 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { campaigns: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { campaigns: null, error: "Usuário não autenticado." };
 
     try {
         const res = await db.query(`
@@ -64,8 +65,8 @@ export async function createCampaign(
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { campaign: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { campaign: null, error: "Usuário não autenticado." };
     
     if (!workspaceId || !instanceName || !message || contactIdentifiers.length === 0) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
@@ -79,7 +80,7 @@ export async function createCampaign(
         const campaignRes = await client.query(
             `INSERT INTO campaigns (workspace_id, created_by_id, name, message, instance_name, status)
              VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING *`,
-            [workspaceId, session.user.id, `Campanha ${new Date().toLocaleString()}`, message, instanceName]
+            [workspaceId, user.id, `Campanha ${new Date().toLocaleString()}`, message, instanceName]
         );
         const newCampaign = campaignRes.rows[0];
 
@@ -239,8 +240,8 @@ async function startCampaignSending(campaignId: string) {
 export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const client = await db.connect();
     try {
@@ -252,7 +253,7 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
         const { workspace_id } = campaignRes.rows[0];
 
         // Permission check
-        if (!await hasPermission(session.user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+        if (!await hasPermission(user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
             return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
         }
         
@@ -278,8 +279,8 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
 export async function deleteCampaigns(campaignIds: string[]): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const client = await db.connect();
     try {
@@ -290,7 +291,7 @@ export async function deleteCampaigns(campaignIds: string[]): Promise<{ success:
         const { workspace_id } = campaignRes.rows[0];
 
         // Permission check
-        if (!await hasPermission(session.user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+        if (!await hasPermission(user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
             return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
         }
 

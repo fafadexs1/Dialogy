@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -21,12 +22,12 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
 }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!session?.user?.id) {
+    if (!user) {
         return { config: null, rules: null, error: "Usuário não autenticado." };
     }
-    const userId = session.user.id;
+    const userId = user.id;
     
     // Simplificamos a lógica - se o usuário é membro, pode acessar.
     if (!await isWorkspaceMember(userId, workspaceId)) {
@@ -67,12 +68,12 @@ export async function saveAutopilotConfig(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!session?.user?.id) {
+    if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
-    const userId = session.user.id;
+    const userId = user.id;
 
     const workspaceId = formData.get('workspaceId') as string;
     if (!workspaceId) {
@@ -130,8 +131,8 @@ export async function saveAutopilotRule(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Não autenticado' };
 
     try {
         if (!configId || !rule.name || !rule.trigger || !rule.action) {
@@ -169,8 +170,8 @@ export async function saveAutopilotRule(
 export async function deleteAutopilotRule(ruleId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Não autenticado' };
 
     try {
         await db.query('DELETE FROM autopilot_rules WHERE id = $1', [ruleId]);
@@ -185,8 +186,8 @@ export async function deleteAutopilotRule(ruleId: string): Promise<{ success: bo
 export async function toggleAutopilotRule(ruleId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: 'Não autenticado' };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Não autenticado' };
     
     try {
         await db.query('UPDATE autopilot_rules SET enabled = $1 WHERE id = $2', [enabled, ruleId]);
@@ -228,8 +229,8 @@ export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
 export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: AutopilotUsageLog[] | null, error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { logs: null, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { logs: null, error: "Usuário não autenticado." };
     
     // We can assume if the user is fetching logs, they have access to the config.
     // A more robust check would verify ownership of the configId.

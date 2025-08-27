@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
+import { db } from '@/lib/db';
 
 export async function GET(
   request: Request,
@@ -11,8 +12,8 @@ export async function GET(
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
   
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user?.id) {
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  if (!authUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -22,19 +23,15 @@ export async function GET(
   }
 
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(
-        'id, full_name, avatar_url, email, online_since, user_workspace_roles!inner(workspace_id)'
-      )
-      .eq('online', true)
-      .eq('user_workspace_roles.workspace_id', workspaceId);
+     const res = await db.query(
+          `SELECT u.id, u.full_name, u.avatar_url, u.email, u.online_since
+           FROM users u
+           JOIN user_workspace_roles uwr ON u.id = uwr.user_id
+           WHERE u.online = TRUE AND uwr.workspace_id = $1`,
+          [workspaceId]
+        );
 
-    if (error) {
-      throw error;
-    }
-
-    const onlineAgents: OnlineAgent[] = (data || []).map(user => ({
+    const onlineAgents: OnlineAgent[] = (res.rows || []).map(user => ({
       user: {
         id: user.id,
         name: user.full_name,

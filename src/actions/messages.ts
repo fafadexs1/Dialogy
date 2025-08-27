@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -237,12 +238,12 @@ export async function sendAgentMessageAction(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
 
-    return internalSendMessage(chatId, content, session.user.id);
+    return internalSendMessage(chatId, content, user.id);
 }
 
 /**
@@ -276,11 +277,11 @@ export async function sendMediaAction(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
-    return internalSendMedia(chatId, caption, mediaFiles, session.user.id);
+    return internalSendMedia(chatId, caption, mediaFiles, user.id);
 }
 
 /**

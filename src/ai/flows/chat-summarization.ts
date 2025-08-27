@@ -1,4 +1,5 @@
 
+
 'use server';
 
 /**
@@ -39,11 +40,11 @@ const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user?.id) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     throw new Error("User not authenticated.");
   }
-  const userId = session.user.id;
+  const userId = user.id;
 
   const configRes = await db.query(
     'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',

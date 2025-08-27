@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -20,11 +21,11 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { members: [], error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { members: [], error: "Usuário não autenticado." };
     
     // Check if the user has permission to view members
-    if (!await hasPermission(session.user.id, workspaceId, 'members:view')) {
+    if (!await hasPermission(user.id, workspaceId, 'members:view')) {
          return { members: [], error: "Acesso não autorizado." };
     }
 
@@ -72,15 +73,15 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
 export async function removeMemberAction(memberId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'members:remove')) {
+    if (!await hasPermission(user.id, workspaceId, 'members:remove')) {
         return { success: false, error: "Você não tem permissão para remover membros." };
     }
     
     // Prevent user from removing themselves
-    if (session.user.id === memberId) {
+    if (user.id === memberId) {
         return { success: false, error: "Você não pode remover a si mesmo do workspace." };
     }
 
@@ -107,8 +108,8 @@ export async function updateMemberRoleAction(
 ): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const memberId = formData.get('memberId') as string;
     const workspaceId = formData.get('workspaceId') as string;
@@ -118,7 +119,7 @@ export async function updateMemberRoleAction(
         return { success: false, error: "Dados insuficientes para atualizar a função." };
     }
 
-    if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para alterar funções de membros." };
     }
     

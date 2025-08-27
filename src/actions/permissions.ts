@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -21,10 +22,10 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { roles: [], permissions: [], error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { roles: [], permissions: [], error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'permissions:view')) {
+    if (!await hasPermission(user.id, workspaceId, 'permissions:view')) {
          return { roles: [], permissions: [], error: "Acesso não autorizado." };
     }
     
@@ -61,8 +62,8 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
 export async function updateRolePermissionAction(roleId: string, permissionId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
         // First, get the workspaceId from the role
@@ -72,7 +73,7 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
         }
         const { workspace_id: workspaceId, name, is_default: isDefault } = roleRes.rows[0];
         
-        if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+        if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
             return { success: false, error: "Você não tem permissão para editar papéis." };
         }
 
@@ -98,8 +99,8 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
 export async function createRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const name = formData.get('name') as string;
     const description = formData.get('description') as string;
@@ -109,7 +110,7 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
         return { success: false, error: "Nome do papel e ID do workspace são obrigatórios." };
     }
 
-    if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para criar papéis." };
     }
     
@@ -133,8 +134,8 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
 export async function updateRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const roleId = formData.get('roleId') as string;
     const name = formData.get('name') as string;
@@ -145,7 +146,7 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
         return { success: false, error: "ID do papel, nome e ID do workspace são obrigatórios." };
     }
 
-    if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para editar papéis." };
     }
     
@@ -170,10 +171,10 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
 export async function deleteRoleAction(roleId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
     const cookieStore = cookies();
     const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return { success: false, error: "Usuário não autenticado." };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(session.user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para remover papéis." };
     }
     

@@ -1,5 +1,4 @@
 
-'use client';
 
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
@@ -9,13 +8,11 @@ import { AuthProvider } from '@/hooks/use-auth.tsx';
 import type { User } from '@/lib/types';
 
 
-function RootLayoutContent({
+export default function RootLayout({
   children,
-  initialUser,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-  initialUser: User | null;
-}) {
+}>) {
   return (
     <html lang="en" className="h-full bg-background light" suppressHydrationWarning>
       <head>
@@ -25,7 +22,7 @@ function RootLayoutContent({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased">
-        <AuthProvider user={initialUser}>
+          <AuthProvider>
             <PresenceProvider>
               <MainAppLayout>
                 {children}
@@ -36,16 +33,4 @@ function RootLayoutContent({
       </body>
     </html>
   );
-}
-
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  // We can't fetch the user here because this is the root layout and might not have access to the session yet.
-  // The logic is now in `page.tsx` which will pass the user down.
-  // For the layout, we can assume a null user initially, and client components will populate it.
-  return <RootLayoutContent initialUser={null}>{children}</RootLayoutContent>
 }
