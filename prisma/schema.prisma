@@ -10,423 +10,412 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ENUMS
-
-enum ChatStatus {
-  atendimentos
-  gerais
-  encerrados
-}
-
-enum MessageType {
-  text
-  system
-  audio
-}
-
-enum MessageStatus {
-  default
-  deleted
-}
-
-enum ActivityType {
-  ligacao
-  email
-  whatsapp
-  visita
-  viabilidade
-  contrato
-  agendamento
-  tentativa_contato
-  nota
-}
-
-enum CustomFieldType {
-  text
-  number
-  date
-  email
-  tel
-  select
-}
-
-enum ShortcutType {
-  global
-  private
-}
-
-enum CampaignStatus {
-  draft
-  sending
-  completed
-  paused
-  failed
-}
-
-enum CampaignRecipientStatus {
-  pending
-  sent
-  failed
-}
-
 
 // MODELS
 
-model User {
-  id                        String      @id @default(uuid())
-  fullName                  String      @map("full_name")
-  avatarUrl                 String?     @map("avatar_url")
-  email                     String      @unique
-  passwordHash              String      @map("password_hash")
-  lastActiveWorkspaceId     String?     @map("last_active_workspace_id")
-  online                    Boolean?    @default(false)
-  onlineSince               DateTime?   @map("online_since")
 
-  ownedWorkspaces         Workspace[]           @relation("WorkspaceOwner")
-  userWorkspaceRoles      UserWorkspaceRole[]
-  ownedInvites            WorkspaceInvite[]
+model User {
+  id                      String                  @id @default(uuid())
+  fullName                String                  @map("full_name")
+  email                   String                  @unique
+  passwordHash            String                  @map("password_hash")
+  avatarUrl               String?                 @map("avatar_url")
+  online                  Boolean                 @default(false)
+  onlineSince             DateTime?               @map("online_since")
+  lastActiveWorkspaceId   String?                 @map("last_active_workspace_id")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+
+  // Relations
+  ownedWorkspaces         Workspace[]             @relation("WorkspaceOwner")
+  workspaces              UserWorkspaceRole[]
+  createdInvites          WorkspaceInvite[]
   usedInvites             UserInvite[]
-  ownedContacts           Contact[]
-  activities              Activity[]
+  ownedTeams              Team[]                  @relation("TeamOwner")
   teamMemberships         TeamMember[]
-  createdCampaigns        Campaign[]
-  createdSystemAgents     SystemAgent[]         @relation("AgentCreator") // Assuming this relation might be useful
-  shortcuts               Shortcut[]
-  assignedChats           Chat[]
+  createdContacts         Contact[]               @relation("ContactOwner")
+  createdTags             Tag[]                   @relation("TagCreator")
+  registeredActivities    Activity[]
   sentMessages            Message[]
-  
+  createdCampaigns        Campaign[]
+  autopilotConfigs        AutopilotConfig[]
+  shortcuts               Shortcut[]
+  createdSystemAgents     SystemAgent[]
+
   @@map("users")
 }
 
 model Workspace {
-  id                      String      @id @default(uuid())
-  name                    String
-  avatarUrl               String?     @map("avatar_url")
-  ownerId                 String      @map("owner_id")
-  
-  owner                   User        @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  roles                   Role[]
-  userWorkspaceRoles      UserWorkspaceRole[]
-  invites                 WorkspaceInvite[]
-  tags                    Tag[]
-  teams                   Team[]
-  contacts                Contact[]
-  customFieldDefinitions  CustomFieldDefinition[]
-  chats                   Chat[]
-  messages                Message[]
-  evolutionApiConfigs     EvolutionApiConfig[]
-  autopilotConfigs        AutopilotConfig[]
-  systemAgents            SystemAgent[]
-  shortcuts               Shortcut[]
-  campaigns               Campaign[]
+  id                    String                @id @default(uuid())
+  name                  String
+  avatarUrl             String?               @map("avatar_url")
+  ownerId               String                @map("owner_id")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  owner                 User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  roles                 Role[]
+  users                 UserWorkspaceRole[]
+  invites               WorkspaceInvite[]
+  teams                 Team[]
+  contacts              Contact[]
+  tags                  Tag[]
+  customFieldDefinitions CustomFieldDefinition[]
+  shortcuts             Shortcut[]
+  systemAgents          SystemAgent[]
+  chats                 Chat[]
+  messages              Message[]
+  autopilotConfigs      AutopilotConfig[]
+  campaigns             Campaign[]
+  evolutionApiConfigs   EvolutionApiConfig[]
 
   @@map("workspaces")
 }
 
-model Permission {
-  id          String @id
-  description String
-  category    String
-
-  roles RolePermission[]
-
-  @@map("permissions")
-}
-
-model Role {
-  id              String   @id @default(uuid())
-  workspaceId     String   @map("workspace_id")
-  name            String
-  description     String?
-  isDefault       Boolean? @default(false) @map("is_default")
-
-  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  permissions       RolePermission[]
-  userWorkspaceRoles UserWorkspaceRole[]
-  teams             Team[]
-
-  @@unique([workspaceId, name])
-  @@map("roles")
-}
-
-model RolePermission {
-  roleId        String     @map("role_id")
-  permissionId  String     @map("permission_id")
-
-  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-  @@map("role_permissions")
-}
-
 model UserWorkspaceRole {
-  userId      String   @map("user_id")
-  workspaceId String   @map("workspace_id")
-  roleId      String   @map("role_id")
-  createdAt   DateTime @default(now()) @map("created_at")
+  userId        String      @map("user_id")
+  workspaceId   String      @map("workspace_id")
+  roleId        String      @map("role_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  // Relations
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role          Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, workspaceId])
   @@map("user_workspace_roles")
 }
 
 
-model WorkspaceInvite {
-  id          String   @id @default(uuid())
-  workspaceId String   @map("workspace_id")
-  code        String   @unique
-  createdBy   String   @map("created_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  expiresAt   DateTime @map("expires_at")
-  maxUses     Int?     @map("max_uses")
-  isRevoked   Boolean? @default(false) @map("is_revoked")
-  useCount    Int?     @default(0) @map("use_count")
+model Role {
+  id                  String                @id @default(uuid())
+  name                String
+  description         String?
+  workspaceId         String                @map("workspace_id")
+  isDefault           Boolean               @default(false) @map("is_default")
+
+  // Relations
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  permissions         RolePermission[]
+  users               UserWorkspaceRole[]
+  teams               Team[]
+
+  @@unique([workspaceId, name])
+  @@map("roles")
+}
+
+model Permission {
+  id          String            @id
+  description String
+  category    String
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId        String      @map("role_id")
+  permissionId  String      @map("permission_id")
+
+  // Relations
+  role          Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
   
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator     User      @relation(fields: [createdBy], references: [id], onDelete: Cascade)
-  usedBy      UserInvite[]
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model WorkspaceInvite {
+  id          String        @id @default(uuid())
+  workspaceId String        @map("workspace_id")
+  code        String        @unique
+  createdBy   String        @map("created_by")
+  expiresAt   DateTime      @map("expires_at")
+  maxUses     Int?          @map("max_uses")
+  isRevoked   Boolean       @default(false) @map("is_revoked")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User          @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  uses        UserInvite[]
 
   @@map("workspace_invites")
 }
 
 model UserInvite {
-  inviteId String @map("invite_id")
-  userId   String @map("user_id")
-  usedAt   DateTime? @default(now()) @map("used_at")
+  inviteId  String    @map("invite_id")
+  userId    String    @map("user_id")
+  usedAt    DateTime  @default(now()) @map("used_at")
 
-  invite WorkspaceInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
-  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Relations
+  invite    WorkspaceInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([inviteId, userId])
   @@map("user_invites")
 }
 
-model Tag {
-  id              String  @id @default(uuid())
-  workspaceId     String  @map("workspace_id")
-  label           String
-  value           String
-  color           String
-  isCloseReason   Boolean? @default(false) @map("is_close_reason")
-
-  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contactTags     ContactTag[]
-  team            Team?
-  chatCloseReason Chat[]
-
-  @@unique([workspaceId, label])
-  @@map("tags")
-}
-
 model Team {
-  id              String        @id @default(uuid())
-  workspaceId     String        @map("workspace_id")
-  roleId          String        @map("role_id")
-  name            String
-  color           String?       @default("#3b82f6")
-  tagId           String?       @unique @map("tag_id")
+  id                String          @id @default(uuid())
+  workspaceId       String          @map("workspace_id")
+  name              String
+  color             String          @default("#cccccc")
+  roleId            String          @map("role_id")
+  tagId             String?         @map("tag_id")
+  ownerId           String          @map("owner_id")
 
-  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  role            Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  tag             Tag?          @relation(fields: [tagId], references: [id], onDelete: SetNull)
-  members         TeamMember[]
-  businessHours   BusinessHour[]
+  // Relations
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role              Role            @relation(fields: [roleId], references: [id])
+  tag               Tag?            @relation(fields: [tagId], references: [id], onDelete: SetNull)
+  owner             User            @relation("TeamOwner", fields: [ownerId], references: [id])
+  members           TeamMember[]
+  businessHours     BusinessHour[]
 
   @@unique([workspaceId, name])
   @@map("teams")
 }
 
 model TeamMember {
-  teamId  String @map("team_id")
-  userId  String @map("user_id")
-
-  team    Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  teamId      String    @map("team_id")
+  userId      String    @map("user_id")
+  
+  // Relations
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
   @@id([teamId, userId])
   @@map("team_members")
 }
 
 model BusinessHour {
-  id        String   @id @default(uuid())
-  teamId    String   @map("team_id")
-  dayOfWeek String   @map("day_of_week")
-  isEnabled Boolean? @default(true)
-  startTime DateTime? @map("start_time") @db.Time
-  endTime   DateTime? @map("end_time") @db.Time
+  id          String    @id @default(uuid())
+  teamId      String    @map("team_id")
+  dayOfWeek   String    @map("day_of_week") // e.g., "Segunda-feira"
+  isEnabled   Boolean   @default(false) @map("is_enabled")
+  startTime   String?   @map("start_time") // e.g., "09:00"
+  endTime     String?   @map("end_time")   // e.g., "18:00"
 
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  // Relations
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([teamId, dayOfWeek])
   @@map("business_hours")
 }
 
 model Contact {
-  id                String      @id @default(uuid())
-  workspaceId       String      @map("workspace_id")
-  name              String
-  avatarUrl         String?     @map("avatar_url")
-  email             String?
-  phone             String?
-  phoneNumberJid    String?     @map("phone_number_jid")
-  address           String?
-  ownerId           String?     @map("owner_id")
-  createdAt         DateTime    @default(now()) @map("created_at")
-
-  workspace           Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner               User?       @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  id                  String                      @id @default(uuid())
+  workspaceId         String                      @map("workspace_id")
+  name                String
+  email               String?
+  phone               String?
+  phoneNumberJid      String?                     @unique @map("phone_number_jid")
+  address             String?
+  avatarUrl           String?                     @map("avatar_url")
+  ownerId             String?                     @map("owner_id")
+  createdAt           DateTime                    @default(now()) @map("created_at")
+  
+  // Relations
+  workspace           Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner               User?                       @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  tags                ContactTag[]
   activities          Activity[]
-  contactTags         ContactTag[]
   customFieldValues   ContactCustomFieldValue[]
   chats               Chat[]
   campaignRecipients  CampaignRecipient[]
 
-  @@unique([workspaceId, phoneNumberJid])
   @@map("contacts")
 }
 
-model Activity {
-  id        String       @id @default(uuid())
-  contactId String       @map("contact_id")
-  userId    String?      @map("user_id")
-  type      ActivityType
-  notes     String?
-  date      DateTime     @default(now())
-  createdAt DateTime     @default(now()) @map("created_at")
+model Tag {
+  id              String        @id @default(uuid())
+  workspaceId     String        @map("workspace_id")
+  label           String
+  value           String
+  color           String
+  isCloseReason   Boolean       @default(false) @map("is_close_reason")
+  createdById     String?       @map("created_by_id")
 
-  contact   Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Relations
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator         User?         @relation("TagCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  contacts        ContactTag[]
+  teams           Team[]
 
-  @@map("activities")
+  @@unique([workspaceId, value])
+  @@map("tags")
 }
 
 model ContactTag {
-  contactId String @map("contact_id")
-  tagId     String @map("tag_id")
-  
-  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  contactId   String    @map("contact_id")
+  tagId       String    @map("tag_id")
+
+  // Relations
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([contactId, tagId])
   @@map("contact_tags")
 }
 
+model Activity {
+  id          String    @id @default(uuid())
+  contactId   String    @map("contact_id")
+  userId      String    @map("user_id")
+  type        String
+  notes       String
+  date        DateTime
+
+  // Relations
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@map("activities")
+}
+
 model CustomFieldDefinition {
-  id          String      @id @default(uuid())
-  workspaceId String      @map("workspace_id")
-  label       String
-  type        CustomFieldType
-  placeholder String?
-  options     Json?
+  id            String                      @id @default(uuid())
+  workspaceId   String                      @map("workspace_id")
+  label         String
+  type          String
+  placeholder   String?
+  options       Json?
 
-  workspace         Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contactFieldValues ContactCustomFieldValue[]
+  // Relations
+  workspace     Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  values        ContactCustomFieldValue[]
 
-  @@unique([workspaceId, label])
   @@map("custom_field_definitions")
 }
 
 model ContactCustomFieldValue {
-  contactId String @map("contact_id")
-  fieldId   String @map("field_id")
-  value     String
-
-  contact   Contact                 @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  field     CustomFieldDefinition   @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  contactId   String                  @map("contact_id")
+  fieldId     String                  @map("field_id")
+  value       String
   
+  // Relations
+  contact     Contact                 @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  field       CustomFieldDefinition   @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
   @@id([contactId, fieldId])
   @@map("contact_custom_field_values")
 }
 
-model Chat {
-  id              String      @id @default(uuid())
-  workspaceId     String      @map("workspace_id")
-  contactId       String      @map("contact_id")
-  agentId         String?     @map("agent_id")
-  status          ChatStatus? @default(gerais)
-  createdAt       DateTime    @default(now()) @map("created_at")
-  assignedAt      DateTime?   @map("assigned_at")
-  closedAt        DateTime?   @map("closed_at")
-  closeReasonTagId String?     @map("close_reason_tag_id")
-  closeNotes      String?     @map("close_notes")
-  tag             String?
-  color           String?
+model Shortcut {
+  id            String    @id @default(uuid())
+  workspaceId   String    @map("workspace_id")
+  userId        String    @map("user_id")
+  name          String
+  message       String
+  type          String    // 'global' or 'private'
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact         Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  agent           User?     @relation(fields: [agentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  closeReasonTag  Tag?      @relation(fields: [closeReasonTagId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  messages        Message[]
+  // Relations
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@map("shortcuts")
+}
+
+model SystemAgent {
+  id            String    @id @default(uuid())
+  workspaceId   String    @map("workspace_id")
+  name          String
+  avatarUrl     String?   @map("avatar_url")
+  token         String    @unique
+  webhookUrl    String?   @map("webhook_url")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdById   String    @map("created_by_id")
+
+  // Relations
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator       User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  messages      Message[]
+
+  @@unique([workspaceId, name])
+  @@map("system_agents")
+}
+
+enum ChatStatusEnum {
+  gerais
+  atendimentos
+  encerrados
+}
+
+model Chat {
+  id                String            @id @default(uuid())
+  workspaceId       String            @map("workspace_id")
+  contactId         String            @map("contact_id")
+  agentId           String?           @map("agent_id")
+  status            ChatStatusEnum
+  tag               String?
+  color             String?
+  assignedAt        DateTime?         @map("assigned_at")
+  closedAt          DateTime?         @map("closed_at")
+  closeReasonTagId  String?           @map("close_reason_tag_id")
+  closeNotes        String?           @map("close_notes")
+  createdAt         DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact           Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  agent             User?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages          Message[]
 
   @@map("chats")
 }
 
 model Message {
-  id                String         @id @default(uuid())
-  workspaceId       String         @map("workspace_id")
-  chatId            String         @map("chat_id")
-  senderId          String?        @map("sender_id")
-  type              MessageType?   @default(text)
-  status            MessageStatus? @default(default)
-  content           String?
-  metadata          Json?
-  createdAt         DateTime       @default(now()) @map("created_at")
-  messageIdFromApi  String?        @map("message_id_from_api")
-  senderFromApi     String?        @map("sender_from_api")
-  instanceName      String?        @map("instance_name")
-  statusFromApi     String?        @map("status_from_api")
-  sourceFromApi     String?        @map("source_from_api")
-  serverUrl         String?        @map("server_url")
-  fromMe            Boolean?       @map("from_me")
-  apiMessageStatus  String?        @map("api_message_status")
-  isRead            Boolean?       @default(false) @map("is_read")
-  rawPayload        Json?          @map("raw_payload")
+  id                  String    @id @default(uuid())
+  workspaceId         String    @map("workspace_id")
+  chatId              String    @map("chat_id")
+  senderId            String?   @map("sender_id") // Can be User ID or SystemAgent ID
+  type                String    // 'text', 'system', 'audio', etc.
+  content             String?
+  fromMe              Boolean   @default(false) @map("from_me")
+  isRead              Boolean   @default(false) @map("is_read")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  
+  // Fields from API
+  messageIdFromApi    String?   @unique @map("message_id_from_api")
+  apiMessageStatus    String?   @map("api_message_status") // 'SENT', 'DELIVERED', 'READ'
+  instanceName        String?   @map("instance_name")
+  
+  // Fields for webhook payload debugging
+  senderFromApi       String?   @map("sender_from_api")
+  statusFromApi       String?   @map("status_from_api")
+  sourceFromApi       String?   @map("source_from_api")
+  serverUrl           String?   @map("server_url")
+  rawPayload          Json?     @map("raw_payload")
+  metadata            Json?
 
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  chat            Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  sender          User?     @relation(fields: [senderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  // Relations
+  workspace           Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chat                Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender              User?       @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  systemAgentSender   SystemAgent? @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
   @@map("messages")
 }
 
-model EvolutionApiConfig {
-  id          String   @id @default(uuid())
-  workspaceId String   @map("workspace_id")
-  apiUrl      String?  @map("api_url")
-  apiKey      String?  @map("api_key")
-
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  instances   EvolutionApiInstance[]
-
-  @@map("evolution_api_configs")
-}
-
-model EvolutionApiInstance {
-  id          String  @id @default(uuid())
-  configId    String  @map("config_id")
-  name        String
-  type        String?
-  webhookUrl  String? @map("webhook_url")
-
-  config      EvolutionApiConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-
-  @@map("evolution_api_instances")
-}
 
 model AutopilotConfig {
-  id             String   @id @default(uuid())
-  workspaceId    String   @map("workspace_id")
-  userId         String   @map("user_id")
-  geminiApiKey   String?  @map("gemini_api_key")
-  aiModel        String?  @map("ai_model")
-  knowledgeBase  String?  @map("knowledge_base")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @default(now()) @map("updated_at")
+  id              String            @id @default(uuid())
+  workspaceId     String            @map("workspace_id")
+  userId          String            @map("user_id")
+  geminiApiKey    String?           @map("gemini_api_key")
+  aiModel         String?           @map("ai_model")
+  knowledgeBase   String?           @map("knowledge_base")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
 
+  // Relations
   workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   rules           AutopilotRule[]
@@ -437,100 +426,95 @@ model AutopilotConfig {
 }
 
 model AutopilotRule {
-  id        String @id @default(uuid())
-  configId  String @map("config_id")
+  id        String    @id @default(uuid())
+  configId  String    @map("config_id")
   name      String
   trigger   String
   action    Json
-  enabled   Boolean? @default(true)
+  enabled   Boolean   @default(true)
 
+  // Relations
   config    AutopilotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   @@map("autopilot_rules")
 }
 
 model AutopilotUsageLog {
-  id           String   @id @default(uuid())
-  configId     String   @map("config_id")
-  ruleName     String?  @map("rule_name")
-  flowName     String   @map("flow_name")
-  modelName    String   @map("model_name")
-  inputTokens  Int      @map("input_tokens")
-  outputTokens Int      @map("output_tokens")
-  totalTokens  Int      @map("total_tokens")
-  createdAt    DateTime @default(now()) @map("created_at")
+    id              String    @id @default(uuid())
+    configId        String    @map("config_id")
+    flowName        String    @map("flow_name")
+    ruleName        String?   @map("rule_name")
+    modelName       String    @map("model_name")
+    inputTokens     Int       @map("input_tokens")
+    outputTokens    Int       @map("output_tokens")
+    totalTokens     Int       @map("total_tokens")
+    createdAt       DateTime  @default(now()) @map("created_at")
 
-  config       AutopilotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+    // Relations
+    config          AutopilotConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
-  @@map("autopilot_usage_logs")
-}
-
-model SystemAgent {
-  id          String   @id @default(uuid())
-  workspaceId String   @map("workspace_id")
-  name        String
-  avatarUrl   String?  @map("avatar_url")
-  token       String   @unique
-  webhookUrl  String?  @map("webhook_url")
-  isActive    Boolean? @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  // Placeholder for creator if needed
-  // creator     User      @relation("AgentCreator", fields: [createdBy], references: [id])
-  // createdBy   String
-  
-  @@unique([workspaceId, name])
-  @@map("system_agents")
-}
-
-model Shortcut {
-  id          String   @id @default(uuid())
-  workspaceId String   @map("workspace_id")
-  userId      String   @map("user_id")
-  name        String
-  message     String
-  type        ShortcutType @default(private)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @default(now()) @map("updated_at")
-
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([workspaceId, name])
-  @@map("shortcuts")
+    @@map("autopilot_usage_logs")
 }
 
 model Campaign {
-  id            String   @id @default(uuid())
-  workspaceId   String   @map("workspace_id")
-  createdById   String?  @map("created_by_id")
-  name          String
-  message       String
-  instanceName  String   @map("instance_name")
-  status        CampaignStatus @default(draft)
-  createdAt     DateTime @default(now()) @map("created_at")
-  startedAt     DateTime? @map("started_at")
-  completedAt   DateTime? @map("completed_at")
+  id                String              @id @default(uuid())
+  workspaceId       String              @map("workspace_id")
+  createdById       String              @map("created_by_id")
+  name              String
+  message           String
+  instanceName      String              @map("instance_name")
+  status            String              // 'draft', 'sending', 'completed', 'failed'
+  createdAt         DateTime            @default(now()) @map("created_at")
+  startedAt         DateTime?           @map("started_at")
+  completedAt       DateTime?           @map("completed_at")
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator     User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  recipients  CampaignRecipient[]
+  // Relations
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator           User                @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  recipients        CampaignRecipient[]
 
   @@map("campaigns")
 }
 
 model CampaignRecipient {
-  id            String                  @id @default(uuid())
-  campaignId    String                  @map("campaign_id")
-  contactId     String                  @map("contact_id")
-  status        CampaignRecipientStatus @default(pending)
-  sentAt        DateTime?               @map("sent_at")
-  errorMessage  String?                 @map("error_message")
+  id            String    @id @default(uuid())
+  campaignId    String    @map("campaign_id")
+  contactId     String    @map("contact_id")
+  status        String    @default("pending") // 'pending', 'sent', 'failed'
+  sentAt        DateTime? @map("sent_at")
+  errorMessage  String?   @map("error_message")
 
-  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  
+  // Relations
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact       Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
   @@unique([campaignId, contactId])
   @@map("campaign_recipients")
+}
+
+model EvolutionApiConfig {
+  id            String                  @id @default(uuid())
+  workspaceId   String                  @unique @map("workspace_id")
+  apiUrl        String?                 @map("api_url")
+  apiKey        String?                 @map("api_key")
+  
+  // Relations
+  workspace     Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instances     EvolutionApiInstance[]
+
+  @@map("evolution_api_configs")
+}
+
+model EvolutionApiInstance {
+  id          String              @id @default(uuid())
+  name        String              
+  type        String              // 'baileys' or 'wa_cloud'
+  configId    String              @map("config_id")
+  webhookUrl  String?             @map("webhook_url")
+
+  // Relations
+  config      EvolutionApiConfig  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@unique([configId, name])
+  @@map("evolution_api_instances")
 }
