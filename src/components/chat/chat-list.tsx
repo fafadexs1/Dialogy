@@ -121,7 +121,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
       <div className="relative flex-shrink-0">
         <Avatar className="h-10 w-10 border">
-          <AvatarImage src={chat.contact.avatar} alt={chat.contact.name} />
+          <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} />
           <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
         {!!chat.instance_name && (
