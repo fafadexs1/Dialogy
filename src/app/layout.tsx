@@ -3,7 +3,6 @@
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
-import { SessionProvider } from 'next-auth/react';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 
@@ -21,13 +20,11 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased">
-        <SessionProvider>
           <PresenceProvider>
             <MainAppLayout>
               {children}
             </MainAppLayout>
           </PresenceProvider>
-        </SessionProvider>
         <Toaster />
       </body>
     </html>

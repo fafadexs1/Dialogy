@@ -38,14 +38,15 @@ export async function register(prevState: any, formData: FormData) {
   }
 
   // Desabilita a confirmação por e-mail, conforme solicitado.
+  // A opção 'data' permite passar metadados que serão usados pelo trigger do DB.
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${process.env.NEXTAUTH_URL}/`,
+      emailRedirectTo: `${process.env.NEXTAUTH_URL}/`, // Mantido para referência futura, mas o e-mail não será enviado.
       data: {
         full_name: name,
-        avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${name}`,
+        avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name)}`,
       },
     },
   });
