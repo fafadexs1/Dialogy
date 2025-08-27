@@ -354,10 +354,23 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const contactIds = [...new Set(chatRes.rows.map(r => r.contact_id).filter(Boolean))];
         const agentIds = [...new Set(chatRes.rows.map(r => r.agent_id).filter(Boolean))];
 
+        // Safe queries
+        const contactsPromise = contactIds.length > 0 
+            ? db.query('SELECT * FROM contacts WHERE id = ANY($1::uuid[])', [contactIds])
+            : Promise.resolve({ rows: [] });
+
+        const agentsPromise = agentIds.length > 0
+            ? db.query('SELECT id, full_name, avatar_url FROM users WHERE id = ANY($1::uuid[])', [agentIds])
+            : Promise.resolve({ rows: [] });
+            
+        const messagesPromise = chatIds.length > 0
+            ? db.query('SELECT * FROM messages WHERE chat_id = ANY($1::uuid[]) ORDER BY created_at ASC', [chatIds])
+            : Promise.resolve({ rows: [] });
+
         const [contactsRes, agentsRes, messagesRes] = await Promise.all([
-            db.query('SELECT * FROM contacts WHERE id = ANY($1::uuid[])', [contactIds]),
-            db.query('SELECT id, full_name, avatar_url FROM users WHERE id = ANY($1::uuid[])', [agentIds]),
-            db.query('SELECT * FROM messages WHERE chat_id = ANY($1::uuid[]) ORDER BY created_at ASC', [chatIds])
+            contactsPromise,
+            agentsPromise,
+            messagesPromise
         ]);
 
         const contactsById = new Map(contactsRes.rows.map(c => [c.id, c]));
