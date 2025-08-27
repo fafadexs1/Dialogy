@@ -244,11 +244,10 @@ export async function closeChatAction(
                 status = 'encerrados',
                 closed_at = NOW(),
                 close_reason_tag_id = $1,
-                close_notes = $2,
-                tag = $3,
-                color = $4
-             WHERE id = $5`,
-            [reasonTagId, notes, tagInfo.label, tagInfo.color, chatId]
+                tag = $2,
+                color = $3
+             WHERE id = $4`,
+            [reasonTagId, tagInfo.label, tagInfo.color, chatId]
         );
         
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
