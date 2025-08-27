@@ -43,11 +43,6 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     // Initial fetch
     fetchOnlineAgentsCallback(workspaceId);
 
-    // Set up polling every 2 seconds
-    const intervalId = setInterval(() => {
-      fetchOnlineAgentsCallback(workspaceId);
-    }, 2000);
-
     // Set up real-time subscription for faster updates
     const channel = supabase
       .channel('public:users')
@@ -55,7 +50,9 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'users' },
         (payload) => {
-            if ('online' in payload.new || 'online_since' in payload.new) {
+            // If the 'online' status of any user changed, refetch the list for the current workspace.
+            if ('online' in payload.new) {
+                console.log('[PRESENCE] User online status changed, refetching list.');
                 fetchOnlineAgentsCallback(workspaceId);
             }
         }
@@ -63,7 +60,6 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
       .subscribe();
 
     return () => {
-      clearInterval(intervalId); // Clear interval on cleanup
       supabase.removeChannel(channel);
     };
   }, [localUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
