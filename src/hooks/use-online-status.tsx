@@ -19,8 +19,21 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const { data: { subscription } } = createClient().auth.onAuthStateChange((event, session) => {
-      setLocalUser(session?.user as User ?? null);
+        // This seems to be returning a Supabase user object, not our extended User type.
+        // We need to fetch our user profile.
+        if (session?.user) {
+            fetch('/api/user').then(res => res.json()).then(data => setLocalUser(data));
+        } else {
+            setLocalUser(null);
+        }
     });
+
+    // Also fetch user on initial load
+    fetch('/api/user').then(res => res.json()).then(data => {
+        if(data && !data.error) {
+             setLocalUser(data);
+        }
+    }).catch(() => setLocalUser(null));
 
     return () => subscription.unsubscribe();
   }, []);
@@ -50,11 +63,35 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'users' },
         (payload) => {
-            // If the 'online' status of any user changed, refetch the list for the current workspace.
-            if ('online' in payload.new) {
-                console.log('[PRESENCE] User online status changed, refetching list.');
-                fetchOnlineAgentsCallback(workspaceId);
-            }
+            const updatedUser = payload.new as User;
+            console.log('[PRESENCE] User online status changed:', updatedUser);
+
+            setOnlineAgents(prevAgents => {
+                const agentExists = prevAgents.some(a => a.user.id === updatedUser.id);
+
+                if (updatedUser.online) {
+                    // If agent is now online and not in the list, add them.
+                    if (!agentExists) {
+                         const newAgent: OnlineAgent = {
+                            user: {
+                                id: updatedUser.id,
+                                name: updatedUser.name,
+                                firstName: updatedUser.name.split(' ')[0] || '',
+                                lastName: updatedUser.name.split(' ').slice(1).join(' ') || '',
+                                avatar: updatedUser.avatar_url,
+                                email: updatedUser.email,
+                            },
+                            joined_at: new Date().toISOString()
+                        };
+                        return [...prevAgents, newAgent];
+                    }
+                } else {
+                    // If agent is now offline, remove them from the list.
+                    return prevAgents.filter(a => a.user.id !== updatedUser.id);
+                }
+                // If no change in list composition, return previous state.
+                return prevAgents;
+            });
         }
       )
       .subscribe();
