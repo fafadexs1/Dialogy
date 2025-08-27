@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -355,16 +354,16 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const agentIds = [...new Set(chatRes.rows.map(r => r.agent_id).filter(Boolean))];
 
         // Safe queries
-        const contactsPromise = contactIds.length > 0 
-            ? db.query('SELECT * FROM contacts WHERE id = ANY($1::uuid[])', [contactIds])
+        const contactsPromise = contactIds.length > 0
+            ? db.query('SELECT * FROM contacts WHERE id::text = ANY($1::text[])', [contactIds])
             : Promise.resolve({ rows: [] });
 
         const agentsPromise = agentIds.length > 0
-            ? db.query('SELECT id, full_name, avatar_url FROM users WHERE id = ANY($1::uuid[])', [agentIds])
+            ? db.query('SELECT id, full_name, avatar_url FROM users WHERE id::text = ANY($1::text[])', [agentIds])
             : Promise.resolve({ rows: [] });
             
         const messagesPromise = chatIds.length > 0
-            ? db.query('SELECT * FROM messages WHERE chat_id = ANY($1::uuid[]) ORDER BY created_at ASC', [chatIds])
+            ? db.query('SELECT * FROM messages WHERE chat_id::text = ANY($1::text[]) ORDER BY created_at ASC', [chatIds])
             : Promise.resolve({ rows: [] });
 
         const [contactsRes, agentsRes, messagesRes] = await Promise.all([
