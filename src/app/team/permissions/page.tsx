@@ -3,14 +3,13 @@
 'use client';
 
 import React, { useState, useEffect, useOptimistic, useActionState, useRef } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth.tsx';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
+import type { User, Role, Permission } from '@/lib/types';
 import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getRolesAndPermissions, updateRolePermissionAction, createRoleAction, updateRoleAction, deleteRoleAction } from '@/actions/permissions';
-import type { Role, Permission } from '@/lib/types';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -258,19 +257,30 @@ function CreateRoleButton() {
 
 // --- Main Page Component ---
 export default function PermissionsPage() {
-    const user = useAuth();
     const [roles, setRoles] = useState<Role[]>([]);
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [workspaceId, setWorkspaceId] = useState<string | undefined>();
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                const userData = await res.json();
+                setWorkspaceId(userData.activeWorkspaceId);
+            }
+        };
+        fetchUser();
+    }, []);
 
     const fetchData = React.useCallback(async () => {
-        if (!user?.activeWorkspaceId) return;
+        if (!workspaceId) return;
         setLoading(true);
         setError(null);
         try {
-            const { roles, permissions, error: fetchError } = await getRolesAndPermissions(user.activeWorkspaceId);
+            const { roles, permissions, error: fetchError } = await getRolesAndPermissions(workspaceId);
             if (fetchError) {
                 throw new Error(fetchError);
             }
@@ -286,7 +296,7 @@ export default function PermissionsPage() {
         } finally {
             setLoading(false);
         }
-    }, [user?.activeWorkspaceId]);
+    }, [workspaceId]);
 
     useEffect(() => {
         fetchData();
@@ -297,73 +307,65 @@ export default function PermissionsPage() {
         fetchData();
     }
 
-    if (!user) {
+    if (loading) {
         return (
-            <MainLayout>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         );
     }
     
     return (
-        <MainLayout>
-            <div className="flex flex-col flex-1 h-full">
-                <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2"><Fingerprint /> Papéis & Permissões</h1>
-                        <p className="text-muted-foreground">Defina papéis e controle o que cada membro pode acessar e fazer no workspace.</p>
+        <div className="flex flex-col flex-1 h-full">
+            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
+                <div>
+                    <h1 className="text-2xl font-bold flex items-center gap-2"><Fingerprint /> Papéis & Permissões</h1>
+                    <p className="text-muted-foreground">Defina papéis e controle o que cada membro pode acessar e fazer no workspace.</p>
+                </div>
+                 <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+                    <DialogTrigger asChild>
+                       <Button>
+                            <PlusCircle className="mr-2 h-4 w-4" />
+                            Criar Novo Papel
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Criar Novo Papel</DialogTitle>
+                            <DialogDescription>
+                                Defina um nome e descrição para o novo papel. Você poderá atribuir permissões na tela seguinte.
+                            </DialogDescription>
+                        </DialogHeader>
+                        {workspaceId && <RoleForm 
+                            workspaceId={workspaceId}
+                            onSuccess={handleSuccess} 
+                            action={createRoleAction}
+                        />}
+                    </DialogContent>
+                </Dialog>
+            </header>
+            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
+                {error ? (
+                    <div className="text-center py-20 text-destructive">
+                        <AlertCircle className="mx-auto h-12 w-12" />
+                        <h2 className="mt-4 text-xl font-bold">Falha ao carregar dados</h2>
+                        <p className="text-muted-foreground">{error}</p>
+                        <Button onClick={fetchData} className="mt-4">Tentar Novamente</Button>
                     </div>
-                     <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-                        <DialogTrigger asChild>
-                           <Button>
-                                <PlusCircle className="mr-2 h-4 w-4" />
-                                Criar Novo Papel
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Criar Novo Papel</DialogTitle>
-                                <DialogDescription>
-                                    Defina um nome e descrição para o novo papel. Você poderá atribuir permissões na tela seguinte.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <RoleForm 
-                                workspaceId={user.activeWorkspaceId!} 
-                                onSuccess={handleSuccess} 
-                                action={createRoleAction}
-                            />
-                        </DialogContent>
-                    </Dialog>
-                </header>
-                <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                    {loading ? (
-                         <div className="flex items-center justify-center h-full">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                        </div>
-                    ) : error ? (
-                        <div className="text-center py-20 text-destructive">
-                            <AlertCircle className="mx-auto h-12 w-12" />
-                            <h2 className="mt-4 text-xl font-bold">Falha ao carregar dados</h2>
-                            <p className="text-muted-foreground">{error}</p>
-                            <Button onClick={fetchData} className="mt-4">Tentar Novamente</Button>
-                        </div>
-                    ) : roles.length > 0 && permissions.length > 0 ? (
-                        <PermissionsMatrix 
-                            initialRoles={roles} 
-                            initialPermissions={permissions} 
-                            workspaceId={user.activeWorkspaceId!}
-                            onMutate={fetchData}
-                        />
-                    ) : (
-                         <div className="text-center py-20">
-                            <h2 className="text-xl font-medium text-muted-foreground">Nenhum dado de permissão encontrado.</h2>
-                            <p className="text-muted-foreground">Isso pode acontecer se o workspace não foi configurado corretamente.</p>
-                        </div>
-                    )}
-                </main>
-            </div>
-        </MainLayout>
+                ) : roles.length > 0 && permissions.length > 0 && workspaceId ? (
+                    <PermissionsMatrix 
+                        initialRoles={roles} 
+                        initialPermissions={permissions} 
+                        workspaceId={workspaceId}
+                        onMutate={fetchData}
+                    />
+                ) : (
+                     <div className="text-center py-20">
+                        <h2 className="text-xl font-medium text-muted-foreground">Nenhum dado de permissão encontrado.</h2>
+                        <p className="text-muted-foreground">Isso pode acontecer se o workspace não foi configurado corretamente.</p>
+                    </div>
+                )}
+            </main>
+        </div>
     );
 }

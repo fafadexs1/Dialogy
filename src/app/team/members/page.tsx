@@ -3,10 +3,8 @@
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth.tsx';
+import type { User, Role, WorkspaceMember } from '@/lib/types';
 import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save, Copy } from 'lucide-react';
-import type { Role, WorkspaceMember } from '@/lib/types';
 import { getWorkspaceMembers, removeMemberAction, updateMemberRoleAction } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -173,20 +171,20 @@ function MemberActions({ member, workspaceId, roles, onMutate }: { member: Works
 
 
 export default function ManageMembersPage() {
-    const user = useAuth();
+    const [user, setUser] = useState<User | null>(null);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchData = React.useCallback(async () => {
-        if (!user?.activeWorkspaceId) return;
+    const fetchData = React.useCallback(async (workspaceId: string) => {
+        if (!workspaceId) return;
         setLoading(true);
         setError(null);
         try {
             const [membersResult, rolesResult] = await Promise.all([
-                getWorkspaceMembers(user.activeWorkspaceId),
-                getRolesAndPermissions(user.activeWorkspaceId)
+                getWorkspaceMembers(workspaceId),
+                getRolesAndPermissions(workspaceId)
             ]);
 
             if (membersResult.error) {
@@ -204,120 +202,127 @@ export default function ManageMembersPage() {
         } finally {
             setLoading(false);
         }
-    }, [user?.activeWorkspaceId]);
+    }, []);
 
     useEffect(() => {
-        if (user) {
-            fetchData();
-        }
-    }, [user, fetchData]);
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if(res.ok) {
+                const userData = await res.json();
+                setUser(userData);
+                if(userData.activeWorkspaceId) {
+                    fetchData(userData.activeWorkspaceId);
+                }
+            } else {
+                 setLoading(false);
+                 setError("Falha ao carregar dados do usuário.");
+            }
+        };
+        fetchUser();
+    }, [fetchData]);
 
-    if (!user || loading) {
+    if (loading) {
         return (
-            <MainLayout>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         );
     }
     
-    const activeWorkspace = user.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
+    const activeWorkspace = user?.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
     return (
-        <MainLayout>
-            <div className="flex flex-col flex-1 h-full">
-                <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
-                    <h1 className="text-2xl font-bold flex items-center gap-2"><ShieldAlert /> Gerenciar Membros</h1>
-                    <p className="text-muted-foreground">Gerencie os membros do seu workspace, suas permissões e status.</p>
-                </header>
-                <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Membros do Workspace</CardTitle>
-                            <CardDescription>
-                                Total de {members.length} membros no workspace: <span className='font-semibold'>{activeWorkspace?.name || ''}</span>
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            {error ? (
-                                 <div className="text-center py-10 text-destructive">
-                                    <AlertCircle className="mx-auto h-12 w-12" />
-                                    <h2 className="mt-4 text-xl font-bold">Falha ao carregar membros</h2>
-                                    <p className="text-muted-foreground">{error}</p>
-                                    <Button onClick={fetchData} className="mt-4">Tentar Novamente</Button>
-                                </div>
-                            ) : (
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead className='w-[30%]'>Membro</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Função</TableHead>
-                                            <TableHead>Equipe</TableHead>
-                                            <TableHead>Membro Desde</TableHead>
-                                            <TableHead>Uso (Piloto Automático)</TableHead>
-                                            <TableHead className="text-right">Ações</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {members.map((member) => (
-                                            <TableRow key={member.id}>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar>
-                                                            <AvatarImage src={member.avatar} alt={member.name} />
-                                                            <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <p className="font-medium">{member.name}</p>
-                                                            <div className="flex items-center gap-1">
-                                                                <p className="text-xs text-muted-foreground">{member.email}</p>
-                                                            </div>
-                                                            <div className="flex items-center gap-1 mt-1">
-                                                                <span className="text-xs font-mono text-muted-foreground">ID: {member.id}</span>
-                                                                <CopyButton textToCopy={member.id} />
-                                                            </div>
+        <div className="flex flex-col flex-1 h-full">
+            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
+                <h1 className="text-2xl font-bold flex items-center gap-2"><ShieldAlert /> Gerenciar Membros</h1>
+                <p className="text-muted-foreground">Gerencie os membros do seu workspace, suas permissões e status.</p>
+            </header>
+            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Membros do Workspace</CardTitle>
+                        <CardDescription>
+                            Total de {members.length} membros no workspace: <span className='font-semibold'>{activeWorkspace?.name || ''}</span>
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {error ? (
+                             <div className="text-center py-10 text-destructive">
+                                <AlertCircle className="mx-auto h-12 w-12" />
+                                <h2 className="mt-4 text-xl font-bold">Falha ao carregar membros</h2>
+                                <p className="text-muted-foreground">{error}</p>
+                                <Button onClick={() => user?.activeWorkspaceId && fetchData(user.activeWorkspaceId)} className="mt-4">Tentar Novamente</Button>
+                            </div>
+                        ) : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className='w-[30%]'>Membro</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Função</TableHead>
+                                        <TableHead>Equipe</TableHead>
+                                        <TableHead>Membro Desde</TableHead>
+                                        <TableHead>Uso (Piloto Automático)</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {members.map((member) => (
+                                        <TableRow key={member.id}>
+                                            <TableCell>
+                                                <div className="flex items-center gap-3">
+                                                    <Avatar>
+                                                        <AvatarImage src={member.avatar} alt={member.name} />
+                                                        <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
+                                                    </Avatar>
+                                                    <div>
+                                                        <p className="font-medium">{member.name}</p>
+                                                        <div className="flex items-center gap-1">
+                                                            <p className="text-xs text-muted-foreground">{member.email}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 mt-1">
+                                                            <span className="text-xs font-mono text-muted-foreground">ID: {member.id}</span>
+                                                            <CopyButton textToCopy={member.id} />
                                                         </div>
                                                     </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant={member.online ? 'default' : 'secondary'} className={member.online ? 'bg-green-500/20 text-green-700 border-transparent' : ''}>
-                                                        {member.online ? 'Online' : 'Offline'}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline">{member.role}</Badge>
-                                                </TableCell>
-                                                 <TableCell>
-                                                    <Badge variant="secondary" className="flex items-center gap-1.5 w-fit">
-                                                        <Users className="h-3 w-3"/>
-                                                        {member.team}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <span className="text-sm text-muted-foreground">{member.memberSince}</span>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-1 font-medium text-muted-foreground">
-                                                      <DollarSign className="h-4 w-4 text-green-500" />
-                                                      <span>
-                                                        {(member.autopilotUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                      </span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                   {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={fetchData} />}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            )}
-                        </CardContent>
-                    </Card>
-                </main>
-            </div>
-        </MainLayout>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant={member.online ? 'default' : 'secondary'} className={member.online ? 'bg-green-500/20 text-green-700 border-transparent' : ''}>
+                                                    {member.online ? 'Online' : 'Offline'}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline">{member.role}</Badge>
+                                            </TableCell>
+                                             <TableCell>
+                                                <Badge variant="secondary" className="flex items-center gap-1.5 w-fit">
+                                                    <Users className="h-3 w-3"/>
+                                                    {member.team}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className="text-sm text-muted-foreground">{member.memberSince}</span>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-1 font-medium text-muted-foreground">
+                                                  <DollarSign className="h-4 w-4 text-green-500" />
+                                                  <span>
+                                                    {(member.autopilotUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                  </span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                               {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={() => fetchData(activeWorkspace.id)} />}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        )}
+                    </CardContent>
+                </Card>
+            </main>
+        </div>
     )
 }

@@ -3,18 +3,16 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { cn } from '@/lib/utils';
 import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
+import type { User } from '@/lib/types';
 
-export function MainAppLayout({ children }: { children: React.ReactNode }) {
+export function MainAppLayout({ user, children }: { user: User | null, children: React.ReactNode }) {
   const pathname = usePathname();
   const transitionKey = pathname.split('?')[0];
 
   const noSidebarRoutes = ['/login', '/register', '/setup'];
-  
-  const user = useAuth();
   
   const shouldShowSidebar = user && !noSidebarRoutes.includes(pathname);
 
@@ -34,7 +32,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       <div className="min-h-0 min-w-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto">
            <PageTransition transitionKey={transitionKey} className="h-full">
-              {children}
+              <div className="h-full w-full">{children}</div>
            </PageTransition>
         </div>
       </div>

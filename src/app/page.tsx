@@ -1,6 +1,6 @@
 
 
-import { MainLayout } from '@/components/layout/main-layout';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import type { User, Workspace } from '@/lib/types';
@@ -114,30 +114,30 @@ export default async function Home() {
     console.error("[PAGE_SERVER] Não foi possível carregar os dados do usuário. Exibindo mensagem de erro.");
     await updateUserOnlineStatus(userId, false);
     return (
-       <MainLayout>
+       <MainAppLayout user={null}>
             <div className="flex-1 flex items-center justify-center">
                 <p>Ocorreu um erro ao carregar os dados do usuário. Tente novamente mais tarde.</p>
             </div>
-       </MainLayout>
+       </MainAppLayout>
     )
   }
 
   if (!user.activeWorkspaceId) {
     console.log("[PAGE_SERVER] Usuário não possui workspace ativo. Renderizando onboarding.");
     return (
-        <MainLayout>
+        <MainAppLayout user={user}>
             <WorkspaceOnboarding user={user} />
-        </MainLayout>
+        </MainAppLayout>
     )
   }
 
   console.log("[PAGE_SERVER] Renderizando layout principal com CustomerChatLayout e Suspense.");
 
   return (
-    <MainLayout>
+    <MainAppLayout user={user}>
         <Suspense fallback={<LoadingSkeleton />}>
             <CustomerChatLayout initialUser={user} />
         </Suspense>
-    </MainLayout>
+    </MainAppLayout>
   );
 }

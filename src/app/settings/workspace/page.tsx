@@ -4,14 +4,13 @@
 
 import { useActionState, useEffect, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { useAuth } from "@/hooks/use-auth.tsx";
 import { updateWorkspaceAction } from '@/actions/workspace';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2 } from 'lucide-react';
-import type { Workspace, WorkspaceInvite } from '@/lib/types';
+import type { User, Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -57,7 +56,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export default function WorkspaceSettingsPage() {
-    const user = useAuth();
+    const [user, setUser] = useState<User | null>(null);
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [workspaceName, setWorkspaceName] = useState('');
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
@@ -69,15 +68,23 @@ export default function WorkspaceSettingsPage() {
     const { toast } = useToast();
 
     useEffect(() => {
-        if (user?.activeWorkspaceId && user.workspaces) {
-            const workspace = user.workspaces.find(ws => ws.id === user.activeWorkspaceId);
-            if (workspace) {
-                setActiveWorkspace(workspace);
-                setWorkspaceName(workspace.name);
-                fetchInvites(workspace.id);
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                const userData = await res.json();
+                setUser(userData);
+                 if (userData?.activeWorkspaceId && userData.workspaces) {
+                    const workspace = userData.workspaces.find((ws: Workspace) => ws.id === userData.activeWorkspaceId);
+                    if (workspace) {
+                        setActiveWorkspace(workspace);
+                        setWorkspaceName(workspace.name);
+                        fetchInvites(workspace.id);
+                    }
+                }
             }
-        }
-    }, [user]);
+        };
+        fetchUser();
+    }, []);
 
     const fetchInvites = async (workspaceId: string) => {
         const result = await getWorkspaceInvites(workspaceId);

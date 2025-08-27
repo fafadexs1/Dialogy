@@ -3,7 +3,6 @@
 'use client';
 
 import React, { useState, useEffect, useActionState, useMemo } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
 import type { User, NexusFlowInstance, Action, ActionType, AutopilotConfig, AutopilotUsageLog } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -31,7 +30,6 @@ import { Label } from '@/components/ui/label';
 import { BarChart, ResponsiveContainer, XAxis, YAxis, Bar } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
@@ -259,9 +257,8 @@ function AutomationForm({
 
 
 export default function AutopilotPage() {
-    const user = useAuth();
     const { toast } = useToast();
-
+    const [user, setUser] = useState<User | null>(null);
     const [config, setConfig] = useState<AutopilotConfig | null>(null);
     const [instances, setInstances] = useState<NexusFlowInstance[]>([]);
     const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
@@ -277,6 +274,18 @@ export default function AutopilotPage() {
     const [editingInstance, setEditingInstance] = useState<NexusFlowInstance | null>(null);
     
     const [saveState, saveAction] = useActionState(saveAutopilotConfig, { success: false });
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                setUser(await res.json());
+            } else {
+                setLoading(false);
+            }
+        };
+        fetchUser();
+    }, []);
 
     const fetchData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -396,306 +405,302 @@ export default function AutopilotPage() {
 
     if (!user || loading) {
         return (
-            <MainLayout>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         )
     }
 
     return (
-        <MainLayout>
-            <div className="flex flex-col flex-1 h-full">
-                <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Agente de IA</h1>
-                        <p className="text-muted-foreground">Crie e gerencie seu agente de IA para responder e agir por você.</p>
-                    </div>
-                    <Button onClick={handleAddNewClick}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Adicionar Automação
-                    </Button>
-                </header>
-                <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                    
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-                            <Card className="lg:col-span-8">
-                                <CardHeader>
-                                    <CardTitle>Visão Geral de Custos e Uso</CardTitle>
-                                    <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Agente de IA.</CardDescription>
-                                </CardHeader>
-                                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-4">
-                                        <h3 className="font-semibold text-muted-foreground">Métricas do Mês Atual</h3>
-                                        {loadingStats ? (
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <Skeleton className="h-24" />
-                                                <Skeleton className="h-24" />
-                                            </div>
-                                        ) : (
-                                        <div className="grid grid-cols-2 gap-4 text-center">
-                                            <div className="p-4 rounded-lg bg-secondary/50">
-                                                <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
-                                                <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                                    <BrainCircuit className="h-6 w-6 text-primary"/>
-                                                    {usageStats?.executions.toLocaleString('pt-BR') || '0'}
-                                                </p>
-                                            </div>
-                                            <div className="p-4 rounded-lg bg-secondary/50">
-                                                <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
-                                                <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                                    <BrainCircuit className="h-6 w-6 text-purple-500"/>
-                                                    {usageStats?.tokens ? `${(usageStats.tokens / 1000).toFixed(1)}k` : '0'}
-                                                </p>
-                                            </div>
-                                            <div className="p-4 rounded-lg bg-secondary/50 col-span-2">
-                                                <p className="text-sm text-muted-foreground font-semibold">Custo Atual (USD)</p>
-                                                <p className="text-2xl font-bold flex items-center justify-center gap-2">
-                                                    <DollarSign className="h-6 w-6 text-green-500"/>
-                                                    {usageStats?.currentCost.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0.00'}
-                                                </p>
-                                            </div>
+        <div className="flex flex-col flex-1 h-full">
+            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
+                <div>
+                    <h1 className="text-2xl font-bold flex items-center gap-2"><Bot /> Agente de IA</h1>
+                    <p className="text-muted-foreground">Crie e gerencie seu agente de IA para responder e agir por você.</p>
+                </div>
+                <Button onClick={handleAddNewClick}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Adicionar Automação
+                </Button>
+            </header>
+            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
+                
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+                        <Card className="lg:col-span-8">
+                            <CardHeader>
+                                <CardTitle>Visão Geral de Custos e Uso</CardTitle>
+                                <CardDescription>Acompanhe o consumo e os custos gerados pelas execuções do Agente de IA.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-muted-foreground">Métricas do Mês Atual</h3>
+                                    {loadingStats ? (
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <Skeleton className="h-24" />
+                                            <Skeleton className="h-24" />
                                         </div>
-                                        )}
+                                    ) : (
+                                    <div className="grid grid-cols-2 gap-4 text-center">
+                                        <div className="p-4 rounded-lg bg-secondary/50">
+                                            <p className="text-sm text-muted-foreground font-semibold">Execuções</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <BrainCircuit className="h-6 w-6 text-primary"/>
+                                                {usageStats?.executions.toLocaleString('pt-BR') || '0'}
+                                            </p>
+                                        </div>
+                                        <div className="p-4 rounded-lg bg-secondary/50">
+                                            <p className="text-sm text-muted-foreground font-semibold">Tokens Usados</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <BrainCircuit className="h-6 w-6 text-purple-500"/>
+                                                {usageStats?.tokens ? `${(usageStats.tokens / 1000).toFixed(1)}k` : '0'}
+                                            </p>
+                                        </div>
+                                        <div className="p-4 rounded-lg bg-secondary/50 col-span-2">
+                                            <p className="text-sm text-muted-foreground font-semibold">Custo Atual (USD)</p>
+                                            <p className="text-2xl font-bold flex items-center justify-center gap-2">
+                                                <DollarSign className="h-6 w-6 text-green-500"/>
+                                                {usageStats?.currentCost.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0.00'}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className="space-y-4">
-                                        <h3 className="font-semibold text-muted-foreground">Execuções nos Últimos 6 Meses</h3>
-                                        <ChartContainer config={chartConfig} className="h-[200px] w-full">
-                                            <BarChart accessibilityLayer data={chartData}>
-                                                <XAxis
-                                                dataKey="month"
-                                                tickLine={false}
-                                                tickMargin={10}
-                                                axisLine={false}
-                                                tickFormatter={(value) => value.slice(0, 3)}
-                                                />
-                                                <YAxis tickLine={false} axisLine={false} />
-                                                <ChartTooltip
-                                                cursor={false}
-                                                content={<ChartTooltipContent indicator="dot" />}
-                                                />
-                                                <Bar dataKey="executions" fill="var(--color-executions)" radius={4} />
-                                            </BarChart>
-                                        </ChartContainer>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                            <div className="lg:col-span-4 space-y-6">
-                                <form action={saveAction}>
-                                    <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Agente</CardTitle>
-                                            <CardDescription>Selecione o "cérebro" do seu agente de IA.</CardDescription>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="ai-model">Modelo de IA</Label>
-                                                <Select name="aiModel" value={aiModel} onValueChange={setAiModel}>
-                                                    <SelectTrigger id="ai-model">
-                                                        <SelectValue placeholder="Selecione um modelo" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
-                                                        <SelectItem value="googleai/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Ultra Rápido)</SelectItem>
-                                                        <SelectItem value="googleai/gemini-1.5-pro">Gemini 1.5 Pro (Avançado)</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                {selectedModelInfo && (
-                                                    <div className="pt-2 space-y-3 animate-in fade-in-50">
-                                                        <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
-                                                        <div className="grid grid-cols-2 gap-3 text-center">
-                                                            <div className="p-2 border rounded-lg">
-                                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
-                                                                <p className="text-sm font-bold">{(selectedModelInfo.inputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
-                                                            </div>
-                                                            <div className="p-2 border rounded-lg">
-                                                                <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
-                                                                <p className="text-sm font-bold">{(selectedModelInfo.outputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="p-2 border rounded-lg text-center">
-                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
-                                                            <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
-                                                        </div>
-                                                        <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços em USD por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                    <Card className="mt-6">
-                                        <CardHeader>
-                                            <CardTitle className="flex items-center gap-2"><KeyRound/> Credenciais da API Gemini</CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="gemini-api-key">Sua Chave de API</Label>
-                                                <Input 
-                                                    id="gemini-api-key"
-                                                    name="geminiApiKey" 
-                                                    type="password" 
-                                                    placeholder="••••••••••••••••••••••••••" 
-                                                    value={geminiApiKey}
-                                                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                                                />
-                                                <p className="text-xs text-muted-foreground pt-1">Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
-                                            </div>
-                                        </CardContent>
-                                        <CardFooter>
-                                            <SaveButton>
-                                                <Save className='mr-2 h-4 w-4'/> Salvar Chave & Modelo
-                                            </SaveButton>
-                                        </CardFooter>
-                                    </Card>
-                                </form>
-                            </div>
-                        </div>
-                        
-                        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                            <DialogContent className="max-w-2xl">
-                                {config?.id && (
-                                    <AutomationForm 
-                                        configId={config.id}
-                                        instance={editingInstance}
-                                        onSuccess={handleSaveSuccess}
-                                        onClose={() => setIsModalOpen(false)}
-                                    />
-                                )}
-                            </DialogContent>
-                        </Dialog>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <form action={saveAction} className='lg:col-span-2 space-y-6'>
+                                    )}
+                                </div>
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-muted-foreground">Execuções nos Últimos 6 Meses</h3>
+                                    <ChartContainer config={chartConfig} className="h-[200px] w-full">
+                                        <BarChart accessibilityLayer data={chartData}>
+                                            <XAxis
+                                            dataKey="month"
+                                            tickLine={false}
+                                            tickMargin={10}
+                                            axisLine={false}
+                                            tickFormatter={(value) => value.slice(0, 3)}
+                                            />
+                                            <YAxis tickLine={false} axisLine={false} />
+                                            <ChartTooltip
+                                            cursor={false}
+                                            content={<ChartTooltipContent indicator="dot" />}
+                                            />
+                                            <Bar dataKey="executions" fill="var(--color-executions)" radius={4} />
+                                        </BarChart>
+                                    </ChartContainer>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <div className="lg:col-span-4 space-y-6">
+                            <form action={saveAction}>
                                 <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>Base de Conhecimento do Agente</CardTitle>
-                                        <CardDescription>
-                                            Forneça ao agente de IA o contexto sobre seu negócio, produtos e políticas.
-                                            Ele usará esse conhecimento para responder às perguntas dos clientes de forma precisa.
-                                        </CardDescription>
+                                        <CardTitle className="flex items-center gap-2"><Cog/> Configurações do Agente</CardTitle>
+                                        <CardDescription>Selecione o "cérebro" do seu agente de IA.</CardDescription>
                                     </CardHeader>
                                     <CardContent>
-                                        <Textarea 
-                                            name="knowledgeBase"
-                                            placeholder="Exemplo: Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. O prazo para devoluções é de 7 dias úteis..."
-                                            className="min-h-[200px]"
-                                            value={knowledgeBase}
-                                            onChange={(e) => setKnowledgeBase(e.target.value)}
-                                        />
+                                        <div className="space-y-2">
+                                            <Label htmlFor="ai-model">Modelo de IA</Label>
+                                            <Select name="aiModel" value={aiModel} onValueChange={setAiModel}>
+                                                <SelectTrigger id="ai-model">
+                                                    <SelectValue placeholder="Selecione um modelo" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="googleai/gemini-2.0-flash">Gemini 2.0 Flash (Rápido)</SelectItem>
+                                                    <SelectItem value="googleai/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Ultra Rápido)</SelectItem>
+                                                    <SelectItem value="googleai/gemini-1.5-pro">Gemini 1.5 Pro (Avançado)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            {selectedModelInfo && (
+                                                <div className="pt-2 space-y-3 animate-in fade-in-50">
+                                                    <p className="text-xs text-muted-foreground">{selectedModelInfo.description}</p>
+                                                    <div className="grid grid-cols-2 gap-3 text-center">
+                                                        <div className="p-2 border rounded-lg">
+                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowDown className="text-green-500"/> Entrada</p>
+                                                            <p className="text-sm font-bold">{(selectedModelInfo.inputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
+                                                        </div>
+                                                        <div className="p-2 border rounded-lg">
+                                                            <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><ArrowUp className="text-blue-500"/> Saída</p>
+                                                            <p className="text-sm font-bold">{(selectedModelInfo.outputCost).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}*</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="p-2 border rounded-lg text-center">
+                                                        <p className="text-xs font-semibold text-muted-foreground flex items-center justify-center gap-1"><BrainCircuit className="text-purple-500"/> Janela de Contexto</p>
+                                                        <p className="text-sm font-bold">{selectedModelInfo.contextWindow}</p>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-foreground/80 leading-tight">* Preços em USD por 1 milhão de tokens. Os valores são estimativas e podem variar.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="mt-6">
+                                    <CardHeader>
+                                        <CardTitle className="flex items-center gap-2"><KeyRound/> Credenciais da API Gemini</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="gemini-api-key">Sua Chave de API</Label>
+                                            <Input 
+                                                id="gemini-api-key"
+                                                name="geminiApiKey" 
+                                                type="password" 
+                                                placeholder="••••••••••••••••••••••••••" 
+                                                value={geminiApiKey}
+                                                onChange={(e) => setGeminiApiKey(e.target.value)}
+                                            />
+                                            <p className="text-xs text-muted-foreground pt-1">Sua chave é armazenada de forma segura e usada apenas para as chamadas de IA.</p>
+                                        </div>
                                     </CardContent>
                                     <CardFooter>
                                         <SaveButton>
-                                            <Save className='mr-2 h-4 w-4'/> Salvar Base de Conhecimento
+                                            <Save className='mr-2 h-4 w-4'/> Salvar Chave & Modelo
                                         </SaveButton>
                                     </CardFooter>
                                 </Card>
-                                 <Card>
-                                <CardHeader>
-                                    <CardTitle>Regras de Automação</CardTitle>
-                                    <CardDescription>
-                                        Defina gatilhos e ações específicas para situações comuns. As regras têm prioridade sobre a base de conhecimento.
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    {instances.map(instance => (
-                                        <div key={instance.id} className="p-4 border rounded-lg bg-background relative group">
-                                            <div className="absolute top-3 right-3 flex items-center gap-1">
-                                                <Switch
-                                                    id={`status-${instance.id}`}
-                                                    checked={instance.enabled}
-                                                    onCheckedChange={(checked) => handleToggleEnabled(instance.id, checked)}
-                                                />
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7">
-                                                            <MoreVertical className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={() => handleEditClick(instance)}><Edit className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
-                                                        <DropdownMenuItem className="text-destructive" onClick={() => handleRemoveInstance(instance.id)}><Trash2 className="mr-2 h-4 w-4" />Remover</DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
-                                            <p className="text-sm font-semibold pr-20">{instance.name}</p>
-                                            <div className="mt-2 space-y-2 text-xs">
-                                                <p className="text-muted-foreground"><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
-                                                <div className="text-muted-foreground flex items-start gap-1.5">
-                                                <span className="font-semibold text-foreground shrink-0">ENTÃO:</span> 
-                                                {instance.action.type === 'reply' ? (
-                                                    <span>{instance.action.value}</span>
-                                                ) : (
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Webhook className="h-3 w-3"/>
-                                                        <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{instance.action.method}</span>
-                                                        <span className="truncate">{instance.action.url}</span>
-                                                    </div>
-                                                )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {instances.length === 0 && (
-                                        <div className="text-center p-6 border-2 border-dashed rounded-lg">
-                                            <p className="text-muted-foreground">Nenhuma automação criada.</p>
-                                            <Button variant="link" onClick={handleAddNewClick}>Adicionar a primeira automação</Button>
-                                        </div>
-                                    )}
-                                </CardContent>
-                            </Card>
                             </form>
+                        </div>
+                    </div>
+                    
+                    <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+                        <DialogContent className="max-w-2xl">
+                            {config?.id && (
+                                <AutomationForm 
+                                    configId={config.id}
+                                    instance={editingInstance}
+                                    onSuccess={handleSaveSuccess}
+                                    onClose={() => setIsModalOpen(false)}
+                                />
+                            )}
+                        </DialogContent>
+                    </Dialog>
 
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <form action={saveAction} className='lg:col-span-2 space-y-6'>
+                            <input type="hidden" name="workspaceId" value={user.activeWorkspaceId || ''} />
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>Histórico de Execuções</CardTitle>
+                                    <CardTitle>Base de Conhecimento do Agente</CardTitle>
                                     <CardDescription>
-                                        Últimas 20 execuções do Piloto Automático e seus custos em tokens.
+                                        Forneça ao agente de IA o contexto sobre seu negócio, produtos e políticas.
+                                        Ele usará esse conhecimento para responder às perguntas dos clientes de forma precisa.
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent>
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Ação</TableHead>
-                                                <TableHead>Tokens</TableHead>
-                                                <TableHead>Quando</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {usageLogs.map((log) => (
-                                                <TableRow key={log.id}>
-                                                    <TableCell>
-                                                        <div className="flex items-center gap-2">
-                                                            {getFlowIcon(log.flow_name)}
-                                                            <div>
-                                                                <p className="font-medium">{log.rule_name || log.flow_name}</p>
-                                                                <p className="text-xs text-muted-foreground">{log.model_name}</p>
-                                                            </div>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="font-mono">{log.total_tokens}</TableCell>
-                                                    <TableCell className="text-muted-foreground text-xs">
-                                                        {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                            {usageLogs.length === 0 && (
-                                                <TableRow>
-                                                    <TableCell colSpan={3} className="text-center h-24 text-muted-foreground">
-                                                        Nenhuma execução registrada ainda.
-                                                    </TableCell>
-                                                </TableRow>
-                                            )}
-                                        </TableBody>
-                                    </Table>
+                                    <Textarea 
+                                        name="knowledgeBase"
+                                        placeholder="Exemplo: Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. O prazo para devoluções é de 7 dias úteis..."
+                                        className="min-h-[200px]"
+                                        value={knowledgeBase}
+                                        onChange={(e) => setKnowledgeBase(e.target.value)}
+                                    />
                                 </CardContent>
+                                <CardFooter>
+                                    <SaveButton>
+                                        <Save className='mr-2 h-4 w-4'/> Salvar Base de Conhecimento
+                                    </SaveButton>
+                                </CardFooter>
                             </Card>
-                        </div>
-                </main>
-            </div>
-        </MainLayout>
+                             <Card>
+                            <CardHeader>
+                                <CardTitle>Regras de Automação</CardTitle>
+                                <CardDescription>
+                                    Defina gatilhos e ações específicas para situações comuns. As regras têm prioridade sobre a base de conhecimento.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {instances.map(instance => (
+                                    <div key={instance.id} className="p-4 border rounded-lg bg-background relative group">
+                                        <div className="absolute top-3 right-3 flex items-center gap-1">
+                                            <Switch
+                                                id={`status-${instance.id}`}
+                                                checked={instance.enabled}
+                                                onCheckedChange={(checked) => handleToggleEnabled(instance.id, checked)}
+                                            />
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                                        <MoreVertical className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => handleEditClick(instance)}><Edit className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-destructive" onClick={() => handleRemoveInstance(instance.id)}><Trash2 className="mr-2 h-4 w-4" />Remover</DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
+                                        <p className="text-sm font-semibold pr-20">{instance.name}</p>
+                                        <div className="mt-2 space-y-2 text-xs">
+                                            <p className="text-muted-foreground"><span className="font-semibold text-foreground">QUANDO:</span> {instance.trigger}</p>
+                                            <div className="text-muted-foreground flex items-start gap-1.5">
+                                            <span className="font-semibold text-foreground shrink-0">ENTÃO:</span> 
+                                            {instance.action.type === 'reply' ? (
+                                                <span>{instance.action.value}</span>
+                                            ) : (
+                                                <div className="flex items-center gap-1.5">
+                                                    <Webhook className="h-3 w-3"/>
+                                                    <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{instance.action.method}</span>
+                                                    <span className="truncate">{instance.action.url}</span>
+                                                </div>
+                                            )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {instances.length === 0 && (
+                                    <div className="text-center p-6 border-2 border-dashed rounded-lg">
+                                        <p className="text-muted-foreground">Nenhuma automação criada.</p>
+                                        <Button variant="link" onClick={handleAddNewClick}>Adicionar a primeira automação</Button>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                        </form>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Histórico de Execuções</CardTitle>
+                                <CardDescription>
+                                    Últimas 20 execuções do Piloto Automático e seus custos em tokens.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Ação</TableHead>
+                                            <TableHead>Tokens</TableHead>
+                                            <TableHead>Quando</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {usageLogs.map((log) => (
+                                            <TableRow key={log.id}>
+                                                <TableCell>
+                                                    <div className="flex items-center gap-2">
+                                                        {getFlowIcon(log.flow_name)}
+                                                        <div>
+                                                            <p className="font-medium">{log.rule_name || log.flow_name}</p>
+                                                            <p className="text-xs text-muted-foreground">{log.model_name}</p>
+                                                        </div>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="font-mono">{log.total_tokens}</TableCell>
+                                                <TableCell className="text-muted-foreground text-xs">
+                                                    {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        {usageLogs.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={3} className="text-center h-24 text-muted-foreground">
+                                                    Nenhuma execução registrada ainda.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </div>
+            </main>
+        </div>
     );
 }

@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, Team, BusinessHour, Role, Tag } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { useToast } from '@/hooks/use-toast';
 import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours } from '@/actions/teams';
 import { getTags } from '@/actions/crm';
@@ -352,7 +351,6 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
 
 
 export default function TeamPage() {
-    const user = useAuth();
     const [teams, setTeams] = useState<Team[]>([]);
     const [allMembers, setAllMembers] = useState<User[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
@@ -362,17 +360,32 @@ export default function TeamPage() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const { toast } = useToast();
+    const [workspaceId, setWorkspaceId] = useState<string | undefined>();
+    const [user, setUser] = useState<User | null>(null);
+
+    // This is a temporary solution to get user data until a proper global context is established
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user'); // This assumes there's an API route to get the logged-in user
+            if (res.ok) {
+                const userData = await res.json();
+                setUser(userData);
+                setWorkspaceId(userData.activeWorkspaceId);
+            }
+        };
+        fetchUser();
+    }, []);
 
     useEffect(() => {
         const fetchData = async () => {
-            if (!user?.activeWorkspaceId) return;
+            if (!workspaceId) return;
             setLoading(true);
             try {
                 const [teamsData, membersData, rolesData, tagsData] = await Promise.all([
-                    getTeams(user.activeWorkspaceId),
-                    getWorkspaceMembers(user.activeWorkspaceId),
-                    getRolesAndPermissions(user.activeWorkspaceId),
-                    getTags(user.activeWorkspaceId)
+                    getTeams(workspaceId),
+                    getWorkspaceMembers(workspaceId),
+                    getRolesAndPermissions(workspaceId),
+                    getTags(workspaceId)
                 ]);
 
                 if (teamsData.error) throw new Error(teamsData.error);
@@ -400,9 +413,9 @@ export default function TeamPage() {
             }
         };
 
-        if(user) fetchData();
+        if(workspaceId) fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user, toast]);
+    }, [workspaceId, toast]);
 
     const handleTeamUpdate = (teamId: string, updatedTeam: Team) => {
         setTeams(prev => prev.map(t => t.id === teamId ? updatedTeam : t));
@@ -432,18 +445,15 @@ export default function TeamPage() {
     const filteredTeams = teams.filter(team => team.name.toLowerCase().includes(searchTerm.toLowerCase()));
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
 
-    if (!user || loading) {
+    if (loading) {
         return (
-            <MainLayout>
-                <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-                </div>
-            </MainLayout>
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+            </div>
         );
     }
 
   return (
-    <MainLayout>
       <div className="flex flex-col flex-1 h-full">
         <header className="p-4 border-b flex-shrink-0 bg-card">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="h-6 w-6"/>Gestão de Equipes</h1>
@@ -509,7 +519,7 @@ export default function TeamPage() {
             <main className="flex-1 overflow-y-auto">
                 <div className="max-w-4xl mx-auto py-6 px-4">
                     {isCreating ? (
-                        <CreateTeamContent workspaceId={user.activeWorkspaceId!} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
+                       workspaceId && <CreateTeamContent workspaceId={workspaceId} roles={roles} onAddTeam={handleAddTeam} onCancel={() => setIsCreating(false)} />
                     ) : selectedTeam ? (
                         <TeamSettingsContent 
                             key={selectedTeam.id}
@@ -530,6 +540,5 @@ export default function TeamPage() {
             </main>
         </div>
       </div>
-    </MainLayout>
   );
 }

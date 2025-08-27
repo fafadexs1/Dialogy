@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -150,6 +151,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
       />
       <ContactPanel
         chat={enrichedSelectedChat}
+        currentUser={initialUser}
         onTransferSuccess={fetchData}
         onContactUpdate={fetchData}
       />

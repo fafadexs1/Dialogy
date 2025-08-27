@@ -31,7 +31,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
 import { getWorkspaceUsers } from '@/actions/crm';
-import { useAuth } from '@/hooks/use-auth';
 import { transferChatAction } from '@/actions/chats';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
@@ -39,12 +38,12 @@ import { AddContactForm } from '../crm/add-contact-form';
 
 interface ContactPanelProps {
   chat: Chat | null;
+  currentUser: User | null;
   onTransferSuccess: () => void;
   onContactUpdate: () => void;
 }
 
-function TransferChatDialog({ chat, onTransferSuccess, disabled }: { chat: Chat, onTransferSuccess: () => void, disabled?: boolean }) {
-    const currentUser = useAuth();
+function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean }) {
     const allOnlineAgents = usePresence();
     const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
     const [loading, setLoading] = useState(true);
@@ -152,18 +151,17 @@ function TransferChatDialog({ chat, onTransferSuccess, disabled }: { chat: Chat,
 }
 
 
-export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
+export default function ContactPanel({ chat, currentUser, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [agents, setAgents] = useState<User[]>([]);
-  const user = useAuth();
   
   useEffect(() => {
-    if(user?.activeWorkspaceId) {
-        getWorkspaceUsers(user.activeWorkspaceId).then(res => {
+    if(currentUser?.activeWorkspaceId) {
+        getWorkspaceUsers(currentUser.activeWorkspaceId).then(res => {
             if(!res.error) setAgents(res.users || []);
         });
     }
-  }, [user?.activeWorkspaceId]);
+  }, [currentUser?.activeWorkspaceId]);
 
 
   if (!chat) {
@@ -261,7 +259,7 @@ export default function ContactPanel({ chat, onTransferSuccess, onContactUpdate 
                   <UserCheck className="h-4 w-4" />
                   Atendente Responsável
               </h4>
-               <TransferChatDialog chat={chat} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
+               <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
             </div>
 
             {agent && agent.id !== 'unknown' ? (

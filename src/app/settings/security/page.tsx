@@ -1,11 +1,22 @@
 'use client';
 
-import { useAuth } from "@/hooks/use-auth.tsx";
 import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { User } from "@/lib/types";
 
 export default function SecurityPage() {
-    const user = useAuth();
+    const [user, setUser] = useState<User | null>(null);
     
+    useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                setUser(await res.json());
+            }
+        };
+        fetchUser();
+    }, []);
+
     if (!user) {
         return <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />

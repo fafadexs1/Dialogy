@@ -3,9 +3,8 @@
 'use client';
 
 import React, { useState, useEffect, useActionState, useOptimistic, useCallback } from 'react';
-import { useAuth } from '@/hooks/use-auth.tsx';
 import { Loader2, MessageSquareQuote, Plus, Trash2, Edit, Save, Globe, Lock, AlertCircle } from 'lucide-react';
-import type { Shortcut } from '@/lib/types';
+import type { Shortcut, User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -41,7 +40,7 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 
 
 export default function ShortcutsPage() {
-    const user = useAuth();
+    const [user, setUser] = useState<User | null>(null);
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingShortcut, setEditingShortcut] = useState<Shortcut | null>(null);
@@ -49,20 +48,32 @@ export default function ShortcutsPage() {
 
     const [state, formAction] = useActionState(saveShortcut, { success: false, error: null });
 
-    const fetchData = useCallback(async () => {
-        if (!user?.activeWorkspaceId) return;
+    const fetchData = useCallback(async (workspaceId: string) => {
+        if (!workspaceId) return;
         setLoading(true);
-        const result = await getShortcuts(user.activeWorkspaceId);
+        const result = await getShortcuts(workspaceId);
         if (result.error) {
             toast({ title: "Erro ao carregar atalhos", description: result.error, variant: 'destructive' });
         } else {
             setShortcuts(result.shortcuts || []);
         }
         setLoading(false);
-    }, [user?.activeWorkspaceId]);
+    }, []);
 
-    useEffect(() => {
-        fetchData();
+     useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                const userData = await res.json();
+                setUser(userData);
+                if (userData.activeWorkspaceId) {
+                    fetchData(userData.activeWorkspaceId);
+                }
+            } else {
+                setLoading(false);
+            }
+        };
+        fetchUser();
     }, [fetchData]);
 
     useEffect(() => {
@@ -70,9 +81,9 @@ export default function ShortcutsPage() {
             toast({ title: 'Sucesso!', description: 'Seu atalho foi salvo.' });
             setIsFormVisible(false);
             setEditingShortcut(null);
-            fetchData();
+            if(user?.activeWorkspaceId) fetchData(user.activeWorkspaceId);
         }
-    }, [state, fetchData]);
+    }, [state, fetchData, user?.activeWorkspaceId]);
 
     const handleEdit = (shortcut: Shortcut) => {
         setEditingShortcut(shortcut);
@@ -93,7 +104,7 @@ export default function ShortcutsPage() {
         const result = await deleteShortcut(shortcutId);
         if(result.success) {
             toast({ title: 'Atalho removido!'});
-            fetchData();
+            if (user?.activeWorkspaceId) fetchData(user.activeWorkspaceId);
         } else {
             toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive'});
         }

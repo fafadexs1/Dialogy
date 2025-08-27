@@ -3,8 +3,7 @@
 'use client';
 
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
-import type { OnlineAgent } from '@/lib/types';
-import { useAuth } from '@/hooks/use-auth.tsx';
+import type { OnlineAgent, User } from '@/lib/types';
 import { updateUserOnlineStatus, getOnlineAgents } from '@/actions/user';
 import { createClient } from '@/lib/supabase/client';
 
@@ -15,8 +14,19 @@ export const usePresence = () => {
 };
 
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
-  const currentUser = useAuth();
+  // We can't use useAuth() here as it creates a circular dependency
+  // and the provider is at a higher level.
+  // Instead, we will fetch a simplified user object for the provider's own use.
+  const [localUser, setLocalUser] = useState<User | null>(null);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
+
+  useEffect(() => {
+    const { data: { subscription } } = createClient().auth.onAuthStateChange((event, session) => {
+      setLocalUser(session?.user as User ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const fetchOnlineAgentsCallback = useCallback(async (workspaceId: string) => {
       try {
@@ -29,8 +39,8 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
   useEffect(() => {
-    if (!currentUser?.activeWorkspaceId) return;
-    const workspaceId = currentUser.activeWorkspaceId;
+    if (!localUser?.activeWorkspaceId) return;
+    const workspaceId = localUser.activeWorkspaceId;
     const supabase = createClient();
     fetchOnlineAgentsCallback(workspaceId);
 
@@ -50,12 +60,12 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
+  }, [localUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
 
 
   useEffect(() => {
-     if (!currentUser?.id) return;
-     const userId = currentUser.id;
+     if (!localUser?.id) return;
+     const userId = localUser.id;
 
      const handleVisibilityChange = () => {
         if (document.visibilityState === 'visible') {
@@ -79,7 +89,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         updateUserOnlineStatus(userId, false); 
      }
 
-  }, [currentUser?.id]);
+  }, [localUser?.id]);
 
 
   return (

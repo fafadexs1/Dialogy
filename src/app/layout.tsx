@@ -3,9 +3,6 @@
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
-import { AuthProvider } from '@/hooks/use-auth.tsx';
-import type { User } from '@/lib/types';
 
 
 export default function RootLayout({
@@ -22,13 +19,9 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased">
-          <AuthProvider>
             <PresenceProvider>
-              <MainAppLayout>
                 {children}
-              </MainAppLayout>
             </PresenceProvider>
-        </AuthProvider>
         <Toaster />
       </body>
     </html>

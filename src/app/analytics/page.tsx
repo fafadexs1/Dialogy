@@ -3,14 +3,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
-import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth.tsx';
+import type { User } from '@/lib/types';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { 
     BarChart, 
     Bar, 
     XAxis, 
-    YAxis, 
-    CartesianGrid, 
+    YAxis, TICK_LINE_HEIGHT_WITH_PADDING, CartesianGrid, 
     Tooltip, 
     ResponsiveContainer,
     PieChart,
@@ -48,7 +47,7 @@ import {
 } from "@/components/ui/select"
 import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers } from '@/actions/analytics';
 import { getTeams } from '@/actions/teams';
-import type { AnalyticsData, AgentPerformance, User, Team } from '@/lib/types';
+import type { AnalyticsData, AgentPerformance, Team } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
 
@@ -141,7 +140,7 @@ const channelsData = [
 
 // Página Principal de Analytics
 export default function AnalyticsPage() {
-  const user = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const [isPending, startTransition] = useTransition();
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
@@ -153,6 +152,16 @@ export default function AnalyticsPage() {
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
   
+  useEffect(() => {
+        const fetchUser = async () => {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                setUser(await res.json());
+            }
+        };
+        fetchUser();
+    }, []);
+
   const getDateRange = (range: TimeRange): { from: string, to: string } => {
     const now = new Date();
     switch (range) {
@@ -229,11 +238,9 @@ export default function AnalyticsPage() {
 
   if (!user) {
     return (
-      <MainLayout>
         <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary"/>
         </div>
-      </MainLayout>
     )
   }
   
@@ -244,7 +251,6 @@ export default function AnalyticsPage() {
     : agentPerformance.filter(p => p.agent_id === selectedAgentId);
 
   return (
-    <MainLayout>
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 border-b flex-shrink-0 bg-card flex items-center justify-between sticky top-0 z-10">
                 <div>
@@ -403,6 +409,5 @@ export default function AnalyticsPage() {
                 </div>
             </main>
         </div>
-    </MainLayout>
   );
 }
