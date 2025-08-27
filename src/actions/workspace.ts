@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { revalidatePath } from 'next/cache';
@@ -30,17 +29,30 @@ export async function createWorkspaceAction(
     await client.query('BEGIN');
 
     // 1. Inserir o novo workspace.
-    // O trigger 'setup_workspace_defaults_trigger' cuidará automaticamente:
-    // - Da criação dos papéis padrão (Administrador, Membro).
-    // - Da atribuição de permissões a esses papéis.
-    // - Da associação do usuário criador (owner_id) ao papel de Administrador na tabela 'user_workspace_roles'.
     const workspaceRes = await client.query(
       'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id',
       [workspaceName, userId]
     );
     const newWorkspaceId = workspaceRes.rows[0].id;
 
-    // 2. Atualizar o workspace ativo do usuário
+    // 2. Criar os papéis (roles) padrão para o novo workspace.
+    const adminRoleRes = await client.query(
+        `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE) RETURNING id`,
+        [newWorkspaceId]
+    );
+    await client.query(
+        `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Membro', 'Acesso às funcionalidades principais, mas com permissões limitadas.', TRUE)`,
+        [newWorkspaceId]
+    );
+    const adminRoleId = adminRoleRes.rows[0].id;
+
+    // 3. Associar o usuário criador ao papel de Administrador.
+    await client.query(
+      'INSERT INTO user_workspace_roles (user_id, workspace_id, role_id) VALUES ($1, $2, $3)',
+      [userId, newWorkspaceId, adminRoleId]
+    );
+
+    // 4. Atualizar o workspace ativo do usuário
     await client.query(
         'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
         [newWorkspaceId, userId]
@@ -48,7 +60,7 @@ export async function createWorkspaceAction(
 
     await client.query('COMMIT');
     
-    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e definido como ativo para o usuário ID: ${userId}. Papéis padrão e permissões foram atribuídos pelo trigger do DB.`);
+    console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado e usuário ${userId} definido como Administrador.`);
 
   } catch (error) {
     await client.query('ROLLBACK');
