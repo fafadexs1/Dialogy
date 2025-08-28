@@ -1,7 +1,8 @@
 
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
+import { useRouter } from 'next/navigation';
 import {
   Plus,
   CheckCircle2,
@@ -95,14 +96,28 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
 }
 
 // --------- Main component ----------
-export default function CampaignsPage({ user }: { user: User | null }) {
+export default function CampaignsPage() {
+  const router = useRouter();
   const { toast } = useToast();
+  const [user, setUser] = useState<User | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [channel, setChannel] = useState<Campaign['channel'] | "all">("all");
+
+  useEffect(() => {
+    const fetchUser = async () => {
+        const res = await fetch('/api/user');
+        if (res.ok) {
+            setUser(await res.json());
+        } else {
+            router.push('/login');
+        }
+    };
+    fetchUser();
+  }, [router]);
 
   const fetchCampaigns = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
