@@ -154,13 +154,17 @@ async function handleMessagesUpsert(payload: any) {
         );
         
         if (contactRes.rowCount === 0) {
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name
+                 RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
         } else {
             // Update name if it's different and not null
             if (pushName && pushName !== contactRes.rows[0].name) {
+                console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
                 contactRes = await client.query(
                     'UPDATE contacts SET name = $1 WHERE id = $2 RETURNING *',
                     [pushName, contactRes.rows[0].id]
