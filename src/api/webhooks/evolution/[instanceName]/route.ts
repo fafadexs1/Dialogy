@@ -172,7 +172,7 @@ async function handleMessagesUpsert(payload: any) {
             chat = chatRes.rows[0];
         } else {
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
