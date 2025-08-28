@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -154,13 +155,17 @@ async function handleMessagesUpsert(payload: any) {
         );
         
         if (contactRes.rowCount === 0) {
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
+                 RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
         } else {
             // Update name if it's different and not null
             if (pushName && pushName !== contactRes.rows[0].name) {
+                console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
                 contactRes = await client.query(
                     'UPDATE contacts SET name = $1 WHERE id = $2 RETURNING *',
                     [pushName, contactRes.rows[0].id]
@@ -180,7 +185,7 @@ async function handleMessagesUpsert(payload: any) {
             chat = chatRes.rows[0];
         } else {
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
@@ -255,43 +260,32 @@ async function updateProfilePicture(contactId: string, contactJid: string, insta
 
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
+    if (!Array.isArray(data) || data.length === 0) return;
     
-    // Normalize data to always be an array
-    const updates = Array.isArray(data) ? data : [data];
+    const contactUpdate = data[0];
+    const { id: remoteJid, profilePicUrl } = contactUpdate;
 
-    if (updates.length === 0) {
-        console.log('[WEBHOOK_CONTACT_UPDATE] Payload inválido ou vazio.');
-        return;
-    }
+    if (!remoteJid || !profilePicUrl) return;
 
-    for (const contactUpdate of updates) {
-        const { id: remoteJid, profilePicUrl } = contactUpdate;
+    try {
+        const instanceRes = await db.query('SELECT config_id FROM evolution_api_instances WHERE name = $1', [instanceName]);
+        if (instanceRes.rowCount === 0) return;
+        const configId = instanceRes.rows[0].config_id;
         
-        if (!remoteJid || !profilePicUrl) {
-            console.log('[WEBHOOK_CONTACT_UPDATE] JID ou URL da foto de perfil ausente em um dos objetos de atualização. Pulando.');
-            continue;
+        const configRes = await db.query('SELECT workspace_id FROM evolution_api_configs WHERE id = $1', [configId]);
+        if(configRes.rowCount === 0) return;
+        const workspaceId = configRes.rows[0].workspace_id;
+
+        const result = await db.query(
+            `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
+            [profilePicUrl, remoteJid, workspaceId]
+        );
+
+        if (result.rowCount > 0) {
+            console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
         }
-
-        try {
-            const instanceRes = await db.query('SELECT config_id FROM evolution_api_instances WHERE name = $1', [instanceName]);
-            if (instanceRes.rowCount === 0) return;
-            const configId = instanceRes.rows[0].config_id;
-            
-            const configRes = await db.query('SELECT workspace_id FROM evolution_api_configs WHERE id = $1', [configId]);
-            if(configRes.rowCount === 0) return;
-            const workspaceId = configRes.rows[0].workspace_id;
-
-            const result = await db.query(
-                `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
-                [profilePicUrl, remoteJid, workspaceId]
-            );
-
-            if (result.rowCount > 0) {
-                console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
-            }
-        } catch (error) {
-            console.error(`[WEBHOOK_CONTACT_UPDATE] Erro ao atualizar foto de perfil para ${remoteJid}:`, error);
-        }
+    } catch (error) {
+        console.error('[WEBHOOK_CONTACT_UPDATE] Erro ao atualizar foto de perfil:', error);
     }
 }
 
