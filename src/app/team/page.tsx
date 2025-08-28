@@ -388,12 +388,14 @@ export default function TeamPage() {
                     getTags(user.activeWorkspaceId)
                 ]);
 
-                if (teamsData.error) throw new Error(teamsData.error);
-                setTeams(teamsData.teams || []);
-                if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
-                    setSelectedTeamId(teamsData.teams[0].id);
-                } else if (teamsData.teams?.length === 0) {
-                    setSelectedTeamId(null);
+                if (teamsData) {
+                    if (teamsData.error) throw new Error(teamsData.error);
+                    setTeams(teamsData.teams || []);
+                    if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
+                        setSelectedTeamId(teamsData.teams[0].id);
+                    } else if (teamsData.teams?.length === 0) {
+                        setSelectedTeamId(null);
+                    }
                 }
 
                 if (membersData.error) throw new Error(membersData.error);
