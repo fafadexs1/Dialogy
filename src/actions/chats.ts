@@ -338,7 +338,8 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const chatQuery = `
             SELECT 
                 c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color, c.contact_id, c.agent_id,
-                t.name as team_name
+                t.name as team_name,
+                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as instance_name
             FROM chats c
             LEFT JOIN team_members tm ON c.agent_id = tm.user_id
             LEFT JOIN teams t ON tm.team_id = t.id
@@ -447,7 +448,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 agent: agent ? { id: agent.id, name: agent.full_name, avatar: agent.avatar_url } : undefined,
                 messages: lastMessage ? [lastMessage] : [],
                 source: lastMessage?.source_from_api,
-                instance_name: lastMessage?.instance_name,
+                instance_name: r.instance_name,
                 assigned_at: r.assigned_at,
                 unreadCount: unreadCount,
                 teamName: r.team_name,
