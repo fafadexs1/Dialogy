@@ -93,9 +93,9 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
         // Create default business hours for the new team
         const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-        const businessHoursValues = days.map(day => `('${newTeam.id}', '${day}')`).join(',');
+        const businessHoursValues = days.map(day => `(gen_random_uuid(), '${newTeam.id}', '${day}')`).join(',');
         await client.query(
-            `INSERT INTO business_hours (team_id, day_of_week) VALUES ${businessHoursValues}`
+            `INSERT INTO business_hours (id, team_id, day_of_week) VALUES ${businessHoursValues}`
         );
 
         await client.query('COMMIT');
@@ -310,3 +310,4 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
 }
+
