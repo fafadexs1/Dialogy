@@ -397,47 +397,7 @@ function TeamSettingsContent({
             ))}
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Exceções de Calendário</CardTitle>
-              <CardDescription>Configure feriados ou dias com horários especiais.</CardDescription>
-            </div>
-            <AddExceptionDialog teamId={team.id} onAdd={onMutate} />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-2">
-            {team.scheduleExceptions && team.scheduleExceptions.length > 0 ? (
-                team.scheduleExceptions.map(ex => (
-                    <div key={ex.id} className="flex items-center justify-between p-3 rounded-lg border bg-secondary/50">
-                        <div className="flex items-center gap-3">
-                           <Calendar className="h-5 w-5 text-muted-foreground"/>
-                           <div>
-                               <p className="font-semibold">{ex.description}</p>
-                               <p className="text-sm text-muted-foreground">{format(new Date(ex.date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-                           </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            {ex.is_closed ? (
-                                <Badge variant="secondary" className="flex items-center gap-1.5"><CalendarOff className="h-3 w-3"/> Sem expediente</Badge>
-                            ) : (
-                                <Badge variant="outline" className="font-mono">{ex.start_time} - {ex.end_time}</Badge>
-                            )}
-                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveException(ex.id)}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                             </Button>
-                        </div>
-                    </div>
-                ))
-            ) : (
-                <div className="text-center text-sm text-muted-foreground p-4 border-2 border-dashed rounded-lg">
-                    <p>Nenhuma exceção configurada para esta equipe.</p>
-                </div>
-            )}
-        </CardContent>
-      </Card>
+      
     </div>
   )
 }

@@ -60,12 +60,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                     WHERE bh.team_id = t.id),
                     '[]'::json
                 ) as "businessHours",
-                COALESCE(
-                    (SELECT json_agg(ex.* ORDER BY ex.date ASC)
-                     FROM schedule_exceptions ex
-                     WHERE ex.team_id = t.id),
-                    '[]'::json
-                ) as "scheduleExceptions"
+                '[]'::json as "scheduleExceptions"
             FROM teams t
             WHERE t.workspace_id = $1
             ORDER BY t.name;
@@ -73,9 +68,9 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
 
         return { teams: teamsRes.rows };
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Erro ao buscar equipes:", error);
-        return { teams: [], error: "Falha ao buscar dados das equipes no banco de dados." };
+        return { teams: [], error: `Falha ao buscar dados das equipes no banco de dados. Detalhe: ${error.message}` };
     }
 }
 
@@ -354,9 +349,9 @@ export async function createScheduleException(
       ]
     );
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
     console.error('[CREATE_SCHEDULE_EXCEPTION] Error:', error);
-    return { success: false, error: 'Falha ao salvar a exceção no banco de dados.' };
+    return { success: false, error: `Falha ao salvar a exceção: ${error.message}` };
   }
 }
 
@@ -369,8 +364,9 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
     // We should check permissions here too
     await db.query('DELETE FROM schedule_exceptions WHERE id = $1', [exceptionId]);
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
     console.error('[DELETE_SCHEDULE_EXCEPTION] Error:', error);
-    return { success: false, error: 'Falha ao remover a exceção.' };
+    return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
   }
 }
+
