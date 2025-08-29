@@ -244,17 +244,6 @@ function PermissionsMatrix({
     );
 }
 
-function CreateRoleButton() {
-    const { pending } = useFormStatus();
-    return (
-        <Button disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Criar Novo Papel
-        </Button>
-    )
-}
-
 // --- Main Page Component ---
 export default function PermissionsPage() {
     const [user, setUser] = useState<User | null>(null);

@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -53,6 +52,7 @@ function TeamSettingsContent({
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [teamName, setTeamName] = useState(team.name);
+  const [isAddingMember, setIsAddingMember] = useState(false);
   const sortedBusinessHours = sortBusinessHours(team.businessHours || []);
 
   const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
@@ -83,6 +83,7 @@ function TeamSettingsContent({
     const agentToAdd = allMembers.find(agent => agent.id === selectedAgentId);
     if (!agentToAdd) return;
     
+    setIsAddingMember(true);
     const result = await addTeamMember(team.id, agentToAdd.id);
     if(result.error) {
       toast({ title: 'Erro ao adicionar membro', description: result.error, variant: 'destructive' });
@@ -90,6 +91,7 @@ function TeamSettingsContent({
       const updatedTeam = { ...team, members: [...team.members, agentToAdd] };
       onTeamUpdate(team.id, updatedTeam);
     }
+    setIsAddingMember(false);
     setSelectedAgentId('');
   }
 
@@ -234,8 +236,8 @@ function TeamSettingsContent({
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={handleAddMember} disabled={!selectedAgentId}>
-                <UserPlus className="mr-2 h-4 w-4"/>
+              <Button onClick={handleAddMember} disabled={!selectedAgentId || isAddingMember}>
+                {isAddingMember ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <UserPlus className="mr-2 h-4 w-4"/>}
                 Adicionar
               </Button>
             </div>
@@ -284,15 +286,18 @@ function TeamSettingsContent({
 
 function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { workspaceId:string, roles: Role[], onAddTeam: (newTeam: Team) => void, onCancel: () => void }) {
     const { toast } = useToast();
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        setIsSubmitting(true);
         const formData = new FormData(e.currentTarget);
         const name = formData.get('name') as string;
         const roleId = formData.get('roleId') as string;
 
         if (!name.trim() || !roleId) {
             toast({title: 'Campos obrigatórios', description: 'Nome da equipe e papel são obrigatórios.', variant: 'destructive' });
+            setIsSubmitting(false);
             return;
         };
 
@@ -303,6 +308,7 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
             toast({title: 'Equipe criada com sucesso!'});
             onAddTeam(result.team);
         }
+        setIsSubmitting(false);
     }
 
     return (
@@ -339,7 +345,10 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
                         </div>
                     </CardContent>
                     <CardFooter className="gap-2">
-                        <Button type="submit"><Save className='mr-2 h-4 w-4' /> Salvar Equipe</Button>
+                        <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
+                            <Save className='mr-2 h-4 w-4' /> Salvar Equipe
+                        </Button>
                         <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>
                     </CardFooter>
                 </form>

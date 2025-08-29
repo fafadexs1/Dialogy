@@ -68,7 +68,7 @@ function CreateInstanceButton() {
 }
 
 function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
-    const [state, formAction] = useActionState(createEvolutionApiInstance, null);
+    const [state, formAction] = useActionState(createEvolutionApiInstance, { error: null });
     const [integrationType, setIntegrationType] = useState<'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS'>('WHATSAPP-BAILEYS');
 
     useEffect(() => {
@@ -248,7 +248,7 @@ export default function EvolutionApiPage() {
     const [instanceStates, setInstanceStates] = useState<Record<string, { loading: boolean }>>({});
     
     const { toast } = useToast();
-    const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, null);
+    const [saveState, saveAction] = useActionState(saveEvolutionApiConfig, { error: null });
 
     useEffect(() => {
         const fetchUser = async () => {
