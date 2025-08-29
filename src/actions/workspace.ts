@@ -105,22 +105,34 @@ export async function updateWorkspaceAction(
 
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
+    const timezone = formData.get('timezone') as string;
 
-    if (!workspaceName) {
-        return { success: false, error: 'O nome do workspace é obrigatório.' };
-    }
-     if (!workspaceId) {
+    if (!workspaceId) {
         return { success: false, error: 'ID do workspace não encontrado.' };
     }
     
     // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
     
+    const fieldsToUpdate: { [key: string]: any } = {};
+    if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
+    if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
+
+    if (Object.keys(fieldsToUpdate).length === 0) {
+        return { success: true, error: null }; // Nada para atualizar
+    }
+
+    const setClause = Object.keys(fieldsToUpdate)
+        .map((key, i) => `${key} = $${i + 1}`)
+        .join(', ');
+    
+    const values = Object.values(fieldsToUpdate);
+
     try {
-        await db.query('UPDATE workspaces SET name = $1 WHERE id = $2', [workspaceName, workspaceId]);
-        console.log(`[UPDATE_WORKSPACE] Workspace ${workspaceId} atualizado para o nome "${workspaceName}".`);
-    } catch (error) {
+        await db.query(`UPDATE workspaces SET ${setClause} WHERE id = $${values.length + 1}`, [...values, workspaceId]);
+        console.log(`[UPDATE_WORKSPACE] Workspace ${workspaceId} atualizado. Campos: ${Object.keys(fieldsToUpdate).join(', ')}.`);
+    } catch (error: any) {
         console.error('[UPDATE_WORKSPACE] Erro:', error);
-        return { success: false, error: "Ocorreu um erro no servidor ao atualizar o workspace." };
+        return { success: false, error: `Ocorreu um erro no servidor ao atualizar o workspace: ${error.message}` };
     }
 
     revalidatePath('/', 'layout');

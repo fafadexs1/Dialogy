@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2 } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -18,6 +18,7 @@ import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite } fro
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettings } from '../settings-context';
+import { timezones } from '@/lib/timezones';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -62,7 +63,7 @@ export default function WorkspaceSettingsPage() {
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     
-    const [updateError, updateAction] = useActionState(updateWorkspaceAction, undefined);
+    const [updateState, updateAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
     
     const { toast } = useToast();
@@ -86,12 +87,12 @@ export default function WorkspaceSettingsPage() {
     }, [user]);
 
     useEffect(() => {
-        if (updateError === null) {
-            toast({ title: "Workspace Atualizado!", description: "O nome do workspace foi alterado." });
-        } else if (updateError) {
-            toast({ title: "Erro ao atualizar", description: updateError, variant: "destructive" });
+        if (updateState.success) {
+            toast({ title: "Workspace Atualizado!", description: "As configurações do workspace foram salvas." });
+        } else if (updateState.error) {
+            toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
-    }, [updateError, toast]);
+    }, [updateState, toast]);
     
     useEffect(() => {
         if (inviteError === null) { // Success is null
@@ -144,9 +145,9 @@ export default function WorkspaceSettingsPage() {
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
-                        <CardDescription>Altere o nome do seu workspace.</CardDescription>
+                        <CardDescription>Altere as configurações do seu workspace.</CardDescription>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
                         <div className="space-y-2">
                             <Label htmlFor="workspaceName">Nome do Workspace</Label>
@@ -156,6 +157,19 @@ export default function WorkspaceSettingsPage() {
                                 value={workspaceName}
                                 onChange={(e) => setWorkspaceName(e.target.value)}
                             />
+                        </div>
+                        <div className="space-y-2">
+                             <Label htmlFor="timezone">Fuso Horário</Label>
+                            <Select name="timezone" defaultValue={(activeWorkspace as any).timezone || 'America/Sao_Paulo'}>
+                                <SelectTrigger id="timezone">
+                                    <SelectValue placeholder="Selecione um fuso horário" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {timezones.map(tz => (
+                                        <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">

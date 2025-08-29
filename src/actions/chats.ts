@@ -10,7 +10,8 @@ import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 
-const timeZone = 'America/Sao_Paulo';
+// Fallback timezone
+const defaultTimeZone = 'America/Sao_Paulo';
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -313,8 +314,8 @@ export async function updateChatTagAction(chatId: string, tagId: string): Promis
     }
 }
 
-function formatMessageDate(date: Date): string {
-    const zonedDate = toZonedTime(date, timeZone);
+function formatMessageDate(date: Date, timezone: string): string {
+    const zonedDate = toZonedTime(date, timezone);
     if (isToday(zonedDate)) {
         return `Hoje`;
     }
@@ -335,6 +336,9 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
     const userId = user.id;
 
     try {
+        const workspaceRes = await db.query('SELECT timezone FROM workspaces WHERE id = $1', [workspaceId]);
+        const timezone = workspaceRes.rows[0]?.timezone || defaultTimeZone;
+
         const chatQuery = `
             SELECT 
                 c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color, c.contact_id, c.agent_id,
@@ -380,7 +384,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
             if (!messagesByChat[m.chat_id]) messagesByChat[m.chat_id] = [];
             
             const createdAtDate = new Date(m.created_at);
-            const zonedDate = toZonedTime(createdAtDate, timeZone);
+            const zonedDate = toZonedTime(createdAtDate, timezone);
             
             let sender: MessageSender;
             if (m.from_me) {
@@ -420,9 +424,9 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 type: m.type as Message['type'],
                 status: m.content === 'Mensagem apagada' ? 'deleted' : 'default',
                 metadata: m.metadata as MessageMetadata,
-                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR }),
+                timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR, timeZone: timezone }),
                 createdAt: createdAtDate.toISOString(),
-                formattedDate: formatMessageDate(createdAtDate),
+                formattedDate: formatMessageDate(createdAtDate, timezone),
                 sender: sender,
                 instance_name: m.instance_name,
                 source_from_api: m.source_from_api,
