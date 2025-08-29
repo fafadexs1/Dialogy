@@ -60,7 +60,22 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                     WHERE bh.team_id = t.id),
                     '[]'::json
                 ) as "businessHours",
-                '[]'::json as "scheduleExceptions"
+                COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'id', se.id,
+                            'team_id', se.team_id,
+                            'date', se.date,
+                            'description', se.description,
+                            'is_closed', se.is_closed,
+                            'start_time', se.start_time,
+                            'end_time', se.end_time
+                        ) ORDER BY se.date ASC
+                    )
+                    FROM schedule_exceptions se
+                    WHERE se.team_id = t.id AND se.date >= CURRENT_DATE),
+                    '[]'::json
+                ) as "scheduleExceptions"
             FROM teams t
             WHERE t.workspace_id = $1
             ORDER BY t.name;

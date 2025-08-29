@@ -398,6 +398,44 @@ function TeamSettingsContent({
         </CardContent>
       </Card>
       
+      <Card>
+        <CardHeader className="flex flex-row justify-between items-center">
+          <div>
+            <CardTitle>Exceções de Calendário</CardTitle>
+            <CardDescription>Configure feriados, eventos ou dias com horários especiais.</CardDescription>
+          </div>
+          <AddExceptionDialog teamId={team.id} onAdd={onMutate} />
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {team.scheduleExceptions && team.scheduleExceptions.length > 0 ? (
+                team.scheduleExceptions.map(ex => (
+                    <div key={ex.id} className="flex items-center justify-between p-3 text-sm border rounded-md bg-secondary/30">
+                        <div className="flex items-center gap-3">
+                            <CalendarOff className="h-5 w-5 text-muted-foreground" />
+                            <div>
+                                <p className="font-semibold">{ex.description}</p>
+                                <p className="text-xs">
+                                    <span className="font-medium">{format(new Date(ex.date), 'PPP', { locale: ptBR })}</span>
+                                    {' - '}
+                                    {ex.is_closed ? 'Fechado o dia todo' : `${ex.start_time} às ${ex.end_time}`}
+                                </p>
+                            </div>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveException(ex.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                    </div>
+                ))
+            ) : (
+                <div className="text-center p-6 border-2 border-dashed rounded-lg">
+                    <p className="text-sm text-muted-foreground">Nenhuma exceção configurada para os próximos dias.</p>
+                </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
     </div>
   )
 }
