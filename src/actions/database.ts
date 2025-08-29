@@ -107,7 +107,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     await client.query(`
         CREATE TABLE IF NOT EXISTS schedule_exceptions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
             date DATE NOT NULL,
             description VARCHAR(255) NOT NULL,
             is_closed BOOLEAN NOT NULL DEFAULT FALSE,
