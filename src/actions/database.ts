@@ -44,6 +44,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Extensão pgcrypto garantida.');
 
     // --- 2. Garante UUIDs para as tabelas principais ---
+    // ESTA ETAPA PRECISA VIR ANTES DE CRIAR TABELAS COM FOREIGN KEYS PARA UUIDS
     const tablesToUpdate = [
         'workspaces', 'roles', 'teams', 
         'contacts', 'tags',
@@ -58,7 +59,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         // Checa se a coluna 'id' existe antes de tentar alterá-la.
         const idCheck = await client.query(`
             SELECT 1 FROM information_schema.columns 
-            WHERE table_name = '${table}' AND column_name = 'id'
+            WHERE table_schema = 'public' AND table_name = '${table}' AND column_name = 'id'
         `);
         if (idCheck.rowCount > 0) {
             await client.query(`
