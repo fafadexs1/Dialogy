@@ -119,6 +119,20 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         );
     `);
     console.log('[DB_SETUP] Tabela schedule_exceptions garantida.');
+
+    // --- 6. Garante que a coluna timezone exista em workspaces ---
+    console.log('[DB_SETUP] Verificando/Criando a coluna timezone em workspaces...');
+    const timezoneCheck = await client.query(`
+      SELECT 1 FROM information_schema.columns 
+      WHERE table_schema = 'public' AND table_name = 'workspaces' AND column_name = 'timezone'
+    `);
+    if (timezoneCheck.rowCount === 0) {
+      await client.query(`ALTER TABLE workspaces ADD COLUMN timezone TEXT DEFAULT 'America/Sao_Paulo';`);
+      console.log('[DB_SETUP] Coluna timezone adicionada à tabela workspaces.');
+    } else {
+      console.log('[DB_SETUP] Coluna timezone já existe na tabela workspaces.');
+    }
+
     
     // --- Outras alterações (se houver) ---
     console.log('[DB_SETUP] Configurando outros padrões...');
