@@ -44,7 +44,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Extensão pgcrypto garantida.');
 
     // --- 2. Garante UUIDs para as tabelas principais ---
-    // Removidas tabelas de junção que não possuem uma coluna 'id' primária.
     const tablesToUpdate = [
         'workspaces', 'roles', 'teams', 
         'contacts', 'tags',
@@ -85,6 +84,24 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     } else {
         console.log('[DB_SETUP] Todas as permissões padrão já existem. Nenhuma inserção necessária.');
     }
+
+    // --- 4. Garante que a tabela schedule_exceptions exista ---
+    console.log('[DB_SETUP] Verificando/Criando tabela schedule_exceptions...');
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS schedule_exceptions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            date DATE NOT NULL,
+            description VARCHAR(255) NOT NULL,
+            is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+            start_time TIME,
+            end_time TIME,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+            UNIQUE(team_id, date)
+        );
+    `);
+    console.log('[DB_SETUP] Tabela schedule_exceptions garantida.');
     
     // --- Outras alterações (se houver) ---
     console.log('[DB_SETUP] Configurando outros padrões...');
@@ -95,7 +112,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
 
     return {
       success: true,
-      message: "Banco de dados inicializado e verificado com sucesso! As permissões e os padrões de ID foram aplicados.",
+      message: "Banco de dados inicializado e verificado com sucesso! As permissões, os padrões de ID e tabelas necessárias foram aplicados.",
     };
   } catch (error: any) {
     await client.query('ROLLBACK');
