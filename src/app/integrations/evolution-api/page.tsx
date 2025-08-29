@@ -78,27 +78,40 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
         setError(null);
 
         const formData = new FormData(e.currentTarget);
-        const payload: EvolutionInstanceCreationPayload = {
+        const integration = formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
+
+        let payload: EvolutionInstanceCreationPayload = {
             instanceName: formData.get('instanceName') as string,
-            integration: formData.get('integration') as any,
-            token: formData.get('token') as string | undefined,
-            number: formData.get('number') as string | undefined,
-            businessId: formData.get('businessId') as string | undefined,
-            msgCall: formData.get('msgCall') as string | undefined,
-            alwaysOnline: formData.get('alwaysOnline') === 'on',
-            readMessages: formData.get('readMessages') === 'on',
-            readStatus: formData.get('readStatus') === 'on',
-            proxy: {
-                host: formData.get('proxyHost') as string,
-                port: Number(formData.get('proxyPort')),
-                username: formData.get('proxyUsername') as string | undefined,
-                password: formData.get('proxyPassword') as string | undefined,
-            },
-             rabbitmq: {
-                enabled: formData.get('rabbitmqEnabled') === 'on',
-                events: (formData.get('rabbitmqEvents') as string)?.split(',').map(ev => ev.trim()) || [],
-            }
+            integration: integration,
         };
+
+        if (integration === 'WHATSAPP-BUSINESS') {
+            payload = {
+                ...payload,
+                token: formData.get('token') as string,
+                number: formData.get('number') as string,
+                businessId: formData.get('businessId') as string,
+            };
+        } else { // WHATSAPP-BAILEYS specific fields
+             payload = {
+                ...payload,
+                number: formData.get('baileys-number') as string | undefined,
+                msgCall: formData.get('msgCall') as string | undefined,
+                alwaysOnline: formData.get('alwaysOnline') === 'on',
+                readMessages: formData.get('readMessages') === 'on',
+                readStatus: formData.get('readStatus') === 'on',
+                proxy: {
+                    host: formData.get('proxyHost') as string,
+                    port: Number(formData.get('proxyPort')),
+                    username: formData.get('proxyUsername') as string | undefined,
+                    password: formData.get('proxyPassword') as string | undefined,
+                },
+                rabbitmq: {
+                    enabled: formData.get('rabbitmqEnabled') === 'on',
+                    events: (formData.get('rabbitmqEvents') as string)?.split(',').map(ev => ev.trim()) || [],
+                }
+            };
+        }
 
         const result = await createEvolutionApiInstance(payload, configId || '');
 
@@ -165,7 +178,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                                     <div className="grid grid-cols-1 gap-4">
                                         <div className="space-y-2">
                                             <Label htmlFor="baileys-number">Número do WhatsApp (Opcional)</Label>
-                                            <Input id="baileys-number" name="number" placeholder="5511999998888" />
+                                            <Input id="baileys-number" name="baileys-number" placeholder="5511999998888" />
                                         </div>
                                     </div>
                                     <div className="space-y-2">
