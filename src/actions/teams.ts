@@ -53,7 +53,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                             'isEnabled', bh.is_enabled,
                             'startTime', bh.start_time,
                             'endTime', bh.end_time
-                        )
+                        ) ORDER BY bh.day_of_week
                     )
                     FROM business_hours bh
                     WHERE bh.team_id = t.id),
