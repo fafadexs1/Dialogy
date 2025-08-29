@@ -205,14 +205,26 @@ export interface Team {
   roleId: string;
   tagId: string | null;
   businessHours: BusinessHour[];
+  scheduleExceptions: ScheduleException[];
   members: User[];
 }
 
 export interface BusinessHour {
+  id: string;
   day: string;
   isEnabled: boolean;
   startTime: string;
   endTime: string;
+}
+
+export interface ScheduleException {
+  id: string;
+  date: string;
+  description: string;
+  is_closed: boolean;
+  start_time: string | null;
+  end_time: string | null;
+  team_id: string;
 }
 
 export interface Integration {

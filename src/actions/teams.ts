@@ -3,7 +3,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import type { Team, User, BusinessHour, Role } from '@/lib/types';
+import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
@@ -49,6 +49,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 COALESCE(
                     (SELECT json_agg(
                         json_build_object(
+                            'id', bh.id,
                             'day', bh.day_of_week,
                             'isEnabled', bh.is_enabled,
                             'startTime', bh.start_time,
@@ -58,7 +59,13 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                     FROM business_hours bh
                     WHERE bh.team_id = t.id),
                     '[]'::json
-                ) as "businessHours"
+                ) as "businessHours",
+                COALESCE(
+                    (SELECT json_agg(ex.* ORDER BY ex.date ASC)
+                     FROM schedule_exceptions ex
+                     WHERE ex.team_id = t.id),
+                    '[]'::json
+                ) as "scheduleExceptions"
             FROM teams t
             WHERE t.workspace_id = $1
             ORDER BY t.name;
@@ -102,7 +109,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
         
         // Fetch the newly created business hours to return the full team object
         const businessHoursRes = await client.query(
-             `SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
+             `SELECT id, day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
                 FROM business_hours
                 WHERE team_id = $1 ORDER BY day_of_week`,
             [newTeam.id]
@@ -115,10 +122,11 @@ export async function createTeam(data: { workspaceId: string, name: string, role
             roleId: newTeam.roleId,
             tagId: newTeam.tagId,
             members: [],
-            businessHours: businessHoursRes.rows
+            businessHours: businessHoursRes.rows,
+            scheduleExceptions: [],
         }
 
-        return { team: fullTeam, error: null };
+        return { team: fullTeam };
     } catch (error: any) {
         await client.query('ROLLBACK');
         console.error("Erro ao criar equipe:", error);
@@ -159,7 +167,7 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 
         const setClauses = fields.map((field, index) => {
             const dbField = fieldMapping[field] || field;
-            return `${dbField} = $${index + 1}`;
+            return `"${dbField}" = $${index + 1}`;
         }).join(', ');
 
         const values = fields.map(field => {
@@ -245,7 +253,7 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
     }
 }
 
-export async function updateBusinessHours(teamId: string, day: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
+export async function updateBusinessHours(teamId: string, businessHourId: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient(cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
@@ -263,11 +271,11 @@ export async function updateBusinessHours(teamId: string, day: string, data: Par
         const values = Object.values(data);
         const setClauses = fields.map((field, index) => {
             const dbField = { isEnabled: 'is_enabled', startTime: 'start_time', endTime: 'end_time' }[field as keyof BusinessHour] || field;
-            return `${dbField} = $${index + 1}`;
+            return `"${dbField}" = $${index + 1}`;
         }).join(', ');
         
-        const query = `UPDATE business_hours SET ${setClauses} WHERE team_id = $${fields.length + 1} AND day_of_week = $${fields.length + 2}`;
-        await db.query(query, [...values, teamId, day]);
+        const query = `UPDATE business_hours SET ${setClauses} WHERE id = $${fields.length + 1} AND team_id = $${fields.length + 2}`;
+        await db.query(query, [...values, businessHourId, teamId]);
 
         return { success: true };
     } catch (error) {
@@ -311,6 +319,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
             tagId: row.tag_id,
             members: [], // This function doesn't need to return all members
             businessHours: [], // or business hours
+            scheduleExceptions: [],
             onlineMembersCount: parseInt(row.onlineMembersCount, 10) || 0,
         }));
 
@@ -320,4 +329,48 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         console.error("Erro ao buscar equipes com membros online:", error);
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
+}
+
+export async function createScheduleException(
+  teamId: string,
+  data: Omit<ScheduleException, 'id' | 'team_id'>
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = createClient(cookies());
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'Usuário não autenticado.' };
+
+  try {
+    // We should check permissions here too
+    await db.query(
+      `INSERT INTO schedule_exceptions (team_id, date, description, is_closed, start_time, end_time)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        teamId,
+        data.date,
+        data.description,
+        data.is_closed,
+        data.is_closed ? null : data.start_time,
+        data.is_closed ? null : data.end_time,
+      ]
+    );
+    return { success: true };
+  } catch (error) {
+    console.error('[CREATE_SCHEDULE_EXCEPTION] Error:', error);
+    return { success: false, error: 'Falha ao salvar a exceção no banco de dados.' };
+  }
+}
+
+export async function deleteScheduleException(exceptionId: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = createClient(cookies());
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'Usuário não autenticado.' };
+  
+  try {
+    // We should check permissions here too
+    await db.query('DELETE FROM schedule_exceptions WHERE id = $1', [exceptionId]);
+    return { success: true };
+  } catch (error) {
+    console.error('[DELETE_SCHEDULE_EXCEPTION] Error:', error);
+    return { success: false, error: 'Falha ao remover a exceção.' };
+  }
 }

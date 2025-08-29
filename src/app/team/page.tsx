@@ -1,22 +1,30 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { User, Team, BusinessHour, Role, Tag } from '@/lib/types';
+import type { User, Team, BusinessHour, Role, Tag, ScheduleException } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette, Tag as TagIcon, Copy } from 'lucide-react';
+import { Plus, Trash2, UserPlus, X, Search, Loader2, Save, Users, Palette, Tag as TagIcon, Copy, Calendar, CalendarOff, AlertCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours } from '@/actions/teams';
+import { getTeams, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, updateBusinessHours, createScheduleException, deleteScheduleException } from '@/actions/teams';
 import { getTags } from '@/actions/crm';
 import { getWorkspaceMembers } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
@@ -33,6 +41,103 @@ function CopyButton({ textToCopy }: { textToCopy: string }) {
     return <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}><Copy className="h-3 w-3" /></Button>;
 }
 
+function AddExceptionDialog({ teamId, onAdd }: { teamId: string, onAdd: () => void }) {
+    const [date, setDate] = useState<Date | undefined>(undefined);
+    const [isClosed, setIsClosed] = useState(false);
+    const [startTime, setStartTime] = useState('09:00');
+    const [endTime, setEndTime] = useState('18:00');
+    const [description, setDescription] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const { toast } = useToast();
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!date || !description) {
+            toast({ title: 'Campos obrigatórios', description: 'Por favor, selecione a data e preencha a descrição.', variant: 'destructive' });
+            return;
+        }
+        setIsSubmitting(true);
+        const result = await createScheduleException(teamId, {
+            date: date.toISOString().split('T')[0],
+            description,
+            is_closed: isClosed,
+            start_time: startTime,
+            end_time: endTime,
+        });
+
+        if (result.success) {
+            toast({ title: 'Exceção adicionada!' });
+            onAdd();
+        } else {
+            toast({ title: 'Erro ao adicionar exceção', description: result.error, variant: 'destructive' });
+        }
+        setIsSubmitting(false);
+    }
+    
+    return (
+        <Dialog>
+            <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                    <Plus className="mr-2 h-4 w-4" /> Adicionar Exceção
+                </Button>
+            </DialogTrigger>
+            <DialogContent>
+                <form onSubmit={handleSubmit}>
+                    <DialogHeader>
+                        <DialogTitle>Adicionar Exceção ao Calendário</DialogTitle>
+                        <p className="text-sm text-muted-foreground">Configure um dia com horário diferente ou sem expediente.</p>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <div>
+                            <Label>Data</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                    variant={"outline"}
+                                    className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
+                                    >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {date ? format(date, "PPP", { locale: ptBR }) : <span>Selecione a data</span>}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                    <CalendarComponent mode="single" selected={date} onSelect={setDate} initialFocus />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                         <div>
+                            <Label htmlFor="exception-description">Descrição</Label>
+                            <Input id="exception-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Feriado de Ano Novo" />
+                        </div>
+                        <div className="flex items-center space-x-2">
+                           <Checkbox id="is-closed" checked={isClosed} onCheckedChange={(checked) => setIsClosed(Boolean(checked))} />
+                           <Label htmlFor="is-closed">A equipe não trabalhará neste dia.</Label>
+                        </div>
+                        {!isClosed && (
+                            <div className="flex items-center gap-2 animate-in fade-in-50">
+                                <div className="flex-1">
+                                    <Label>Início</Label>
+                                    <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                                </div>
+                                <div className="flex-1">
+                                    <Label>Fim</Label>
+                                    <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild><Button variant="ghost">Cancelar</Button></DialogClose>
+                        <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Salvar Exceção
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
 
 function TeamSettingsContent({ 
     team, 
@@ -41,6 +146,7 @@ function TeamSettingsContent({
     tags,
     onTeamUpdate,
     onTeamDelete,
+    onMutate,
 }: { 
     team: Team, 
     allMembers: User[],
@@ -48,6 +154,7 @@ function TeamSettingsContent({
     tags: Tag[],
     onTeamUpdate: (teamId: string, updatedTeam: Team) => void;
     onTeamDelete: (teamId: string) => void;
+    onMutate: () => void;
 }) {
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -55,7 +162,7 @@ function TeamSettingsContent({
   const [isAddingMember, setIsAddingMember] = useState(false);
   const sortedBusinessHours = sortBusinessHours(team.businessHours || []);
 
-  const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
+  const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members' | 'scheduleExceptions'>, value: any) => {
     // Treat "no-tag" as null for the database
     const finalValue = value === 'no-tag' ? null : value;
     
@@ -106,16 +213,26 @@ function TeamSettingsContent({
      }
   }
   
-  const handleBusinessHoursChange = async (dayLabel: string, field: keyof Omit<BusinessHour, 'day'>, value: any) => {
-    const result = await updateBusinessHours(team.id, dayLabel, { [field]: value });
+  const handleBusinessHoursChange = async (businessHourId: string, field: keyof Omit<BusinessHour, 'id' | 'day'>, value: any) => {
+    const result = await updateBusinessHours(team.id, businessHourId, { [field]: value });
     if(result.error) {
       toast({ title: 'Erro ao salvar horário', description: result.error, variant: 'destructive' });
     } else {
-       const updatedHours = team.businessHours.map(bh => bh.day === dayLabel ? { ...bh, [field]: value } : bh);
+       const updatedHours = team.businessHours.map(bh => bh.id === businessHourId ? { ...bh, [field]: value } : bh);
        const updatedTeam = { ...team, businessHours: updatedHours };
        onTeamUpdate(team.id, updatedTeam);
     }
   };
+  
+  const handleRemoveException = async (exceptionId: string) => {
+    const result = await deleteScheduleException(exceptionId);
+    if (result.error) {
+        toast({ title: 'Erro ao remover exceção', description: result.error, variant: 'destructive'});
+    } else {
+        toast({ title: 'Exceção removida!'});
+        onMutate();
+    }
+  }
 
   return (
     <div className="space-y-6 p-1">
@@ -252,32 +369,73 @@ function TeamSettingsContent({
         </CardHeader>
         <CardContent className="space-y-4">
           {sortedBusinessHours.map(bh => (
-              <div key={bh.day} className="flex items-center justify-between p-3 rounded-lg bg-background border">
+              <div key={bh.id} className="flex items-center justify-between p-3 rounded-lg bg-background border">
                 <div className='flex items-center gap-4'>
                   <Switch 
-                    id={`switch-${team.id}-${bh.day}`} 
+                    id={`switch-${team.id}-${bh.id}`} 
                     checked={bh.isEnabled}
-                    onCheckedChange={(checked) => handleBusinessHoursChange(bh.day, 'isEnabled', checked)}
+                    onCheckedChange={(checked) => handleBusinessHoursChange(bh.id, 'isEnabled', checked)}
                   />
-                  <Label htmlFor={`switch-${team.id}-${bh.day}`} className='font-medium text-base min-w-[100px]'>{bh.day}</Label>
+                  <Label htmlFor={`switch-${team.id}-${bh.id}`} className='font-medium text-base min-w-[100px]'>{bh.day}</Label>
                 </div>
                 <div className={`flex items-center gap-2 transition-opacity ${bh.isEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                   <Input 
                     type="time" 
                     defaultValue={bh.startTime || '09:00'}
-                    onBlur={(e) => handleBusinessHoursChange(bh.day, 'startTime', e.target.value)}
+                    onBlur={(e) => handleBusinessHoursChange(bh.id, 'startTime', e.target.value)}
                     className="w-[110px]" 
                   />
                   <span className="text-muted-foreground">às</span>
                   <Input 
                     type="time" 
                     defaultValue={bh.endTime || '18:00'}
-                    onBlur={(e) => handleBusinessHoursChange(bh.day, 'endTime', e.target.value)}
+                    onBlur={(e) => handleBusinessHoursChange(bh.id, 'endTime', e.target.value)}
                     className="w-[110px]" 
                   />
                 </div>
               </div>
             ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Exceções de Calendário</CardTitle>
+              <CardDescription>Configure feriados ou dias com horários especiais.</CardDescription>
+            </div>
+            <AddExceptionDialog teamId={team.id} onAdd={onMutate} />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+            {team.scheduleExceptions && team.scheduleExceptions.length > 0 ? (
+                team.scheduleExceptions.map(ex => (
+                    <div key={ex.id} className="flex items-center justify-between p-3 rounded-lg border bg-secondary/50">
+                        <div className="flex items-center gap-3">
+                           <Calendar className="h-5 w-5 text-muted-foreground"/>
+                           <div>
+                               <p className="font-semibold">{ex.description}</p>
+                               <p className="text-sm text-muted-foreground">{format(new Date(ex.date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+                           </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            {ex.is_closed ? (
+                                <Badge variant="secondary" className="flex items-center gap-1.5"><CalendarOff className="h-3 w-3"/> Sem expediente</Badge>
+                            ) : (
+                                <Badge variant="outline" className="font-mono">{ex.start_time} - {ex.end_time}</Badge>
+                            )}
+                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveException(ex.id)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                             </Button>
+                        </div>
+                    </div>
+                ))
+            ) : (
+                <div className="text-center text-sm text-muted-foreground p-4 border-2 border-dashed rounded-lg">
+                    <p>Nenhuma exceção configurada para esta equipe.</p>
+                </div>
+            )}
         </CardContent>
       </Card>
     </div>
@@ -548,6 +706,7 @@ export default function TeamPage() {
                             tags={tags}
                             onTeamUpdate={handleTeamUpdate}
                             onTeamDelete={handleTeamDelete}
+                            onMutate={fetchData}
                         />
                     ) : (
                         <div className="text-center py-20">
