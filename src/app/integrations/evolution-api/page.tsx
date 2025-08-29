@@ -93,24 +93,37 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                 businessId: formData.get('businessId') as string,
             };
         } else { // WHATSAPP-BAILEYS specific fields
-             payload = {
-                ...payload,
-                number: formData.get('baileys-number') as string | undefined,
-                msgCall: formData.get('msgCall') as string | undefined,
-                alwaysOnline: formData.get('alwaysOnline') === 'on',
-                readMessages: formData.get('readMessages') === 'on',
-                readStatus: formData.get('readStatus') === 'on',
-                proxy: {
-                    host: formData.get('proxyHost') as string,
-                    port: Number(formData.get('proxyPort')),
-                    username: formData.get('proxyUsername') as string | undefined,
-                    password: formData.get('proxyPassword') as string | undefined,
-                },
-                rabbitmq: {
-                    enabled: formData.get('rabbitmqEnabled') === 'on',
-                    events: (formData.get('rabbitmqEvents') as string)?.split(',').map(ev => ev.trim()) || [],
+            const baileysNumber = formData.get('baileys-number') as string;
+            const msgCall = formData.get('msgCall') as string;
+            const proxyHost = formData.get('proxyHost') as string;
+            const proxyPort = formData.get('proxyPort') as string;
+            const proxyUsername = formData.get('proxyUsername') as string;
+            const proxyPassword = formData.get('proxyPassword') as string;
+            const rabbitmqEvents = formData.get('rabbitmqEvents') as string;
+            
+            if (baileysNumber) payload.number = baileysNumber;
+            if (msgCall) payload.msgCall = msgCall;
+            
+            payload.alwaysOnline = formData.get('alwaysOnline') === 'on';
+            payload.readMessages = formData.get('readMessages') === 'on';
+            payload.readStatus = formData.get('readStatus') === 'on';
+            
+            if(proxyHost && proxyPort) {
+                payload.proxy = {
+                    host: proxyHost,
+                    port: Number(proxyPort),
+                    ...(proxyUsername && { username: proxyUsername }),
+                    ...(proxyPassword && { password: proxyPassword }),
+                };
+            }
+
+            const rabbitmqEnabled = formData.get('rabbitmqEnabled') === 'on';
+            if (rabbitmqEnabled) {
+                payload.rabbitmq = {
+                    enabled: true,
+                    ...(rabbitmqEvents && { events: rabbitmqEvents.split(',').map(ev => ev.trim()) }),
                 }
-            };
+            }
         }
 
         const result = await createEvolutionApiInstance(payload, configId || '');
