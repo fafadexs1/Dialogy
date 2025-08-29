@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -52,7 +53,7 @@ function TeamSettingsContent({
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [teamName, setTeamName] = useState(team.name);
-  const sortedBusinessHours = sortBusinessHours(team.businessHours);
+  const sortedBusinessHours = sortBusinessHours(team.businessHours || []);
 
   const handleUpdateField = async (field: keyof Omit<Team, 'id' | 'businessHours' | 'members'>, value: any) => {
     // Treat "no-tag" as null for the database
@@ -376,55 +377,63 @@ export default function TeamPage() {
         fetchUser();
     }, []);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            if (!user?.activeWorkspaceId) return;
-            setLoading(true);
-            try {
-                const [teamsData, membersData, rolesData, tagsData] = await Promise.all([
-                    getTeams(user.activeWorkspaceId),
-                    getWorkspaceMembers(user.activeWorkspaceId),
-                    getRolesAndPermissions(user.activeWorkspaceId),
-                    getTags(user.activeWorkspaceId)
-                ]);
+    const fetchData = React.useCallback(async () => {
+        if (!user?.activeWorkspaceId) return;
+        setLoading(true);
+        try {
+            const [teamsData, membersData, rolesData, tagsData] = await Promise.all([
+                getTeams(user.activeWorkspaceId),
+                getWorkspaceMembers(user.activeWorkspaceId),
+                getRolesAndPermissions(user.activeWorkspaceId),
+                getTags(user.activeWorkspaceId)
+            ]);
 
-                if (teamsData) {
-                    if (teamsData.error) throw new Error(teamsData.error);
-                    setTeams(teamsData.teams || []);
-                    if (!selectedTeamId && teamsData.teams && teamsData.teams.length > 0) {
+            if (teamsData) {
+                if (teamsData.error) throw new Error(teamsData.error);
+                setTeams(teamsData.teams || []);
+                if (teamsData.teams && teamsData.teams.length > 0) {
+                     // Check if the previously selected team still exists
+                    if (!teamsData.teams.some(t => t.id === selectedTeamId)) {
                         setSelectedTeamId(teamsData.teams[0].id);
-                    } else if (teamsData.teams?.length === 0) {
-                        setSelectedTeamId(null);
                     }
+                } else {
+                    setSelectedTeamId(null);
                 }
-
-                if (membersData.error) throw new Error(membersData.error);
-                // Cast to User[], as WorkspaceMember is a subset
-                setAllMembers(membersData.members as User[] || []);
-
-                if (rolesData.error) throw new Error(rolesData.error);
-                setRoles(rolesData.roles || []);
-                
-                if (tagsData.error) throw new Error(tagsData.error);
-                setTags(tagsData.tags?.filter(t => !t.is_close_reason) || []);
-
-            } catch (e: any) {
-                toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
-            } finally {
-                setLoading(false);
             }
-        };
 
+            if (membersData.error) throw new Error(membersData.error);
+            // Cast to User[], as WorkspaceMember is a subset
+            setAllMembers(membersData.members as User[] || []);
+
+            if (rolesData.error) throw new Error(rolesData.error);
+            setRoles(rolesData.roles || []);
+            
+            if (tagsData.error) throw new Error(tagsData.error);
+            setTags(tagsData.tags?.filter(t => !t.is_close_reason) || []);
+
+        } catch (e: any) {
+            toast({ title: "Erro ao buscar dados", description: e.message, variant: "destructive" });
+        } finally {
+            setLoading(false);
+        }
+    }, [user?.activeWorkspaceId, toast, selectedTeamId]);
+
+
+    useEffect(() => {
         if(user) fetchData();
-    }, [user, toast, selectedTeamId]);
+    }, [user, fetchData]);
 
     const handleTeamUpdate = (teamId: string, updatedTeam: Team) => {
         setTeams(prev => prev.map(t => t.id === teamId ? updatedTeam : t));
     };
 
     const handleTeamDelete = (teamId: string) => {
-        setTeams(prev => prev.filter(t => t.id !== teamId));
-        setSelectedTeamId(prevId => prevId === teamId ? (teams[0]?.id || null) : prevId);
+        setTeams(prev => {
+            const newTeams = prev.filter(t => t.id !== teamId);
+             setSelectedTeamId(newTeams[0]?.id || null);
+             if (newTeams.length === 0) setIsCreating(false);
+            return newTeams;
+        });
     }
     
     const handleAddTeam = (newTeam: Team) => {

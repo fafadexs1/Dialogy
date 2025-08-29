@@ -31,8 +31,8 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 t.id,
                 t.name,
                 t.color,
-                t.role_id,
-                t.tag_id,
+                t.role_id as "roleId",
+                t.tag_id as "tagId",
                 COALESCE(
                     (SELECT json_agg(
                         json_build_object(
@@ -86,7 +86,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
         await client.query('BEGIN');
 
         const teamRes = await client.query(
-            'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id, tag_id',
+            'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id as "roleId", tag_id as "tagId"',
             [data.workspaceId, data.name, data.roleId, user.id]
         );
         const newTeam = teamRes.rows[0];
@@ -112,8 +112,8 @@ export async function createTeam(data: { workspaceId: string, name: string, role
             id: newTeam.id,
             name: newTeam.name,
             color: newTeam.color,
-            roleId: newTeam.role_id,
-            tagId: newTeam.tag_id,
+            roleId: newTeam.roleId,
+            tagId: newTeam.tagId,
             members: [],
             businessHours: businessHoursRes.rows
         }
@@ -144,21 +144,32 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
     }
 
     try {
-        const fields = Object.keys(data);
-        const values = Object.values(data);
+        const fields = Object.keys(data) as (keyof typeof data)[];
+        if (fields.length === 0) {
+            return { success: true }; // Nothing to update
+        }
+        
+        // Map JS-style keys to DB-style keys
+        const fieldMapping: Record<string, string> = {
+            roleId: 'role_id',
+            tagId: 'tag_id',
+            name: 'name',
+            color: 'color'
+        };
+
         const setClauses = fields.map((field, index) => {
-            const dbField = { roleId: 'role_id', tagId: 'tag_id' }[field] || field;
+            const dbField = fieldMapping[field] || field;
             return `${dbField} = $${index + 1}`;
         }).join(', ');
 
-        if (!setClauses) return { success: true };
+        const values = fields.map(field => {
+            const value = data[field];
+            return value === 'no-tag' ? null : value;
+        });
 
         const query = `UPDATE teams SET ${setClauses} WHERE id = $${fields.length + 1}`;
         
-        // Handle case where tagId might be an empty string from the form, should be NULL
-        const finalValues = values.map(val => val === '' ? null : val);
-
-        await db.query(query, [...finalValues, teamId]);
+        await db.query(query, [...values, teamId]);
         
         return { success: true };
     } catch (error) {
@@ -310,4 +321,3 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
 }
-
