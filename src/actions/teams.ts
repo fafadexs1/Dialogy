@@ -81,18 +81,30 @@ export async function createTeam(data: { workspaceId: string, name: string, role
          return { team: null, error: "Você não tem permissão para criar equipes." };
     }
 
+    const client = await db.connect();
     try {
-        const teamRes = await db.query(
+        await client.query('BEGIN');
+
+        const teamRes = await client.query(
             'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id, tag_id',
             [data.workspaceId, data.name, data.roleId, user.id]
         );
-        
         const newTeam = teamRes.rows[0];
 
-        const businessHoursRes = await db.query(
+        // Create default business hours for the new team
+        const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+        const businessHoursValues = days.map(day => `('${newTeam.id}', '${day}')`).join(',');
+        await client.query(
+            `INSERT INTO business_hours (team_id, day_of_week) VALUES ${businessHoursValues}`
+        );
+
+        await client.query('COMMIT');
+        
+        // Fetch the newly created business hours to return the full team object
+        const businessHoursRes = await client.query(
              `SELECT day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
                 FROM business_hours
-                WHERE team_id = $1`,
+                WHERE team_id = $1 ORDER BY day_of_week`,
             [newTeam.id]
         );
 
@@ -108,10 +120,14 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
         return { team: fullTeam };
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error("Erro ao criar equipe:", error);
         return { team: null, error: "Falha ao criar a equipe." };
+    } finally {
+        client.release();
     }
 }
+
 
 export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient(cookies());
@@ -293,5 +309,3 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
         return { teams: [], error: "Falha ao buscar dados das equipes." };
     }
 }
-
-    
