@@ -78,7 +78,10 @@ export async function GET(
             }
         } else {
         // 2. Se não houver exceção, verificar o horário normal
-            const todayBusinessHour = team.businessHours.find((bh: any) => bh.day_of_week === currentDayOfWeek);
+            const todayBusinessHour = team.businessHours.find((bh: any) => 
+                bh.day_of_week.toLowerCase() === currentDayOfWeek.toLowerCase()
+            );
+
             if (todayBusinessHour && todayBusinessHour.is_enabled) {
                 isOpen = isTimeInRange(currentTime, todayBusinessHour.start_time, todayBusinessHour.end_time);
                 reason = isOpen ? 'open_by_schedule' : 'closed_by_schedule_hours';
