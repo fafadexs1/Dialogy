@@ -42,9 +42,26 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Verificando/Criando extensão pgcrypto...');
     await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto;');
     console.log('[DB_SETUP] Extensão pgcrypto garantida.');
+    
+    // --- 2. Garante que a tabela 'teams' tem uma chave primária ---
+    const pkCheck = await client.query(`
+        SELECT con.*
+        FROM pg_catalog.pg_constraint con
+        INNER JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+        INNER JOIN pg_catalog.pg_namespace nsp ON nsp.oid = con.connamespace
+        WHERE nsp.nspname = 'public' AND rel.relname = 'teams' AND con.contype = 'p'
+    `);
 
-    // --- 2. Garante UUIDs para as tabelas principais ---
-    // ESTA ETAPA PRECISA VIR ANTES DE CRIAR TABELAS COM FOREIGN KEYS PARA UUIDS
+    if (pkCheck.rowCount === 0) {
+        console.log(`[DB_SETUP] Chave primária não encontrada na tabela 'teams'. Adicionando...`);
+        await client.query(`ALTER TABLE teams ADD PRIMARY KEY (id);`);
+        console.log(`[DB_SETUP] Chave primária adicionada à tabela 'teams'.`);
+    } else {
+        console.log(`[DB_SETUP] Chave primária já existe na tabela 'teams'.`);
+    }
+
+
+    // --- 3. Garante UUIDs para as tabelas principais ---
     const tablesToUpdate = [
         'workspaces', 'roles', 'teams', 
         'contacts', 'tags',
@@ -56,7 +73,6 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     ];
     console.log('[DB_SETUP] Configurando IDs padrão para as tabelas...');
     for (const table of tablesToUpdate) {
-        // Checa se a coluna 'id' existe antes de tentar alterá-la.
         const idCheck = await client.query(`
             SELECT 1 FROM information_schema.columns 
             WHERE table_schema = 'public' AND table_name = '${table}' AND column_name = 'id'
@@ -71,7 +87,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     }
     console.log('[DB_SETUP] IDs padrão configurados.');
 
-    // --- 3. Garante que as permissões padrão existam ---
+    // --- 4. Garante que as permissões padrão existam ---
     console.log('[DB_SETUP] Verificando e populando a tabela de permissões...');
     const existingPermissions = await client.query('SELECT id FROM permissions');
     const existingIds = new Set(existingPermissions.rows.map(p => p.id));
@@ -86,7 +102,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         console.log('[DB_SETUP] Todas as permissões padrão já existem. Nenhuma inserção necessária.');
     }
 
-    // --- 4. Garante que a tabela schedule_exceptions exista ---
+    // --- 5. Garante que a tabela schedule_exceptions exista ---
     console.log('[DB_SETUP] Verificando/Criando tabela schedule_exceptions...');
     await client.query(`
         CREATE TABLE IF NOT EXISTS schedule_exceptions (
