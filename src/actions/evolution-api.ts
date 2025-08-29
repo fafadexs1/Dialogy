@@ -133,98 +133,41 @@ export async function fetchEvolutionAPI(
  * Cria uma nova instância na API da Evolution e a registra no banco de dados local.
  */
 export async function createEvolutionApiInstance(
-    prevState: any,
-    formData: FormData
-): Promise<{ error: string | null }> {
-    const config_id = formData.get('config_id') as string;
+    payload: EvolutionInstanceCreationPayload,
+    config_id: string
+): Promise<{ success: boolean, error?: string | null }> {
     if (!config_id) {
-        return { error: 'ID de configuração não encontrado.' };
+        return { success: false, error: 'ID de configuração não encontrado.' };
     }
 
     // 1. Obter a configuração global da API
     const configRes = await db.query('SELECT api_url, api_key FROM evolution_api_configs WHERE id = $1', [config_id]);
     if (configRes.rows.length === 0) {
-        return { error: 'Configuração global da API não encontrada.' };
+        return { success: false, error: 'Configuração global da API não encontrada.' };
     }
     const apiConfig = configRes.rows[0];
     
-    const instanceName = formData.get('instanceName') as string;
-    if (!instanceName) {
-        return { error: 'O nome da instância é obrigatório.'}
+    if (!payload.instanceName) {
+        return { success: false, error: 'O nome da instância é obrigatório.'}
     }
     
-    const integrationType = formData.get('integration') as 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
-
-    // 2. Construir o payload para a API da Evolution dinamicamente
-    let payload: EvolutionInstanceCreationPayload = {
-        instanceName,
-        integration: integrationType,
-        rejectCall: true,
-        groupsIgnore: true,
-    };
-    
-    // Funções auxiliares para manter o código limpo
-    const addIfPresent = (key: keyof EvolutionInstanceCreationPayload, value: string | undefined | null) => {
-        if (value) (payload as any)[key] = value;
-    };
-    const addIfOn = (key: keyof EvolutionInstanceCreationPayload, value: FormDataEntryValue | null) => {
-        if (value === 'on') (payload as any)[key] = true;
-    };
-
-    if (integrationType === 'WHATSAPP-BUSINESS') {
+    if (payload.integration === 'WHATSAPP-BUSINESS') {
         payload.qrcode = false;
-        const token = formData.get('token') as string;
-        const number = formData.get('number') as string;
-        const businessId = formData.get('businessId') as string;
-
-        if (!token || !number || !businessId) {
-            return { error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
+        if (!payload.token || !payload.number || !payload.businessId) {
+            return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
         }
-        payload.token = token;
-        payload.number = number;
-        payload.businessId = businessId;
-
     } else { // WHATSAPP-BAILEYS
         payload.qrcode = true;
-        addIfPresent('number', formData.get('number') as string);
-        addIfPresent('msgCall', formData.get('msgCall') as string);
-        addIfOn('alwaysOnline', formData.get('alwaysOnline'));
-        addIfOn('readMessages', formData.get('readMessages'));
-        addIfOn('readStatus', formData.get('readStatus'));
-        
-        // Proxy
-        const proxyHost = formData.get('proxyHost') as string;
-        const proxyPort = formData.get('proxyPort') as string;
-        const proxyUsername = formData.get('proxyUsername') as string;
-        const proxyPassword = formData.get('proxyPassword') as string;
-        if (proxyHost && proxyPort) {
-            payload.proxy = {
-                host: proxyHost,
-                port: Number(proxyPort)
-            };
-            if (proxyUsername) payload.proxy.username = proxyUsername;
-            if (proxyPassword) payload.proxy.password = proxyPassword;
-        }
-
-        // RabbitMQ
-        const rabbitmqEnabled = formData.get('rabbitmqEnabled') === 'on';
-        if (rabbitmqEnabled) {
-            const rabbitmqEventsStr = formData.get('rabbitmqEvents') as string;
-            payload.rabbitmq = {
-                enabled: true,
-                events: rabbitmqEventsStr ? rabbitmqEventsStr.split(',').map(e => e.trim()) : []
-            };
-        }
     }
     
     // Automatic Webhook Configuration
     const webhookBaseUrl = process.env.NEXTAUTH_URL;
     if (!webhookBaseUrl) {
         console.error('[EVO_ACTION_CREATE_INSTANCE] Erro: A variável de ambiente NEXTAUTH_URL não está definida.');
-        return { error: 'A URL base da aplicação não está configurada no ambiente.' };
+        return { success: false, error: 'A URL base da aplicação não está configurada no ambiente.' };
     }
 
-    const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${instanceName}`;
+    const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
     payload.webhook = {
         url: webhookUrlForInstance,
         enabled: true,
@@ -256,11 +199,11 @@ export async function createEvolutionApiInstance(
 
     } catch (error: any) {
         console.error('[EVO_ACTION_CREATE_INSTANCE] Erro ao criar instância:', error);
-        return { error: `Falha ao criar instância na API Evolution: ${error.message}` };
+        return { success: false, error: `Falha ao criar instância na API Evolution: ${error.message}` };
     }
 
     revalidatePath('/integrations/evolution-api');
-    return { error: null };
+    return { success: true, error: null };
 }
 
 /**

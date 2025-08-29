@@ -57,29 +57,62 @@ function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     )
 }
 
-function CreateInstanceButton() {
-    const { pending } = useFormStatus();
+function CreateInstanceButton({ isSubmitting }: { isSubmitting: boolean }) {
     return (
-        <Button type="submit" disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {pending ? 'Criando...' : 'Criar Instância'}
+        <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isSubmitting ? 'Criando...' : 'Criar Instância'}
         </Button>
     );
 }
 
-function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
-    const [state, formAction] = useActionState(createEvolutionApiInstance, { error: null });
-    const [integrationType, setIntegrationType] = useState<'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS'>('WHATSAPP-BAILEYS');
 
-    useEffect(() => {
-        if (state?.error === null) {
+function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void, configId: string | undefined }) {
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [integrationType, setIntegrationType] = useState<'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS'>('WHATSAPP-BAILEYS');
+    
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        setError(null);
+
+        const formData = new FormData(e.currentTarget);
+        const payload: EvolutionInstanceCreationPayload = {
+            instanceName: formData.get('instanceName') as string,
+            integration: formData.get('integration') as any,
+            token: formData.get('token') as string | undefined,
+            number: formData.get('number') as string | undefined,
+            businessId: formData.get('businessId') as string | undefined,
+            msgCall: formData.get('msgCall') as string | undefined,
+            alwaysOnline: formData.get('alwaysOnline') === 'on',
+            readMessages: formData.get('readMessages') === 'on',
+            readStatus: formData.get('readStatus') === 'on',
+            proxy: {
+                host: formData.get('proxyHost') as string,
+                port: Number(formData.get('proxyPort')),
+                username: formData.get('proxyUsername') as string | undefined,
+                password: formData.get('proxyPassword') as string | undefined,
+            },
+             rabbitmq: {
+                enabled: formData.get('rabbitmqEnabled') === 'on',
+                events: (formData.get('rabbitmqEvents') as string)?.split(',').map(ev => ev.trim()) || [],
+            }
+        };
+
+        const result = await createEvolutionApiInstance(payload, configId || '');
+
+        if (result.success) {
             onFormSubmit();
+        } else {
+            setError(result.error || 'Ocorreu um erro desconhecido.');
         }
-    }, [state, onFormSubmit]);
+
+        setIsSubmitting(false);
+    }
 
     return (
-        <form action={formAction}>
-            <input type="hidden" name="config_id" value={configId || ''} />
+        <form onSubmit={handleSubmit}>
             <div className="space-y-4 py-2 pb-4 max-h-[70vh] overflow-y-auto px-1">
                 <Accordion type="multiple" defaultValue={['general']} className="w-full">
                     {/* General Settings */}
@@ -210,11 +243,11 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                         </>
                     )}
                 </Accordion>
-                {state?.error && (
+                {error && (
                   <Alert variant="destructive" className="mt-4">
                       <AlertCircle className="h-4 w-4" />
                       <AlertTitle>Erro ao Criar</AlertTitle>
-                      <AlertDescription>{state.error}</AlertDescription>
+                      <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
             </div>
@@ -222,7 +255,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
                 <DialogTrigger asChild>
                     <Button type="button" variant="outline">Cancelar</Button>
                 </DialogTrigger>
-                <CreateInstanceButton />
+                <CreateInstanceButton isSubmitting={isSubmitting} />
             </DialogFooter>
         </form>
     );
