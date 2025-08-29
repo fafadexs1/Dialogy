@@ -118,11 +118,12 @@ export async function createTeam(data: { workspaceId: string, name: string, role
             businessHours: businessHoursRes.rows
         }
 
-        return { team: fullTeam };
-    } catch (error) {
+        return { team: fullTeam, error: null };
+    } catch (error: any) {
         await client.query('ROLLBACK');
         console.error("Erro ao criar equipe:", error);
-        return { team: null, error: "Falha ao criar a equipe." };
+        const errorMessage = error.message || 'Ocorreu um erro desconhecido.';
+        return { team: null, error: `Falha ao criar a equipe. Detalhe: ${errorMessage}` };
     } finally {
         client.release();
     }
