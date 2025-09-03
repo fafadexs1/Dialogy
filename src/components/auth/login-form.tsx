@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useActionState, useEffect } from 'react';
@@ -28,9 +27,8 @@ export function LoginForm() {
 
   useEffect(() => {
     if (state.success) {
-      // Força um refresh para garantir que o layout recarregue com o novo estado de autenticação
-      router.refresh(); 
-      router.push('/');
+      // Force a full page reload to ensure the new session is picked up by the server layout
+      window.location.href = '/';
     }
   }, [state, router]);
   
