@@ -40,10 +40,17 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     // Update public.users table
     if (Object.keys(updates).length > 0) {
         try {
-            await db.query(
-                'UPDATE users SET full_name = $1, avatar_url = $2, updated_at = NOW() WHERE id = $3',
-                [updates.full_name, updates.avatar_url, user.id]
-            );
+            // Only update fields that are provided
+            const setClauses = Object.keys(updates).map((key, i) => `${key} = $${i + 1}`).join(', ');
+            const values = Object.values(updates);
+
+            if (setClauses) {
+                 await db.query(
+                    `UPDATE users SET ${setClauses}, updated_at = NOW() WHERE id = $${values.length + 1}`,
+                    [...values, user.id]
+                );
+            }
+           
         } catch (dbError: any) {
             console.error("[UPDATE_USER_PROFILE_DB] Erro:", dbError);
             return { success: false, error: 'Falha ao atualizar o perfil no banco de dados.' };

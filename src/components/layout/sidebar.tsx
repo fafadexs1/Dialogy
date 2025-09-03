@@ -21,6 +21,9 @@ import {
   Fingerprint,
   Rocket,
   Send,
+  Sun,
+  Moon,
+  Monitor
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -36,11 +39,16 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
 import { usePathname, useRouter } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { createClient } from '@/lib/supabase/client';
+import React, { useEffect, useState } from 'react';
 
 interface SidebarProps {
   user: User;
@@ -53,6 +61,55 @@ const mainNavItems = [
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
+
+function ThemeSwitcher() {
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') || 'system'
+    }
+    return 'system'
+  })
+
+  useEffect(() => {
+    const root = window.document.documentElement
+    root.classList.remove('light', 'dark')
+
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      root.classList.add(systemTheme)
+      return
+    }
+
+    root.classList.add(theme)
+  }, [theme])
+
+  return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+            {theme === 'light' && <Sun className="mr-2 h-4 w-4" />}
+            {theme === 'dark' && <Moon className="mr-2 h-4 w-4" />}
+            {theme === 'system' && <Monitor className="mr-2 h-4 w-4" />}
+            <span>Tema</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuPortal>
+            <DropdownMenuSubContent>
+                <DropdownMenuItem onClick={() => setTheme('light')}>
+                    <Sun className="mr-2 h-4 w-4" />
+                    <span>Claro</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTheme('dark')}>
+                    <Moon className="mr-2 h-4 w-4" />
+                    <span>Escuro</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTheme('system')}>
+                    <Monitor className="mr-2 h-4 w-4" />
+                    <span>Sistema</span>
+                </DropdownMenuItem>
+            </DropdownMenuSubContent>
+        </DropdownMenuPortal>
+    </DropdownMenuSub>
+  )
+}
 
 function SignOutMenuItem({ userId }: { userId: string }) {
     const router = useRouter();
@@ -231,12 +288,7 @@ export function Sidebar({ user }: SidebarProps) {
                     <span>Configurações do Workspace</span>
                 </DropdownMenuItem>
             </Link>
-             <Link href="/settings/security">
-                <DropdownMenuItem>
-                    <Settings className="mr-2 h-4 w-4" />
-                    <span>Segurança</span>
-                </DropdownMenuItem>
-            </Link>
+            <ThemeSwitcher />
             <DropdownMenuSeparator />
             <SignOutMenuItem userId={user.id} />
           </DropdownMenuContent>

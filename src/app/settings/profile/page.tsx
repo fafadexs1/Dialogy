@@ -1,9 +1,10 @@
 
+
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Loader2, User, Save, Mail, Image as ImageIcon, Briefcase, UserCircle } from "lucide-react";
+import { Loader2, User, Save, Mail, Image as ImageIcon, UserCircle, UploadCloud, Sun, Moon, Monitor } from "lucide-react";
 import { useSettings } from "../settings-context";
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -13,6 +14,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { updateUserProfile } from '@/actions/user';
 import { toast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
+import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
+
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -33,12 +37,63 @@ function SubmitButton() {
     )
 }
 
+function ThemeSwitcher() {
+    const [theme, setTheme] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('theme') || 'system';
+        }
+        return 'system';
+    });
+
+    useEffect(() => {
+        const root = window.document.documentElement;
+        root.classList.remove('light', 'dark');
+
+        if (theme === 'system') {
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            root.classList.add(systemTheme);
+        } else {
+            root.classList.add(theme);
+        }
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    return (
+        <div className='flex items-center gap-2'>
+             <Button
+                variant={theme === 'light' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTheme('light')}
+            >
+                <Sun className="mr-2 h-4 w-4" /> Claro
+            </Button>
+            <Button
+                variant={theme === 'dark' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTheme('dark')}
+            >
+                <Moon className="mr-2 h-4 w-4" /> Escuro
+            </Button>
+             <Button
+                variant={theme === 'system' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTheme('system')}
+            >
+                <Monitor className="mr-2 h-4 w-4" /> Sistema
+            </Button>
+        </div>
+    )
+}
+
 export default function ProfilePage() {
     const { user, loading } = useSettings();
     const [state, formAction] = useActionState(updateUserProfile, { success: false, error: null });
 
     const [fullName, setFullName] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
+    const [avatarFile, setAvatarFile] = useState<File | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (user) {
@@ -46,6 +101,45 @@ export default function ProfilePage() {
             setAvatarUrl(user.avatar || '');
         }
     }, [user]);
+    
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setAvatarFile(file);
+            const previewUrl = URL.createObjectURL(file);
+            setAvatarUrl(previewUrl); // Show preview
+        }
+    }
+
+    const handleFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        
+        let finalAvatarUrl = contact?.avatar_url || '';
+
+        if (avatarFile) {
+            setIsUploading(true);
+            const supabase = createClient();
+            const fileName = `${user!.id}-${Date.now()}`;
+            const { data, error } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, avatarFile);
+
+            if (error) {
+                toast({ title: "Erro no Upload", description: error.message, variant: 'destructive'});
+                setIsUploading(false);
+                return;
+            }
+            
+            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(data.path);
+            finalAvatarUrl = publicUrl;
+        }
+        
+        setIsUploading(false);
+        const formData = new FormData(e.currentTarget);
+        formData.set('avatarUrl', finalAvatarUrl);
+
+        formAction(formData);
+    }
 
     useEffect(() => {
         if (state.success) {
@@ -53,6 +147,7 @@ export default function ProfilePage() {
                 title: "Perfil Atualizado!",
                 description: "Suas informações foram salvas com sucesso.",
             });
+            setAvatarFile(null); // Reset file after successful upload
         } else if (state.error) {
             toast({
                 title: "Erro ao Atualizar",
@@ -67,6 +162,8 @@ export default function ProfilePage() {
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
     }
+    
+    const contact = user;
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
@@ -78,19 +175,31 @@ export default function ProfilePage() {
                 <p className="text-muted-foreground">Gerencie suas informações pessoais e aparência na plataforma.</p>
             </header>
 
-            <form action={formAction}>
+            <form onSubmit={handleFormSubmit}>
+                 <input type="hidden" name="avatarUrl" value={avatarUrl} />
                  <Card>
-                    <CardHeader className="flex-col md:flex-row items-start md:items-center gap-4">
-                        <Avatar className="h-20 w-20 border">
-                            <AvatarImage src={avatarUrl} alt={fullName} />
-                            <AvatarFallback className="text-3xl">{fullName.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1">
-                            <CardTitle>{fullName}</CardTitle>
-                            <CardDescription>{user.email}</CardDescription>
-                        </div>
+                    <CardHeader>
+                         <CardTitle>Informações Pessoais</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                        <div className="flex items-center gap-6">
+                            <Avatar className="h-20 w-20 border">
+                                <AvatarImage src={avatarUrl} alt={fullName} />
+                                <AvatarFallback className="text-3xl">{fullName.charAt(0)}</AvatarFallback>
+                            </Avatar>
+                             <div className="space-y-2">
+                                <Label>Foto de Perfil</Label>
+                                <div className="flex gap-2">
+                                    <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
+                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                                        <UploadCloud className="mr-2 h-4 w-4" />
+                                        Carregar Imagem
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-muted-foreground">PNG, JPG, GIF até 2MB.</p>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-2">
                                 <Label htmlFor="fullName">Nome Completo</Label>
@@ -113,26 +222,25 @@ export default function ProfilePage() {
                                 />
                             </div>
                         </div>
-                        <div className="space-y-2">
-                             <Label htmlFor="avatarUrl">URL do Avatar</Label>
-                            <Input
-                                id="avatarUrl"
-                                name="avatarUrl"
-                                value={avatarUrl}
-                                onChange={(e) => setAvatarUrl(e.target.value)}
-                                placeholder="https://exemplo.com/sua-foto.png"
-                            />
-                        </div>
-                        <Separator/>
-                        <div className="space-y-2">
-                            <h3 className="font-medium text-muted-foreground">Em breve...</h3>
-                             <p className="text-sm text-muted-foreground">Mais configurações de preferência como tema (claro/escuro) e notificações estarão disponíveis aqui.</p>
-                        </div>
                     </CardContent>
-                    <CardFooter className="border-t pt-6 flex justify-end">
-                        <SubmitButton />
-                    </CardFooter>
                 </Card>
+
+                <Card className='mt-6'>
+                    <CardHeader>
+                        <CardTitle>Tema da Interface</CardTitle>
+                        <CardDescription>Escolha como deseja visualizar a plataforma.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ThemeSwitcher/>
+                    </CardContent>
+                </Card>
+
+                 <div className="mt-8 flex justify-end">
+                    <Button type="submit" disabled={isUploading}>
+                        {(isUploading || status.pending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        {isUploading ? 'Enviando imagem...' : (status.pending ? 'Salvando...' : 'Salvar Alterações')}
+                    </Button>
+                </div>
             </form>
         </div>
     )
