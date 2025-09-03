@@ -352,7 +352,7 @@ export async function deleteMessageAction(
             body: JSON.stringify(deletePayload)
         });
         
-        await client.query("UPDATE messages SET status = 'deleted', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
+        await client.query("UPDATE messages SET api_message_status = 'DELETED', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
 
         await client.query('COMMIT');
         revalidatePath(`/api/chats/${workspace_id}`);
@@ -366,3 +366,5 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+    
