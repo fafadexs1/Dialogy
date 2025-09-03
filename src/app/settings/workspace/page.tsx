@@ -185,6 +185,7 @@ export default function WorkspaceSettingsPage() {
             setIsUploading(true);
             const supabase = createClient();
             const fileName = `public/${activeWorkspace.id}-${Date.now()}`;
+            
             const { data, error } = await supabase.storage
                 .from('workspace-avatars')
                 .upload(fileName, avatarFile);
@@ -195,9 +196,18 @@ export default function WorkspaceSettingsPage() {
                 return;
             }
             
-            const { data: { publicUrl } } = supabase.storage.from('workspace-avatars').getPublicUrl(data.path);
-            finalAvatarUrl = publicUrl;
-            setAvatarFile(null); // Reset after successful upload
+            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+                .from('workspace-avatars')
+                .createSignedUrl(data.path, 31536000); // 1 year expiry
+
+             if (signedUrlError) {
+                toast({ title: "Erro ao gerar URL", description: signedUrlError.message, variant: 'destructive'});
+                setIsUploading(false);
+                return;
+            }
+
+            finalAvatarUrl = signedUrlData.signedUrl;
+            setAvatarFile(null);
         }
         
         setIsUploading(false);
@@ -399,5 +409,3 @@ export default function WorkspaceSettingsPage() {
         </div>
     )
 }
-
-    

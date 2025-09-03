@@ -131,8 +131,17 @@ export default function ProfilePage() {
                 return;
             }
             
-            const { data: { publicUrl } } = supabase.storage.from('photo_user').getPublicUrl(data.path);
-            finalAvatarUrl = publicUrl;
+            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+                .from('photo_user')
+                .createSignedUrl(data.path, 31536000); // 1 year expiry
+
+            if (signedUrlError) {
+                toast({ title: "Erro ao gerar URL", description: signedUrlError.message, variant: 'destructive'});
+                setIsUploading(false);
+                return;
+            }
+
+            finalAvatarUrl = signedUrlData.signedUrl;
         }
         
         setIsUploading(false);
@@ -176,7 +185,7 @@ export default function ProfilePage() {
                 <p className="text-muted-foreground">Gerencie suas informações pessoais e aparência na plataforma.</p>
             </header>
 
-            <form ref={formRef} action={formAction} onSubmit={handleSubmit}>
+            <form ref={formRef} onSubmit={handleSubmit}>
                  <input type="hidden" name="avatarUrl" value={avatarUrl} />
                  <Card>
                     <CardHeader>
