@@ -79,7 +79,13 @@ async function internalSendMessage(
                 method: 'POST',
                 body: JSON.stringify({
                     number: correctedRemoteJid,
-                    text: content,
+                    options: {
+                        delay: 1200,
+                        presence: 'composing'
+                    },
+                    textMessage: {
+                        text: content
+                    }
                 }),
             }
         );

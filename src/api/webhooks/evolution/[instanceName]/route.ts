@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -8,6 +7,27 @@ import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+
+
+/**
+ * Normalizes a Brazilian WhatsApp JID by removing the first '9' after the DDD.
+ * Example: 5511987654321@s.whatsapp.net -> 551187654321@s.whatsapp.net
+ * @param jid The original JID.
+ * @returns A normalized JID if it's a Brazilian mobile number, otherwise the original JID.
+ */
+function normalizeBrazilianNumber(jid: string): string {
+    const match = jid.match(/^55(\d{2})(9\d{8})@s\.whatsapp\.net$/);
+    if (match) {
+        const ddd = match[1];
+        const number = match[2];
+        // Check if it's a mobile DDD (11-99)
+        const dddInt = parseInt(ddd, 10);
+        if (dddInt >= 11 && dddInt <= 99) {
+            return `55${ddd}${number.substring(1)}@s.whatsapp.net`;
+        }
+    }
+    return jid;
+}
 
 
 export async function POST(
@@ -85,10 +105,10 @@ async function handleMessagesUpsert(payload: any) {
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
-    const contactJid = data?.key?.remoteJid;
+    const originalJid = data?.key?.remoteJid;
 
-    if (!data || !data.key || !data.message) {
-        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
+    if (!data || !data.key || !data.message || !originalJid) {
+        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key, message ou remoteJid ausente.');
         return;
     }
 
@@ -133,7 +153,7 @@ async function handleMessagesUpsert(payload: any) {
     }
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
-    const contactPhone = sender || contactJid.split('@')[0];
+    const contactPhone = sender || originalJid.split('@')[0];
     
     try {
         await client.query('BEGIN');
@@ -150,17 +170,36 @@ async function handleMessagesUpsert(payload: any) {
         workspaceId = workspace_id;
         apiConfig = { api_url, api_key };
         
-        // Find or create the contact within the specific workspace
-        const contactRes = await client.query(
-            `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) 
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (workspace_id, phone_number_jid) 
-             DO UPDATE SET name = EXCLUDED.name, avatar_url = COALESCE(contacts.avatar_url, EXCLUDED.avatar_url)
-             RETURNING *`,
-            [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
+        // --- Robust Contact Handling ---
+        const normalizedJid = normalizeBrazilianNumber(originalJid);
+        const jidsToSearch = [...new Set([originalJid, normalizedJid])];
+
+        let contactRes = await client.query(
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = ANY($2::text[])', 
+            [workspaceId, jidsToSearch]
         );
         
-        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
+        if (contactRes.rowCount === 0) {
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JIDs ${jidsToSearch.join(', ')} não encontrado. Criando novo contato com JID normalizado: ${normalizedJid}`);
+            contactRes = await client.query(
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
+                 RETURNING *`,
+                [workspaceId, pushName || contactPhone, contactPhone, normalizedJid, null]
+            );
+        } else {
+             console.log(`[WEBHOOK_MSG_UPSERT] Contato encontrado com ID: ${contactRes.rows[0].id}`);
+            // Update name if it's different and not null
+            if (pushName && pushName !== contactRes.rows[0].name) {
+                console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
+                contactRes = await client.query(
+                    'UPDATE contacts SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+                    [pushName, contactRes.rows[0].id]
+                );
+            }
+        }
+        // --- End Robust Contact Handling ---
+        
+        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${originalJid}`);
         contactData = contactRes.rows[0];
 
         let chatRes = await client.query(
@@ -172,7 +211,7 @@ async function handleMessagesUpsert(payload: any) {
             chat = chatRes.rows[0];
         } else {
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
@@ -183,13 +222,13 @@ async function handleMessagesUpsert(payload: any) {
             `INSERT INTO messages (
                 workspace_id, chat_id, type, content, metadata,
                 message_id_from_api, sender_from_api, instance_name,
-                status_from_api, source_from_api, server_url, from_me,
+                source_from_api, from_me,
                 api_message_status, raw_payload
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
             [
                 workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
-                instanceName, data.status, data.source, parsedUrl, key.fromMe,
-                data.status?.toUpperCase(), JSON.stringify(payload)
+                instanceName, data.source, key.fromMe,
+                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload)
             ]
         );
 
@@ -213,7 +252,7 @@ async function handleMessagesUpsert(payload: any) {
 
         if (contactData?.id && apiConfig && !contactData.avatar_url) {
             postTransactionTasks.push(
-                updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
+                updateProfilePicture(contactData.id, originalJid, instanceName, apiConfig)
             );
         }
         
