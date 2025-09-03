@@ -86,7 +86,7 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
         };
 
         if (integration === 'WHATSAPP-BUSINESS') {
-            payload = {
+             payload = {
                 ...payload,
                 token: formData.get('token') as string,
                 number: formData.get('number') as string,
@@ -100,6 +100,10 @@ function AddInstanceForm({ onFormSubmit, configId }: { onFormSubmit: () => void,
             const proxyUsername = formData.get('proxyUsername') as string;
             const proxyPassword = formData.get('proxyPassword') as string;
             const rabbitmqEvents = formData.get('rabbitmqEvents') as string;
+
+            // Set mandatory defaults for Baileys
+            payload.rejectCall = true;
+            payload.groupsIgnore = true;
             
             if (baileysNumber) payload.number = baileysNumber;
             if (msgCall) payload.msgCall = msgCall;
