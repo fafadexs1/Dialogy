@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -79,7 +80,6 @@ async function internalSendMessage(
                 body: JSON.stringify({
                     number: correctedRemoteJid,
                     options: {
-                        delay: 1200,
                         presence: 'composing'
                     },
                     text: content
