@@ -8,17 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHead } from '@/components/ui/table';
-import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite } from '@/actions/invites';
+import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite, joinWorkspaceAction } from '@/actions/invites';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettings } from '../settings-context';
 import { timezones } from '@/lib/timezones';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -55,6 +56,43 @@ function CopyButton({ text }: { text: string }) {
         </Button>
     )
 }
+
+function JoinWorkspaceForm({ className }: { className?: string}) {
+    const [state, formAction] = useActionState(joinWorkspaceAction, { success: false, error: null });
+    const { pending } = useFormStatus();
+
+    return (
+        <form action={formAction} className={className}>
+            <CardContent>
+                <div className="space-y-2">
+                    <Label htmlFor="invite-code">Código de Convite</Label>
+                    <Input
+                        id="invite-code"
+                        name="inviteCode"
+                        placeholder="Insira o código do convite aqui"
+                        required
+                        disabled={pending}
+                    />
+                </div>
+                 {state.error && (
+                    <Alert variant="destructive" className="mt-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Erro ao entrar no workspace</AlertTitle>
+                        <AlertDescription>{state.error}</AlertDescription>
+                    </Alert>
+                )}
+            </CardContent>
+            <CardFooter>
+                 <Button type="submit" className="w-full" disabled={pending}>
+                    {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <LogIn className="mr-2 h-4 w-4" />
+                    {pending ? 'Verificando...' : 'Entrar no Workspace'}
+                </Button>
+            </CardFooter>
+        </form>
+    );
+}
+
 
 export default function WorkspaceSettingsPage() {
     const { user } = useSettings();
@@ -178,6 +216,14 @@ export default function WorkspaceSettingsPage() {
                     </CardFooter>
                 </Card>
             </form>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Entrar em outro Workspace</CardTitle>
+                    <CardDescription>Recebeu um convite? Insira o código abaixo para se juntar a outra equipe.</CardDescription>
+                </CardHeader>
+                <JoinWorkspaceForm />
+            </Card>
             
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">

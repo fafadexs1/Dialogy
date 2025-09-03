@@ -117,7 +117,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };
     }
     const userId = user.id;
-    const inviteCode = formData.get('inviteCode') as string;
+    const inviteCode = (formData.get('inviteCode') as string)?.trim().toUpperCase();
 
     if (!inviteCode) {
         return { success: false, error: "O código de convite é obrigatório." };
@@ -133,7 +133,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
                 id, workspace_id, expires_at, max_uses, is_revoked, 
                 (SELECT COUNT(*) FROM user_invites WHERE invite_id = wi.id) as use_count
              FROM workspace_invites wi 
-             WHERE code = $1`, [inviteCode.trim()]
+             WHERE code = $1`, [inviteCode]
         );
 
         if (inviteRes.rowCount === 0) {
@@ -200,5 +200,3 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
     revalidatePath('/', 'layout');
     redirect('/');
 }
-
-    

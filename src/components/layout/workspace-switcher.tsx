@@ -3,7 +3,6 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
 import { CheckIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -23,6 +22,14 @@ import {
 import { switchWorkspaceAction } from '@/actions/workspace';
 import Link from 'next/link';
 import { Separator } from '../ui/separator';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Label } from '../ui/label';
+import { Input } from '../ui/input';
+import { useActionState, useEffect } from 'react';
+import { joinWorkspaceAction } from '@/actions/invites';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle, Loader2, LogIn } from 'lucide-react';
+import { useFormStatus } from 'react-dom';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -30,6 +37,49 @@ type PopoverTriggerProps = React.ComponentPropsWithoutRef<
 
 interface WorkspaceSwitcherProps extends PopoverTriggerProps {
   user: User;
+}
+
+function JoinWorkspaceDialog() {
+    const [state, formAction] = useActionState(joinWorkspaceAction, { success: false, error: null });
+    const { pending } = useFormStatus();
+
+    return (
+        <DialogContent>
+            <form action={formAction}>
+                 <DialogHeader>
+                    <DialogTitle>Entrar em um Workspace</DialogTitle>
+                    <DialogDescription>
+                        Insira o código de convite que você recebeu para se juntar a uma equipe existente.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                    <Label htmlFor="invite-code-dialog">Código de Convite</Label>
+                    <Input
+                        id="invite-code-dialog"
+                        name="inviteCode"
+                        placeholder="Ex: ABC-123"
+                        required
+                        autoFocus
+                        disabled={pending}
+                    />
+                     {state.error && (
+                        <Alert variant="destructive" className="mt-4">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Erro ao entrar no workspace</AlertTitle>
+                            <AlertDescription>{state.error}</AlertDescription>
+                        </Alert>
+                    )}
+                </div>
+                <div className="flex justify-end gap-2">
+                     <Button type="submit" className="w-full" disabled={pending}>
+                        {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                         <LogIn className="mr-2 h-4 w-4" />
+                        {pending ? 'Verificando...' : 'Entrar no Workspace'}
+                    </Button>
+                </div>
+            </form>
+        </DialogContent>
+    )
 }
 
 export function WorkspaceSwitcher({
@@ -129,16 +179,28 @@ export function WorkspaceSwitcher({
         </div>
         <Separator />
         <div className='p-2'>
-        <Button
-            asChild
-            variant="ghost"
-            className="w-full justify-start text-sm font-normal"
-        >
-            <Link href="/settings/workspace/new">
-                <PlusCircledIcon className="mr-2 h-5 w-5" />
-                Criar Workspace
-            </Link>
-        </Button>
+            <Button
+                asChild
+                variant="ghost"
+                className="w-full justify-start text-sm font-normal"
+            >
+                <Link href="/settings/workspace/new">
+                    <PlusCircledIcon className="mr-2 h-5 w-5" />
+                    Criar Workspace
+                </Link>
+            </Button>
+            <Dialog>
+                <DialogTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        className="w-full justify-start text-sm font-normal"
+                    >
+                        <LogIn className="mr-2 h-5 w-5" />
+                        Entrar com Convite
+                    </Button>
+                </DialogTrigger>
+                <JoinWorkspaceDialog />
+            </Dialog>
         </div>
       </PopoverContent>
     </Popover>
