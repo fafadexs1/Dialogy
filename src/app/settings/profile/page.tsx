@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import { useActionState, useEffect, useState, useRef } from 'react';
@@ -94,6 +93,7 @@ export default function ProfilePage() {
     const [avatarFile, setAvatarFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const formRef = useRef<HTMLFormElement>(null);
 
     useEffect(() => {
         if (user) {
@@ -111,10 +111,12 @@ export default function ProfilePage() {
         }
     }
 
-    const handleFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        let finalAvatarUrl = contact?.avatar_url || '';
+        if (!formRef.current) return;
+
+        let finalAvatarUrl = user?.avatar || '';
 
         if (avatarFile) {
             setIsUploading(true);
@@ -135,7 +137,7 @@ export default function ProfilePage() {
         }
         
         setIsUploading(false);
-        const formData = new FormData(e.currentTarget);
+        const formData = new FormData(formRef.current);
         formData.set('avatarUrl', finalAvatarUrl);
 
         formAction(formData);
@@ -175,7 +177,7 @@ export default function ProfilePage() {
                 <p className="text-muted-foreground">Gerencie suas informações pessoais e aparência na plataforma.</p>
             </header>
 
-            <form onSubmit={handleFormSubmit}>
+            <form ref={formRef} action={formAction} onSubmit={handleSubmit}>
                  <input type="hidden" name="avatarUrl" value={avatarUrl} />
                  <Card>
                     <CardHeader>
@@ -237,8 +239,8 @@ export default function ProfilePage() {
 
                  <div className="mt-8 flex justify-end">
                     <Button type="submit" disabled={isUploading}>
-                        {(isUploading || status.pending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {isUploading ? 'Enviando imagem...' : (status.pending ? 'Salvando...' : 'Salvar Alterações')}
+                        {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        {isUploading ? 'Enviando imagem...' : 'Salvar Alterações'}
                     </Button>
                 </div>
             </form>
