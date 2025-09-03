@@ -106,6 +106,8 @@ export async function updateWorkspaceAction(
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
     const timezone = formData.get('timezone') as string;
+    const avatarUrl = formData.get('avatarUrl') as string;
+
 
     if (!workspaceId) {
         return { success: false, error: 'ID do workspace não encontrado.' };
@@ -116,6 +118,7 @@ export async function updateWorkspaceAction(
     const fieldsToUpdate: { [key: string]: any } = {};
     if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
     if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
+    if (formData.has('avatarUrl')) fieldsToUpdate.avatar_url = avatarUrl;
 
     if (Object.keys(fieldsToUpdate).length === 0) {
         return { success: true, error: null }; // Nada para atualizar

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle, UploadCloud } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -20,6 +20,8 @@ import { ptBR } from 'date-fns/locale';
 import { useSettings } from '../settings-context';
 import { timezones } from '@/lib/timezones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { createClient } from '@/lib/supabase/client';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -95,11 +97,18 @@ function JoinWorkspaceForm({ className }: { className?: string}) {
 
 
 export default function WorkspaceSettingsPage() {
-    const { user } = useSettings();
+    const { user, loading: userLoading } = useSettings();
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [workspaceName, setWorkspaceName] = useState('');
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+    
+    // State for avatar
+    const [avatarUrl, setAvatarUrl] = useState('');
+    const [avatarFile, setAvatarFile] = useState<File | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const formRef = useRef<HTMLFormElement>(null);
     
     const [updateState, updateAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
@@ -119,6 +128,7 @@ export default function WorkspaceSettingsPage() {
             if (workspace) {
                 setActiveWorkspace(workspace);
                 setWorkspaceName(workspace.name);
+                setAvatarUrl(workspace.avatar || '');
                 fetchInvites(workspace.id);
             }
         }
@@ -127,6 +137,7 @@ export default function WorkspaceSettingsPage() {
     useEffect(() => {
         if (updateState.success) {
             toast({ title: "Workspace Atualizado!", description: "As configurações do workspace foram salvas." });
+            setAvatarFile(null); // Reset file on success
         } else if (updateState.error) {
             toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
@@ -152,9 +163,50 @@ export default function WorkspaceSettingsPage() {
         }
     }
     
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setAvatarFile(file);
+            const previewUrl = URL.createObjectURL(file);
+            setAvatarUrl(previewUrl);
+        }
+    };
+    
+     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (!formRef.current) return;
+
+        let finalAvatarUrl = activeWorkspace?.avatar || '';
+
+        if (avatarFile) {
+            setIsUploading(true);
+            const supabase = createClient();
+            const fileName = `${activeWorkspace!.id}-${Date.now()}`;
+            const { data, error } = await supabase.storage
+                .from('workspace-avatars')
+                .upload(fileName, avatarFile);
+
+            if (error) {
+                toast({ title: "Erro no Upload", description: error.message, variant: 'destructive'});
+                setIsUploading(false);
+                return;
+            }
+            
+            const { data: { publicUrl } } = supabase.storage.from('workspace-avatars').getPublicUrl(data.path);
+            finalAvatarUrl = publicUrl;
+            setIsUploading(false);
+        }
+        
+        const formData = new FormData(formRef.current);
+        formData.set('avatarUrl', finalAvatarUrl); // Set the possibly new URL
+
+        updateAction(formData);
+    };
+
+
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
-    if (!user) {
+    if (userLoading || !user) {
         return <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -179,40 +231,65 @@ export default function WorkspaceSettingsPage() {
                  <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
-            <form action={updateAction}>
+            <form ref={formRef} onSubmit={handleSubmit}>
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
                         <CardDescription>Altere as configurações do seu workspace.</CardDescription>
                     </CardHeader>
-                    <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <CardContent className="space-y-6">
                         <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
-                        <div className="space-y-2">
-                            <Label htmlFor="workspaceName">Nome do Workspace</Label>
-                            <Input 
-                                id="workspaceName"
-                                name="workspaceName"
-                                value={workspaceName}
-                                onChange={(e) => setWorkspaceName(e.target.value)}
-                            />
+                         <input type="hidden" name="avatarUrl" value={avatarUrl} />
+                        
+                        <div className="flex items-center gap-6">
+                            <Avatar className="h-20 w-20 rounded-lg border">
+                                <AvatarImage src={avatarUrl} alt={workspaceName} />
+                                <AvatarFallback className="text-3xl rounded-lg">{workspaceName.charAt(0)}</AvatarFallback>
+                            </Avatar>
+                             <div className="space-y-2">
+                                <Label>Avatar do Workspace</Label>
+                                <div className="flex gap-2">
+                                    <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
+                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                                        <UploadCloud className="mr-2 h-4 w-4" />
+                                        Carregar Imagem
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-muted-foreground">PNG, JPG, GIF até 2MB.</p>
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                             <Label htmlFor="timezone">Fuso Horário</Label>
-                            <Select name="timezone" defaultValue={(activeWorkspace as any).timezone || 'America/Sao_Paulo'}>
-                                <SelectTrigger id="timezone">
-                                    <SelectValue placeholder="Selecione um fuso horário" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {timezones.map(tz => (
-                                        <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="workspaceName">Nome do Workspace</Label>
+                                <Input 
+                                    id="workspaceName"
+                                    name="workspaceName"
+                                    value={workspaceName}
+                                    onChange={(e) => setWorkspaceName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="timezone">Fuso Horário</Label>
+                                <Select name="timezone" defaultValue={(activeWorkspace as any).timezone || 'America/Sao_Paulo'}>
+                                    <SelectTrigger id="timezone">
+                                        <SelectValue placeholder="Selecione um fuso horário" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {timezones.map(tz => (
+                                            <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">As alterações serão refletidas em toda a plataforma.</p>
-                        <SubmitButton />
+                        <Button type="submit" disabled={isUploading}>
+                            {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isUploading ? 'Enviando Imagem...' : 'Salvar Alterações'}
+                        </Button>
                     </CardFooter>
                 </Card>
             </form>
