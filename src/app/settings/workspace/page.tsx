@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useActionState, useEffect, useState, useRef } from 'react';
@@ -23,12 +22,15 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { createClient } from '@/lib/supabase/client';
 
-function SubmitButton() {
+function SubmitButton({ isUploading }: { isUploading: boolean }) {
     const { pending } = useFormStatus();
+    const isDisabled = pending || isUploading;
     return (
-        <Button type="submit" disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {pending ? 'Salvando...' : 'Salvar Alterações'}
+        <Button type="submit" disabled={isDisabled}>
+            {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> :
+             pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
+             <Save className="mr-2 h-4 w-4" />}
+            {isUploading ? 'Enviando imagem...' : (pending ? 'Salvando...' : 'Salvar Alterações')}
         </Button>
     )
 }
@@ -99,16 +101,13 @@ function JoinWorkspaceForm({ className }: { className?: string}) {
 export default function WorkspaceSettingsPage() {
     const { user, loading: userLoading } = useSettings();
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-    const [workspaceName, setWorkspaceName] = useState('');
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     
     // State for avatar
     const [avatarUrl, setAvatarUrl] = useState('');
-    const [avatarFile, setAvatarFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const formRef = useRef<HTMLFormElement>(null);
     
     const [updateState, updateAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
@@ -127,7 +126,6 @@ export default function WorkspaceSettingsPage() {
             const workspace = user.workspaces.find((ws: Workspace) => ws.id === user.activeWorkspaceId);
             if (workspace) {
                 setActiveWorkspace(workspace);
-                setWorkspaceName(workspace.name);
                 setAvatarUrl(workspace.avatar || '');
                 fetchInvites(workspace.id);
             }
@@ -137,7 +135,6 @@ export default function WorkspaceSettingsPage() {
     useEffect(() => {
         if (updateState.success) {
             toast({ title: "Workspace Atualizado!", description: "As configurações do workspace foram salvas." });
-            setAvatarFile(null); // Reset file on success
         } else if (updateState.error) {
             toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
@@ -163,44 +160,34 @@ export default function WorkspaceSettingsPage() {
         }
     }
     
-    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            setAvatarFile(file);
-            const previewUrl = URL.createObjectURL(file);
-            setAvatarUrl(previewUrl);
-        }
-    };
-    
-     const handleSubmit = async (event: React.MouseEvent<HTMLButtonElement>) => {
-        event.preventDefault();
-        if (!formRef.current) return;
+        if (!file || !activeWorkspace) return;
 
-        let finalAvatarUrl = activeWorkspace?.avatar || '';
+        setIsUploading(true);
+        setAvatarUrl(URL.createObjectURL(file)); // Show preview immediately
 
-        if (avatarFile) {
-            setIsUploading(true);
+        try {
             const supabase = createClient();
-            const fileName = `${activeWorkspace!.id}-${Date.now()}`;
+            const fileName = `${activeWorkspace.id}-${Date.now()}`;
             const { data, error } = await supabase.storage
                 .from('workspace-avatars')
-                .upload(fileName, avatarFile);
+                .upload(fileName, file);
 
             if (error) {
-                toast({ title: "Erro no Upload", description: error.message, variant: 'destructive'});
-                setIsUploading(false);
-                return;
+                throw error;
             }
-            
+
             const { data: { publicUrl } } = supabase.storage.from('workspace-avatars').getPublicUrl(data.path);
-            finalAvatarUrl = publicUrl;
+            setAvatarUrl(publicUrl); // Set the final URL
+            toast({ title: 'Avatar Carregado!', description: 'Sua nova imagem de workspace está pronta. Clique em "Salvar Alterações" para confirmar.'})
+
+        } catch (error: any) {
+            toast({ title: "Erro no Upload", description: error.message, variant: 'destructive' });
+            setAvatarUrl(activeWorkspace.avatar || ''); // Revert on error
+        } finally {
             setIsUploading(false);
         }
-        
-        const formData = new FormData(formRef.current);
-        formData.set('avatarUrl', finalAvatarUrl); // Set the possibly new URL
-
-        updateAction(formData);
     };
 
 
@@ -231,7 +218,7 @@ export default function WorkspaceSettingsPage() {
                  <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
-            <form ref={formRef} action={updateAction}>
+            <form action={updateAction}>
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
@@ -239,19 +226,19 @@ export default function WorkspaceSettingsPage() {
                     </CardHeader>
                     <CardContent className="space-y-6">
                         <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
-                         <input type="hidden" name="avatarUrl" value={avatarUrl} />
+                        <input type="hidden" name="avatarUrl" value={avatarUrl} />
                         
                         <div className="flex items-center gap-6">
                             <Avatar className="h-20 w-20 rounded-lg border">
-                                <AvatarImage src={avatarUrl} alt={workspaceName} />
-                                <AvatarFallback className="text-3xl rounded-lg">{workspaceName.charAt(0)}</AvatarFallback>
+                                <AvatarImage src={avatarUrl} alt={activeWorkspace.name} />
+                                <AvatarFallback className="text-3xl rounded-lg">{activeWorkspace.name.charAt(0)}</AvatarFallback>
                             </Avatar>
                              <div className="space-y-2">
                                 <Label>Avatar do Workspace</Label>
                                 <div className="flex gap-2">
                                     <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
-                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                                        <UploadCloud className="mr-2 h-4 w-4" />
+                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                                        {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
                                         Carregar Imagem
                                     </Button>
                                 </div>
@@ -265,8 +252,7 @@ export default function WorkspaceSettingsPage() {
                                 <Input 
                                     id="workspaceName"
                                     name="workspaceName"
-                                    value={workspaceName}
-                                    onChange={(e) => setWorkspaceName(e.target.value)}
+                                    defaultValue={activeWorkspace.name}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -286,15 +272,7 @@ export default function WorkspaceSettingsPage() {
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">As alterações serão refletidas em toda a plataforma.</p>
-                        <Button type="button" onClick={handleSubmit} disabled={isUploading}>
-                            {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {isUploading ? 'Enviando Imagem...' : (
-                                <>
-                                    <Save className="mr-2 h-4 w-4" />
-                                    Salvar Alterações
-                                </>
-                            )}
-                        </Button>
+                        <SubmitButton isUploading={isUploading} />
                     </CardFooter>
                 </Card>
             </form>
