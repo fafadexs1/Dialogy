@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useActionState, useEffect, useState, useRef } from 'react';
@@ -123,7 +122,7 @@ export default function ProfilePage() {
             const supabase = createClient();
             const fileName = `${user!.id}-${Date.now()}`;
             const { data, error } = await supabase.storage
-                .from('avatars')
+                .from('photo_user')
                 .upload(fileName, avatarFile);
 
             if (error) {
@@ -132,7 +131,7 @@ export default function ProfilePage() {
                 return;
             }
             
-            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(data.path);
+            const { data: { publicUrl } } = supabase.storage.from('photo_user').getPublicUrl(data.path);
             finalAvatarUrl = publicUrl;
         }
         
