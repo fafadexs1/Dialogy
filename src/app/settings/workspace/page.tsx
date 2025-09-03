@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle, UploadCloud } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -172,7 +172,7 @@ export default function WorkspaceSettingsPage() {
         }
     };
     
-     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+     const handleSubmit = async (event: React.MouseEvent<HTMLButtonElement>) => {
         event.preventDefault();
         if (!formRef.current) return;
 
@@ -231,7 +231,7 @@ export default function WorkspaceSettingsPage() {
                  <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
-            <form ref={formRef} onSubmit={handleSubmit}>
+            <form ref={formRef} action={updateAction}>
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
@@ -286,9 +286,14 @@ export default function WorkspaceSettingsPage() {
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">As alterações serão refletidas em toda a plataforma.</p>
-                        <Button type="submit" disabled={isUploading}>
+                        <Button type="button" onClick={handleSubmit} disabled={isUploading}>
                             {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {isUploading ? 'Enviando Imagem...' : 'Salvar Alterações'}
+                            {isUploading ? 'Enviando Imagem...' : (
+                                <>
+                                    <Save className="mr-2 h-4 w-4" />
+                                    Salvar Alterações
+                                </>
+                            )}
                         </Button>
                     </CardFooter>
                 </Card>
