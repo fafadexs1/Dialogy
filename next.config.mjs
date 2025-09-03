@@ -1,7 +1,9 @@
 
-import type {NextConfig} from 'next';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   /* config options here */
   typescript: {
     // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
