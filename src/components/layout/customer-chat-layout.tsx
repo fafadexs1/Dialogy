@@ -15,6 +15,9 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 
+// Base64 encoded, short, and browser-safe notification sound
+const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
+
 function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -25,8 +28,17 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const selectedChatIdRef = useRef<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previousMessagesCount = useRef<Record<string, number>>({});
   
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
+
+  const playNotificationSound = useCallback(() => {
+    const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
+    if (isSoundEnabled && audioRef.current) {
+        audioRef.current.play().catch(e => console.error("Error playing notification sound:", e));
+    }
+  }, []);
 
   const fetchData = useCallback(async (isInitial = false) => {
     if (!initialUser.activeWorkspaceId) return;
@@ -43,8 +55,24 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
             throw new Error(error);
         }
         
-        setChats(fetchedChats || []);
-        setMessagesByChat(fetchedMessagesByChat || {});
+        const newChats = fetchedChats || [];
+        const newMessagesByChat = fetchedMessagesByChat || {};
+
+        // Check for new messages that should trigger a notification
+        newChats.forEach(chat => {
+            const isMyAttendance = chat.status === 'atendimentos' && chat.agent?.id === initialUser.id;
+            const newMessages = newMessagesByChat[chat.id] || [];
+            const oldMessageCount = previousMessagesCount.current[chat.id] || 0;
+            const lastMessage = newMessages[newMessages.length - 1];
+
+            if (isMyAttendance && newMessages.length > oldMessageCount && lastMessage && !lastMessage.from_me) {
+                 playNotificationSound();
+            }
+            previousMessagesCount.current[chat.id] = newMessages.length;
+        });
+
+        setChats(newChats);
+        setMessagesByChat(newMessagesByChat);
         setFetchError(null);
         
     } catch(e: any) {
@@ -55,7 +83,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser.activeWorkspaceId]);
+  }, [initialUser.activeWorkspaceId, initialUser.id, playNotificationSound]);
 
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
@@ -208,6 +236,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
 
   return (
     <div className="h-full flex-1 w-full min-h-0 flex">
+      <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
       <ChatList
         chats={chats}
         selectedChat={selectedChat}

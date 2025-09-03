@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Loader2, User, Save, Mail, Image as ImageIcon, UserCircle, UploadCloud, Sun, Moon, Monitor } from "lucide-react";
+import { Loader2, User, Save, Mail, Image as ImageIcon, UserCircle, UploadCloud, Sun, Moon, Monitor, Bell } from "lucide-react";
 import { useSettings } from "../settings-context";
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { toast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
 
 
 function SubmitButton() {
@@ -83,6 +84,41 @@ function ThemeSwitcher() {
     )
 }
 
+function NotificationSettings() {
+    const [soundEnabled, setSoundEnabled] = useState(true);
+
+    useEffect(() => {
+        const storedValue = localStorage.getItem('notificationSoundEnabled');
+        if (storedValue !== null) {
+            setSoundEnabled(JSON.parse(storedValue));
+        }
+    }, []);
+
+    const handleSoundToggle = (enabled: boolean) => {
+        setSoundEnabled(enabled);
+        localStorage.setItem('notificationSoundEnabled', JSON.stringify(enabled));
+        toast({
+            title: `Notificações sonoras ${enabled ? 'ativadas' : 'desativadas'}.`,
+        });
+    };
+
+    return (
+        <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="space-y-0.5">
+                <Label htmlFor="sound-switch" className="text-base">Som de notificação</Label>
+                <p className="text-sm text-muted-foreground">
+                    Receber um alerta sonoro para novas mensagens em seus atendimentos.
+                </p>
+            </div>
+            <Switch
+                id="sound-switch"
+                checked={soundEnabled}
+                onCheckedChange={handleSoundToggle}
+            />
+        </div>
+    );
+}
+
 export default function ProfilePage() {
     const { user, loading } = useSettings();
     const [state, formAction] = useActionState(updateUserProfile, { success: false, error: null });
@@ -110,13 +146,11 @@ export default function ProfilePage() {
         }
     }
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
         
-        if (!formRef.current) return;
-
-        let finalAvatarUrl = user?.avatar || '';
-
+        let finalAvatarUrl = avatarUrl;
         if (avatarFile) {
             setIsUploading(true);
             const supabase = createClient();
@@ -131,25 +165,19 @@ export default function ProfilePage() {
                 return;
             }
             
-            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+            const { data: urlData } = supabase.storage
                 .from('photo_user')
-                .createSignedUrl(data.path, 31536000); // 1 year expiry
-
-            if (signedUrlError) {
-                toast({ title: "Erro ao gerar URL", description: signedUrlError.message, variant: 'destructive'});
-                setIsUploading(false);
-                return;
-            }
-
-            finalAvatarUrl = signedUrlData.signedUrl;
+                .getPublicUrl(data.path);
+            
+            finalAvatarUrl = urlData.publicUrl;
+            setAvatarUrl(finalAvatarUrl);
+            setAvatarFile(null); // Reset file input
+            setIsUploading(false);
         }
         
-        setIsUploading(false);
-        const formData = new FormData(formRef.current);
         formData.set('avatarUrl', finalAvatarUrl);
-
         formAction(formData);
-    }
+    };
 
     useEffect(() => {
         if (state.success) {
@@ -172,8 +200,6 @@ export default function ProfilePage() {
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
     }
-    
-    const contact = user;
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
@@ -233,25 +259,34 @@ export default function ProfilePage() {
                             </div>
                         </div>
                     </CardContent>
+                     <CardFooter className="border-t pt-6 flex justify-end">
+                        <Button type="submit" disabled={isUploading}>
+                            {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isUploading ? 'Enviando imagem...' : 'Salvar Alterações'}
+                        </Button>
+                    </CardFooter>
                 </Card>
-
-                <Card className='mt-6'>
-                    <CardHeader>
-                        <CardTitle>Tema da Interface</CardTitle>
-                        <CardDescription>Escolha como deseja visualizar a plataforma.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <ThemeSwitcher/>
-                    </CardContent>
-                </Card>
-
-                 <div className="mt-8 flex justify-end">
-                    <Button type="submit" disabled={isUploading}>
-                        {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {isUploading ? 'Enviando imagem...' : 'Salvar Alterações'}
-                    </Button>
-                </div>
             </form>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Tema da Interface</CardTitle>
+                    <CardDescription>Escolha como deseja visualizar a plataforma.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <ThemeSwitcher/>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className='flex items-center gap-2'><Bell/>Notificações</CardTitle>
+                    <CardDescription>Gerencie como você recebe alertas.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <NotificationSettings />
+                </CardContent>
+            </Card>
         </div>
     )
 }
