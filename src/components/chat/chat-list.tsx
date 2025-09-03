@@ -1,14 +1,14 @@
 
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type Chat, type OnlineAgent, type User, type Message } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -16,6 +16,117 @@ import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 import { TagSelectionDialog } from './tag-selection-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose
+} from '@/components/ui/dialog';
+import { Label } from '../ui/label';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { Textarea } from '../ui/textarea';
+import { startNewConversation } from '@/actions/messages';
+import { toast } from '@/hooks/use-toast';
+import { getEvolutionApiInstances } from '@/actions/evolution-api';
+
+// --- Start New Conversation Dialog ---
+function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    useEffect(() => {
+        if (isOpen && workspaceId) {
+            setIsLoading(true);
+            getEvolutionApiInstances(workspaceId)
+                .then(setInstances)
+                .finally(() => setIsLoading(false));
+        }
+    }, [isOpen, workspaceId]);
+
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const formData = new FormData(e.currentTarget);
+        const result = await startNewConversation({
+            workspaceId,
+            instanceName: formData.get('instanceName') as string,
+            phoneNumber: formData.get('phoneNumber') as string,
+            message: formData.get('message') as string,
+        });
+
+        if (result.success) {
+            toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
+            setIsOpen(false);
+            onActionSuccess();
+        } else {
+            toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
+        }
+        setIsSubmitting(false);
+    }
+    
+    return (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+                <Button variant="ghost" size="icon">
+                    <PlusCircle className="h-5 w-5" />
+                </Button>
+            </DialogTrigger>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+                    <DialogDescription>
+                        Envie uma mensagem para um novo número para iniciar um atendimento.
+                    </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit}>
+                    <div className="space-y-4 py-2 pb-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="instanceName">Instância de Envio</Label>
+                             <Select name="instanceName" required>
+                                <SelectTrigger id="instanceName">
+                                    <SelectValue placeholder="Selecione a instância..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {isLoading ? (
+                                        <div className='p-4 text-center text-sm text-muted-foreground'>Carregando...</div>
+                                    ) : (
+                                        instances.map(instance => (
+                                            <SelectItem key={instance.id} value={instance.name}>{instance.name}</SelectItem>
+                                        ))
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="phoneNumber">Número do WhatsApp (JID)</Label>
+                            <Input id="phoneNumber" name="phoneNumber" placeholder="5511999998888" required />
+                             <p className="text-xs text-muted-foreground">Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="message">Mensagem</Label>
+                            <Textarea id="message" name="message" placeholder="Olá! Gostaria de falar sobre..." required />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button type="button" variant="outline">Cancelar</Button>
+                        </DialogClose>
+                        <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Enviar Mensagem
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
 
 interface AgentTooltipContentProps {
   agent: OnlineAgent;
@@ -249,9 +360,12 @@ export default function ChatList({
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
-          <Button variant="ghost" size="icon">
-            <PlusCircle className="h-5 w-5" />
-          </Button>
+          {currentUser.activeWorkspaceId && (
+            <NewConversationDialog 
+                workspaceId={currentUser.activeWorkspaceId}
+                onActionSuccess={onUpdate}
+            />
+          )}
         </div>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -299,4 +298,82 @@ export async function sendAutomatedMediaAction(
     instanceName?: string,
 ): Promise<{ success: boolean; error?: string }> {
     return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
+}
+
+
+export async function startNewConversation(
+    input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string }
+): Promise<{ success: boolean, error?: string }> {
+    const supabase = createClient(cookies());
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuário não autenticado.' };
+    }
+    const senderId = user.id;
+
+    const { workspaceId, instanceName, phoneNumber, message } = input;
+    if (!workspaceId || !instanceName || !phoneNumber || !message) {
+        return { success: false, error: 'Todos os campos são obrigatórios.' };
+    }
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+        
+        // 1. Find or create the contact
+        let contactRes = await client.query(
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+            [workspaceId, fullJid]
+        );
+        let contactId;
+        if (contactRes.rowCount === 0) {
+            const newContactRes = await client.query(
+                `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
+                [workspaceId, phoneNumber, fullJid]
+            );
+            contactId = newContactRes.rows[0].id;
+        } else {
+            contactId = contactRes.rows[0].id;
+        }
+        
+        // 2. Find or create the chat
+        let chatRes = await client.query(
+            `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
+            [workspaceId, contactId]
+        );
+        let chatId;
+        if (chatRes.rowCount > 0) {
+            chatId = chatRes.rows[0].id;
+        } else {
+            const newChatRes = await client.query(
+                `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
+                [workspaceId, contactId, senderId]
+            );
+            chatId = newChatRes.rows[0].id;
+        }
+
+        await client.query('COMMIT');
+        
+        // 3. Send the message using the existing internal action
+        // We pass the instanceName directly to ensure it's used.
+        const sendResult = await internalSendMessage(chatId, message, senderId, {}, instanceName);
+
+        if (sendResult.success) {
+            revalidatePath('/', 'layout');
+            return { success: true };
+        } else {
+            return { success: false, error: sendResult.error };
+        }
+        
+    } catch(error) {
+        await client.query('ROLLBACK');
+        console.error('[START_NEW_CONVERSATION_ACTION] Erro:', error);
+        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
+        return { success: false, error: `Falha ao iniciar conversa: ${errorMessage}` };
+    } finally {
+        client.release();
+    }
 }
