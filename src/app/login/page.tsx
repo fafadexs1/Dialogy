@@ -1,15 +1,14 @@
-
-'use client';
-
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+// src/app/login/page.tsx
 import { LoginForm } from '@/components/auth/login-form';
 import { LifeBuoy, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
-function LoginPageContent() {
-  const searchParams = useSearchParams();
-  const isRegistered = searchParams.get('registered') === 'true';
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams?: { registered?: string };
+}) {
+  const isRegistered = searchParams?.registered === 'true';
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-secondary p-4">
@@ -21,13 +20,16 @@ function LoginPageContent() {
           <h1 className="text-3xl font-bold">Dialogy</h1>
           <p className="text-muted-foreground">Bem-vindo de volta</p>
         </div>
+
         {isRegistered && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-300 bg-green-50 p-3 text-sm font-medium text-green-800">
             <CheckCircle2 className="h-5 w-5" />
             <p>Registro realizado com sucesso! Faça o login para continuar.</p>
           </div>
         )}
+
         <LoginForm />
+
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Não tem uma conta?{' '}
           <Link href="/register" className="font-medium text-primary hover:underline">
@@ -36,15 +38,5 @@ function LoginPageContent() {
         </p>
       </div>
     </main>
-  );
-}
-
-export default function LoginPage() {
-  // O Suspense é necessário porque useSearchParams só pode ser usado em Client Components
-  // que são filhos de um <Suspense> boundary.
-  return (
-    <Suspense>
-      <LoginPageContent />
-    </Suspense>
   );
 }
