@@ -1,4 +1,3 @@
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -83,9 +82,7 @@ async function internalSendMessage(
                         delay: 1200,
                         presence: 'composing'
                     },
-                    textMessage: {
-                        text: content
-                    }
+                    text: content
                 }),
             }
         );
