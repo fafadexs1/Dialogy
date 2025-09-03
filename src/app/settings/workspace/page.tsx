@@ -1,7 +1,9 @@
+
 'use client';
 
-import { useActionState, useEffect, useState, useRef } from 'react';
+import { useActionState, useEffect, useState, useRef, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { updateWorkspaceAction } from '@/actions/workspace';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +102,7 @@ function JoinWorkspaceForm({ className }: { className?: string}) {
 
 export default function WorkspaceSettingsPage() {
     const { user, loading: userLoading } = useSettings();
+    const router = useRouter();
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -114,12 +117,12 @@ export default function WorkspaceSettingsPage() {
     
     const { toast } = useToast();
 
-    const fetchInvites = async (workspaceId: string) => {
+    const fetchInvites = useCallback(async (workspaceId: string) => {
         const result = await getWorkspaceInvites(workspaceId);
         if (!result.error) {
             setInvites(result.invites || []);
         }
-    }
+    }, []);
 
     useEffect(() => {
         if (user?.activeWorkspaceId && user.workspaces) {
@@ -130,15 +133,16 @@ export default function WorkspaceSettingsPage() {
                 fetchInvites(workspace.id);
             }
         }
-    }, [user]);
+    }, [user, fetchInvites]);
 
     useEffect(() => {
         if (updateState.success) {
             toast({ title: "Workspace Atualizado!", description: "As configurações do workspace foram salvas." });
+            router.refresh(); // Re-fetch server components data
         } else if (updateState.error) {
             toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
-    }, [updateState, toast]);
+    }, [updateState, toast, router]);
     
     useEffect(() => {
         if (inviteError === null) { // Success is null
@@ -148,7 +152,7 @@ export default function WorkspaceSettingsPage() {
         } else if (inviteError) { // Error is a string
              toast({ title: "Erro ao criar convite", description: inviteError, variant: "destructive" });
         }
-    }, [inviteError, toast, activeWorkspace]);
+    }, [inviteError, toast, activeWorkspace, fetchInvites]);
     
     const handleRevokeInvite = async (inviteId: string) => {
         const result = await revokeWorkspaceInvite(inviteId);
