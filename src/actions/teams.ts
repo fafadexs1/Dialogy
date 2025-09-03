@@ -293,7 +293,7 @@ export async function updateBusinessHours(teamId: string, businessHourId: string
     }
 }
 
-export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
+export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Omit<Team, 'businessHours' | 'scheduleExceptions' | 'members'> & { onlineMembersCount: number })[], error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
@@ -304,6 +304,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
     }
 
     try {
+        // This query no longer checks the 'online' column
         const res = await db.query(`
             SELECT 
                 t.id, 
@@ -311,10 +312,8 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
                 t.color, 
                 t.role_id,
                 t.tag_id,
-                COUNT(u.id) FILTER (WHERE u.online = TRUE) as "onlineMembersCount"
+                (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) as "membersCount"
             FROM teams t
-            LEFT JOIN team_members tm ON t.id = tm.team_id
-            LEFT JOIN users u ON tm.user_id = u.id
             WHERE t.workspace_id = $1
             GROUP BY t.id
             ORDER BY t.name;
@@ -326,10 +325,9 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
             color: row.color,
             roleId: row.role_id,
             tagId: row.tag_id,
-            members: [], // This function doesn't need to return all members
-            businessHours: [], // or business hours
-            scheduleExceptions: [],
-            onlineMembersCount: parseInt(row.onlineMembersCount, 10) || 0,
+            // The online member count will be determined on the client-side using presence.
+            // We can return total members for now.
+            onlineMembersCount: parseInt(row.membersCount, 10) || 0,
         }));
 
         return { teams };
@@ -383,5 +381,3 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
     return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
   }
 }
-
-

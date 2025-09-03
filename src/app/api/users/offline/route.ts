@@ -2,11 +2,11 @@
 'use server';
 
 import { NextResponse } from 'next/server';
-import { updateUserOnlineStatus } from '@/actions/user';
 
 /**
  * Endpoint para ser chamado via navigator.sendBeacon()
  * para garantir que o status offline seja definido quando o usuário fecha a página.
+ * DEPRECATED: Esta lógica agora é tratada pela presença em tempo real do Supabase.
  */
 export async function POST(request: Request) {
   try {
@@ -16,8 +16,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
     
-    // Chama a server action para atualizar o status no banco de dados.
-    await updateUserOnlineStatus(userId, false);
+    // A chamada para a ação do servidor foi removida, pois foi descontinuada.
+    // O endpoint é mantido para evitar que clientes antigos quebrem.
 
     // Retorna uma resposta 204 No Content, que é apropriada para sendBeacon.
     return new Response(null, { status: 204 });
@@ -28,5 +28,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-    

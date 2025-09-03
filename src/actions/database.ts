@@ -41,9 +41,7 @@ const TABLE_CREATION_QUERIES = `
         email text,
         last_active_workspace_id uuid,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
-        updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
-        online boolean DEFAULT false,
-        online_since timestamptz
+        updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS public.workspaces (

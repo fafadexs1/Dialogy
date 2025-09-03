@@ -8,16 +8,12 @@ import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 
 /**
- * Updates the user's online status in the database.
- * This is intended to be called from a presence tracking system.
+ * DEPRECATED: This function is no longer used. Presence is handled by Supabase Realtime.
  */
 export async function updateUserOnlineStatus(userId: string, isOnline: boolean): Promise<void> {
     try {
-        const now = isOnline ? new Date().toISOString() : null;
-        await db.query(
-            'UPDATE users SET online = $1, online_since = $2 WHERE id = $3',
-            [isOnline, now, userId]
-        );
+        // This function is kept to avoid breaking changes if old clients still call it, but it does nothing.
+        console.warn(`[DEPRECATED] updateUserOnlineStatus foi chamada para o usuário ${userId}, mas esta função foi descontinuada.`);
     } catch (error) {
         console.error(`[UPDATE_USER_STATUS] Failed to update online status for user ${userId}:`, error);
         // Do not throw an error, as this is often a background task.

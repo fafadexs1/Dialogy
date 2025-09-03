@@ -4,6 +4,11 @@ import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 
+/**
+ * DEPRECATED: This route is no longer the primary source for online status.
+ * Presence is handled in real-time by the Supabase client via the usePresence hook.
+ * This route is kept for potential compatibility or fallback but should not be relied upon.
+ */
 export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
@@ -21,32 +26,21 @@ export async function GET(
   }
 
   try {
+    // This query is simplified to just get all users, as the 'online' column is gone.
      const res = await db.query(
-          `SELECT u.id, u.full_name, u.avatar_url, u.email, u.online_since
+          `SELECT u.id, u.full_name, u.avatar_url, u.email
            FROM users u
            JOIN user_workspace_roles uwr ON u.id = uwr.user_id
-           WHERE u.online = TRUE AND uwr.workspace_id = $1`,
+           WHERE uwr.workspace_id = $1`,
           [workspaceId]
         );
 
-    const onlineAgents: OnlineAgent[] = (res.rows || []).map(user => ({
-      user: {
-        id: user.id,
-        name: user.full_name,
-        firstName: user.full_name.split(' ')[0] || '',
-        lastName: user.full_name.split(' ').slice(1).join(' ') || '',
-        avatar: user.avatar_url,
-        email: user.email,
-      } as User,
-      // Retorna o timestamp de quando o usuário ficou online, do banco de dados.
-      joined_at: new Date(user.online_since).toISOString(),
-    }));
+    // Returns an empty array, as the client will populate this list via real-time presence.
+    const onlineAgents: OnlineAgent[] = [];
 
     return NextResponse.json(onlineAgents);
   } catch (error) {
-    console.error(`[API /users/online/${workspaceId}] Error fetching online users:`, error);
+    console.error(`[API /users/online/${workspaceId}] Error fetching users:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-
-    
