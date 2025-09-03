@@ -7,6 +7,7 @@ export type Workspace = {
     name: string;
     avatar: string;
     timezone?: string;
+    roleName?: string;
 }
 
 export type Permission = {

@@ -24,16 +24,18 @@ async function fetchUserAndWorkspaces(userId: string) {
         const dbUser = userRes.rows[0];
         
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url
+            SELECT w.id, w.name, w.avatar_url, r.name as role_name
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
+            JOIN roles r ON uwr.role_id = r.id
             WHERE uwr.user_id = $1
         `, [userId]);
 
         const workspaces = workspacesRes.rows.map(r => ({
             id: r.id,
             name: r.name,
-            avatar: r.avatar_url || ''
+            avatar: r.avatar_url || '',
+            roleName: r.role_name
         }));
         
         const userObject: User = {

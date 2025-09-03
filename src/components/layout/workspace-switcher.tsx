@@ -30,6 +30,7 @@ import { joinWorkspaceAction } from '@/actions/invites';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, Loader2, LogIn } from 'lucide-react';
 import { useFormStatus } from 'react-dom';
+import { Badge } from '../ui/badge';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -156,16 +157,19 @@ export function WorkspaceSwitcher({
                 key={ws.id}
                 variant="ghost"
                 onClick={() => handleWorkspaceChange(ws.id)}
-                className="w-full justify-start text-sm font-normal"
+                className="w-full justify-start text-sm font-normal h-auto py-2"
             >
-                <Avatar className="mr-2 h-5 w-5">
+                <Avatar className="mr-2 h-7 w-7">
                 <AvatarImage
                     src={ws.avatar}
                     alt={ws.name}
                 />
                 <AvatarFallback>{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
                 </Avatar>
-                <span className="truncate">{ws.name}</span>
+                <div className="flex-1 text-left">
+                    <p className="truncate">{ws.name}</p>
+                    {ws.roleName && <p className="text-xs text-muted-foreground">{ws.roleName}</p>}
+                </div>
                 <CheckIcon
                 className={cn(
                     'ml-auto h-4 w-4',
