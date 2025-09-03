@@ -22,7 +22,9 @@ export async function login(prevState: any, formData: FormData) {
     return { success: false, message: 'Credenciais inválidas. Verifique seu e-mail e senha.' };
   }
 
-  return redirect('/');
+  // Em vez de redirecionar, retorna um estado de sucesso.
+  // O redirecionamento será tratado no lado do cliente.
+  return { success: true, message: null };
 }
 
 export async function register(prevState: any, formData: FormData) {
@@ -68,5 +70,3 @@ export async function signOut() {
   await supabase.auth.signOut();
   return redirect('/login');
 }
-
-    

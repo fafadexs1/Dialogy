@@ -1,8 +1,9 @@
 
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,15 @@ function LoginButton() {
 
 export function LoginForm() {
   const [state, formAction] = useActionState(login, { success: false, message: null });
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state.success) {
+      // Força um refresh para garantir que o layout recarregue com o novo estado de autenticação
+      router.refresh(); 
+      router.push('/');
+    }
+  }, [state, router]);
   
   return (
     <form action={formAction}>
