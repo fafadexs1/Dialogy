@@ -6,10 +6,6 @@ require('dotenv').config();
 
 const nextConfig: NextConfig = {
   /* config options here */
-  env: {
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANon_KEY,
-  },
   typescript: {
     // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
     ignoreBuildErrors: true,
