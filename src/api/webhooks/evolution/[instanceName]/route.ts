@@ -10,7 +10,7 @@ import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
 
 /**
- * Normalizes a Brazilian WhatsApp JID by removing the first '9' after the DDD.
+ * Normalizes a Brazilian WhatsApp JID by removing the first '9' after the DDD if it exists and the number has 9 digits after the DDD.
  * Example: 5511987654321@s.whatsapp.net -> 551187654321@s.whatsapp.net
  * @param jid The original JID.
  * @returns A normalized JID if it's a Brazilian mobile number, otherwise the original JID.
@@ -19,11 +19,14 @@ function normalizeBrazilianNumber(jid: string): string {
     const match = jid.match(/^55(\d{2})(9\d{8})@s\.whatsapp\.net$/);
     if (match) {
         const ddd = match[1];
-        const number = match[2];
-        // Check if it's a mobile DDD (11-99)
+        const numberWithoutDdd = match[2];
         const dddInt = parseInt(ddd, 10);
+        
+        // Check for valid Brazilian mobile DDDs (11-99)
         if (dddInt >= 11 && dddInt <= 99) {
-            return `55${ddd}${number.substring(1)}@s.whatsapp.net`;
+            // Remove the first '9' from the number part
+            const normalizedNumber = numberWithoutDdd.substring(1);
+            return `55${ddd}${normalizedNumber}@s.whatsapp.net`;
         }
     }
     return jid;
@@ -172,22 +175,28 @@ async function handleMessagesUpsert(payload: any) {
         
         // --- Robust Contact Handling ---
         const normalizedJid = normalizeBrazilianNumber(originalJid);
-        const jidsToSearch = [...new Set([originalJid, normalizedJid])];
 
-        let contactRes = await client.query(
-            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = ANY($2::text[])', 
-            [workspaceId, jidsToSearch]
-        );
+        const contactQuery = `
+            SELECT * FROM contacts 
+            WHERE workspace_id = $1 
+            AND (
+                phone_number_jid = $2 OR
+                phone_number_jid = $3
+            )
+        `;
         
+        let contactRes = await client.query(contactQuery, [workspaceId, originalJid, normalizedJid]);
+
         if (contactRes.rowCount === 0) {
-            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JIDs ${jidsToSearch.join(', ')} não encontrado. Criando novo contato com JID normalizado: ${normalizedJid}`);
+            // Use normalized JID for new contacts
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${originalJid} ou ${normalizedJid} não encontrado. Criando novo contato com JID original: ${originalJid}`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
                  RETURNING *`,
-                [workspaceId, pushName || contactPhone, contactPhone, normalizedJid, null]
+                [workspaceId, pushName || contactPhone, contactPhone, originalJid, null]
             );
         } else {
-             console.log(`[WEBHOOK_MSG_UPSERT] Contato encontrado com ID: ${contactRes.rows[0].id}`);
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato encontrado com ID: ${contactRes.rows[0].id}`);
             // Update name if it's different and not null
             if (pushName && pushName !== contactRes.rows[0].name) {
                 console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
