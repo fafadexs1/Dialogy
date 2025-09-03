@@ -39,34 +39,40 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
     const supabase = createClient();
     const channel = supabase.channel(`workspace-presence-${localUser.activeWorkspaceId}`);
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        // 'sync' event is called when the client first connects to the channel
-        // and gives you the whole list of presences.
+    const updatePresenceState = () => {
         const newState = channel.presenceState<User>();
         const agents: OnlineAgent[] = Object.values(newState).map(presence => ({
             user: presence[0],
-            joined_at: new Date().toISOString() // We can mock this or improve later
+            joined_at: new Date().toISOString()
         }));
         setOnlineAgents(agents);
+    }
+    
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        updatePresenceState();
       })
-      .on('presence', { event: 'join' }, ({ newPresences }) => {
-        // A new user has joined the channel.
-        setOnlineAgents(prevAgents => {
-            const newAgents: OnlineAgent[] = newPresences.map(p => ({ user: p, joined_at: new Date().toISOString()}));
-            // Avoid duplicates
-            return [...prevAgents.filter(a => !newAgents.some(na => na.user.id === a.user.id)), ...newAgents];
-        });
+      .on('presence', { event: 'join' }, () => {
+        // A user has joined, refetch the whole state to be safe
+        updatePresenceState();
       })
-      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-        // A user has left the channel.
-        const leftUserIds = leftPresences.map(p => p.id);
-        setOnlineAgents(prevAgents => prevAgents.filter(a => !leftUserIds.includes(a.user.id)));
+      .on('presence', { event: 'leave' }, () => {
+        // A user has left, refetch the whole state to be safe
+        updatePresenceState();
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           // Client is subscribed, now track its own presence.
-          await channel.track(localUser);
+          // Ensure the tracked object has all necessary fields for the UI.
+          const presencePayload: User = {
+            id: localUser.id,
+            name: localUser.name,
+            firstName: localUser.firstName,
+            lastName: localUser.lastName,
+            email: localUser.email,
+            avatar: localUser.avatar,
+          };
+          await channel.track(presencePayload);
         }
       });
 
