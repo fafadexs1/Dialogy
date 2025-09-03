@@ -109,8 +109,10 @@ export default function WorkspaceSettingsPage() {
     
     // State for avatar
     const [avatarUrl, setAvatarUrl] = useState('');
+    const [avatarFile, setAvatarFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const formRef = useRef<HTMLFormElement>(null);
     
     const [updateState, updateAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
@@ -164,35 +166,47 @@ export default function WorkspaceSettingsPage() {
         }
     }
     
-    const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file || !activeWorkspace) return;
+        if (file) {
+            setAvatarFile(file);
+            const previewUrl = URL.createObjectURL(file);
+            setAvatarUrl(previewUrl);
+        }
+    }
 
-        setIsUploading(true);
-        setAvatarUrl(URL.createObjectURL(file)); // Show preview immediately
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formRef.current || !activeWorkspace) return;
 
-        try {
+        let finalAvatarUrl = activeWorkspace.avatar || '';
+        
+        if (avatarFile) {
+            setIsUploading(true);
             const supabase = createClient();
-            const fileName = `${activeWorkspace.id}-${Date.now()}`;
+            const fileName = `public/${activeWorkspace.id}-${Date.now()}`;
             const { data, error } = await supabase.storage
                 .from('workspace-avatars')
-                .upload(fileName, file);
+                .upload(fileName, avatarFile);
 
             if (error) {
-                throw error;
+                toast({ title: "Erro no Upload", description: error.message, variant: 'destructive' });
+                setIsUploading(false);
+                return;
             }
-
+            
             const { data: { publicUrl } } = supabase.storage.from('workspace-avatars').getPublicUrl(data.path);
-            setAvatarUrl(publicUrl); // Set the final URL
-            toast({ title: 'Avatar Carregado!', description: 'Sua nova imagem de workspace está pronta. Clique em "Salvar Alterações" para confirmar.'})
-
-        } catch (error: any) {
-            toast({ title: "Erro no Upload", description: error.message, variant: 'destructive' });
-            setAvatarUrl(activeWorkspace.avatar || ''); // Revert on error
-        } finally {
-            setIsUploading(false);
+            finalAvatarUrl = publicUrl;
+            setAvatarFile(null); // Reset after successful upload
         }
-    };
+        
+        setIsUploading(false);
+
+        const formData = new FormData(formRef.current);
+        formData.set('avatarUrl', finalAvatarUrl);
+
+        updateAction(formData);
+    }
 
 
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
@@ -222,7 +236,7 @@ export default function WorkspaceSettingsPage() {
                  <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
-            <form action={updateAction}>
+            <form ref={formRef} onSubmit={handleSubmit}>
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
@@ -385,3 +399,5 @@ export default function WorkspaceSettingsPage() {
         </div>
     )
 }
+
+    
