@@ -32,7 +32,6 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
                 u.full_name,
                 u.email,
                 u.avatar_url,
-                u.online,
                 r.id as role_id,
                 r.name as role_name,
                 uwr.created_at,
@@ -51,7 +50,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
             name: row.full_name,
             email: row.email,
             avatar: row.avatar_url,
-            online: row.online,
+            online: false, // This will be handled by the real-time presence system on the client
             roleId: row.role_id,
             role: row.role_name || 'N/A',
             team: row.team_name || 'Nenhuma',
@@ -135,5 +134,3 @@ export async function updateMemberRoleAction(
         return { success: false, error: "Falha ao atualizar a função no banco de dados." };
     }
 }
-
-    

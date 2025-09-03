@@ -36,7 +36,6 @@ export type User = {
   firstName: string;
   lastName: string;
   phone?: string;
-  online?: boolean;
   memberSince?: string;
   geminiUsage?: number; // Old, to be removed
   autopilotUsage?: number;

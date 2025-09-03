@@ -4,7 +4,6 @@
 
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
 import type { OnlineAgent, User } from '@/lib/types';
-import { updateUserOnlineStatus, getOnlineAgents } from '@/actions/user';
 import { createClient } from '@/lib/supabase/client';
 
 const PresenceContext = createContext<OnlineAgent[]>([]);
@@ -18,123 +17,65 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
 
   useEffect(() => {
-    const { data: { subscription } } = createClient().auth.onAuthStateChange((event, session) => {
-        // This seems to be returning a Supabase user object, not our extended User type.
-        // We need to fetch our user profile.
-        if (session?.user) {
-            fetch('/api/user').then(res => res.json()).then(data => setLocalUser(data));
-        } else {
-            setLocalUser(null);
+    // This effect runs once to get the initial local user data.
+    const fetchUser = async () => {
+        try {
+            const res = await fetch('/api/user');
+            if (res.ok) {
+                const userData = await res.json();
+                setLocalUser(userData);
+            }
+        } catch (error) {
+            console.error("PresenceProvider: Failed to fetch initial user.", error);
         }
-    });
-
-    // Also fetch user on initial load
-    fetch('/api/user').then(res => res.json()).then(data => {
-        if(data && !data.error) {
-             setLocalUser(data);
-        }
-    }).catch(() => setLocalUser(null));
-
-    return () => subscription.unsubscribe();
+    };
+    fetchUser();
   }, []);
 
-  const fetchOnlineAgentsCallback = useCallback(async (workspaceId: string) => {
-      try {
-        const agents = await getOnlineAgents(workspaceId);
-        setOnlineAgents(agents);
-      } catch (error) {
-        console.error("Error fetching online agents:", error);
-        setOnlineAgents([]);
-      }
-    }, []);
-
   useEffect(() => {
-    if (!localUser?.activeWorkspaceId) return;
-    const workspaceId = localUser.activeWorkspaceId;
+    // This effect establishes the real-time presence connection.
+    if (!localUser?.activeWorkspaceId || !localUser.id) return;
+
     const supabase = createClient();
-    
-    // Initial fetch
-    fetchOnlineAgentsCallback(workspaceId);
+    const channel = supabase.channel(`workspace-presence-${localUser.activeWorkspaceId}`);
 
-    // Set up real-time subscription for faster updates
-    const channel = supabase
-      .channel('public:users')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'users' },
-        (payload) => {
-            const updatedUser = payload.new as User;
-            console.log('[PRESENCE] User online status changed:', updatedUser);
-
-            // Safety check: ensure updatedUser and its name property exist
-            if (!updatedUser || !updatedUser.name) {
-                console.warn('[PRESENCE] Received an update for a user without a name. Skipping.');
-                return;
-            }
-
-            setOnlineAgents(prevAgents => {
-                const agentExists = prevAgents.some(a => a.user.id === updatedUser.id);
-
-                if (updatedUser.online) {
-                    // If agent is now online and not in the list, add them.
-                    if (!agentExists) {
-                         const newAgent: OnlineAgent = {
-                            user: {
-                                id: updatedUser.id,
-                                name: updatedUser.name,
-                                firstName: updatedUser.name.split(' ')[0] || '',
-                                lastName: updatedUser.name.split(' ').slice(1).join(' ') || '',
-                                avatar: updatedUser.avatar_url,
-                                email: updatedUser.email,
-                            },
-                            joined_at: new Date().toISOString()
-                        };
-                        return [...prevAgents, newAgent];
-                    }
-                } else {
-                    // If agent is now offline, remove them from the list.
-                    return prevAgents.filter(a => a.user.id !== updatedUser.id);
-                }
-                // If no change in list composition, return previous state.
-                return prevAgents;
-            });
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        // 'sync' event is called when the client first connects to the channel
+        // and gives you the whole list of presences.
+        const newState = channel.presenceState<User>();
+        const agents: OnlineAgent[] = Object.values(newState).map(presence => ({
+            user: presence[0],
+            joined_at: new Date().toISOString() // We can mock this or improve later
+        }));
+        setOnlineAgents(agents);
+      })
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // A new user has joined the channel.
+        setOnlineAgents(prevAgents => {
+            const newAgents: OnlineAgent[] = newPresences.map(p => ({ user: p, joined_at: new Date().toISOString()}));
+            // Avoid duplicates
+            return [...prevAgents.filter(a => !newAgents.some(na => na.user.id === a.user.id)), ...newAgents];
+        });
+      })
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        // A user has left the channel.
+        const leftUserIds = leftPresences.map(p => p.id);
+        setOnlineAgents(prevAgents => prevAgents.filter(a => !leftUserIds.includes(a.user.id)));
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Client is subscribed, now track its own presence.
+          await channel.track(localUser);
         }
-      )
-      .subscribe();
+      });
 
     return () => {
-      supabase.removeChannel(channel);
+        // Cleanup: leave the channel when the component unmounts.
+        channel.untrack();
+        supabase.removeChannel(channel);
     };
-  }, [localUser?.activeWorkspaceId, fetchOnlineAgentsCallback]);
-
-
-  useEffect(() => {
-     if (!localUser?.id) return;
-     const userId = localUser.id;
-
-     const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-            updateUserOnlineStatus(userId, true);
-        }
-     }
-
-     const handleBeforeUnload = () => {
-        const payload = JSON.stringify({ userId });
-        navigator.sendBeacon('/api/users/offline', payload);
-     }
-     
-     updateUserOnlineStatus(userId, true);
-
-     window.addEventListener('beforeunload', handleBeforeUnload);
-     document.addEventListener('visibilitychange', handleVisibilityChange);
-
-     return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        updateUserOnlineStatus(userId, false); 
-     }
-
-  }, [localUser?.id]);
+  }, [localUser]);
 
 
   return (

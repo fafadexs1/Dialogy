@@ -39,8 +39,6 @@ const TABLE_CREATION_QUERIES = `
         full_name text,
         avatar_url text,
         email text,
-        online boolean DEFAULT false,
-        online_since timestamptz,
         last_active_workspace_id uuid,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
         updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
@@ -401,5 +399,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Conexão com o banco de dados liberada.');
   }
 }
-
-    

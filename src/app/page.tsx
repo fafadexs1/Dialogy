@@ -6,7 +6,6 @@ import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import type { User } from '@/lib/types';
 import { redirect } from 'next/navigation';
-import { updateUserOnlineStatus } from '@/actions/user';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
@@ -104,8 +103,6 @@ export default async function Home() {
     return redirect('/login');
   }
   
-  await updateUserOnlineStatus(user.id, true);
-
   if (!user.activeWorkspaceId) {
     return <WorkspaceOnboarding user={user} />;
   }
@@ -116,5 +113,3 @@ export default async function Home() {
     </Suspense>
   );
 }
-
-    

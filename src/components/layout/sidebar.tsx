@@ -40,7 +40,6 @@ import {
 import type { User } from '@/lib/types';
 import { usePathname, useRouter } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
-import { updateUserOnlineStatus } from '@/actions/user';
 import { createClient } from '@/lib/supabase/client';
 
 interface SidebarProps {
@@ -59,7 +58,6 @@ function SignOutMenuItem({ userId }: { userId: string }) {
     const router = useRouter();
     const handleSignOut = async () => {
         const supabase = createClient();
-        await updateUserOnlineStatus(userId, false);
         const { error } = await supabase.auth.signOut();
         if (!error) {
             router.push('/login');
