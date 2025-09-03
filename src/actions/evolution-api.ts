@@ -329,8 +329,8 @@ export async function deleteMessageAction(
             `SELECT c.api_url, c.api_key 
             FROM evolution_api_configs c
             JOIN evolution_api_instances i ON c.id = i.config_id
-            WHERE i.name = $1`,
-            [instanceName]
+            WHERE i.name = $1 AND c.workspace_id = $2`,
+            [instanceName, workspace_id]
         );
         if (configRes.rowCount === 0) {
             throw new Error("Configuração da API não encontrada para esta instância.");
@@ -355,7 +355,7 @@ export async function deleteMessageAction(
         await client.query("UPDATE messages SET api_message_status = 'DELETED', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
 
         await client.query('COMMIT');
-        revalidatePath(`/api/chats/${workspace_id}`);
+        revalidatePath('/', 'layout');
         return { success: true };
 
     } catch (error: any) {
@@ -366,5 +366,3 @@ export async function deleteMessageAction(
         client.release();
     }
 }
-
-    

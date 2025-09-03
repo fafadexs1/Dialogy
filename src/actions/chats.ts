@@ -271,11 +271,10 @@ export async function closeChatAction(
         await client.query('COMMIT');
         revalidatePath('/', 'layout');
         return { success: true };
-    } catch (error) {
+    } catch (error: any) {
         await client.query('ROLLBACK');
         console.error("Erro ao encerrar atendimento:", error);
-        const errorMessage = error instanceof Error ? `Erro ao encerrar atendimento: ${error.message}` : "Falha no servidor ao encerrar o atendimento.";
-        return { success: false, error: errorMessage };
+        return { success: false, error: error.message || "Falha no servidor ao encerrar o atendimento." };
     } finally {
         client.release();
     }
