@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -6,7 +7,6 @@ import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
 import type { MessageMetadata } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 
 /**
@@ -82,7 +82,9 @@ async function internalSendMessage(
                     options: {
                         presence: 'composing'
                     },
-                    text: content
+                    textMessage: {
+                       text: content
+                    }
                 }),
             }
         );
@@ -238,7 +240,7 @@ export async function sendAgentMessageAction(
     chatId: string,
     content: string,
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -276,7 +278,7 @@ export async function sendMediaAction(
         thumbnail?: string; 
     }[]
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -307,7 +309,7 @@ export async function sendAutomatedMediaAction(
 export async function startNewConversation(
     input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string }
 ): Promise<{ success: boolean, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

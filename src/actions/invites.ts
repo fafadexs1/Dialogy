@@ -8,7 +8,6 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import type { WorkspaceInvite } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -20,7 +19,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return "Usuário não autenticado.";
     
@@ -52,7 +51,7 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 }
 
 export async function getWorkspaceInvites(workspaceId: string): Promise<{invites: WorkspaceInvite[] | null, error?: string}> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { invites: null, error: "Usuário não autenticado."};
     
@@ -85,7 +84,7 @@ export async function getWorkspaceInvites(workspaceId: string): Promise<{invites
 }
 
 export async function revokeWorkspaceInvite(inviteId: string): Promise<{success: boolean, error?: string}> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado."};
 
@@ -111,7 +110,7 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{success:
 
 
 export async function joinWorkspaceAction(prevState: any, formData: FormData): Promise<{ success: boolean; error: string | null }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };

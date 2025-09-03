@@ -1,4 +1,5 @@
 
+
 'use server';
 
 /**
@@ -14,7 +15,6 @@ import {z} from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 
 const SmartRepliesInputSchema = z.object({
@@ -43,7 +43,7 @@ const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
 
 
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated.");

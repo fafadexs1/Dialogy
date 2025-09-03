@@ -2,14 +2,13 @@
 import { NextResponse } from 'next/server';
 import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 
 export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) {

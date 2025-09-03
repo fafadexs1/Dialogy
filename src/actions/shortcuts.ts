@@ -1,11 +1,11 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
 import type { Shortcut } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 async function hasAdminPermission(userId: string, workspaceId: string): Promise<boolean> {
     const res = await db.query(`
@@ -18,7 +18,7 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
 }
 
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { shortcuts: null, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -43,7 +43,7 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
 
 
 export async function saveShortcut(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -108,7 +108,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
 
 export async function deleteShortcut(shortcutId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;

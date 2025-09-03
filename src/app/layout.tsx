@@ -6,7 +6,6 @@ import { PresenceProvider } from '@/hooks/use-online-status';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import { ThemeProvider } from '@/components/layout/theme-provider';
 
@@ -58,7 +57,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   
   const { data: { user: authUser } } = await supabase.auth.getUser();
   

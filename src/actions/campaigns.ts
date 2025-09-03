@@ -7,7 +7,6 @@ import { revalidatePath } from 'next/cache';
 import type { Campaign, CampaignRecipient, Contact } from '@/lib/types';
 import { sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -24,7 +23,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaigns: null, error: "Usuário não autenticado." };
 
@@ -62,7 +61,7 @@ export async function createCampaign(
     message: string,
     contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
 ): Promise<{ campaign: Campaign | null, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaign: null, error: "Usuário não autenticado." };
     
@@ -236,7 +235,7 @@ async function startCampaignSending(campaignId: string) {
 
 
 export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -274,7 +273,7 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
 }
 
 export async function deleteCampaigns(campaignIds: string[]): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

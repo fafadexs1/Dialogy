@@ -6,7 +6,6 @@ import { db } from '@/lib/db';
 import type { Role, WorkspaceMember } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -16,7 +15,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: [], error: "Usuário não autenticado." };
     
@@ -66,7 +65,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
 }
 
 export async function removeMemberAction(memberId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -100,7 +99,7 @@ export async function updateMemberRoleAction(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

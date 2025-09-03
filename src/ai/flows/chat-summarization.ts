@@ -1,4 +1,5 @@
 
+
 'use server';
 
 /**
@@ -15,7 +16,6 @@ import { logAutopilotUsage } from '@/actions/autopilot';
 import type { AutopilotConfig } from '@/lib/types';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 const SummarizeChatInputSchema = z.object({
   chatHistory: z.string().describe('The complete chat history to summarize.'),
@@ -37,7 +37,7 @@ const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
 
 
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated.");

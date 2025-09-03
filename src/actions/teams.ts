@@ -6,7 +6,6 @@ import { db } from '@/lib/db';
 import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -17,7 +16,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
@@ -90,7 +89,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
 }
 
 export async function createTeam(data: { workspaceId: string, name: string, roleId: string }): Promise<{ team: Team | null; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { team: null, error: "Usuário não autenticado." };
     
@@ -149,7 +148,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
 
 export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     
@@ -197,7 +196,7 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 }
 
 export async function deleteTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -220,7 +219,7 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
 
 
 export async function addTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -242,7 +241,7 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
 }
 
 export async function removeTeamMember(teamId: string, userId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -264,7 +263,7 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 }
 
 export async function updateBusinessHours(teamId: string, businessHourId: string, data: Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -295,7 +294,7 @@ export async function updateBusinessHours(teamId: string, businessHourId: string
 }
 
 export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Team & { onlineMembersCount: number })[], error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
@@ -345,7 +344,7 @@ export async function createScheduleException(
   teamId: string,
   data: Omit<ScheduleException, 'id' | 'team_id'>
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: 'Usuário não autenticado.' };
 
@@ -371,7 +370,7 @@ export async function createScheduleException(
 }
 
 export async function deleteScheduleException(exceptionId: string): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: 'Usuário não autenticado.' };
   
@@ -384,4 +383,5 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
     return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
   }
 }
+
 

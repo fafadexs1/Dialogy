@@ -7,7 +7,6 @@ import type { SystemAgent } from '@/lib/types';
 import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     // For now, let's assume any logged in user can manage agents.
@@ -17,7 +16,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { agents: null, error: "Usuário não autenticado." };
 
@@ -39,7 +38,7 @@ export async function createSystemAgent(
     workspaceId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -65,7 +64,7 @@ export async function createSystemAgent(
     try {
         const res = await db.query(
             'INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [workspaceId, data.name, data.avatar_url, data.webhook_url || null, token, user.id]
+            [workspaceId, data.name, data.avatar_url || null, data.webhook_url || null, token, user.id]
         );
         revalidatePath('/automations/robots');
         return { success: true, agent: res.rows[0] };
@@ -82,7 +81,7 @@ export async function updateSystemAgent(
     agentId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -123,7 +122,7 @@ export async function updateSystemAgent(
 
 
 export async function deleteSystemAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

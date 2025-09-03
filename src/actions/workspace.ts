@@ -1,18 +1,17 @@
 
+
 'use server';
 
 import { revalidatePath } from 'next/cache';
 import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 export async function createWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-  const cookieStore = cookies();
-  const supabase = createClient(cookieStore);
+  const supabase = createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -96,8 +95,7 @@ export async function updateWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -145,8 +143,7 @@ export async function updateWorkspaceAction(
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');

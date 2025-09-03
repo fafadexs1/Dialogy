@@ -23,12 +23,16 @@ function SubmitButton() {
 }
 
 export default function NewWorkspacePage() {
-  const [errorMessage, formAction] = useActionState(createWorkspaceAction, null);
-  
-  // Como a Server Action agora redireciona com sucesso,
-  // não precisamos mais de lógica complexa de useEffect para redirecionar o cliente.
-  // O router só será usado se houver um erro.
+  const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
+  const router = useRouter();
 
+  useEffect(() => {
+    if(state.success) {
+      router.refresh();
+      router.push('/');
+    }
+  }, [state, router]);
+  
   return (
     <div className="max-w-3xl">
          <header className="mb-6">
@@ -60,11 +64,11 @@ export default function NewWorkspacePage() {
                             autoFocus
                         />
                     </div>
-                     {errorMessage && (
+                     {state.error && (
                         <Alert variant="destructive" className="mt-4">
                             <AlertCircle className="h-4 w-4" />
                             <AlertTitle>Erro ao criar workspace</AlertTitle>
-                            <AlertDescription>{errorMessage}</AlertDescription>
+                            <AlertDescription>{state.error}</AlertDescription>
                         </Alert>
                     )}
                 </CardContent>

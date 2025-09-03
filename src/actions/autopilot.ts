@@ -6,7 +6,6 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -20,7 +19,7 @@ export async function getAutopilotConfig(workspaceId: string): Promise<{
     rules: NexusFlowInstance[] | null,
     error?: string
 }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -65,7 +64,7 @@ export async function saveAutopilotConfig(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -127,7 +126,7 @@ export async function saveAutopilotRule(
     configId: string, 
     rule: Omit<NexusFlowInstance, 'enabled'>
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Não autenticado' };
 
@@ -165,7 +164,7 @@ export async function saveAutopilotRule(
 
 
 export async function deleteAutopilotRule(ruleId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Não autenticado' };
 
@@ -180,7 +179,7 @@ export async function deleteAutopilotRule(ruleId: string): Promise<{ success: bo
 }
 
 export async function toggleAutopilotRule(ruleId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Não autenticado' };
     
@@ -222,7 +221,7 @@ export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
 
 
 export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: AutopilotUsageLog[] | null, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { logs: null, error: "Usuário não autenticado." };
     

@@ -3,11 +3,10 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 
 export async function GET(request: Request) {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
 
     const { data: { user: authUser } } = await supabase.auth.getUser();
 

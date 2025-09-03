@@ -3,7 +3,7 @@ import { LoginForm } from '@/components/auth/login-form';
 import { LifeBuoy, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
   searchParams?: { registered?: string };

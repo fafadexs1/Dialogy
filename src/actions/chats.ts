@@ -4,7 +4,6 @@
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
@@ -26,7 +25,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  * Esta ação é chamada pelo botão "Assumir Atendimento".
  */
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -63,7 +62,7 @@ export async function transferChatAction(
     // Optional parameter to accept a session-like object from an API call
     prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     
     let sessionToUse = prefetchedSession;
     
@@ -206,7 +205,7 @@ export async function closeChatAction(
     reasonTagId: string | null,
     notes: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !user.user_metadata.full_name) {
@@ -282,7 +281,7 @@ export async function closeChatAction(
 
 
 export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -325,7 +324,7 @@ function formatMessageDate(date: Date, timezone: string): string {
 }
 
 export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]>, error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !workspaceId) {

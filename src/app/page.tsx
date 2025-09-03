@@ -9,7 +9,6 @@ import { redirect } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 
 async function fetchUserAndWorkspaces(userId: string) {
@@ -89,7 +88,7 @@ function LoadingSkeleton() {
 }
 
 export default async function Home() {
-  const supabase = createClient(cookies());
+  const supabase = createClient();
 
   const { data: { user: authUser } } = await supabase.auth.getUser();
 

@@ -6,7 +6,6 @@ import { db } from '@/lib/db';
 import type { Role, Permission } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -17,7 +16,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { roles: [], permissions: [], error: "Usuário não autenticado." };
 
@@ -56,7 +55,7 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
 }
 
 export async function updateRolePermissionAction(roleId: string, permissionId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -92,7 +91,7 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
 }
 
 export async function createRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -126,7 +125,7 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
 }
 
 export async function updateRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -162,7 +161,7 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
 }
 
 export async function deleteRoleAction(roleId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient(cookies());
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
