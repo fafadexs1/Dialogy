@@ -8,12 +8,15 @@ declare global {
 // Ensure the connection string is correctly typed
 const connectionString: string = process.env.DATABASE_URL!;
 
-const pool = global.pool || new Pool({
-  connectionString: connectionString,
-});
-
-if (process.env.NODE_ENV !== 'production') {
-  global.pool = pool;
+if (!connectionString) {
+  throw new Error('A variável de ambiente DATABASE_URL não está definida.');
 }
 
-export const db = pool;
+// A nova implementação cria um único pool de conexões que é exportado.
+// Isso é mais seguro e mais compatível com o ambiente Vercel/Next.js.
+export const db = new Pool({
+  connectionString,
+});
+
+// A lógica de pooling global foi removida por ser a causa provável de instabilidade
+// no ambiente serverless.
