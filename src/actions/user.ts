@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
@@ -7,6 +6,23 @@ import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
+
+/**
+ * Updates the user's online status in the database.
+ * This is intended to be called from a presence tracking system.
+ */
+export async function updateUserOnlineStatus(userId: string, isOnline: boolean): Promise<void> {
+    try {
+        const now = isOnline ? new Date().toISOString() : null;
+        await db.query(
+            'UPDATE users SET online = $1, online_since = $2 WHERE id = $3',
+            [isOnline, now, userId]
+        );
+    } catch (error) {
+        console.error(`[UPDATE_USER_STATUS] Failed to update online status for user ${userId}:`, error);
+        // Do not throw an error, as this is often a background task.
+    }
+}
 
 
 export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[]> {

@@ -41,7 +41,9 @@ const TABLE_CREATION_QUERIES = `
         email text,
         last_active_workspace_id uuid,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
-        updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
+        updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
+        online boolean DEFAULT false,
+        online_since timestamptz
     );
 
     CREATE TABLE IF NOT EXISTS public.workspaces (
@@ -213,7 +215,6 @@ const TABLE_CREATION_QUERIES = `
         sender_system_agent_id uuid, -- To be referenced later
         content text,
         type public.message_type_enum,
-        status text,
         metadata jsonb,
         from_me boolean DEFAULT false,
         is_read boolean DEFAULT false,
@@ -222,7 +223,6 @@ const TABLE_CREATION_QUERIES = `
         instance_name text,
         sender_from_api text,
         source_from_api text,
-        server_url text,
         raw_payload jsonb,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
