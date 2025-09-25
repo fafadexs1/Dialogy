@@ -399,17 +399,23 @@ export default function ChatList({
       <Tabs defaultValue="gerais" className="flex-1 min-h-0 flex flex-col">
         <div className="p-2 flex-shrink-0">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="gerais" className="flex items-center gap-2">
+            <TabsTrigger value="gerais">
+              <div className="flex items-center gap-2">
                 Gerais
                 <Badge variant={sortedChats.gerais.length > 0 ? "destructive" : "secondary"}>{sortedChats.gerais.length}</Badge>
+              </div>
             </TabsTrigger>
-            <TabsTrigger value="atendimentos" className="flex items-center gap-2">
+            <TabsTrigger value="atendimentos">
+               <div className="flex items-center gap-2">
                 Atendimentos
                 <Badge variant="secondary">{sortedChats.atendimentos.length}</Badge>
+              </div>
             </TabsTrigger>
-            <TabsTrigger value="encerrados" className="flex items-center gap-2">
+            <TabsTrigger value="encerrados">
+               <div className="flex items-center gap-2">
                 Encerrados
                 <Badge variant="secondary">{sortedChats.encerrados.length}</Badge>
+              </div>
             </TabsTrigger>
           </TabsList>
         </div>
