@@ -19,12 +19,12 @@ export function MainAppLayout({ user, children }: { user: User | null, children:
   return (
     <div
       className={cn(
-        'h-dvh w-full bg-background overflow-hidden',
+        'h-dvh w-full bg-muted/30 overflow-hidden',
         shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
       )}
     >
       {shouldShowSidebar && (
-        <aside className="w-auto shrink-0 overflow-y-auto border-r">
+        <aside className="w-auto shrink-0 overflow-y-auto border-r bg-background">
           <Sidebar user={user} />
         </aside>
       )}

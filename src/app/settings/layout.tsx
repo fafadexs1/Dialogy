@@ -37,7 +37,7 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
           <Button asChild>
               <Link href="/settings/workspace/new">
-                  <PlusCircle />
+                  <PlusCircle className="mr-2 h-4 w-4" />
                   Criar Novo Workspace
               </Link>
           </Button>
