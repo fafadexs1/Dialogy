@@ -21,10 +21,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  LayoutGrid,
-  ClipboardCheck,
-  CalendarDays,
-  Bell,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -56,14 +52,24 @@ interface SidebarProps {
 }
 
 const mainNavItems = [
-  { href: '/dashboard', icon: LayoutGrid, label: 'Início' },
-  { href: '/tasks', icon: ClipboardCheck, label: 'Tarefas' },
-  { href: '/crm', icon: Users, label: 'Contatos' },
-  { href: '/calendar', icon: CalendarDays, label: 'Calendário' },
   { href: '/', icon: MessageSquare, label: 'Chat' },
+  { href: '/crm', icon: Users, label: 'CRM' },
+  { href: '/campaigns', icon: Send, label: 'Campanhas' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
-  { href: '/notifications', icon: Bell, label: 'Notificações' },
+  { href: '/integrations', icon: Puzzle, label: 'Integrações' },
 ];
+
+const teamNavItems = [
+    { href: '/team/members', icon: Users2, label: 'Membros' },
+    { href: '/team/invite', icon: UserPlus, label: 'Convidar' },
+    { href: '/team/permissions', icon: Fingerprint, label: 'Papéis & Permissões' },
+    { href: '/team', icon: ShieldAlert, label: 'Equipes' },
+]
+
+const automationNavItems = [
+    { href: '/automations/robots', icon: Rocket, label: 'Agentes do Sistema' },
+    { href: '/autopilot', icon: Bot, label: 'Agente de IA' },
+]
 
 function DialogyLogo() {
     return (
@@ -177,7 +183,7 @@ export function Sidebar({ user }: SidebarProps) {
             <nav className="flex flex-col items-center gap-4">
                 <TooltipProvider>
                     {mainNavItems.map((item) => {
-                        const isActive = pathname.startsWith(item.href) && (item.href !== '/' || pathname === '/');
+                        const isActive = pathname === item.href;
                         return (
                             <Tooltip key={item.label}>
                                 <TooltipTrigger asChild>
@@ -199,6 +205,75 @@ export function Sidebar({ user }: SidebarProps) {
                             </Tooltip>
                         );
                     })}
+
+                    {/* Team Submenu */}
+                    <DropdownMenu>
+                         <Tooltip>
+                            <TooltipTrigger asChild>
+                                <DropdownMenuTrigger asChild>
+                                    <button className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors
+                                        ${
+                                            pathname.startsWith('/team')
+                                            ? 'bg-foreground text-background'
+                                            : 'text-muted-foreground hover:bg-muted'
+                                        }`}
+                                    >
+                                        <Users2 className="h-6 w-6" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                             <TooltipContent side="right">
+                                <p>Equipe</p>
+                            </TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent side="right">
+                            <DropdownMenuLabel>Gestão de Equipes</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {teamNavItems.map(item => (
+                                <Link key={item.href} href={item.href}>
+                                    <DropdownMenuItem>
+                                        <item.icon className="mr-2 h-4 w-4" />
+                                        <span>{item.label}</span>
+                                    </DropdownMenuItem>
+                                </Link>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+
+                     {/* Automation Submenu */}
+                    <DropdownMenu>
+                         <Tooltip>
+                            <TooltipTrigger asChild>
+                                <DropdownMenuTrigger asChild>
+                                    <button className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors
+                                        ${
+                                            pathname.startsWith('/automations') || pathname.startsWith('/autopilot')
+                                            ? 'bg-foreground text-background'
+                                            : 'text-muted-foreground hover:bg-muted'
+                                        }`}
+                                    >
+                                        <Bot className="h-6 w-6" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                             <TooltipContent side="right">
+                                <p>Automações</p>
+                            </TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent side="right">
+                            <DropdownMenuLabel>Automações & IA</DropdownMenuLabel>
+                             <DropdownMenuSeparator />
+                            {automationNavItems.map(item => (
+                                <Link key={item.href} href={item.href}>
+                                    <DropdownMenuItem>
+                                        <item.icon className="mr-2 h-4 w-4" />
+                                        <span>{item.label}</span>
+                                    </DropdownMenuItem>
+                                </Link>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+
                 </TooltipProvider>
             </nav>
         </div>
