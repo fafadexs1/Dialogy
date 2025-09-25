@@ -35,7 +35,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
@@ -61,9 +60,8 @@ const mainNavItems = [
 
 const teamNavItems = [
     { href: '/team/members', icon: Users2, label: 'Membros' },
-    { href: '/team/invite', icon: UserPlus, label: 'Convidar' },
-    { href: '/team/permissions', icon: Fingerprint, label: 'Papéis & Permissões' },
     { href: '/team', icon: ShieldAlert, label: 'Equipes' },
+    { href: '/team/permissions', icon: Fingerprint, label: 'Papéis & Permissões' },
 ]
 
 const automationNavItems = [
@@ -179,6 +177,8 @@ export function Sidebar({ user }: SidebarProps) {
                 <DialogyLogo />
                 <span className="sr-only">Dialogy</span>
             </Link>
+            
+            <WorkspaceSwitcher user={user} />
 
             <nav className="flex flex-col items-center gap-4">
                 <TooltipProvider>

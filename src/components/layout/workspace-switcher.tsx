@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import * as React from 'react';
@@ -30,7 +29,6 @@ import { joinWorkspaceAction } from '@/actions/invites';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, Loader2, LogIn } from 'lucide-react';
 import { useFormStatus } from 'react-dom';
-import { Badge } from '../ui/badge';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
