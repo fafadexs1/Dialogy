@@ -172,15 +172,18 @@ export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-20 flex-col items-center justify-between border-r bg-card p-4">
-        <div className="flex flex-col items-center gap-6">
+    <aside className="flex h-full w-20 flex-col items-center border-r bg-card p-4">
+        {/* Top Section */}
+        <div className="flex flex-col items-center gap-6 flex-shrink-0">
             <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground">
                 <DialogyLogo />
                 <span className="sr-only">Dialogy</span>
             </Link>
-            
             <WorkspaceSwitcher user={user} />
+        </div>
 
+        {/* Middle Section (Navigation) */}
+        <div className="flex flex-1 items-center justify-center">
             <nav className="flex flex-col items-center gap-4">
                 <TooltipProvider>
                     {mainNavItems.map((item) => {
@@ -193,7 +196,7 @@ export function Sidebar({ user }: SidebarProps) {
                                     className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors
                                     ${
                                         isActive
-                                        ? 'bg-foreground text-background'
+                                        ? 'bg-primary text-primary-foreground'
                                         : 'text-muted-foreground hover:bg-muted'
                                     }`}
                                 >
@@ -207,15 +210,14 @@ export function Sidebar({ user }: SidebarProps) {
                         );
                     })}
 
-                    {/* Team Submenu */}
                     <DropdownMenu>
-                         <Tooltip>
+                        <Tooltip>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
                                     <button className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors
                                         ${
                                             pathname.startsWith('/team')
-                                            ? 'bg-foreground text-background'
+                                            ? 'bg-primary text-primary-foreground'
                                             : 'text-muted-foreground hover:bg-muted'
                                         }`}
                                     >
@@ -223,7 +225,7 @@ export function Sidebar({ user }: SidebarProps) {
                                     </button>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                             <TooltipContent side="right">
+                            <TooltipContent side="right">
                                 <p>Equipe</p>
                             </TooltipContent>
                         </Tooltip>
@@ -241,15 +243,14 @@ export function Sidebar({ user }: SidebarProps) {
                         </DropdownMenuContent>
                     </DropdownMenu>
 
-                     {/* Automation Submenu */}
                     <DropdownMenu>
-                         <Tooltip>
+                        <Tooltip>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
                                     <button className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors
                                         ${
                                             pathname.startsWith('/automations') || pathname.startsWith('/autopilot')
-                                            ? 'bg-foreground text-background'
+                                            ? 'bg-primary text-primary-foreground'
                                             : 'text-muted-foreground hover:bg-muted'
                                         }`}
                                     >
@@ -257,13 +258,13 @@ export function Sidebar({ user }: SidebarProps) {
                                     </button>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                             <TooltipContent side="right">
+                            <TooltipContent side="right">
                                 <p>Automações</p>
                             </TooltipContent>
                         </Tooltip>
                         <DropdownMenuContent side="right">
                             <DropdownMenuLabel>Automações & IA</DropdownMenuLabel>
-                             <DropdownMenuSeparator />
+                            <DropdownMenuSeparator />
                             {automationNavItems.map(item => (
                                 <Link key={item.href} href={item.href}>
                                     <DropdownMenuItem>
@@ -279,7 +280,8 @@ export function Sidebar({ user }: SidebarProps) {
             </nav>
         </div>
 
-        <div className="flex flex-col items-center gap-4">
+        {/* Bottom Section */}
+        <div className="flex flex-col items-center gap-4 flex-shrink-0">
             <DropdownMenu>
                 <TooltipProvider>
                     <Tooltip>
@@ -293,7 +295,7 @@ export function Sidebar({ user }: SidebarProps) {
                                 </button>
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
-                         <TooltipContent side="right">
+                        <TooltipContent side="right">
                             <p>{user.name}</p>
                         </TooltipContent>
                     </Tooltip>
