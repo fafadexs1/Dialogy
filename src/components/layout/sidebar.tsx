@@ -200,7 +200,7 @@ export function Sidebar({ user }: SidebarProps) {
                                         : 'text-muted-foreground hover:bg-muted'
                                     }`}
                                 >
-                                    <item.icon className="h-6 w-6" />
+                                    <item.icon className="h-5 w-5" />
                                 </Link>
                                 </TooltipTrigger>
                                 <TooltipContent side="right">
@@ -221,7 +221,7 @@ export function Sidebar({ user }: SidebarProps) {
                                             : 'text-muted-foreground hover:bg-muted'
                                         }`}
                                     >
-                                        <Users2 className="h-6 w-6" />
+                                        <Users2 className="h-5 w-5" />
                                     </button>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
@@ -254,7 +254,7 @@ export function Sidebar({ user }: SidebarProps) {
                                             : 'text-muted-foreground hover:bg-muted'
                                         }`}
                                     >
-                                        <Bot className="h-6 w-6" />
+                                        <Bot className="h-5 w-5" />
                                     </button>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
