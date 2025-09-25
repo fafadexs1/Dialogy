@@ -159,7 +159,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 function SendMessageButton({ disabled }: { disabled?: boolean }) {
     const { pending } = useFormStatus();
     return (
-        <Button type="submit" size="icon" className='h-8 w-8' disabled={pending || disabled}>
+        <Button type="submit" size="icon" className='h-10 w-10 shrink-0' disabled={pending || disabled}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
     )
@@ -774,7 +774,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             {showDateSeparator && (
                 <div className="relative my-6">
                     <Separator />
-                    <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-muted/20 px-2">
+                    <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-secondary px-2">
                         <span className="text-xs font-medium text-muted-foreground">{message.formattedDate}</span>
                     </div>
                 </div>
@@ -799,16 +799,16 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                      <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                          <div
-                            className={cn("break-words rounded-xl shadow-md p-3 max-w-lg",
+                            className={cn("break-words rounded-xl p-3 max-w-lg shadow-md",
                                 isDeleted 
-                                    ? 'bg-secondary/50 border'
+                                    ? 'bg-secondary text-muted-foreground italic'
                                     : (isFromMe 
-                                        ? 'bg-primary text-primary-foreground' 
-                                        : 'bg-card')
+                                        ? 'bg-primary text-primary-foreground rounded-br-none' 
+                                        : 'bg-card text-card-foreground rounded-bl-none')
                             )}
                         >
                             {isDeleted ? (
-                                <p className="whitespace-pre-wrap italic text-sm text-muted-foreground">🗑️ Mensagem apagada</p>
+                                <span className="flex items-center gap-2"><Trash2 className="h-4 w-4"/>Mensagem apagada</span>
                             ) : renderMessageContent(message)}
                         </div>
                          {isFromMe && !isDeleted && (
@@ -845,7 +845,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             </div>
                         )}
                     </div>
-                    <div className={cn("flex items-center text-xs text-muted-foreground mt-1", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
+                    <div className={cn("flex items-center text-xs text-muted-foreground mt-1.5", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
                         <span className="mx-1">{message.timestamp}</span>
                         {message.from_me && !isDeleted && (
                              isPending
@@ -853,7 +853,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                              : message.api_message_status === 'READ'
                              ? <CheckCheck className="h-4 w-4 text-sky-400" />
                              : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                             ? <CheckCheck className="h-4 w-4" />
+                             ? <CheckCheck className="h-4 w-4 text-muted-foreground" />
                              : <Check className="h-4 w-4" />
                         )}
                     </div>
@@ -867,7 +867,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
   if (!chat) {
     return (
-        <main className="flex-1 flex flex-col items-center justify-center bg-muted/20 min-w-0 p-6">
+        <main className="flex-1 flex flex-col items-center justify-center bg-secondary/30 min-w-0 p-6">
             <div className="text-center">
                 <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
                 <h2 className="text-2xl font-semibold">Selecione uma conversa</h2>
@@ -889,10 +889,10 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
 
   return (
-    <main className="flex-1 flex flex-col bg-muted/20 min-w-0">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-6 flex-shrink-0">
+    <main className="flex-1 flex flex-col bg-secondary/30 min-w-0">
+      <header className="flex h-16 items-center justify-between border-b bg-background px-6 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <Avatar className="h-9 w-9 border">
+          <Avatar className="h-9 w-9 border-2 border-background ring-2 ring-primary">
             <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
             <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
           </Avatar>
@@ -938,13 +938,13 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
 
        {isChatOpen && isChatAssigned ? (
-            <footer className="border-t bg-card p-4 flex-shrink-0">
+            <footer className="border-t bg-background p-4 flex-shrink-0">
                  {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                    <div className="mb-2 p-2 border rounded-md bg-background max-h-40 overflow-y-auto">
+                    <div className="mb-2 p-2 border rounded-md bg-secondary max-h-40 overflow-y-auto">
                         {filteredShortcuts.map(shortcut => (
                             <button
                                 key={shortcut.id}
-                                className="w-full text-left p-2 rounded hover:bg-accent text-sm"
+                                className="w-full text-left p-2 rounded hover:bg-background text-sm"
                                 onClick={() => handleShortcutSelect(shortcut)}
                             >
                                 <span className="font-bold">/{shortcut.name}</span>
@@ -967,24 +967,23 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                         }}
                     />
                 )}
-                <div className="space-y-2">
+                <div className="space-y-4">
                      <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                         <input type="hidden" name="chatId" value={chat.id} />
-                        <div className="relative w-full">
+                        <div className="relative w-full flex items-center rounded-lg border bg-secondary/50 focus-within:ring-2 focus-within:ring-primary/50">
                             {showTextInput ? (
-                                <div className='border rounded-lg overflow-hidden'>
-                                    <FormattingToolbar />
+                                <div className='w-full'>
                                     <ContentEditable
                                         innerRef={contentEditableRef}
                                         html={newMessage}
                                         disabled={isAiTyping}
                                         onChange={handleMessageChange}
-                                        className="pr-10 pl-4 py-3 min-h-14 bg-background focus:outline-none"
+                                        className="pr-10 pl-4 py-2.5 min-h-[40px] focus:outline-none"
                                         tagName="div"
                                         onKeyUp={saveCursorPosition}
                                         onClick={saveCursorPosition}
                                     />
-                                    <div className="absolute right-2 bottom-2.5 flex items-center">
+                                    <div className="absolute right-2 bottom-2 flex items-center">
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
@@ -1010,7 +1009,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-10 w-10"
+                                className="h-10 w-10 shrink-0"
                                 disabled={isAiTyping}
                                 onClick={() => fileInputRef.current?.click()}
                             >
@@ -1020,9 +1019,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                              {newMessage.trim() === "" && mediaFiles.length === 0 ? (
                                 <AudioRecorder onSend={handleSendAudio} />
                             ) : (
-                                <Button type="submit" size="icon" className='h-10 w-10' disabled={isAiTyping}>
-                                    <Send className="h-4 w-4" />
-                                </Button>
+                                <SendMessageButton disabled={isAiTyping} />
                             )}
                          </div>
                     </form>
@@ -1049,5 +1046,3 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     </main>
   );
 }
-
-    
