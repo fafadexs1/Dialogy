@@ -406,3 +406,38 @@ export async function createWhatsappTemplate(
         return { success: false, error: error.message || 'Falha ao se comunicar com a API da Evolution.' };
     }
 }
+
+
+/**
+ * Busca templates de mensagem do WhatsApp de uma instância Cloud API.
+ */
+export async function findWhatsappTemplates(instanceName: string): Promise<{ templates?: any[]; error?: string }> {
+    if (!instanceName) {
+        return { error: 'O nome da instância é obrigatório.' };
+    }
+    
+    try {
+        const instanceRes = await db.query(
+            `SELECT c.api_url, c.api_key 
+             FROM evolution_api_instances i
+             JOIN evolution_api_configs c ON i.config_id = c.id
+             WHERE i.name = $1 AND i.type = 'wa_cloud'`,
+            [instanceName]
+        );
+        
+        if (instanceRes.rowCount === 0) {
+            return { error: 'Instância Cloud API não encontrada ou não configurada.' };
+        }
+        const apiConfig = instanceRes.rows[0];
+
+        const response = await fetchEvolutionAPI(`/template/find/${instanceName}`, apiConfig, {
+            method: 'GET',
+        });
+        
+        return { templates: response };
+
+    } catch (error: any) {
+        console.error('[FIND_TEMPLATES_ACTION] Erro ao buscar templates:', error);
+        return { error: error.message || 'Falha ao se comunicar com a API da Evolution.' };
+    }
+}
