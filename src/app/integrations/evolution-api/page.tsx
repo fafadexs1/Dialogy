@@ -6,7 +6,7 @@ import Image from 'next/image';
 import type { User, EvolutionInstance, EvolutionApiConfig, Workspace, EvolutionInstanceCreationPayload } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Server, Power, PowerOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, AlertCircle, Rabbit, ListTree, Unplug, KeyRound } from 'lucide-react';
+import { Server, Power, PowerOff, Plus, MoreVertical, Trash2, Edit, Cloud, Smartphone, Settings, Loader2, AlertCircle, Rabbit, ListTree, Unplug, KeyRound, MessageSquareText } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +43,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TemplateManager } from './template-manager';
 
 function InstanceTypeBadge({ type }: { type: EvolutionInstance['type'] }) {
     const typeInfo = {
@@ -618,6 +619,15 @@ export default function EvolutionApiPage() {
                         </div>
                     )}
                 </div>
+                 {/* Seção de Templates */}
+                 {config?.api_url && config?.api_key && instances.some(inst => inst.type === 'wa_cloud') && (
+                     <div className='mt-8'>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold flex items-center gap-2"><MessageSquareText/> Templates do WhatsApp Cloud</h2>
+                        </div>
+                        <TemplateManager config={config} instances={instances.filter(i => i.type === 'wa_cloud')} />
+                     </div>
+                 )}
             </main>
         </div>
     );

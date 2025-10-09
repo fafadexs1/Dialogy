@@ -366,3 +366,43 @@ export async function deleteMessageAction(
         client.release();
     }
 }
+
+/**
+ * Cria um novo template de mensagem do WhatsApp via API.
+ */
+export async function createWhatsappTemplate(
+    instanceName: string,
+    templatePayload: any
+): Promise<{ success: boolean; error?: string }> {
+    if (!instanceName || !templatePayload) {
+        return { success: false, error: 'Nome da instância e payload do template são obrigatórios.' };
+    }
+
+    try {
+        // 1. Obter a configuração da API para a instância
+        const instanceRes = await db.query(
+            `SELECT c.api_url, c.api_key 
+             FROM evolution_api_instances i
+             JOIN evolution_api_configs c ON i.config_id = c.id
+             WHERE i.name = $1 AND i.type = 'wa_cloud'`,
+            [instanceName]
+        );
+
+        if (instanceRes.rowCount === 0) {
+            return { success: false, error: 'Instância Cloud API não encontrada ou não configurada.' };
+        }
+        const apiConfig = instanceRes.rows[0];
+
+        // 2. Chamar a API da Evolution para criar o template
+        await fetchEvolutionAPI(`/template/create/${instanceName}`, apiConfig, {
+            method: 'POST',
+            body: JSON.stringify(templatePayload),
+        });
+        
+        // Sucesso não significa que foi aprovado, apenas que foi enviado.
+        return { success: true };
+    } catch (error: any) {
+        console.error('[CREATE_TEMPLATE_ACTION] Erro ao criar template:', error);
+        return { success: false, error: error.message || 'Falha ao se comunicar com a API da Evolution.' };
+    }
+}
