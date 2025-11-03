@@ -36,54 +36,6 @@ function SubmitButton() {
     )
 }
 
-function ThemeSwitcher() {
-    const [theme, setTheme] = useState(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') || 'system';
-        }
-        return 'system';
-    });
-
-    useEffect(() => {
-        const root = window.document.documentElement;
-        root.classList.remove('light', 'dark');
-
-        if (theme === 'system') {
-            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            root.classList.add(systemTheme);
-        } else {
-            root.classList.add(theme);
-        }
-        localStorage.setItem('theme', theme);
-    }, [theme]);
-
-    return (
-        <div className='flex items-center gap-2'>
-             <Button
-                variant={theme === 'light' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('light')}
-            >
-                <Sun className="mr-2 h-4 w-4" /> Claro
-            </Button>
-            <Button
-                variant={theme === 'dark' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('dark')}
-            >
-                <Moon className="mr-2 h-4 w-4" /> Escuro
-            </Button>
-             <Button
-                variant={theme === 'system' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('system')}
-            >
-                <Monitor className="mr-2 h-4 w-4" /> Sistema
-            </Button>
-        </div>
-    )
-}
-
 function NotificationSettings() {
     const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -267,16 +219,6 @@ export default function ProfilePage() {
                     </CardFooter>
                 </Card>
             </form>
-
-            <Card>
-                <CardHeader>
-                    <CardTitle>Tema da Interface</CardTitle>
-                    <CardDescription>Escolha como deseja visualizar a plataforma.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <ThemeSwitcher/>
-                </CardContent>
-            </Card>
 
             <Card>
                 <CardHeader>

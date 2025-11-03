@@ -98,55 +98,6 @@ function DialogyLogo() {
     )
 }
 
-function ThemeSwitcher() {
-  const [theme, setTheme] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('theme') || 'system'
-    }
-    return 'system'
-  })
-
-  useEffect(() => {
-    const root = window.document.documentElement
-    root.classList.remove('light', 'dark')
-
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      root.classList.add(systemTheme)
-      return
-    }
-
-    root.classList.add(theme)
-  }, [theme])
-
-  return (
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
-            {theme === 'light' && <Sun className="mr-2 h-4 w-4" />}
-            {theme === 'dark' && <Moon className="mr-2 h-4 w-4" />}
-            {theme === 'system' && <Monitor className="mr-2 h-4 w-4" />}
-            <span>Tema</span>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuPortal>
-            <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => setTheme('light')}>
-                    <Sun className="mr-2 h-4 w-4" />
-                    <span>Claro</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTheme('dark')}>
-                    <Moon className="mr-2 h-4 w-4" />
-                    <span>Escuro</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTheme('system')}>
-                    <Monitor className="mr-2 h-4 w-4" />
-                    <span>Sistema</span>
-                </DropdownMenuItem>
-            </DropdownMenuSubContent>
-        </DropdownMenuPortal>
-    </DropdownMenuSub>
-  )
-}
-
 function SignOutMenuItem({ userId }: { userId: string }) {
     const router = useRouter();
     const handleSignOut = async () => {
@@ -315,7 +266,6 @@ export function Sidebar({ user }: SidebarProps) {
                             <span>Configurações</span>
                         </DropdownMenuItem>
                     </Link>
-                    <ThemeSwitcher />
                     <DropdownMenuSeparator />
                     <SignOutMenuItem userId={user.id} />
                 </DropdownMenuContent>

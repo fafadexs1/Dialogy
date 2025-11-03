@@ -7,7 +7,6 @@ import { MainAppLayout } from '@/components/layout/main-app-layout';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { ThemeProvider } from '@/components/layout/theme-provider';
 
 async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
     if (!userId) return null;
@@ -75,16 +74,13 @@ export default async function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased">
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            <PresenceProvider>
-              <MainAppLayout user={user}>
-                  {children}
-              </MainAppLayout>
-            </PresenceProvider>
-            <Toaster />
-          </ThemeProvider>
+          <PresenceProvider>
+            <MainAppLayout user={user}>
+                {children}
+            </MainAppLayout>
+          </PresenceProvider>
+          <Toaster />
       </body>
     </html>
   );
 }
-
