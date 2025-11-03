@@ -18,14 +18,13 @@ function RegisterButton() {
   return (
     <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-md hover:shadow-lg transition-all" disabled={pending}>
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      {pending ? 'Creating Account...' : 'Sign up'}
+      {pending ? 'Creating Account...' : 'Criar minha conta'}
     </Button>
   );
 }
 
 export function RegisterForm({ onRegisterSuccess }: { onRegisterSuccess: (user: User) => void }) {
   const [state, formAction] = useActionState(register, { success: false, message: null, user: null });
-  const router = useRouter();
 
   useEffect(() => {
     if (state.success && state.user) {
@@ -33,42 +32,42 @@ export function RegisterForm({ onRegisterSuccess }: { onRegisterSuccess: (user: 
       // to the onboarding steps.
       onRegisterSuccess(state.user as User);
     }
-  }, [state, router, onRegisterSuccess]);
+  }, [state, onRegisterSuccess]);
 
 
   return (
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="name" className="font-semibold text-gray-600">Full Name</Label>
+        <Label htmlFor="name" className="font-semibold text-gray-600">Nome Completo</Label>
         <Input
           id="name"
           name="name"
           type="text"
-          placeholder="Enter your full name"
+          placeholder="Seu nome completo"
           required
           autoComplete="name"
            className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="email" className="font-semibold text-gray-600">Email Address</Label>
+        <Label htmlFor="email" className="font-semibold text-gray-600">Seu melhor e-mail</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="Enter your email"
+          placeholder="email@dominio.com"
           required
           autoComplete="email"
            className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password" className="font-semibold text-gray-600">Password</Label>
+        <Label htmlFor="password" className="font-semibold text-gray-600">Crie uma senha</Label>
         <Input 
             id="password" 
             name="password" 
             type="password" 
-            placeholder="Create a password"
+            placeholder="Pelo menos 6 caracteres"
             required 
             autoComplete="new-password"
             className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
@@ -77,7 +76,7 @@ export function RegisterForm({ onRegisterSuccess }: { onRegisterSuccess: (user: 
       {state?.message && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Registration Error</AlertTitle>
+          <AlertTitle>Erro no Registro</AlertTitle>
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       )}
