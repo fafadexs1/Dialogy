@@ -1,8 +1,13 @@
-
 import { LoginForm } from '@/components/auth/login-form';
-import { LifeBuoy, CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, X } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+
+const recentUsers = [
+  { name: 'John Peter', avatar: 'https://picsum.photos/seed/10/40/40', active: '1 days ago' },
+  { name: 'Alina Shmen', avatar: 'https://picsum.photos/seed/11/40/40', active: '4 days ago' },
+];
 
 export default async function LoginPage({
   searchParams,
@@ -12,49 +17,75 @@ export default async function LoginPage({
   const isRegistered = searchParams?.registered === 'true';
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#1E2D4A] to-[#0E1524] p-4">
-      <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-[#1C1C2E] shadow-2xl md:grid md:grid-cols-2">
-        
-        {/* Coluna da Esquerda: Formulário */}
-        <div className="p-8 sm:p-12 text-white">
-          <div className="mb-8 flex flex-col items-center text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <LifeBuoy className="h-8 w-8" />
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="bg-[#007BFF] text-white p-8 lg:px-24 lg:py-12">
+        <div className="flex justify-between items-center">
+            <h1 className="text-xl font-bold">Your Logo</h1>
+        </div>
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 items-center">
+            <div>
+                <h2 className="text-4xl font-bold">Sign in to</h2>
+                <h3 className="text-4xl font-bold text-white/80">Lorem Ipsum is simply</h3>
+                <p className="mt-4 max-w-md text-white/90">
+                    Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s.
+                </p>
             </div>
-            <h1 className="text-3xl font-bold">Bem-vindo(a) de volta!</h1>
-            <p className="mt-2 text-sm text-gray-400">Faça login para continuar na plataforma.</p>
-          </div>
-
-          {isRegistered && (
-            <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-300/30 bg-green-500/10 p-3 text-sm font-medium text-green-300">
-              <CheckCircle2 className="h-5 w-5" />
-              <p>Registro realizado com sucesso! Faça o login para continuar.</p>
+             <div className="relative h-64 md:h-auto">
+                <Image 
+                    src="https://picsum.photos/seed/rocket/500/300"
+                    alt="Illustration of a person on a rocket"
+                    width={500}
+                    height={300}
+                    className="absolute right-0 bottom-0 md:-bottom-12"
+                    data-ai-hint="3d illustration rocket"
+                />
             </div>
-          )}
+        </div>
+      </header>
 
-          <LoginForm />
-
-          <p className="mt-6 text-center text-sm text-gray-400">
-            Não tem uma conta?{' '}
-            <Link href="/register" className="font-medium text-primary hover:underline">
-              Registre-se
-            </Link>
-          </p>
+      <main className="px-8 lg:px-24 -mt-20 md:-mt-28 relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12">
+        {/* Formulário de Login */}
+        <div className="w-full">
+            <div className="bg-card p-8 rounded-2xl shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                    <div>
+                        <p className="text-muted-foreground">Welcome to LOREM</p>
+                        <h2 className="text-3xl font-bold">Sign in</h2>
+                    </div>
+                    <Link href="/register" className="text-sm text-blue-500 hover:underline">
+                        No Account? <br/> Sign up
+                    </Link>
+                </div>
+                 {isRegistered && (
+                    <div className="mb-4 flex items-center gap-2 rounded-lg bg-green-500/10 p-3 text-sm font-medium text-green-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <p>Registro realizado com sucesso! Faça o login para continuar.</p>
+                    </div>
+                )}
+                <LoginForm />
+            </div>
         </div>
 
-        {/* Coluna da Direita: Imagem */}
-        <div className="relative hidden md:block">
-          <Image
-            src="https://picsum.photos/seed/1/800/1000"
-            alt="Arte promocional do Dialogy"
-            width={800}
-            height={1000}
-            className="h-full w-full object-cover"
-            data-ai-hint="illustration digital art"
-          />
-           <div className="absolute inset-0 bg-gradient-to-t from-[#1C1C2E] via-transparent to-transparent"></div>
+        {/* Login como */}
+        <div className="pt-12 md:pt-0">
+            <h3 className="text-lg font-semibold mb-4">Login as</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-4">
+                {recentUsers.map(user => (
+                    <div key={user.name} className="relative group bg-card p-4 rounded-2xl text-center shadow-lg hover:shadow-xl transition-shadow cursor-pointer">
+                        <button className="absolute top-2 right-2 p-1 rounded-full bg-muted/50 group-hover:bg-muted transition-colors">
+                            <X className="h-3 w-3" />
+                        </button>
+                        <Avatar className="h-16 w-16 mx-auto mb-3">
+                            <AvatarImage src={user.avatar} alt={user.name} />
+                            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <p className="font-semibold">{user.name}</p>
+                        <p className="text-xs text-muted-foreground">Active {user.active}</p>
+                    </div>
+                ))}
+            </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

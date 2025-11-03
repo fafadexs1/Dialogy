@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useActionState, useEffect } from 'react';
@@ -16,9 +15,9 @@ function RegisterButton() {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" className="w-full h-12 text-base" disabled={pending}>
+    <Button type="submit" className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600" disabled={pending}>
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      {pending ? 'Registrando...' : 'Criar Conta'}
+      {pending ? 'Creating Account...' : 'Sign up'}
     </Button>
   );
 }
@@ -37,44 +36,45 @@ export function RegisterForm() {
   return (
     <form action={formAction} className="space-y-6">
       <div className="space-y-2">
-        <Label htmlFor="name">Nome Completo</Label>
+        <Label htmlFor="name">Full Name</Label>
         <Input
           id="name"
           name="name"
           type="text"
-          placeholder="Seu Nome Completo"
+          placeholder="Your Full Name"
           required
           autoComplete="name"
-          className="h-12 bg-gray-800/50 border-gray-700/50 text-white placeholder:text-gray-500 focus:border-primary"
+          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="email">Email Address</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="agente@dialogy.com"
+          placeholder="your.email@example.com"
           required
           autoComplete="email"
-          className="h-12 bg-gray-800/50 border-gray-700/50 text-white placeholder:text-gray-500 focus:border-primary"
+          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Senha</Label>
+        <Label htmlFor="password">Password</Label>
         <Input 
             id="password" 
             name="password" 
             type="password" 
+            placeholder="Create a password"
             required 
             autoComplete="new-password"
-            className="h-12 bg-gray-800/50 border-gray-700/50 text-white placeholder:text-gray-500 focus:border-primary"
+            className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
         />
       </div>
       {state?.message && (
-        <Alert variant="destructive" className="bg-red-500/10 border-red-500/30 text-red-300">
-          <AlertCircle className="h-4 w-4 !text-red-400" />
-          <AlertTitle>Erro no Registro</AlertTitle>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Registration Error</AlertTitle>
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       )}
