@@ -30,11 +30,8 @@ export default function RegisterPage() {
         </div>
       </header>
        <main className="px-8 lg:px-24 -mt-20 md:-mt-28 relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12">
-        <div className="w-full">
-            {/* Empty column for spacing on the left */}
-        </div>
-        <div className="w-full">
-            <div className="bg-card p-8 rounded-2xl shadow-2xl">
+        <div className="w-full md:col-start-2">
+             <div className="bg-card p-8 rounded-2xl shadow-2xl">
                  <div className="flex justify-between items-center mb-6">
                     <div>
                         <p className="text-muted-foreground">Get started</p>
