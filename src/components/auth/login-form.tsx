@@ -15,7 +15,7 @@ import Image from 'next/image';
 function LoginButton() {
   const { pending } = useFormStatus();
   return (
-      <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-md hover:shadow-lg transition-all" disabled={pending}>
+      <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-sm hover:shadow-md transition-all" disabled={pending}>
           {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {pending ? 'Signing in...' : 'Sign in'}
       </Button>
@@ -25,7 +25,7 @@ function LoginButton() {
 function SocialButton({ provider, icon, label, isIconOnly }: { provider: string, icon: string, label: string, isIconOnly?: boolean }) {
     if (isIconOnly) {
         return (
-             <Button variant="outline" size="icon" className="h-12 w-12 rounded-full bg-[#f3f8ff] border-[#ddd] hover:bg-blue-100 flex-shrink-0">
+             <Button variant="outline" size="icon" className="h-12 w-12 rounded-lg bg-[#f3f8ff] border-[#ddd] hover:bg-blue-100 flex-shrink-0">
                  <Image src={icon} alt={`${provider} logo`} width={24} height={24} />
             </Button>
         )
@@ -53,7 +53,7 @@ export function LoginForm() {
   return (
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="email" className="font-semibold text-gray-600">Username or email address</Label>
+        <Label htmlFor="email" className="font-semibold text-gray-600 text-sm">Username or email address</Label>
         <Input
           id="email"
           name="email"
@@ -66,7 +66,7 @@ export function LoginForm() {
       </div>
       <div className="space-y-2">
         <div className="flex justify-between items-center">
-            <Label htmlFor="password"  className="font-semibold text-gray-600">Password</Label>
+            <Label htmlFor="password"  className="font-semibold text-gray-600 text-sm">Password</Label>
              <Link href="#" className="text-xs font-medium text-[#007BFF] hover:underline">
                 Forgot Password?
             </Link>
@@ -90,14 +90,16 @@ export function LoginForm() {
         </Alert>
       )}
 
-      <LoginButton />
+      <div className='pt-2'>
+        <LoginButton />
+      </div>
       
-      <div className="relative my-4">
+      <div className="relative pt-4">
           <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-gray-300" />
+              <span className="w-full border-t border-gray-200" />
           </div>
-          <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+          <div className="relative flex justify-center text-xs">
+              <span className="bg-card px-2 text-muted-foreground uppercase">Or continue with</span>
           </div>
       </div>
 

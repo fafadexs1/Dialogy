@@ -14,8 +14,8 @@ export default function LoginPage() {
       <main className="w-full grid md:grid-cols-2">
         
         {/* Left Side - Informational */}
-        <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative">
-           <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-800 opacity-80"></div>
+        <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
+           <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-800 opacity-80 z-0"></div>
           <div className="z-10">
             <div className="flex items-center gap-3 mb-8">
                 <LifeBuoy className="h-8 w-8"/>
@@ -42,7 +42,7 @@ export default function LoginPage() {
         {/* Right Side - Form */}
         <div className="bg-card flex flex-col justify-center p-8 sm:p-12">
           <div className="w-full max-w-md mx-auto">
-            <div className="mb-6">
+            <div className="mb-8">
                 <h2 className="text-3xl font-bold mt-1">Sign in to <span className='text-[#007BFF]'>Dialogy</span></h2>
                 <p className="text-sm text-gray-500 mt-1">
                     Welcome back! Please enter your details.
@@ -51,7 +51,7 @@ export default function LoginPage() {
             
             <LoginForm />
 
-            <div className="mt-6 text-center text-sm">
+            <div className="mt-8 text-center text-sm">
               <p className="text-muted-foreground">
                 Don't have an account?{' '}
                 <Link href="/register" className="font-medium text-[#007BFF] hover:underline">
