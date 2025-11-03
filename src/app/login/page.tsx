@@ -44,6 +44,26 @@ export default async function LoginPage({
       </header>
 
       <main className="px-8 lg:px-24 -mt-20 md:-mt-28 relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12">
+        {/* Login como */}
+        <div className="pt-12 md:pt-0">
+            <h3 className="text-lg font-semibold mb-4">Login as</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-4">
+                {recentUsers.map(user => (
+                    <div key={user.name} className="relative group bg-card p-4 rounded-2xl text-center shadow-lg hover:shadow-xl transition-shadow cursor-pointer">
+                        <button className="absolute top-2 right-2 p-1 rounded-full bg-muted/50 group-hover:bg-muted transition-colors">
+                            <X className="h-3 w-3" />
+                        </button>
+                        <Avatar className="h-16 w-16 mx-auto mb-3">
+                            <AvatarImage src={user.avatar} alt={user.name} />
+                            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <p className="font-semibold">{user.name}</p>
+                        <p className="text-xs text-muted-foreground">Active {user.active}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+
         {/* Formulário de Login */}
         <div className="w-full">
             <div className="bg-card p-8 rounded-2xl shadow-2xl">
@@ -63,26 +83,6 @@ export default async function LoginPage({
                     </div>
                 )}
                 <LoginForm />
-            </div>
-        </div>
-
-        {/* Login como */}
-        <div className="pt-12 md:pt-0">
-            <h3 className="text-lg font-semibold mb-4">Login as</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-4">
-                {recentUsers.map(user => (
-                    <div key={user.name} className="relative group bg-card p-4 rounded-2xl text-center shadow-lg hover:shadow-xl transition-shadow cursor-pointer">
-                        <button className="absolute top-2 right-2 p-1 rounded-full bg-muted/50 group-hover:bg-muted transition-colors">
-                            <X className="h-3 w-3" />
-                        </button>
-                        <Avatar className="h-16 w-16 mx-auto mb-3">
-                            <AvatarImage src={user.avatar} alt={user.name} />
-                            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <p className="font-semibold">{user.name}</p>
-                        <p className="text-xs text-muted-foreground">Active {user.active}</p>
-                    </div>
-                ))}
             </div>
         </div>
       </main>
