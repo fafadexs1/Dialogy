@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
+import type { User } from '@/lib/types';
 
 
 function RegisterButton() {
@@ -22,15 +23,17 @@ function RegisterButton() {
   );
 }
 
-export function RegisterForm() {
-  const [state, formAction] = useActionState(register, { success: false, message: null });
+export function RegisterForm({ onRegisterSuccess }: { onRegisterSuccess: (user: User) => void }) {
+  const [state, formAction] = useActionState(register, { success: false, message: null, user: null });
   const router = useRouter();
 
   useEffect(() => {
-    if (state.success) {
-      router.push('/login?registered=true');
+    if (state.success && state.user) {
+      // Instead of redirecting, call the callback to switch the view
+      // to the onboarding steps.
+      onRegisterSuccess(state.user as User);
     }
-  }, [state.success, router]);
+  }, [state, router, onRegisterSuccess]);
 
 
   return (

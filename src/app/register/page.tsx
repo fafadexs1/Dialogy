@@ -1,19 +1,29 @@
+'use client';
+
+import { useState } from 'react';
 import { RegisterForm } from '@/components/auth/register-form';
 import Link from 'next/link';
 import Image from 'next/image';
 import { LifeBuoy } from 'lucide-react';
+import OnboardingSteps from './onboarding-steps';
+import type { User } from '@/lib/types';
 
 export default function RegisterPage() {
+  const [user, setUser] = useState<User | null>(null);
+
+  if (user) {
+    return <OnboardingSteps user={user} />;
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 h-screen">
-      {/* Left Side - Form */}
       <div className="bg-card p-8 sm:p-12 flex items-center justify-center order-last md:order-first">
         <div className="w-full max-w-md">
           <div className="mb-6">
             <p className="text-sm text-gray-500">Get started for free</p>
             <h2 className="text-3xl font-bold mt-1">Sign up</h2>
           </div>
-          <RegisterForm />
+          <RegisterForm onRegisterSuccess={setUser} />
           <div className="mt-6 text-center text-sm">
             <p className="text-muted-foreground">
               Have an account?{' '}
@@ -25,7 +35,6 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Right Side - Informational */}
       <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
         <div className="z-10">
           <div className="flex items-center gap-3 mb-8">
