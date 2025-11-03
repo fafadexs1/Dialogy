@@ -15,7 +15,7 @@ import Image from 'next/image';
 function LoginButton() {
   const { pending } = useFormStatus();
   return (
-      <Button type="submit" className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600" disabled={pending}>
+      <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-md hover:shadow-lg transition-all" disabled={pending}>
           {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {pending ? 'Signing in...' : 'Sign in'}
       </Button>
@@ -23,10 +23,18 @@ function LoginButton() {
 }
 
 function SocialButton({ provider, icon, label }: { provider: string, icon: string, label: string }) {
+    if (provider === 'Google') {
+        return (
+             <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12 bg-[#f3f8ff] border-[#ddd] rounded-lg text-gray-700 font-medium hover:bg-blue-100">
+                <Image src={icon} alt={`${provider} logo`} width={20} height={20} />
+                {label}
+            </Button>
+        )
+    }
+    // Apple & Facebook
     return (
-        <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12">
-            <Image src={icon} alt={`${provider} logo`} width={20} height={20} />
-            {label}
+        <Button variant="outline" size="icon" className="h-12 w-12 rounded-full bg-[#f3f8ff] border-[#ddd] hover:bg-blue-100">
+             <Image src={icon} alt={`${provider} logo`} width={24} height={24} />
         </Button>
     )
 }
@@ -42,52 +50,35 @@ export function LoginForm() {
   }, [state, router]);
   
   return (
-    <form action={formAction} className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-1">
-                 <SocialButton provider="Google" icon="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_28dp.png" label="Google" />
-            </div>
-            <div className="flex items-center gap-2 sm:col-span-2">
-                 <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12">
-                    <svg className="h-5 w-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M22.08 12.52v-1.04c0-5.84-4.72-10.56-10.56-10.56S.96 5.64.96 11.48c0 4.96 3.4 9.16 8 10.24V15.2h-2.4v-3.6h2.4v-2.64c0-2.36 1.4-3.68 3.56-3.68 1.04 0 1.92.08 2.2.12v3.12h-1.84c-1.16 0-1.36.56-1.36 1.32v1.76h3.48l-.44 3.6h-3.04v6.4c5.16-1.12 9-5.72 9-11.12z" /></svg>
-                    Facebook
-                 </Button>
-                 <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12">
-                     <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12.012 2.508c-4.14 0-6.84 3.28-6.84 7.06 0 2.24 1.02 4.54 2.86 5.76-1.52.48-3.32 1-4.74 1.84-.4.24-.48.72-.28 1.08.16.28.52.4.84.28 1.52-.88 3.24-1.48 4.76-1.72.6.44 1.28.8 2.04.92V22.2c0 .44.36.8.8.8s.8-.36.8-.8v-4.48c.76-.12 1.44-.48 2.04-.92 1.52.24 3.24.84 4.76 1.72.32.12.68 0 .84-.28.2-.36.12-.84-.28-1.08-1.42-.84-3.22-1.36-4.74-1.84 1.84-1.22 2.86-3.52 2.86-5.76 0-3.78-2.7-7.06-6.84-7.06zm-4.48 5.7c-.56 0-1.02-.46-1.02-1.02s.46-1.02 1.02-1.02 1.02.46 1.02 1.02-.46 1.02-1.02 1.02zm8.98 0c-.56 0-1.02-.46-1.02-1.02s.46-1.02 1.02-1.02 1.02.46 1.02 1.02-.46 1.02-1.02 1.02z"/></svg>
-                    Apple
-                 </Button>
-            </div>
-        </div>
-
+    <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="email">Enter your username or email address</Label>
+        <Label htmlFor="email" className="font-semibold text-gray-600">Username or email address</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="Username or email address"
+          placeholder="Enter your username or email"
           required
           autoComplete="email"
-          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
+          className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Enter your Password</Label>
+        <div className="flex justify-between items-center">
+            <Label htmlFor="password"  className="font-semibold text-gray-600">Password</Label>
+             <Link href="#" className="text-xs font-medium text-[#007BFF] hover:underline">
+                Forgot Password?
+            </Link>
+        </div>
         <Input
           id="password"
           name="password"
           type="password"
-          placeholder="Password"
+          placeholder="Enter your password"
           required
           autoComplete="current-password"
-          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
+          className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
-      </div>
-
-       <div className="text-right text-sm">
-        <Link href="#" className="font-medium text-blue-500 hover:underline">
-          Forgot Password
-        </Link>
       </div>
       
       {state?.message && (
@@ -99,6 +90,21 @@ export function LoginForm() {
       )}
 
       <LoginButton />
+      
+      <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-gray-300" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+          </div>
+      </div>
+
+       <div className="flex items-center gap-4">
+            <SocialButton provider="Google" icon="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_28dp.png" label="Sign in with Google" />
+            <SocialButton provider="Facebook" icon="https://picsum.photos/seed/fb/24" label="Facebook" />
+            <SocialButton provider="Apple" icon="https://picsum.photos/seed/apple/24" label="Apple" />
+        </div>
 
     </form>
   );

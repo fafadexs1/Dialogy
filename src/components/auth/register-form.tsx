@@ -15,7 +15,7 @@ function RegisterButton() {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600" disabled={pending}>
+    <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-md hover:shadow-lg transition-all" disabled={pending}>
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {pending ? 'Creating Account...' : 'Sign up'}
     </Button>
@@ -34,33 +34,33 @@ export function RegisterForm() {
 
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="name">Full Name</Label>
+        <Label htmlFor="name" className="font-semibold text-gray-600">Full Name</Label>
         <Input
           id="name"
           name="name"
           type="text"
-          placeholder="Your Full Name"
+          placeholder="Enter your full name"
           required
           autoComplete="name"
-          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
+           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="email">Email Address</Label>
+        <Label htmlFor="email" className="font-semibold text-gray-600">Email Address</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="your.email@example.com"
+          placeholder="Enter your email"
           required
           autoComplete="email"
-          className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
+           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="password" className="font-semibold text-gray-600">Password</Label>
         <Input 
             id="password" 
             name="password" 
@@ -68,7 +68,7 @@ export function RegisterForm() {
             placeholder="Create a password"
             required 
             autoComplete="new-password"
-            className="h-12 bg-gray-100 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700/50 focus:border-blue-500 focus:bg-white"
+            className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       {state?.message && (
