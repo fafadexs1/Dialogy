@@ -44,8 +44,8 @@ export default async function LoginPage({
       </header>
 
       <main className="px-8 lg:px-24 -mt-20 md:-mt-28 relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12">
-        {/* Login como */}
-        <div className="pt-12 md:pt-0">
+        {/* Coluna da Esquerda: Login como */}
+        <div>
             <h3 className="text-lg font-semibold mb-4">Login as</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-4">
                 {recentUsers.map(user => (
@@ -64,7 +64,7 @@ export default async function LoginPage({
             </div>
         </div>
 
-        {/* Formulário de Login */}
+        {/* Coluna da Direita: Formulário de Login */}
         <div className="w-full">
             <div className="bg-card p-8 rounded-2xl shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
