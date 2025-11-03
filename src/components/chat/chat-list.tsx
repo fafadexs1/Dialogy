@@ -2,12 +2,11 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2 } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
@@ -32,6 +31,7 @@ import { Textarea } from '../ui/textarea';
 import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { cn } from '@/lib/utils';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
@@ -319,6 +319,8 @@ export default function ChatList({
   onUpdate,
 }: ChatListProps) {
   const onlineAgents = usePresence();
+  const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
+
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -354,18 +356,29 @@ export default function ChatList({
       )}
     </div>
   );
+  
+  const TABS = [
+      { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
+      { id: 'atendimentos', label: 'Atendendo', data: sortedChats.atendimentos },
+      { id: 'encerrados', label: 'Encerrados', data: sortedChats.encerrados },
+  ] as const;
+
+  const currentChats = TABS.find(t => t.id === activeTab)?.data || [];
 
   return (
     <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card min-h-0">
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
-          {currentUser.activeWorkspaceId && (
-            <NewConversationDialog 
-                workspaceId={currentUser.activeWorkspaceId}
-                onActionSuccess={onUpdate}
-            />
-          )}
+          <div className="flex items-center">
+            <Button variant="ghost" size="icon"><Filter className="h-5 w-5" /></Button>
+            {currentUser.activeWorkspaceId && (
+              <NewConversationDialog 
+                  workspaceId={currentUser.activeWorkspaceId}
+                  onActionSuccess={onUpdate}
+              />
+            )}
+          </div>
         </div>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -396,36 +409,39 @@ export default function ChatList({
         </TooltipProvider>
       </div>
 
-      <Tabs defaultValue="gerais" className="flex-1 min-h-0 flex flex-col">
-        <div className="p-2 flex-shrink-0">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="gerais">
-              Gerais
-              <Badge variant={sortedChats.gerais.length > 0 ? "destructive" : "secondary"}>{sortedChats.gerais.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="atendimentos">
-              Atendimentos
-              <Badge variant="secondary">{sortedChats.atendimentos.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="encerrados">
-              Encerrados
-              <Badge variant="secondary">{sortedChats.encerrados.length}</Badge>
-            </TabsTrigger>
-          </TabsList>
-        </div>
-
-        <ScrollArea className="flex-1 min-h-0 pr-2">
-          <TabsContent value="gerais" className="m-0">
-            {renderChatList(sortedChats.gerais)}
-          </TabsContent>
-          <TabsContent value="atendimentos" className="m-0">
-            {renderChatList(sortedChats.atendimentos)}
-          </TabsContent>
-          <TabsContent value="encerrados" className="m-0">
-            {renderChatList(sortedChats.encerrados)}
-          </TabsContent>
-        </ScrollArea>
-      </Tabs>
+      <div className="p-2 flex-shrink-0 border-b">
+          <div className='flex items-center bg-muted rounded-md p-1'>
+            {TABS.map(tab => (
+                 <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                        "flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors",
+                        activeTab === tab.id
+                            ? 'bg-background text-primary shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                    )}
+                >
+                    <span>{tab.label}</span>
+                    {tab.data.length > 0 && (
+                         <Badge
+                            className={cn(
+                                "px-1.5 h-5 text-xs",
+                                activeTab === tab.id ? 'bg-primary/20 text-primary' : 'bg-secondary-foreground/10 text-muted-foreground'
+                            )}
+                        >
+                            {tab.data.length}
+                        </Badge>
+                    )}
+                 </button>
+            ))}
+          </div>
+      </div>
+      
+      <ScrollArea className="flex-1 min-h-0 pr-2">
+          {renderChatList(currentChats)}
+      </ScrollArea>
     </div>
   );
 }
+
