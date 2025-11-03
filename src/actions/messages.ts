@@ -5,7 +5,7 @@
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from './evolution-api';
-import type { MessageMetadata } from '@/lib/types';
+import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 
 
@@ -79,13 +79,7 @@ async function internalSendMessage(
                 method: 'POST',
                 body: JSON.stringify({
                     number: correctedRemoteJid,
-                    options: {
-                        delay: 1200,
-                        presence: 'composing'
-                    },
-                    textMessage: {
-                       text: content
-                    }
+                    text: content
                 }),
             }
         );
