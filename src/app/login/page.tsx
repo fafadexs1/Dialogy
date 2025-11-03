@@ -11,8 +11,8 @@ export default async function LoginPage({
   const isRegistered = searchParams?.registered === 'true';
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 shadow-2xl rounded-3xl overflow-hidden">
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
+      <div className="w-full grid grid-cols-1 md:grid-cols-2 h-screen">
         
         {/* Left Side - Informational */}
         <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
