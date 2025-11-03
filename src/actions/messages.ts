@@ -80,6 +80,7 @@ async function internalSendMessage(
                 body: JSON.stringify({
                     number: correctedRemoteJid,
                     options: {
+                        delay: 1200,
                         presence: 'composing'
                     },
                     textMessage: {
@@ -173,7 +174,7 @@ async function internalSendMedia(
         for (const file of mediaFiles) {
             let endpoint: string;
             let apiPayload: Record<string, any>;
-            let dbMessageType: 'audio' | 'text' = 'text';
+            let dbMessageType: Message['type'] = 'text';
 
             if (file.mediatype === 'audio') {
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
