@@ -1,6 +1,6 @@
 'use client';
 import { LoginForm } from '@/components/auth/login-form';
-import { CheckCircle2, LifeBuoy } from 'lucide-react';
+import { LifeBuoy } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
@@ -10,8 +10,8 @@ export default function LoginPage() {
   const isRegistered = searchParams.get('registered') === 'true';
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-gray-100 p-6">
-      <main className="w-full max-w-6xl grid md:grid-cols-2 shadow-2xl rounded-3xl overflow-hidden">
+    <div className="h-screen w-full flex bg-gray-100">
+      <main className="w-full grid md:grid-cols-2">
         
         {/* Left Side - Informational */}
         <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative">
@@ -40,29 +40,22 @@ export default function LoginPage() {
         </div>
         
         {/* Right Side - Form */}
-        <div className="bg-card p-8 sm:p-12 flex flex-col justify-center">
+        <div className="bg-card flex flex-col justify-center p-8 sm:p-12">
           <div className="w-full max-w-md mx-auto">
             <div className="mb-6">
-                <p className="text-sm text-gray-500">
-                    Bem-vindo(a) de volta!
+                <h2 className="text-3xl font-bold mt-1">Sign in to <span className='text-[#007BFF]'>Dialogy</span></h2>
+                <p className="text-sm text-gray-500 mt-1">
+                    Welcome back! Please enter your details.
                 </p>
-                <h2 className="text-3xl font-bold mt-1">Faça seu login</h2>
             </div>
-            
-              {isRegistered && (
-                <div className="mb-4 flex items-center gap-2 rounded-lg bg-green-500/10 p-3 text-sm font-medium text-green-600">
-                    <CheckCircle2 className="h-5 w-5" />
-                    <p>Registro realizado com sucesso! Faça o login para continuar.</p>
-                </div>
-            )}
             
             <LoginForm />
 
-              <div className="mt-6 text-center text-sm">
+            <div className="mt-6 text-center text-sm">
               <p className="text-muted-foreground">
-                Não tem uma conta?{' '}
+                Don't have an account?{' '}
                 <Link href="/register" className="font-medium text-[#007BFF] hover:underline">
-                  Cadastre-se
+                  Sign up for free
                 </Link>
               </p>
             </div>
