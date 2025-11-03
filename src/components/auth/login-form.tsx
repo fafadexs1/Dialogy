@@ -22,19 +22,19 @@ function LoginButton() {
   )
 }
 
-function SocialButton({ provider, icon, label }: { provider: string, icon: string, label: string }) {
-    if (provider === 'Google') {
+function SocialButton({ provider, icon, label, isIconOnly }: { provider: string, icon: string, label: string, isIconOnly?: boolean }) {
+    if (isIconOnly) {
         return (
-             <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12 bg-[#f3f8ff] border-[#ddd] rounded-lg text-gray-700 font-medium hover:bg-blue-100">
-                <Image src={icon} alt={`${provider} logo`} width={20} height={20} />
-                {label}
+             <Button variant="outline" size="icon" className="h-12 w-12 rounded-full bg-[#f3f8ff] border-[#ddd] hover:bg-blue-100 flex-shrink-0">
+                 <Image src={icon} alt={`${provider} logo`} width={24} height={24} />
             </Button>
         )
     }
-    // Apple & Facebook
+    
     return (
-        <Button variant="outline" size="icon" className="h-12 w-12 rounded-full bg-[#f3f8ff] border-[#ddd] hover:bg-blue-100">
-             <Image src={icon} alt={`${provider} logo`} width={24} height={24} />
+         <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12 bg-[#f3f8ff] border-[#ddd] rounded-lg text-gray-700 font-medium hover:bg-blue-100">
+            <Image src={icon} alt={`${provider} logo`} width={20} height={20} />
+            {label}
         </Button>
     )
 }
@@ -102,8 +102,8 @@ export function LoginForm() {
 
        <div className="flex items-center gap-4">
             <SocialButton provider="Google" icon="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_28dp.png" label="Sign in with Google" />
-            <SocialButton provider="Facebook" icon="https://picsum.photos/seed/fb/24" label="Facebook" />
-            <SocialButton provider="Apple" icon="https://picsum.photos/seed/apple/24" label="Apple" />
+            <SocialButton provider="Facebook" icon="https://picsum.photos/seed/fb/24" label="Facebook" isIconOnly />
+            <SocialButton provider="Apple" icon="https://picsum.photos/seed/apple/24" label="Apple" isIconOnly />
         </div>
 
     </form>
