@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -881,8 +880,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   }
 
   const isChatOpen = chat.status !== 'encerrados';
-  const isChatAssigned = chat.agent && chat.agent.id === currentUser.id;
-  const isChatInGeneralQueueAndNotMine = chat.status === 'gerais' && chat.agent?.id !== currentUser.id;
+  const isChatAssignedToMe = chat.agent && chat.agent.id === currentUser.id;
+  const isChatInGeneralQueue = chat.status === 'gerais';
 
   const showTextInput = !mediaFiles.length;
 
@@ -914,7 +913,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     </TooltipContent>
                 </Tooltip>
             </TooltipProvider>
-          {isChatOpen && isChatAssigned && (
+          {isChatOpen && isChatAssignedToMe && (
             <CloseChatDialog chat={chat} onActionSuccess={onActionSuccess} reasons={closeReasons} />
           )}
           <Button variant="ghost" size="icon">
@@ -936,11 +935,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             {(chat.messages || []).map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>
-        {isChatInGeneralQueueAndNotMine && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
+        {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
       </div>
 
 
-       {isChatOpen && isChatAssigned ? (
+       {isChatOpen && isChatAssignedToMe ? (
             <footer className="border-t bg-background p-4 flex-shrink-0">
                  {showShortcutSuggestions && filteredShortcuts.length > 0 && (
                     <div className="mb-2 p-2 border rounded-md bg-secondary max-h-40 overflow-y-auto">
