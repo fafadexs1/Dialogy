@@ -157,7 +157,7 @@ async function internalSendMedia(
 
             const mediaPayload = {
                 number: remoteJid,
-                media: `data:${file.mimetype};base64,${file.base64}`,
+                media: file.base64,
                 mimetype: file.mimetype,
                 filename: file.filename,
                 caption: caption || ''
@@ -177,7 +177,7 @@ async function internalSendMedia(
                     dbMessageType = 'document';
                     break;
                 case 'audio':
-                    const audioPayload = { number: remoteJid, media: `data:${file.mimetype};base64,${file.base64}`, mimetype: file.mimetype, filename: file.filename };
+                    const audioPayload = { number: remoteJid, media: file.base64, mimetype: file.mimetype, filename: file.filename };
                     apiResponse = await sendAudioMessage(apiConfig, instanceName, audioPayload);
                     dbMessageType = 'audio';
                     break;
@@ -185,14 +185,16 @@ async function internalSendMedia(
                     throw new Error(`Unsupported mediatype: ${file.mediatype}`);
             }
 
+            const messageTypeKey = `${dbMessageType}Message` as keyof typeof apiResponse.message;
+            const messageDetails = apiResponse.message?.[messageTypeKey] as any;
+            
             const dbMetadata: MessageMetadata = {
                 ...(metadata || {}),
                 mediaUrl: apiResponse?.message?.mediaUrl,
-                fileName: file.filename,
-                mimetype: file.mimetype,
-                duration: apiResponse?.message?.[`${dbMessageType}Message`]?.seconds,
+                fileName: messageDetails?.fileName || file.filename,
+                mimetype: messageDetails?.mimetype || file.mimetype,
+                duration: messageDetails?.seconds,
             };
-            
 
             await client.query(
                 `INSERT INTO messages (
