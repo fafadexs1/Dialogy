@@ -7,6 +7,7 @@ import type { EvolutionApiConfig } from "@/lib/types";
 interface AudioPayload {
     number: string;
     media: string; // Base64 com data URI prefix
+    mimetype: string;
     filename: string;
 }
 
@@ -22,10 +23,13 @@ export async function sendAudioMessage(
     instanceName: string,
     payload: AudioPayload
 ) {
+     const base64Data = payload.media.split(',')[1] || payload.media;
+
      const apiPayload = {
         number: payload.number,
         mediatype: 'document',
-        media: payload.media,
+        mimetype: payload.mimetype,
+        media: base64Data,
         fileName: payload.filename,
     };
 

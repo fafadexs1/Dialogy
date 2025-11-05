@@ -7,6 +7,7 @@ import type { EvolutionApiConfig } from "@/lib/types";
 interface VideoPayload {
     number: string;
     media: string; // Base64 com data URI prefix
+    mimetype: string;
     caption?: string;
     filename?: string;
 }
@@ -23,10 +24,13 @@ export async function sendVideoMessage(
     instanceName: string,
     payload: VideoPayload
 ) {
+    const base64Data = payload.media.split(',')[1] || payload.media;
+
     const apiPayload = {
         number: payload.number,
         mediatype: 'video',
-        media: payload.media,
+        mimetype: payload.mimetype,
+        media: base64Data,
         caption: payload.caption,
         fileName: payload.filename,
     };

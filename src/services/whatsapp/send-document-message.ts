@@ -7,6 +7,7 @@ import type { EvolutionApiConfig } from "@/lib/types";
 interface DocumentPayload {
     number: string;
     media: string; // Base64 com data URI prefix
+    mimetype: string;
     caption?: string;
     filename?: string;
 }
@@ -23,10 +24,13 @@ export async function sendDocumentMessage(
     instanceName: string,
     payload: DocumentPayload
 ) {
+    const base64Data = payload.media.split(',')[1] || payload.media;
+    
     const apiPayload = {
         number: payload.number,
         mediatype: 'document',
-        media: payload.media,
+        mimetype: payload.mimetype,
+        media: base64Data,
         caption: payload.caption,
         fileName: payload.filename,
     };

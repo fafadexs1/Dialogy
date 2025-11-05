@@ -158,6 +158,7 @@ async function internalSendMedia(
             const mediaPayload = {
                 number: remoteJid,
                 media: `data:${file.mimetype};base64,${file.base64}`,
+                mimetype: file.mimetype,
                 filename: file.filename,
                 caption: caption || ''
             };
@@ -176,8 +177,7 @@ async function internalSendMedia(
                     dbMessageType = 'document';
                     break;
                 case 'audio':
-                    // Audio has a different payload structure
-                    const audioPayload = { number: remoteJid, media: `data:${file.mimetype};base64,${file.base64}`, filename: file.filename };
+                    const audioPayload = { number: remoteJid, media: `data:${file.mimetype};base64,${file.base64}`, mimetype: file.mimetype, filename: file.filename };
                     apiResponse = await sendAudioMessage(apiConfig, instanceName, audioPayload);
                     dbMessageType = 'audio';
                     break;
