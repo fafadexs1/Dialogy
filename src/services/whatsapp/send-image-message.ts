@@ -6,9 +6,10 @@ import type { EvolutionApiConfig } from "@/lib/types";
 
 interface ImagePayload {
     number: string;
-    media: string;
+    media: string; // Base64 com data URI prefix
     caption?: string;
     filename?: string;
+    mimetype: string;
 }
 
 /**
@@ -27,6 +28,7 @@ export async function sendImageMessage(
         number: payload.number,
         mediatype: 'image',
         media: payload.media,
+        mimetype: payload.mimetype,
         caption: payload.caption,
         fileName: payload.filename,
     };

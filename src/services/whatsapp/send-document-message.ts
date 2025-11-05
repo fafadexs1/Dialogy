@@ -6,9 +6,10 @@ import type { EvolutionApiConfig } from "@/lib/types";
 
 interface DocumentPayload {
     number: string;
-    media: string;
+    media: string; // Base64 com data URI prefix
     caption?: string;
     filename?: string;
+    mimetype: string;
 }
 
 /**
@@ -27,6 +28,7 @@ export async function sendDocumentMessage(
         number: payload.number,
         mediatype: 'document',
         media: payload.media,
+        mimetype: payload.mimetype,
         caption: payload.caption,
         fileName: payload.filename,
     };
