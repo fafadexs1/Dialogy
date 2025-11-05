@@ -37,14 +37,16 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
     }
 
     try {
+        // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
+        // regardless of whether agent_id was previously filled.
         const result = await db.query(
-            "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND agent_id IS NULL",
+            "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND status = 'gerais'",
             [currentAgentId, chatId]
         );
 
         if (result.rowCount === 0) {
-            // Isso pode acontecer se outro agente assumiu o chat milissegundos antes.
-            return { success: false, error: "Este atendimento já foi assumido por outro agente." };
+            // This can happen if another agent took the chat milliseconds before, or if the chat is not in 'gerais' status.
+            return { success: false, error: "Este atendimento não está mais na fila geral ou já foi assumido." };
         }
 
         console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
@@ -470,3 +472,5 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {}, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
+
+    
