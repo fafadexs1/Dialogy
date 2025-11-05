@@ -100,36 +100,28 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     let content = '';
-    let metadata: MessageMetadata = {};
     let dbMessageType: Message['type'] = 'text';
 
     const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
     
     content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
 
-    if (message.mediaUrl) metadata.mediaUrl = message.mediaUrl;
+    // A URL da mídia está no nível superior do objeto `message`
+    const mediaUrl = message.mediaUrl || null;
     
     if (messageType) {
         switch (messageType) {
             case 'audioMessage':
                 dbMessageType = 'audio';
-                metadata.mimetype = messageDetails?.mimetype;
-                metadata.duration = messageDetails?.seconds;
                 break;
             case 'imageMessage':
                 dbMessageType = 'image';
-                metadata.mimetype = messageDetails?.mimetype;
-                metadata.fileName = messageDetails?.fileName;
                 break;
             case 'videoMessage':
                 dbMessageType = 'video';
-                metadata.mimetype = messageDetails?.mimetype;
-                metadata.fileName = messageDetails?.fileName;
                 break;
             case 'documentMessage':
                 dbMessageType = 'document';
-                metadata.mimetype = messageDetails?.mimetype;
-                metadata.fileName = messageDetails?.fileName;
                 break;
             case 'conversation': case 'extendedTextMessage': break;
             default:
@@ -138,13 +130,19 @@ async function handleMessagesUpsert(payload: any) {
         }
     }
 
-
-    if (!content.trim() && !metadata.mediaUrl) {
+    if (!content.trim() && !mediaUrl) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
         return;
     }
     
-    const parsedUrl = server_url ? new URL(server_url).hostname : null;
+    // Construir o objeto metadata
+    let metadata: MessageMetadata = {
+        mediaUrl: mediaUrl,
+        mimetype: messageDetails?.mimetype,
+        fileName: messageDetails?.fileName,
+        duration: messageDetails?.seconds
+    };
+
     const contactPhone = sender || contactJid.split('@')[0];
     
     try {
@@ -212,7 +210,7 @@ async function handleMessagesUpsert(payload: any) {
                 api_message_status, raw_payload
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
             [
-                workspaceId, chat.id, dbMessageType, content, metadata, key.id, sender,
+                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
                 instanceName, data.source, key.fromMe,
                 data.status?.toUpperCase() || 'SENT', JSON.stringify(payload)
             ]

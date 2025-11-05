@@ -172,34 +172,27 @@ async function internalSendMedia(
 
             if (file.mediatype === 'audio') {
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
-                apiPayload = { number: correctedRemoteJid, audio: file.base64 };
+                apiPayload = { number: correctedRemoteJid, audio: `data:${file.mimetype};base64,${file.base64}` };
                 dbMessageType = 'audio';
             } else {
                 endpoint = `/message/sendMedia/${instanceName}`;
-                apiPayload = { number: correctedRemoteJid, mediatype: file.mediatype, mimetype: file.mimetype, media: file.base64, fileName: file.filename, caption: caption || '' };
-                 dbMessageType = file.mediatype === 'image' ? 'image' : file.mediatype === 'video' ? 'video' : 'document';
+                apiPayload = { number: correctedRemoteJid, mediatype: file.mediatype, media: `data:${file.mimetype};base64,${file.base64}`, fileName: file.filename, caption: caption || '' };
+                dbMessageType = file.mediatype === 'image' ? 'image' : file.mediatype === 'video' ? 'video' : 'document';
             }
 
             const apiResponse = await fetchEvolutionAPI(endpoint, apiConfig, { method: 'POST', body: JSON.stringify(apiPayload) });
 
             const dbContent = caption || '';
-            let dbMetadata: MessageMetadata = { ...metadata, thumbnail: file.thumbnail };
-
-            if (apiResponse?.message?.mediaUrl) {
-                 dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
-            }
-             if (apiResponse?.message) {
-                const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
-                if (messageTypeKey && apiResponse.message[messageTypeKey]) {
-                    const mediaDetails = apiResponse.message[messageTypeKey];
-                    dbMetadata.mimetype = mediaDetails.mimetype;
-                    dbMetadata.fileName = mediaDetails.fileName || file.filename;
-                    if (file.mediatype === 'audio' && mediaDetails.seconds) {
-                        dbMetadata.duration = mediaDetails.seconds;
-                    }
-                }
-            }
-
+            
+            // Re-estruturação do metadata
+            const dbMetadata: MessageMetadata = {
+                ...(metadata || {}),
+                mediaUrl: apiResponse?.message?.mediaUrl,
+                thumbnail: file.thumbnail,
+                fileName: apiResponse?.message?.[`${dbMessageType}Message`]?.fileName || file.filename,
+                mimetype: apiResponse?.message?.[`${dbMessageType}Message`]?.mimetype || file.mimetype,
+                duration: apiResponse?.message?.audioMessage?.seconds || undefined,
+            };
 
             await client.query(
                 `INSERT INTO messages (
