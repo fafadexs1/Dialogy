@@ -31,8 +31,8 @@ export async function sendImageMessage(
         },
         mediaMessage: {
             mediatype: 'image',
-            caption: payload.caption,
             media: payload.media,
+            caption: payload.caption,
             fileName: payload.filename,
         }
     };
