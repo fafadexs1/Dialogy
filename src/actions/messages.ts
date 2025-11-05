@@ -177,6 +177,7 @@ async function internalSendMedia(
             } else {
                 endpoint = `/message/sendMedia/${instanceName}`;
                 apiPayload = { number: correctedRemoteJid, mediatype: file.mediatype, mimetype: file.mimetype, media: file.base64, fileName: file.filename, caption: caption || '' };
+                 dbMessageType = file.mediatype === 'image' ? 'image' : file.mediatype === 'video' ? 'video' : 'document';
             }
 
             const apiResponse = await fetchEvolutionAPI(endpoint, apiConfig, { method: 'POST', body: JSON.stringify(apiPayload) });
@@ -184,8 +185,10 @@ async function internalSendMedia(
             const dbContent = caption || '';
             let dbMetadata: MessageMetadata = { ...metadata, thumbnail: file.thumbnail };
 
-            if (apiResponse?.message) {
+            if (apiResponse?.message?.mediaUrl) {
                  dbMetadata.mediaUrl = apiResponse.message.mediaUrl;
+            }
+             if (apiResponse?.message) {
                 const messageTypeKey = Object.keys(apiResponse.message).find(k => k.endsWith('Message'));
                 if (messageTypeKey && apiResponse.message[messageTypeKey]) {
                     const mediaDetails = apiResponse.message[messageTypeKey];
@@ -196,6 +199,7 @@ async function internalSendMedia(
                     }
                 }
             }
+
 
             await client.query(
                 `INSERT INTO messages (

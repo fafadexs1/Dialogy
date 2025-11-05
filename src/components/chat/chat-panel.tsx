@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -193,7 +194,9 @@ function formatWhatsappText(text: string): string {
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
-    if (!mediaUrl && !thumbnail) return <p>{message.content || 'Mídia inválida'}</p>;
+    const urlToUse = mediaUrl || thumbnail;
+
+    if (!urlToUse) return <p>{message.content || 'Mídia inválida'}</p>;
     
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
@@ -201,7 +204,7 @@ function MediaMessage({ message }: { message: Message }) {
                  <Dialog>
                     <DialogTrigger asChild>
                         <Image
-                            src={mediaUrl!}
+                            src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
@@ -214,7 +217,7 @@ function MediaMessage({ message }: { message: Message }) {
                             <DialogDescription className="sr-only">Visualizando a imagem enviada no chat em tamanho maior.</DialogDescription>
                         </DialogHeader>
                         <Image
-                            src={mediaUrl!}
+                            src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={1024}
                             height={768}
@@ -229,9 +232,9 @@ function MediaMessage({ message }: { message: Message }) {
                 <Dialog>
                     <DialogTrigger asChild>
                          <div className="relative group w-full max-w-[300px] aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
-                            {thumbnail ? (
+                            {urlToUse ? (
                                 <Image
-                                    src={thumbnail}
+                                    src={urlToUse}
                                     alt="Video thumbnail"
                                     width={300}
                                     height={169}
@@ -256,12 +259,12 @@ function MediaMessage({ message }: { message: Message }) {
             );
         }
         if (mimetype.startsWith('audio/')) {
-            return <AudioPlayer src={mediaUrl!} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
+            return <AudioPlayer src={urlToUse} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
         }
         if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
             return (
                 <a
-                    href={mediaUrl}
+                    href={urlToUse}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors max-w-xs"
@@ -687,7 +690,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   };
 
   const renderMessageContent = (message: Message) => {
-    const isMedia = message.type === 'audio' || message.metadata?.mediaUrl || message.metadata?.thumbnail;
+    const isMedia = message.type !== 'text' && message.type !== 'system';
     if (isMedia) {
         return <MediaMessage message={message} />;
     }

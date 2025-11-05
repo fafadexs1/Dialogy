@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -7,30 +8,6 @@ import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
-
-
-/**
- * Normalizes a Brazilian WhatsApp JID by removing the first '9' after the DDD if it exists and the number has 9 digits after the DDD.
- * Example: 5511987654321@s.whatsapp.net -> 551187654321@s.whatsapp.net
- * @param jid The original JID.
- * @returns A normalized JID if it's a Brazilian mobile number, otherwise the original JID.
- */
-function normalizeBrazilianNumber(jid: string): string {
-    const match = jid.match(/^55(\d{2})(9\d{8})@s\.whatsapp\.net$/);
-    if (match) {
-        const ddd = match[1];
-        const numberWithoutDdd = match[2];
-        const dddInt = parseInt(ddd, 10);
-        
-        // Check for valid Brazilian mobile DDDs (11-99)
-        if (dddInt >= 11 && dddInt <= 99) {
-            // Remove the first '9' from the number part
-            const normalizedNumber = numberWithoutDdd.substring(1);
-            return `55${ddd}${normalizedNumber}@s.whatsapp.net`;
-        }
-    }
-    return jid;
-}
 
 
 export async function POST(
@@ -108,10 +85,10 @@ async function handleMessagesUpsert(payload: any) {
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
-    const originalJid = data?.key?.remoteJid;
+    const contactJid = data?.key?.remoteJid;
 
-    if (!data || !data.key || !data.message || !originalJid) {
-        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key, message ou remoteJid ausente.');
+    if (!data || !data.key || !data.message) {
+        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
         return;
     }
 
@@ -139,7 +116,18 @@ async function handleMessagesUpsert(payload: any) {
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.duration = messageDetails?.seconds;
                 break;
-            case 'imageMessage': case 'videoMessage': case 'documentMessage':
+            case 'imageMessage':
+                dbMessageType = 'image';
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'videoMessage':
+                dbMessageType = 'video';
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'documentMessage':
+                dbMessageType = 'document';
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.fileName = messageDetails?.fileName;
                 break;
@@ -150,13 +138,14 @@ async function handleMessagesUpsert(payload: any) {
         }
     }
 
+
     if (!content.trim() && !metadata.mediaUrl) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
         return;
     }
     
     const parsedUrl = server_url ? new URL(server_url).hostname : null;
-    const contactPhone = sender || originalJid.split('@')[0];
+    const contactPhone = sender || contactJid.split('@')[0];
     
     try {
         await client.query('BEGIN');
@@ -173,42 +162,30 @@ async function handleMessagesUpsert(payload: any) {
         workspaceId = workspace_id;
         apiConfig = { api_url, api_key };
         
-        // --- Robust Contact Handling ---
-        const normalizedJid = normalizeBrazilianNumber(originalJid);
-
-        const contactQuery = `
-            SELECT * FROM contacts 
-            WHERE workspace_id = $1 
-            AND (
-                phone_number_jid = $2 OR
-                phone_number_jid = $3
-            )
-        `;
+        let contactRes = await client.query(
+            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
+        );
         
-        let contactRes = await client.query(contactQuery, [workspaceId, originalJid, normalizedJid]);
-
         if (contactRes.rowCount === 0) {
-            // Use normalized JID for new contacts
-            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${originalJid} ou ${normalizedJid} não encontrado. Criando novo contato com JID original: ${originalJid}`);
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
                  RETURNING *`,
-                [workspaceId, pushName || contactPhone, contactPhone, originalJid, null]
+                [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
         } else {
-            console.log(`[WEBHOOK_MSG_UPSERT] Contato encontrado com ID: ${contactRes.rows[0].id}`);
             // Update name if it's different and not null
             if (pushName && pushName !== contactRes.rows[0].name) {
                 console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
                 contactRes = await client.query(
-                    'UPDATE contacts SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+                    'UPDATE contacts SET name = $1 WHERE id = $2 RETURNING *',
                     [pushName, contactRes.rows[0].id]
                 );
             }
         }
-        // --- End Robust Contact Handling ---
         
-        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${originalJid}`);
+        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         contactData = contactRes.rows[0];
 
         let chatRes = await client.query(
@@ -261,7 +238,7 @@ async function handleMessagesUpsert(payload: any) {
 
         if (contactData?.id && apiConfig && !contactData.avatar_url) {
             postTransactionTasks.push(
-                updateProfilePicture(contactData.id, originalJid, instanceName, apiConfig)
+                updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
             );
         }
         

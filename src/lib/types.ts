@@ -126,7 +126,7 @@ export type Message = {
   id: string;
   sender?: MessageSender;
   content: string;
-  type: 'text' | 'system' | 'audio';
+  type: 'text' | 'system' | 'audio' | 'image' | 'video' | 'document';
   status: 'default' | 'deleted';
   metadata?: MessageMetadata;
   timestamp: string;
