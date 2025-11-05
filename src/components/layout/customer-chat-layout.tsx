@@ -131,10 +131,21 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
       .channel('public:messages')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
+      
+    // Re-fetch data when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[REALTIME] Tab is visible again, re-fetching data.');
+        fetchData();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       supabase.removeChannel(chatsChannel);
       supabase.removeChannel(messagesChannel);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [initialUser.activeWorkspaceId, fetchData]);
 
