@@ -6,16 +6,14 @@ import type { EvolutionApiConfig } from "@/lib/types";
 
 interface AudioPayload {
     number: string;
-    media: string; // Base64 com data URI prefix
-    mimetype: string;
-    filename: string;
+    audio: string; // Base64 without data URI prefix
 }
 
 /**
- * Sends an audio file as a document using the Evolution API.
+ * Sends a recorded audio message as a native WhatsApp voice note.
  * @param apiConfig - The API configuration.
  * @param instanceName - The name of the Evolution API instance.
- * @param payload - The audio payload.
+ * @param payload - The audio payload containing the recipient number and base64 audio string.
  * @returns The response from the Evolution API.
  */
 export async function sendAudioMessage(
@@ -23,18 +21,14 @@ export async function sendAudioMessage(
     instanceName: string,
     payload: AudioPayload
 ) {
-     const base64Data = payload.media.split(',')[1] || payload.media;
-
+     // The base64 data is already prepared by the calling function.
      const apiPayload = {
         number: payload.number,
-        mediatype: 'document',
-        mimetype: payload.mimetype,
-        media: base64Data,
-        fileName: payload.filename,
+        audio: payload.audio,
     };
 
     return await fetchEvolutionAPI(
-        `/message/sendMedia/${instanceName}`,
+        `/message/sendWhatsAppAudio/${instanceName}`,
         apiConfig,
         {
             method: 'POST',

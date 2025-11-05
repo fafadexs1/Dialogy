@@ -155,30 +155,29 @@ async function internalSendMedia(
             let apiResponse;
             let dbMessageType: Message['type'];
 
-            const mediaPayload = {
-                number: remoteJid,
-                media: file.base64,
-                mimetype: file.mimetype,
-                filename: file.filename,
-                caption: caption || ''
-            };
-
+            const base64Data = file.base64; // Already pure base64
+            
             switch(file.mediatype) {
                 case 'image':
-                    apiResponse = await sendImageMessage(apiConfig, instanceName, mediaPayload);
+                    apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'image';
                     break;
                 case 'video':
-                    apiResponse = await sendVideoMessage(apiConfig, instanceName, mediaPayload);
+                    apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'video';
                     break;
                 case 'document':
-                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, mediaPayload);
+                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'document';
                     break;
                 case 'audio':
-                    const audioPayload = { number: remoteJid, media: file.base64, mimetype: file.mimetype, filename: file.filename };
-                    apiResponse = await sendAudioMessage(apiConfig, instanceName, audioPayload);
+                     // Special handling for recorded audio to be sent as voice note
+                    if (file.filename === 'audio_gravado.mp3') {
+                        apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: base64Data });
+                    } else {
+                        // Send other audio files as documents
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
+                    }
                     dbMessageType = 'audio';
                     break;
                 default:
