@@ -116,7 +116,18 @@ async function handleMessagesUpsert(payload: any) {
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.duration = messageDetails?.seconds;
                 break;
-            case 'imageMessage': case 'videoMessage': case 'documentMessage':
+            case 'imageMessage':
+                dbMessageType = 'image';
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'videoMessage':
+                dbMessageType = 'video';
+                metadata.mimetype = messageDetails?.mimetype;
+                metadata.fileName = messageDetails?.fileName;
+                break;
+            case 'documentMessage':
+                dbMessageType = 'document';
                 metadata.mimetype = messageDetails?.mimetype;
                 metadata.fileName = messageDetails?.fileName;
                 break;
@@ -126,6 +137,7 @@ async function handleMessagesUpsert(payload: any) {
                 return;
         }
     }
+
 
     if (!content.trim() && !metadata.mediaUrl) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
@@ -196,13 +208,13 @@ async function handleMessagesUpsert(payload: any) {
             `INSERT INTO messages (
                 workspace_id, chat_id, type, content, metadata,
                 message_id_from_api, sender_from_api, instance_name,
-                status_from_api, source_from_api, server_url, from_me,
+                source_from_api, from_me,
                 api_message_status, raw_payload
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
             [
-                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
-                instanceName, data.status, data.source, parsedUrl, key.fromMe,
-                data.status?.toUpperCase(), JSON.stringify(payload)
+                workspaceId, chat.id, dbMessageType, content, metadata, key.id, sender,
+                instanceName, data.source, key.fromMe,
+                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload)
             ]
         );
 

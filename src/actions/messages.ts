@@ -69,7 +69,7 @@ async function internalSendMessage(
         const apiConfig = apiConfigRes.rows[0];
         
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
-            ? remoteJid.replace('@lid', '@s.whatsapp.net') 
+            ? remoteJid.replace('@s.whatsapp.net', '@lid') 
             : remoteJid;
 
         const apiResponse = await fetchEvolutionAPI(
@@ -79,7 +79,7 @@ async function internalSendMessage(
                 method: 'POST',
                 body: JSON.stringify({
                     number: correctedRemoteJid,
-                    text: content
+                    text: content,
                 }),
             }
         );
@@ -160,7 +160,7 @@ async function internalSendMedia(
         const apiConfig = apiConfigRes.rows[0];
         
         const correctedRemoteJid = remoteJid.endsWith('@lid') 
-            ? remoteJid.replace('@lid', '@s.whatsapp.net') 
+            ? remoteJid.replace('@s.whatsapp.net', '@lid') 
             : remoteJid;
         
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
@@ -168,7 +168,7 @@ async function internalSendMedia(
         for (const file of mediaFiles) {
             let endpoint: string;
             let apiPayload: Record<string, any>;
-            let dbMessageType: Message['type'] = 'text';
+            let dbMessageType: Message['type'] = 'document';
 
             if (file.mediatype === 'audio') {
                 endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
