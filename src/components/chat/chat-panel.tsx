@@ -882,7 +882,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
   const isChatOpen = chat.status !== 'encerrados';
   const isChatAssigned = chat.agent && chat.agent.id === currentUser.id;
-  const isChatInGeneralQueue = chat.status === 'gerais';
+  const isChatInGeneralQueueAndNotMine = chat.status === 'gerais' && chat.agent?.id !== currentUser.id;
 
   const showTextInput = !mediaFiles.length;
 
@@ -936,7 +936,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             {(chat.messages || []).map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>
-        {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
+        {isChatInGeneralQueueAndNotMine && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
       </div>
 
 
@@ -1042,7 +1042,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
        ) : (
             <footer className="border-t bg-card p-4 flex-shrink-0 text-center">
                 <p className='text-sm font-medium text-muted-foreground'>{
-                  isChatInGeneralQueue ? "Este atendimento está aguardando um agente." : "Este atendimento foi encerrado."
+                  chat.status === 'gerais' ? "Este atendimento está aguardando um agente." : "Este atendimento foi encerrado."
                 }</p>
             </footer>
        )}
