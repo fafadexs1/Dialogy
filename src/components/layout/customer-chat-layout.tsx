@@ -73,6 +73,19 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
 
         setChats(newChats);
         setMessagesByChat(newMessagesByChat);
+        
+        // If there's a selected chat, find its updated version in the new list and update the state
+        if (selectedChatIdRef.current) {
+            const updatedSelectedChat = newChats.find(c => c.id === selectedChatIdRef.current);
+            if (updatedSelectedChat) {
+                setSelectedChat(updatedSelectedChat);
+            } else {
+                // The chat might have been closed or removed from the list
+                setSelectedChat(null);
+                selectedChatIdRef.current = null;
+            }
+        }
+        
         setFetchError(null);
         
     } catch(e: any) {
