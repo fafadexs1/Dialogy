@@ -4,10 +4,15 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import { fetchEvolutionAPI } from './evolution-api';
 import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 
+// Importando as novas funções de serviço
+import { sendTextMessage } from '@/services/whatsapp/send-text-message';
+import { sendImageMessage } from '@/services/whatsapp/send-image-message';
+import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
+import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
+import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 
 /**
  * Ação genérica para enviar uma mensagem de texto.
@@ -68,21 +73,7 @@ async function internalSendMessage(
         }
         const apiConfig = apiConfigRes.rows[0];
         
-        const correctedRemoteJid = remoteJid.endsWith('@lid') 
-            ? remoteJid.replace('@s.whatsapp.net', '@lid') 
-            : remoteJid;
-
-        const apiResponse = await fetchEvolutionAPI(
-            `/message/sendText/${instanceName}`,
-            apiConfig,
-            {
-                method: 'POST',
-                body: JSON.stringify({
-                    number: correctedRemoteJid,
-                    text: content,
-                }),
-            }
-        );
+        const apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
         
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
@@ -127,7 +118,6 @@ async function internalSendMedia(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string; 
     }[],
     senderId: string,
     metadata?: MessageMetadata,
@@ -159,39 +149,52 @@ async function internalSendMedia(
         if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
         const apiConfig = apiConfigRes.rows[0];
         
-        const correctedRemoteJid = remoteJid.endsWith('@lid') 
-            ? remoteJid.replace('@s.whatsapp.net', '@lid') 
-            : remoteJid;
-        
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         for (const file of mediaFiles) {
-            let endpoint: string;
-            let apiPayload: Record<string, any>;
-            let dbMessageType: Message['type'] = 'document';
+            let apiResponse;
+            let dbMessageType: Message['type'];
 
-            if (file.mediatype === 'audio') {
-                endpoint = `/message/sendWhatsAppAudio/${instanceName}`;
-                apiPayload = { number: correctedRemoteJid, audio: `data:${file.mimetype};base64,${file.base64}` };
-                dbMessageType = 'audio';
-            } else {
-                endpoint = `/message/sendMedia/${instanceName}`;
-                apiPayload = { number: correctedRemoteJid, mediatype: file.mediatype, media: `data:${file.mimetype};base64,${file.base64}`, fileName: file.filename, caption: caption || '' };
-                dbMessageType = file.mediatype === 'image' ? 'image' : file.mediatype === 'video' ? 'video' : 'document';
+            const mediaPayload = {
+                number: remoteJid,
+                mimetype: file.mimetype,
+                media: `data:${file.mimetype};base64,${file.base64}`,
+                filename: file.filename,
+                caption: caption || ''
+            };
+
+            switch(file.mediatype) {
+                case 'image':
+                    apiResponse = await sendImageMessage(apiConfig, instanceName, mediaPayload);
+                    dbMessageType = 'image';
+                    break;
+                case 'video':
+                    apiResponse = await sendVideoMessage(apiConfig, instanceName, mediaPayload);
+                    dbMessageType = 'video';
+                    break;
+                case 'document':
+                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, mediaPayload);
+                    dbMessageType = 'document';
+                    break;
+                case 'audio':
+                    // Audio has a different payload structure
+                    const audioPayload = { number: remoteJid, audio: `data:${file.mimetype};base64,${file.base64}` };
+                    apiResponse = await sendAudioMessage(apiConfig, instanceName, audioPayload);
+                    dbMessageType = 'audio';
+                    break;
+                default:
+                    throw new Error(`Unsupported mediatype: ${file.mediatype}`);
             }
 
-            const apiResponse = await fetchEvolutionAPI(endpoint, apiConfig, { method: 'POST', body: JSON.stringify(apiPayload) });
+            const messageKey = dbMessageType === 'audio' ? 'audioMessage' : `${dbMessageType}Message`;
+            const messageDetailsFromApi = apiResponse?.message?.[messageKey];
 
-            const dbContent = caption || '';
-            
-            // Re-estruturação do metadata
             const dbMetadata: MessageMetadata = {
                 ...(metadata || {}),
                 mediaUrl: apiResponse?.message?.mediaUrl,
-                thumbnail: file.thumbnail,
-                fileName: apiResponse?.message?.[`${dbMessageType}Message`]?.fileName || file.filename,
-                mimetype: apiResponse?.message?.[`${dbMessageType}Message`]?.mimetype || file.mimetype,
-                duration: apiResponse?.message?.audioMessage?.seconds || undefined,
+                fileName: messageDetailsFromApi?.fileName || file.filename,
+                mimetype: messageDetailsFromApi?.mimetype || file.mimetype,
+                duration: messageDetailsFromApi?.seconds,
             };
 
             await client.query(
@@ -201,7 +204,7 @@ async function internalSendMedia(
                     metadata, is_read, ${senderColumn}
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
                 [
-                    workspaceId, chatId, dbMessageType, dbContent, true,
+                    workspaceId, chatId, dbMessageType, caption, true,
                     apiResponse?.key?.id, apiResponse?.status || 'SENT', instanceName,
                     dbMetadata, true, senderId
                 ]
@@ -267,7 +270,6 @@ export async function sendMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string; 
     }[]
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient();
@@ -289,7 +291,6 @@ export async function sendAutomatedMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string; 
     }[],
     agentId: string,
     instanceName?: string,
