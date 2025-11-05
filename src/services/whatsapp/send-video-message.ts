@@ -9,7 +9,6 @@ interface VideoPayload {
     media: string; // Base64 com data URI prefix
     caption?: string;
     filename?: string;
-    mimetype: string;
 }
 
 /**
@@ -26,11 +25,16 @@ export async function sendVideoMessage(
 ) {
     const apiPayload = {
         number: payload.number,
-        mediatype: 'video',
-        media: payload.media,
-        mimetype: payload.mimetype,
-        caption: payload.caption,
-        fileName: payload.filename,
+        options: {
+            delay: 1200,
+            presence: 'composing'
+        },
+        mediaMessage: {
+            mediatype: 'video',
+            media: payload.media,
+            caption: payload.caption,
+            fileName: payload.filename,
+        }
     };
     
     return await fetchEvolutionAPI(

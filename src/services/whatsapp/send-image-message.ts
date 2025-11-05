@@ -9,7 +9,6 @@ interface ImagePayload {
     media: string; // Base64 com data URI prefix
     caption?: string;
     filename?: string;
-    mimetype: string;
 }
 
 /**
@@ -26,11 +25,16 @@ export async function sendImageMessage(
 ) {
     const apiPayload = {
         number: payload.number,
-        mediatype: 'image',
-        media: payload.media,
-        mimetype: payload.mimetype,
-        caption: payload.caption,
-        fileName: payload.filename,
+        options: {
+            delay: 1200,
+            presence: 'composing'
+        },
+        mediaMessage: {
+            mediatype: 'image',
+            caption: payload.caption,
+            media: payload.media,
+            fileName: payload.filename,
+        }
     };
     
     return await fetchEvolutionAPI(
