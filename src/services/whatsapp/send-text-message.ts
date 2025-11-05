@@ -20,9 +20,7 @@ export async function sendTextMessage(
 ) {
     const payload = {
         number: remoteJid,
-        textMessage: {
-            text: text,
-        },
+        text: text,
     };
     
     return await fetchEvolutionAPI(
