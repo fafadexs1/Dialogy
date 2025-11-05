@@ -25,16 +25,10 @@ export async function sendDocumentMessage(
 ) {
     const apiPayload = {
         number: payload.number,
-        options: {
-            delay: 1200,
-            presence: 'composing'
-        },
-        mediaMessage: {
-            mediatype: 'document',
-            media: payload.media,
-            caption: payload.caption,
-            fileName: payload.filename,
-        }
+        mediatype: 'document',
+        media: payload.media,
+        caption: payload.caption,
+        fileName: payload.filename,
     };
     
     return await fetchEvolutionAPI(
