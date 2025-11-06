@@ -5,7 +5,6 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { randomUUID } from 'crypto';
 
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
@@ -77,71 +76,92 @@ export async function createEvolutionApiInstance(
     payload: EvolutionInstanceCreationPayload,
     workspaceId: string
 ): Promise<{ success: boolean, error?: string | null }> {
+    const client = await db.connect();
+    
     if (!workspaceId) {
         return { success: false, error: 'ID do Workspace não encontrado.' };
     }
-
-    // 1. Encontrar um cluster ativo com a menor carga (lógica de load balance a ser implementada)
-    // Por agora, vamos apenas pegar o primeiro cluster ativo.
-    const clusterRes = await db.query('SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC LIMIT 1');
-    if (clusterRes.rowCount === 0) {
-        return { success: false, error: 'Nenhum servidor (cluster) de WhatsApp ativo foi encontrado.' };
-    }
-    const cluster = clusterRes.rows[0];
-    const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
-    
-    // Generate a unique instance name for the API
-    const instanceName = `dialogy_${randomUUID().replace(/-/g, '')}`;
-    payload.instanceName = instanceName;
-
     if (!payload.displayName) {
         return { success: false, error: 'O apelido da instância é obrigatório.'}
     }
-    
-    // Prepara o payload para a API da Evolution
-    if (payload.integration === 'WHATSAPP-BUSINESS') {
-        payload.qrcode = false;
-        if (!payload.token || !payload.number || !payload.businessId) {
-            return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
-        }
-    } else { // WHATSAPP-BAILEYS
-        payload.qrcode = true;
-    }
-    
-    // Automatic Webhook Configuration
-    const webhookBaseUrl = process.env.NEXTAUTH_URL;
-    if (!webhookBaseUrl) {
-        console.error('[EVO_ACTION_CREATE_INSTANCE] Erro: A variável de ambiente NEXTAUTH_URL não está definida.');
-        return { success: false, error: 'A URL base da aplicação não está configurada no ambiente.' };
-    }
-
-    const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
-    payload.webhook = {
-        url: webhookUrlForInstance,
-        enabled: true,
-        events: [
-            'CHATS_UPSERT', 'CONNECTION_UPDATE', 'CONTACTS_UPDATE', 'CONTACTS_UPSERT',
-            'MESSAGES_DELETE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'
-        ]
-    };
 
     try {
+        await client.query('BEGIN');
+
+        // 1. Encontrar um cluster ativo com a menor carga (lógica de load balance a ser implementada)
+        const clusterRes = await client.query('SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC LIMIT 1');
+        if (clusterRes.rowCount === 0) {
+            throw new Error('Nenhum servidor (cluster) de WhatsApp ativo foi encontrado.');
+        }
+        const cluster = clusterRes.rows[0];
+        const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
+        
+        // 2. Gerar o próximo `instanceName` sequencial para o cluster selecionado.
+        const lastInstanceRes = await client.query(
+            `SELECT instance_name FROM evolution_api_instances 
+             WHERE cluster_id = $1 AND instance_name LIKE 'zap%' 
+             ORDER BY LENGTH(instance_name) DESC, instance_name DESC 
+             LIMIT 1`,
+            [cluster.id]
+        );
+        
+        let newInstanceNumber = 1;
+        if (lastInstanceRes.rowCount > 0) {
+            const lastInstanceName = lastInstanceRes.rows[0].instance_name;
+            const lastNumber = parseInt(lastInstanceName.replace('zap', ''), 10);
+            if (!isNaN(lastNumber)) {
+                newInstanceNumber = lastNumber + 1;
+            }
+        }
+        const instanceName = `zap${newInstanceNumber}`;
+        payload.instanceName = instanceName;
+        
+        // 3. Preparar o payload para a API da Evolution
+        if (payload.integration === 'WHATSAPP-BUSINESS') {
+            payload.qrcode = false;
+            if (!payload.token || !payload.number || !payload.businessId) {
+                return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
+            }
+        } else { // WHATSAPP-BAILEYS
+            payload.qrcode = true;
+        }
+        
+        const webhookBaseUrl = process.env.NEXTAUTH_URL;
+        if (!webhookBaseUrl) {
+            throw new Error('A variável de ambiente NEXTAUTH_URL não está definida.');
+        }
+
+        const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
+        payload.webhook = {
+            url: webhookUrlForInstance,
+            enabled: true,
+            events: [
+                'CHATS_UPSERT', 'CONNECTION_UPDATE', 'CONTACTS_UPDATE', 'CONTACTS_UPSERT',
+                'MESSAGES_DELETE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'
+            ]
+        };
+
+        // 4. Chamar a API da Evolution para criar a instância
         console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
         await fetchEvolutionAPI('/instance/create', apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
 
-        // Se a criação na API for bem-sucedida, salvar no DB local
+        // 5. Se a criação na API for bem-sucedida, salvar no DB local
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
-        await db.query(
+        await client.query(
             'INSERT INTO evolution_api_instances (workspace_id, cluster_id, instance_name, display_name, type, webhook_url) VALUES ($1, $2, $3, $4, $5, $6)',
             [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, payload.webhook.url]
         );
 
+        await client.query('COMMIT');
     } catch (error: any) {
+        await client.query('ROLLBACK');
         console.error('[EVO_ACTION_CREATE_INSTANCE] Erro ao criar instância:', error);
-        return { success: false, error: `Falha ao criar instância na API Evolution: ${error.message}` };
+        return { success: false, error: `Falha ao criar instância: ${error.message}` };
+    } finally {
+        client.release();
     }
 
     revalidatePath('/integrations/evolution-api');
