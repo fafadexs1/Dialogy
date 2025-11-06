@@ -46,20 +46,22 @@ function MetricBar({ value, label, icon: Icon }: { value: number, label: string,
 function AddClusterDialog({ onClusterAdded }: { onClusterAdded: () => void }) {
     const [isOpen, setIsOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [name, setName] = useState('');
+    const [apiUrl, setApiUrl] = useState('');
+    const [apiKey, setApiKey] = useState('');
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const formData = new FormData(e.currentTarget);
-        const name = formData.get('name') as string;
-        const apiUrl = formData.get('apiUrl') as string;
-        const apiKey = formData.get('apiKey') as string;
         
         const result = await createCluster({ name, apiUrl, apiKey });
 
         if (result.success) {
             toast({ title: "Cluster Adicionado!", description: "O novo servidor já está disponível." });
+            setName('');
+            setApiUrl('');
+            setApiKey('');
             setIsOpen(false);
             onClusterAdded();
         } else {
@@ -87,15 +89,15 @@ function AddClusterDialog({ onClusterAdded }: { onClusterAdded: () => void }) {
                     <div className="py-4 space-y-4">
                         <div className="space-y-2">
                             <Label htmlFor="name">Nome do Servidor</Label>
-                            <Input id="name" name="name" placeholder="Ex: Servidor SP-02" required />
+                            <Input id="name" name="name" placeholder="Ex: Servidor SP-02" required value={name} onChange={(e) => setName(e.target.value)} />
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="apiUrl">URL da API</Label>
-                            <Input id="apiUrl" name="apiUrl" placeholder="http://seu-dominio:8080" required />
+                            <Input id="apiUrl" name="apiUrl" placeholder="http://seu-dominio:8080" required value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="apiKey">Chave da API (API Key)</Label>
-                            <Input id="apiKey" name="apiKey" type="password" required />
+                            <Input id="apiKey" name="apiKey" type="password" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
                         </div>
                     </div>
                     <DialogFooter>
@@ -185,5 +187,3 @@ export default function ClustersPage() {
         </div>
     )
 }
-
-    
