@@ -2,6 +2,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlusCircle, Cpu, MemoryStick, HardDrive, Network, Server } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 async function getClusters() {
     // Mock data for now. In the future, this will fetch from the whatsapp_clusters table.
