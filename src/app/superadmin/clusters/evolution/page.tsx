@@ -21,6 +21,7 @@ import type { WhatsappCluster } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 
 
 function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, label: string, icon: React.ElementType, unit?: string }) {
@@ -37,7 +38,7 @@ function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, la
                 <span className="font-mono">{value}{unit}</span>
             </div>
             <div className="w-full bg-muted rounded-full h-2">
-                <div className={`h-2 rounded-full ${getColor(value)}`} style={{ width: `${value}%`}}></div>
+                <div className={`h-2 rounded-full transition-all duration-500 ease-in-out ${getColor(value)}`} style={{ width: `${value}%`}}></div>
             </div>
         </div>
     )
@@ -113,38 +114,115 @@ function AddClusterDialog({ onClusterAdded }: { onClusterAdded: () => void }) {
     )
 }
 
+function ClusterCard({ cluster }: { cluster: WhatsappCluster }) {
+    const [isPulsing, setIsPulsing] = useState(false);
+
+    useEffect(() => {
+        // This effect triggers the pulse animation whenever the metrics prop changes.
+        // We compare the stringified version as a simple way to detect a deep change.
+        setIsPulsing(true);
+        const timer = setTimeout(() => setIsPulsing(false), 1000); // Duration of the pulse animation
+        return () => clearTimeout(timer);
+    }, [cluster.metrics]);
+
+
+    const storageMetrics = cluster.metrics?.storage;
+    const networkMetrics = cluster.metrics?.network;
+    const storageUsage = storageMetrics && storageMetrics.total > 0
+        ? (storageMetrics.used / storageMetrics.total) * 100
+        : 0;
+
+    return (
+        <Card className={cn('transition-all duration-500', isPulsing && 'ring-2 ring-primary/50 shadow-lg')}>
+            <CardHeader>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${cluster.is_active ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                            {cluster.name}
+                        </CardTitle>
+                        <CardDescription className="mt-1">{cluster.api_url}</CardDescription>
+                    </div>
+                    <Switch checked={cluster.is_active} id={`active-${cluster.id}`} />
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <MetricBar value={cluster.metrics?.cpu || 0} label="CPU" icon={Cpu} />
+                <MetricBar value={cluster.metrics?.memory || 0} label="Memória" icon={MemoryStick} />
+                
+                <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5"><HardDrive className="h-3 w-3" /> Armazenamento</span>
+                        <span className="font-mono">{storageMetrics ? `${storageMetrics.used.toFixed(1)}GB / ${storageMetrics.total.toFixed(1)}GB` : 'N/A'}</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                        <div className="h-2 rounded-full bg-cyan-500 transition-all duration-500 ease-in-out" style={{ width: `${storageUsage}%`}}></div>
+                    </div>
+                </div>
+                
+                 <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5"><Network className="h-3 w-3" /> Rede</span>
+                        <div className="flex items-center gap-2 font-mono">
+                            <span className='flex items-center gap-1'><ArrowDown className="h-3 w-3 text-emerald-500"/>{networkMetrics?.down || 0} Mbps</span>
+                            <span className='flex items-center gap-1'><ArrowUp className="h-3 w-3 text-sky-500"/>{networkMetrics?.up || 0} Mbps</span>
+                        </div>
+                    </div>
+                 </div>
+
+                <div className="pt-2 border-t mt-4">
+                    <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground flex items-center gap-2"><Server className="h-4 w-4" /> Instâncias</span>
+                        <span className="font-bold">{cluster.metrics?.instances_count || 0}</span>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    )
+}
+
 export default function EvolutionClustersPage() {
     const [clusters, setClusters] = useState<WhatsappCluster[]>([]);
     const [loading, setLoading] = useState(true);
     const { toast } = useToast();
 
-    const fetchClusters = useCallback(async () => {
-        // Only set loading on initial fetch
-        if (clusters.length === 0) setLoading(true);
+    const fetchClusters = useCallback(async (isInitial = false) => {
+        if (isInitial) setLoading(true);
         
         const result = await getClusters();
         if (result.error) {
             toast({ title: "Erro ao carregar clusters", description: result.error, variant: "destructive" });
-            setClusters([]);
+            if (isInitial) setClusters([]);
         } else {
             setClusters(result.clusters || []);
         }
-        setLoading(false);
-    }, [toast, clusters.length]);
+        if(isInitial) setLoading(false);
+    }, [toast]);
     
     useEffect(() => {
-        fetchClusters();
+        fetchClusters(true); // Initial fetch
         
         const supabase = createClient();
         const channel = supabase
             .channel('whatsapp-clusters-db-changes')
-            .on(
+            .on<WhatsappCluster>(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'whatsapp_clusters' },
                 (payload) => {
                     console.log('Change received!', payload);
-                    // Re-fetch data on any change
-                    fetchClusters();
+                    const updatedCluster = payload.new;
+                    setClusters(currentClusters => {
+                        const existingClusterIndex = currentClusters.findIndex(c => c.id === updatedCluster.id);
+                        if (existingClusterIndex !== -1) {
+                            // Update existing cluster in place
+                            const newClusters = [...currentClusters];
+                            newClusters[existingClusterIndex] = updatedCluster;
+                            return newClusters;
+                        } else {
+                            // Add new cluster if it doesn't exist
+                            return [...currentClusters, updatedCluster];
+                        }
+                    });
                 }
             )
             .subscribe();
@@ -166,7 +244,7 @@ export default function EvolutionClustersPage() {
                         Gerencie os servidores da Evolution API disponíveis para as instâncias dos usuários.
                     </CardDescription>
                 </div>
-                <AddClusterDialog onClusterAdded={fetchClusters} />
+                <AddClusterDialog onClusterAdded={() => fetchClusters(true)} />
             </div>
             
             {loading ? (
@@ -176,63 +254,13 @@ export default function EvolutionClustersPage() {
                  </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {clusters.map(cluster => {
-                        const storageMetrics = cluster.metrics?.storage;
-                        const networkMetrics = cluster.metrics?.network;
-                        const storageUsage = storageMetrics && storageMetrics.total > 0
-                            ? (storageMetrics.used / storageMetrics.total) * 100
-                            : 0;
-
-                        return (
-                            <Card key={cluster.id}>
-                                <CardHeader>
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <CardTitle className="flex items-center gap-2">
-                                                <div className={`w-3 h-3 rounded-full ${cluster.is_active ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                                                {cluster.name}
-                                            </CardTitle>
-                                            <CardDescription className="mt-1">{cluster.api_url}</CardDescription>
-                                        </div>
-                                        <Switch checked={cluster.is_active} id={`active-${cluster.id}`} />
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <MetricBar value={cluster.metrics?.cpu || 0} label="CPU" icon={Cpu} />
-                                    <MetricBar value={cluster.metrics?.memory || 0} label="Memória" icon={MemoryStick} />
-                                    
-                                    <div className="space-y-1">
-                                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                            <span className="flex items-center gap-1.5"><HardDrive className="h-3 w-3" /> Armazenamento</span>
-                                            <span className="font-mono">{storageMetrics ? `${storageMetrics.used.toFixed(1)}GB / ${storageMetrics.total.toFixed(1)}GB` : 'N/A'}</span>
-                                        </div>
-                                        <div className="w-full bg-muted rounded-full h-2">
-                                            <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${storageUsage}%`}}></div>
-                                        </div>
-                                    </div>
-                                    
-                                     <div className="space-y-1">
-                                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                            <span className="flex items-center gap-1.5"><Network className="h-3 w-3" /> Rede</span>
-                                            <div className="flex items-center gap-2 font-mono">
-                                                <span className='flex items-center gap-1'><ArrowDown className="h-3 w-3 text-emerald-500"/>{networkMetrics?.down || 0} Mbps</span>
-                                                <span className='flex items-center gap-1'><ArrowUp className="h-3 w-3 text-sky-500"/>{networkMetrics?.up || 0} Mbps</span>
-                                            </div>
-                                        </div>
-                                     </div>
-
-                                    <div className="pt-2 border-t mt-4">
-                                        <div className="flex items-center justify-between text-sm">
-                                            <span className="text-muted-foreground flex items-center gap-2"><Server className="h-4 w-4" /> Instâncias</span>
-                                            <span className="font-bold">{cluster.metrics?.instances_count || 0}</span>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )
-                    })}
+                    {clusters.map(cluster => (
+                       <ClusterCard key={cluster.id} cluster={cluster} />
+                    ))}
                 </div>
             )}
         </div>
     )
 }
+
+    
