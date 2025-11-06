@@ -3,13 +3,14 @@
 
 import Link from "next/link";
 import { usePathname } from 'next/navigation';
-import { Bell, Home, LineChart, Package, Package2, ShoppingCart, Users, CreditCard } from "lucide-react";
+import { Bell, Home, LineChart, Package, Package2, ShoppingCart, Users, CreditCard, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const navItems = [
     { href: '/superadmin/billing', label: 'Cobranças', icon: CreditCard },
+    { href: '/superadmin/clusters', label: 'Clusters', icon: HardDrive },
     { href: '/superadmin/users', label: 'Usuários', icon: Users },
 ]
 
@@ -54,5 +55,3 @@ export function Sidebar() {
         </div>
     );
 }
-
-    

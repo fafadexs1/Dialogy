@@ -342,6 +342,17 @@ const TABLE_CREATION_QUERIES = `
         error_message text,
         UNIQUE(campaign_id, contact_id)
     );
+
+    CREATE TABLE IF NOT EXISTS public.whatsapp_clusters (
+        id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+        name TEXT NOT NULL,
+        api_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        metrics JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+        updated_at TIMEST-AMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+    );
 `;
 
 
@@ -398,5 +409,3 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Conexão com o banco de dados liberada.');
   }
 }
-
-    
