@@ -284,11 +284,21 @@ export interface AutopilotUsageLog {
     output_tokens: number;
 }
 
-export interface EvolutionApiConfig {
+export interface WhatsappCluster {
     id: string;
-    workspace_id: string;
-    api_url: string | null;
-    api_key: string | null;
+    name: string;
+    api_url: string;
+    api_key: string;
+    is_active: boolean;
+    metrics: {
+        cpu: number;
+        memory: number;
+        storage: number;
+        network: number;
+        instances_count: number;
+    } | null;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface EvolutionInstance {
@@ -296,7 +306,7 @@ export interface EvolutionInstance {
     name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
-    config_id: string; // This will now refer to the cluster_id
+    cluster_id: string; 
     qrCode?: string;
     webhook_url?: string;
 }
@@ -434,5 +444,7 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
+
+    
 
     
