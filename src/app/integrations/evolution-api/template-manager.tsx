@@ -13,12 +13,11 @@ import { PlusCircle, Trash2, Loader2, Save, MessageSquarePlus, Copy, Code, Refre
 import { useToast } from '@/hooks/use-toast';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { createWhatsappTemplate, findWhatsappTemplates } from '@/actions/evolution-api';
-import type { EvolutionApiConfig, EvolutionInstance } from '@/lib/types';
+import type { EvolutionInstance } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface TemplateManagerProps {
-    config: EvolutionApiConfig;
     instances: Omit<EvolutionInstance, 'status' | 'qrCode'>[];
 }
 
@@ -37,7 +36,7 @@ type TemplateButton = {
     phone_number?: string;
 };
 
-export function TemplateManager({ config, instances }: TemplateManagerProps) {
+export function TemplateManager({ instances }: TemplateManagerProps) {
     const { toast } = useToast();
     const [isOpen, setIsOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -153,7 +152,7 @@ export function TemplateManager({ config, instances }: TemplateManagerProps) {
                     <Select value={instanceName} onValueChange={setInstanceName} required>
                         <SelectTrigger className="w-[250px]"><SelectValue placeholder="Selecione uma instância..."/></SelectTrigger>
                         <SelectContent>
-                            {instances.map(inst => <SelectItem key={inst.id} value={inst.name}>{inst.name}</SelectItem>)}
+                            {instances.map(inst => <SelectItem key={inst.id} value={inst.instance_name}>{inst.display_name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                      <Button onClick={() => fetchTemplates(instanceName)} variant="outline" size="icon" disabled={loadingTemplates || !instanceName}>

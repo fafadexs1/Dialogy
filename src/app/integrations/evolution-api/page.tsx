@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff } from 'lucide-react';
+import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,8 @@ import { useFormStatus } from 'react-dom';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TemplateManager } from './template-manager';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -41,22 +43,20 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         const payload: EvolutionInstanceCreationPayload = {
             displayName: formData.get('displayName') as string,
             integration: formData.get('integrationType') as any,
-            // Baileys is default
-            qrcode: true,
+            qrcode: true, // Default for baileys
+            rejectCall: formData.get('rejectCall') === 'on',
+            msgCall: formData.get('msgCall') as string | undefined,
+            groupsIgnore: formData.get('groupsIgnore') === 'on',
+            alwaysOnline: formData.get('alwaysOnline') === 'on',
+            readMessages: formData.get('readMessages') === 'on',
+            readStatus: formData.get('readStatus') === 'on',
         };
         
         if (payload.integration === 'WHATSAPP-BUSINESS') {
+            payload.qrcode = false; // Override for Cloud API
             payload.token = formData.get('token') as string;
-            payload.number = formData.get('numberId') as string; // Corrigido de 'number' para 'numberId'
+            payload.number = formData.get('numberId') as string;
             payload.businessId = formData.get('businessId') as string;
-            payload.s3 = {
-                endpoint: formData.get('s3Endpoint') as string,
-                bucket: formData.get('s3Bucket') as string,
-                port: Number(formData.get('s3Port')),
-                accessKeyId: formData.get('s3AccessKey') as string,
-                secretAccessKey: formData.get('s3SecretKey') as string,
-                useSSL: formData.get('s3UseSsl') === 'on'
-            }
         }
         
         const result = await createEvolutionApiInstance(payload, workspaceId);
@@ -91,8 +91,8 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     </Select>
                 </div>
 
-                {integrationType === 'WHATSAPP-BUSINESS' && (
-                    <Accordion type="multiple" defaultValue={['meta', 's3']} className="w-full">
+                {integrationType === 'WHATSAPP-BUSINESS' ? (
+                    <Accordion type="single" defaultValue={'meta'} className="w-full">
                         <AccordionItem value="meta">
                             <AccordionTrigger>Informações da Meta Business</AccordionTrigger>
                             <AccordionContent className="space-y-4 pt-2">
@@ -110,34 +110,35 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                 </div>
                             </AccordionContent>
                         </AccordionItem>
-                        <AccordionItem value="s3">
-                            <AccordionTrigger>Configuração S3 (Minio)</AccordionTrigger>
-                            <AccordionContent className="space-y-4 pt-2">
-                                 <div className="space-y-2">
-                                    <Label htmlFor="s3Endpoint">S3 Endpoint</Label>
-                                    <Input id="s3Endpoint" name="s3Endpoint" placeholder="Ex: s3.meudominio.com" required />
+                    </Accordion>
+                ) : (
+                    <Accordion type="single" defaultValue={'settings'} className="w-full">
+                        <AccordionItem value="settings">
+                            <AccordionTrigger>Configurações Avançadas (Baileys)</AccordionTrigger>
+                            <AccordionContent className="space-y-4 pt-4">
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox id="rejectCall" name="rejectCall" />
+                                    <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
                                 </div>
                                  <div className="space-y-2">
-                                    <Label htmlFor="s3Bucket">S3 Bucket</Label>
-                                    <Input id="s3Bucket" name="s3Bucket" placeholder="Nome do seu bucket" required />
+                                    <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
+                                    <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                     <div className="space-y-2">
-                                        <Label htmlFor="s3Port">S3 Porta</Label>
-                                        <Input id="s3Port" name="s3Port" type="number" defaultValue="9000" required />
-                                    </div>
-                                    <div className="flex items-center space-x-2 pt-6">
-                                       <input type="checkbox" id="s3UseSsl" name="s3UseSsl" className="h-4 w-4 rounded border-primary" />
-                                       <Label htmlFor="s3UseSsl">Usar SSL</Label>
-                                    </div>
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox id="groupsIgnore" name="groupsIgnore" />
+                                    <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="s3AccessKey">S3 Access Key ID</Label>
-                                    <Input id="s3AccessKey" name="s3AccessKey" required />
+                                 <div className="flex items-center space-x-2">
+                                    <Checkbox id="alwaysOnline" name="alwaysOnline" />
+                                    <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
                                 </div>
-                                 <div className="space-y-2">
-                                    <Label htmlFor="s3SecretKey">S3 Secret Access Key</Label>
-                                    <Input id="s3SecretKey" name="s3SecretKey" type="password" required />
+                                 <div className="flex items-center space-x-2">
+                                    <Checkbox id="readMessages" name="readMessages" defaultChecked/>
+                                    <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
+                                </div>
+                                 <div className="flex items-center space-x-2">
+                                    <Checkbox id="readStatus" name="readStatus" />
+                                    <Label htmlFor="readStatus">Marcar status como vistos</Label>
                                 </div>
                             </AccordionContent>
                         </AccordionItem>
@@ -341,7 +342,7 @@ export default function EvolutionApiPage() {
                 )}
                 
                 {cloudApiInstances.length > 0 && user.activeWorkspaceId && (
-                     <TemplateManager config={{ id: 'dummy', workspace_id: user.activeWorkspaceId, api_key: null, api_url: null }} instances={cloudApiInstances} />
+                     <TemplateManager instances={cloudApiInstances} />
                 )}
 
             </main>

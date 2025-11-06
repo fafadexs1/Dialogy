@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { randomUUID } from 'crypto';
 
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
@@ -12,7 +13,7 @@ import { createClient } from '@/lib/supabase/server';
 export async function getEvolutionApiInstances(workspaceId: string): Promise<Omit<EvolutionInstance, 'status' | 'qrCode'>[]> {
     try {
         const res = await db.query('SELECT id, instance_name, display_name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
-        return res.rows.map(r => ({ ...r, config_id: r.cluster_id })); // Map cluster_id to config_id for compatibility
+        return res.rows;
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
         throw new Error('Failed to fetch Evolution API instances.');
@@ -117,15 +118,6 @@ export async function createEvolutionApiInstance(
         payload.instanceName = instanceName;
         
         // 3. Preparar o payload para a API da Evolution
-        if (payload.integration === 'WHATSAPP-BUSINESS') {
-            payload.qrcode = false;
-            if (!payload.token || !payload.number || !payload.businessId) {
-                return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
-            }
-        } else { // WHATSAPP-BAILEYS
-            payload.qrcode = true;
-        }
-        
         const webhookBaseUrl = process.env.NEXTAUTH_URL;
         if (!webhookBaseUrl) {
             throw new Error('A variável de ambiente NEXTAUTH_URL não está definida.');
@@ -140,6 +132,15 @@ export async function createEvolutionApiInstance(
                 'MESSAGES_DELETE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'
             ]
         };
+
+        if (payload.integration === 'WHATSAPP-BUSINESS') {
+            payload.qrcode = false;
+            if (!payload.token || !payload.number || !payload.businessId) {
+                return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
+            }
+        } else { // WHATSAPP-BAILEYS
+            payload.qrcode = true;
+        }
 
         // 4. Chamar a API da Evolution para criar a instância
         console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
@@ -314,5 +315,38 @@ export async function deleteMessageAction(
         return { success: false, error: error.message };
     } finally {
         client.release();
+    }
+}
+
+
+// Ação para criar template do WhatsApp
+export async function createWhatsappTemplate(
+    instanceName: string,
+    payload: any
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        await fetchEvolutionAPI(`/template/add/${instanceName}`, apiConfig, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        return { success: true };
+    } catch (error: any) {
+        console.error('[EVO_ACTION_CREATE_TEMPLATE] Error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Ação para buscar templates do WhatsApp
+export async function findWhatsappTemplates(
+    instanceName: string
+): Promise<{ templates: any[] | null; error?: string }> {
+    try {
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        const response = await fetchEvolutionAPI(`/template/findAll/${instanceName}`, apiConfig);
+        return { templates: response };
+    } catch (error: any) {
+        console.error('[EVO_ACTION_FIND_TEMPLATES] Error:', error);
+        return { templates: null, error: error.message };
     }
 }
