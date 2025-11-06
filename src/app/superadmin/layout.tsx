@@ -9,11 +9,16 @@ import { Sidebar } from './sidebar';
 
 async function checkSuperAdmin(userId: string) {
     if (!userId) return false;
-    const { data, error } = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
-    if (error || !data.rows[0]) {
+    try {
+        const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
+        if (result.rowCount === 0) {
+            return false;
+        }
+        return result.rows[0].is_superadmin;
+    } catch (error) {
+        console.error("[CHECK_SUPERADMIN_ERROR]", error);
         return false;
     }
-    return data.rows[0].is_superadmin;
 }
 
 export default async function SuperAdminLayout({ children }: { children: ReactNode }) {
@@ -35,5 +40,3 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
         </div>
     );
 }
-
-    
