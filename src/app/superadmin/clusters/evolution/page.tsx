@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +20,7 @@ import { getClusters, createCluster } from "@/actions/clusters";
 import type { WhatsappCluster } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
+import { createClient } from "@/lib/supabase/client";
 
 
 function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, label: string, icon: React.ElementType, unit?: string }) {
@@ -119,7 +119,9 @@ export default function EvolutionClustersPage() {
     const { toast } = useToast();
 
     const fetchClusters = useCallback(async () => {
-        setLoading(true);
+        // Only set loading on initial fetch
+        if (clusters.length === 0) setLoading(true);
+        
         const result = await getClusters();
         if (result.error) {
             toast({ title: "Erro ao carregar clusters", description: result.error, variant: "destructive" });
@@ -128,11 +130,31 @@ export default function EvolutionClustersPage() {
             setClusters(result.clusters || []);
         }
         setLoading(false);
-    }, [toast]);
+    }, [toast, clusters.length]);
     
     useEffect(() => {
         fetchClusters();
-    }, [fetchClusters]);
+        
+        const supabase = createClient();
+        const channel = supabase
+            .channel('whatsapp-clusters-db-changes')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'whatsapp_clusters' },
+                (payload) => {
+                    console.log('Change received!', payload);
+                    // Re-fetch data on any change
+                    fetchClusters();
+                }
+            )
+            .subscribe();
+
+        // Cleanup subscription on component unmount
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
 
     return (
