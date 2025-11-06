@@ -9,6 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -212,9 +218,9 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                             </DropdownMenuTrigger>
                             <DropdownMenuContent>
                                 <AlertDialogTrigger asChild>
-                                    <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive">
+                                    <DropdownMenuItem className="w-full justify-start text-destructive hover:text-destructive" onSelect={(e) => e.preventDefault()}>
                                         <Trash2 className="mr-2"/>Excluir
-                                    </Button>
+                                    </DropdownMenuItem>
                                 </AlertDialogTrigger>
                             </DropdownMenuContent>
                         </DropdownMenu>
