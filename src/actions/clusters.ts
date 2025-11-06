@@ -8,9 +8,9 @@ import { createClient } from '@/lib/supabase/server';
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     if (!userId) return false;
-    const { data, error } = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
-    if (error || data.rowCount === 0) return false;
-    return data.rows[0].is_superadmin;
+    const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
+    if (result.rowCount === 0) return false;
+    return result.rows[0].is_superadmin;
 }
 
 export async function getClusters(): Promise<{ clusters: WhatsappCluster[] | null, error?: string }> {
@@ -58,5 +58,3 @@ export async function createCluster(payload: { name: string, apiUrl: string, api
         return { success: false, error: 'Falha ao adicionar o cluster ao banco de dados.' };
     }
 }
-
-    
