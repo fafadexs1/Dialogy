@@ -296,7 +296,7 @@ export interface EvolutionInstance {
     name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
-    config_id: string;
+    config_id: string; // This will now refer to the cluster_id
     qrCode?: string;
     webhook_url?: string;
 }
@@ -308,6 +308,7 @@ export interface EvolutionInstanceCreationPayload {
     // Cloud API Fields
     token?: string;
     businessId?: string;
+    number?: string;
     s3?: {
         endpoint: string;
         bucket: string;
@@ -321,7 +322,6 @@ export interface EvolutionInstanceCreationPayload {
     qrcode?: boolean;
     
     // Common fields
-    number?: string;
     rejectCall?: boolean;
     msgCall?: string;
     groupsIgnore?: boolean;

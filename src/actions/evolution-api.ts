@@ -3,72 +3,16 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { EvolutionApiConfig, EvolutionInstance, EvolutionInstanceCreationPayload } from '@/lib/types';
-
-/**
- * Retorna a configuração da Evolution API para um workspace específico.
- */
-export async function getEvolutionApiConfig(workspaceId: string): Promise<EvolutionApiConfig | null> {
-    try {
-        const res = await db.query('SELECT * FROM evolution_api_configs WHERE workspace_id = $1', [workspaceId]);
-        if (res.rows.length === 0) {
-            return null;
-        }
-        return res.rows[0];
-    } catch (error) {
-        console.error('[EVO_ACTION_GET_CONFIG] Error fetching config:', error);
-        throw new Error('Failed to fetch Evolution API config.');
-    }
-}
-
-/**
- * Salva ou atualiza a configuração da Evolution API para um workspace.
- */
-export async function saveEvolutionApiConfig(prevState: any, formData: FormData): Promise<{ error: string | null }> {
-    const workspaceId = formData.get('workspaceId') as string;
-    const configId = formData.get('configId') as string;
-    const apiUrl = formData.get('apiUrl') as string;
-    const apiKey = formData.get('apiKey') as string;
-
-    if (!workspaceId) {
-        return { error: 'Workspace ID is required.' };
-    }
-
-    try {
-        if (configId) {
-            // Update existing config
-            await db.query(
-                'UPDATE evolution_api_configs SET api_url = $1, api_key = $2 WHERE id = $3 AND workspace_id = $4',
-                [apiUrl, apiKey, configId, workspaceId]
-            );
-        } else {
-            // Insert new config
-            await db.query(
-                'INSERT INTO evolution_api_configs (workspace_id, api_url, api_key) VALUES ($1, $2, $3)',
-                [workspaceId, apiUrl, apiKey]
-            );
-        }
-    } catch (error) {
-        console.error('[EVO_ACTION_SAVE_CONFIG] Error saving config:', error);
-        return { error: 'Failed to save configuration.' };
-    }
-
-    revalidatePath('/integrations/evolution-api');
-    return { error: null };
-}
+import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace } from '@/lib/types';
+import { createClient } from '@/lib/supabase/server';
 
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
 export async function getEvolutionApiInstances(workspaceId: string): Promise<Omit<EvolutionInstance, 'status' | 'qrCode'>[]> {
     try {
-        const config = await getEvolutionApiConfig(workspaceId);
-        if (!config || !config.id) {
-            return [];
-        }
-        
-        const res = await db.query('SELECT id, name, type, config_id, webhook_url FROM evolution_api_instances WHERE config_id = $1', [config.id]);
-        return res.rows;
+        const res = await db.query('SELECT id, name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
+        return res.rows.map(r => ({ ...r, config_id: r.cluster_id })); // Map cluster_id to config_id for compatibility
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
         throw new Error('Failed to fetch Evolution API instances.');
@@ -80,13 +24,13 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<Omi
  */
 export async function fetchEvolutionAPI(
     endpoint: string, 
-    config: Omit<EvolutionApiConfig, 'id' | 'workspace_id'>,
+    apiConfig: { api_url: string; api_key: string },
     options: RequestInit = {}
 ) {
-    if (!config.api_url || !config.api_key) {
+    if (!apiConfig.api_url || !apiConfig.api_key) {
         throw new Error("A configuração da API (URL e Chave) é necessária.");
     }
-    const baseUrl = config.api_url.endsWith('/') ? config.api_url.slice(0, -1) : config.api_url;
+    const baseUrl = apiConfig.api_url.endsWith('/') ? apiConfig.api_url.slice(0, -1) : apiConfig.api_url;
     const url = `${baseUrl}${endpoint}`;
     
     console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
@@ -99,7 +43,7 @@ export async function fetchEvolutionAPI(
             ...options,
             headers: {
                 ...options.headers,
-                'apikey': config.api_key,
+                'apikey': apiConfig.api_key,
                 'Content-Type': 'application/json',
             },
             cache: 'no-store'
@@ -113,13 +57,10 @@ export async function fetchEvolutionAPI(
             throw new Error(`Erro da API Evolution: ${response.statusText} - ${responseBodyText}`);
         }
         
-        // Verifica se a resposta é um JSON antes de tentar fazer o parse
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json") && responseBodyText) {
             return JSON.parse(responseBodyText);
         }
-        // Retorna undefined ou o corpo do texto se não for JSON, dependendo da necessidade.
-        // Para a maioria dos casos da Evolution API, um corpo vazio em uma resposta 200 OK é sucesso.
         return responseBodyText ? { text: responseBodyText } : undefined;
 
     } catch (error) {
@@ -128,29 +69,31 @@ export async function fetchEvolutionAPI(
     }
 }
 
-
 /**
  * Cria uma nova instância na API da Evolution e a registra no banco de dados local.
  */
 export async function createEvolutionApiInstance(
     payload: EvolutionInstanceCreationPayload,
-    config_id: string
+    workspaceId: string
 ): Promise<{ success: boolean, error?: string | null }> {
-    if (!config_id) {
-        return { success: false, error: 'ID de configuração não encontrado.' };
+    if (!workspaceId) {
+        return { success: false, error: 'ID do Workspace não encontrado.' };
     }
 
-    // 1. Obter a configuração global da API
-    const configRes = await db.query('SELECT api_url, api_key FROM evolution_api_configs WHERE id = $1', [config_id]);
-    if (configRes.rows.length === 0) {
-        return { success: false, error: 'Configuração global da API não encontrada.' };
+    // 1. Encontrar um cluster ativo com a menor carga (lógica de load balance a ser implementada)
+    // Por agora, vamos apenas pegar o primeiro cluster ativo.
+    const clusterRes = await db.query('SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC LIMIT 1');
+    if (clusterRes.rowCount === 0) {
+        return { success: false, error: 'Nenhum servidor (cluster) de WhatsApp ativo foi encontrado.' };
     }
-    const apiConfig = configRes.rows[0];
+    const cluster = clusterRes.rows[0];
+    const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
     
     if (!payload.instanceName) {
         return { success: false, error: 'O nome da instância é obrigatório.'}
     }
     
+    // Prepara o payload para a API da Evolution
     if (payload.integration === 'WHATSAPP-BUSINESS') {
         payload.qrcode = false;
         if (!payload.token || !payload.number || !payload.businessId) {
@@ -172,29 +115,23 @@ export async function createEvolutionApiInstance(
         url: webhookUrlForInstance,
         enabled: true,
         events: [
-            'CHATS_UPSERT',
-            'CONNECTION_UPDATE',
-            'CONTACTS_UPDATE',
-            'CONTACTS_UPSERT',
-            'MESSAGES_DELETE',
-            'MESSAGES_UPSERT',
-            'MESSAGES_UPDATE'
+            'CHATS_UPSERT', 'CONNECTION_UPDATE', 'CONTACTS_UPDATE', 'CONTACTS_UPSERT',
+            'MESSAGES_DELETE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'
         ]
     };
 
     try {
-        // 3. Chamar a API da Evolution para criar a instância
         console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
         await fetchEvolutionAPI('/instance/create', apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
 
-        // 4. Se a criação na API for bem-sucedida, salvar no DB local
+        // Se a criação na API for bem-sucedida, salvar no DB local
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
         await db.query(
-            'INSERT INTO evolution_api_instances (name, type, config_id, webhook_url) VALUES ($1, $2, $3, $4)',
-            [payload.instanceName, instanceType, config_id, payload.webhook.url]
+            'INSERT INTO evolution_api_instances (workspace_id, cluster_id, name, type, webhook_url) VALUES ($1, $2, $3, $4, $5)',
+            [workspaceId, cluster.id, payload.instanceName, instanceType, payload.webhook.url]
         );
 
     } catch (error: any) {
@@ -215,19 +152,19 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     }
 
     try {
-        // Primeiro, precisamos do nome da instância para a chamada da API
-        const instanceRes = await db.query('SELECT name, config_id FROM evolution_api_instances WHERE id = $1', [instanceId]);
+        // Obter detalhes da instância e do cluster associado
+        const instanceRes = await db.query(
+          `SELECT i.name, c.api_url, c.api_key 
+           FROM evolution_api_instances i
+           JOIN whatsapp_clusters c ON i.cluster_id = c.id
+           WHERE i.id = $1`,
+          [instanceId]
+        );
         if (instanceRes.rows.length === 0) {
-            return { error: 'Instância não encontrada no banco de dados local.' };
+            return { error: 'Instância ou cluster associado não encontrado.' };
         }
-        const { name: instanceName, config_id } = instanceRes.rows[0];
-
-        // Obter a configuração da API para a chave
-        const configRes = await db.query('SELECT api_url, api_key FROM evolution_api_configs WHERE id = $1', [config_id]);
-        if (configRes.rows.length === 0) {
-            return { error: 'Configuração da API não encontrada.' };
-        }
-        const apiConfig = configRes.rows[0];
+        const { name: instanceName, api_url, api_key } = instanceRes.rows[0];
+        const apiConfig = { api_url, api_key };
 
         // Chamar a API para deletar
         await fetchEvolutionAPI(`/instance/delete/${instanceName}`, apiConfig, { method: 'DELETE' });
@@ -237,25 +174,39 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
 
     } catch (error: any) {
         console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting instance:', error);
-        // Mesmo se a API falhar (ex: instância já deletada lá), tentamos remover do nosso DB
+        // Mesmo se a API falhar, tentamos remover do nosso DB
         try {
             await db.query('DELETE FROM evolution_api_instances WHERE id = $1', [instanceId]);
         } catch (dbError) {
              console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting from DB after API error:', dbError);
         }
-        return { error: `Falha ao deletar instância. Ela pode ter sido removida do DB local, mas verifique o servidor da Evolution. Erro: ${error.message}` };
+        return { error: `Falha ao deletar instância. Erro: ${error.message}` };
     }
 
     revalidatePath('/integrations/evolution-api');
     return { error: null };
 }
 
-export async function checkInstanceStatus(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+async function getApiConfigForInstance(instanceName: string) {
+    const instanceRes = await db.query(
+      `SELECT c.api_url, c.api_key 
+       FROM evolution_api_instances i
+       JOIN whatsapp_clusters c ON i.cluster_id = c.id
+       WHERE i.name = $1`,
+      [instanceName]
+    );
+     if (instanceRes.rows.length === 0) {
+        throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);
+    }
+    return instanceRes.rows[0];
+}
+
+export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, config);
-        // O estado 'connecting' na API v2 significa que está aguardando o QR code.
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, apiConfig);
         if (data.instance.state === 'connecting') {
-            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
+            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
              return { status: 'pending', qrCode: qrData?.base64 };
         }
         if (data.instance.state === 'open') {
@@ -268,10 +219,10 @@ export async function checkInstanceStatus(instanceName: string, config: Evolutio
     }
 }
 
-export async function connectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
-        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, config);
-        // Se a conexão for iniciada, o status será 'pending' e podemos ter um QR code
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
         }
@@ -282,19 +233,19 @@ export async function connectInstance(instanceName: string, config: EvolutionApi
     }
 }
 
-export async function disconnectInstance(instanceName: string, config: EvolutionApiConfig): Promise<{ status: EvolutionInstance['status'] }> {
+export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'] }> {
     try {
-        await fetchEvolutionAPI(`/instance/logout/${instanceName}`, config, { method: 'POST' });
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        await fetchEvolutionAPI(`/instance/logout/${instanceName}`, apiConfig, { method: 'POST' });
         return { status: 'disconnected' };
     } catch (error) {
         console.error(`[EVO_ACTION_DISCONNECT] Erro ao desconectar instância ${instanceName}:`, error);
-        // Mesmo em caso de erro, assumimos que desconectou ou já estava desconectado.
         return { status: 'disconnected' };
     }
 }
 
 export async function deleteMessageAction(
-    messageId: string, // This is the DB message ID
+    messageId: string,
     instanceName: string
 ): Promise<{ success: boolean, error?: string }> {
      if (!instanceName || !messageId) {
@@ -306,44 +257,18 @@ export async function deleteMessageAction(
         await client.query('BEGIN');
 
         const msgRes = await client.query('SELECT message_id_from_api, from_me, chat_id FROM messages WHERE id = $1', [messageId]);
-        if (msgRes.rowCount === 0) {
-            throw new Error("Mensagem não encontrada no banco de dados.");
-        }
+        if (msgRes.rowCount === 0) throw new Error("Mensagem não encontrada no banco de dados.");
         const { message_id_from_api: apiMessageId, from_me: fromMe, chat_id } = msgRes.rows[0];
         
-        if (!apiMessageId) {
-            throw new Error("A mensagem não possui um ID da API para ser apagada.");
-        }
+        if (!apiMessageId) throw new Error("A mensagem não possui um ID da API para ser apagada.");
 
-        const chatRes = await client.query('SELECT c.workspace_id, ct.phone_number_jid as remoteJid FROM chats c JOIN contacts ct ON c.contact_id = ct.id WHERE c.id = $1', [chat_id]);
-        if (chatRes.rowCount === 0) {
-             throw new Error("Chat não encontrado.");
-        }
-        const { workspace_id, remotejid: remoteJid } = chatRes.rows[0];
+        const chatRes = await client.query('SELECT ct.phone_number_jid as remoteJid FROM chats c JOIN contacts ct ON c.contact_id = ct.id WHERE c.id = $1', [chat_id]);
+        if (chatRes.rowCount === 0) throw new Error("Chat não encontrado.");
+        const { remotejid: remoteJid } = chatRes.rows[0];
         
-        if (!remoteJid) {
-            throw new Error("Número do contato (remoteJid) não encontrado.");
-        }
+        const apiConfig = await getApiConfigForInstance(instanceName);
         
-        const configRes = await client.query(
-            `SELECT c.api_url, c.api_key 
-            FROM evolution_api_configs c
-            JOIN evolution_api_instances i ON c.id = i.config_id
-            WHERE i.name = $1 AND c.workspace_id = $2`,
-            [instanceName, workspace_id]
-        );
-        if (configRes.rowCount === 0) {
-            throw new Error("Configuração da API não encontrada para esta instância.");
-        }
-
-        const apiConfig = configRes.rows[0];
-        
-        // Correct payload for the delete request
-        const deletePayload = {
-            id: apiMessageId,
-            remoteJid,
-            fromMe,
-        };
+        const deletePayload = { id: apiMessageId, remoteJid, fromMe };
         
         console.log(`[EVO_ACTION_DELETE_MSG] Enviando requisição para apagar. Payload: ${JSON.stringify(deletePayload)}`);
 
@@ -364,80 +289,5 @@ export async function deleteMessageAction(
         return { success: false, error: error.message };
     } finally {
         client.release();
-    }
-}
-
-/**
- * Cria um novo template de mensagem do WhatsApp via API.
- */
-export async function createWhatsappTemplate(
-    instanceName: string,
-    templatePayload: any
-): Promise<{ success: boolean; error?: string }> {
-    if (!instanceName || !templatePayload) {
-        return { success: false, error: 'Nome da instância e payload do template são obrigatórios.' };
-    }
-
-    try {
-        // 1. Obter a configuração da API para a instância
-        const instanceRes = await db.query(
-            `SELECT c.api_url, c.api_key 
-             FROM evolution_api_instances i
-             JOIN evolution_api_configs c ON i.config_id = c.id
-             WHERE i.name = $1 AND i.type = 'wa_cloud'`,
-            [instanceName]
-        );
-
-        if (instanceRes.rowCount === 0) {
-            return { success: false, error: 'Instância Cloud API não encontrada ou não configurada.' };
-        }
-        const apiConfig = instanceRes.rows[0];
-
-        // 2. Chamar a API da Evolution para criar o template
-        await fetchEvolutionAPI(`/template/create/${instanceName}`, apiConfig, {
-            method: 'POST',
-            body: JSON.stringify(templatePayload),
-        });
-        
-        // Sucesso não significa que foi aprovado, apenas que foi enviado.
-        return { success: true };
-    } catch (error: any) {
-        console.error('[CREATE_TEMPLATE_ACTION] Erro ao criar template:', error);
-        return { success: false, error: error.message || 'Falha ao se comunicar com a API da Evolution.' };
-    }
-}
-
-
-/**
- * Busca templates de mensagem do WhatsApp de uma instância Cloud API.
- */
-export async function findWhatsappTemplates(instanceName: string): Promise<{ templates?: any[]; error?: string }> {
-    if (!instanceName) {
-        return { error: 'O nome da instância é obrigatório.' };
-    }
-    
-    try {
-        const instanceRes = await db.query(
-            `SELECT c.api_url, c.api_key 
-             FROM evolution_api_instances i
-             JOIN evolution_api_configs c ON i.config_id = c.id
-             WHERE i.name = $1 AND i.type = 'wa_cloud'`,
-            [instanceName]
-        );
-        
-        if (instanceRes.rowCount === 0) {
-            return { error: 'Instância Cloud API não encontrada ou não configurada.' };
-        }
-        const apiConfig = instanceRes.rows[0];
-
-        const response = await fetchEvolutionAPI(`/template/find/${instanceName}`, apiConfig, {
-            method: 'GET',
-        });
-        
-        return { templates: response };
-
-    } catch (error: any) {
-        console.error('[FIND_TEMPLATES_ACTION] Erro ao buscar templates:', error);
-        return { error: error.message || 'Falha ao se comunicar com a API da Evolution.' };
     }
 }

@@ -44,6 +44,17 @@ const TABLE_CREATION_QUERIES = `
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
         updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
+    
+    CREATE TABLE IF NOT EXISTS public.whatsapp_clusters (
+        id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+        name TEXT NOT NULL,
+        api_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        metrics JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+    );
 
     CREATE TABLE IF NOT EXISTS public.workspaces (
         id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -290,22 +301,15 @@ const TABLE_CREATION_QUERIES = `
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS public.evolution_api_configs (
-        id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-        workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-        api_url text,
-        api_key text,
-        created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS public.evolution_api_instances (
         id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-        config_id uuid NOT NULL REFERENCES public.evolution_api_configs(id) ON DELETE CASCADE,
+        workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+        cluster_id uuid REFERENCES public.whatsapp_clusters(id) ON DELETE SET NULL,
         name text NOT NULL,
         type text, -- e.g., 'baileys', 'wa_cloud'
         webhook_url text,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
-        UNIQUE(config_id, name)
+        UNIQUE(workspace_id, name)
     );
 
     CREATE TABLE IF NOT EXISTS public.shortcuts (
@@ -341,17 +345,6 @@ const TABLE_CREATION_QUERIES = `
         sent_at timestamptz,
         error_message text,
         UNIQUE(campaign_id, contact_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS public.whatsapp_clusters (
-        id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-        name TEXT NOT NULL,
-        api_url TEXT NOT NULL,
-        api_key TEXT NOT NULL,
-        is_active BOOLEAN NOT NULL DEFAULT true,
-        metrics JSONB,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-        updated_at TIMEST-AMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
     );
 `;
 
