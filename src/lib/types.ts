@@ -1,4 +1,5 @@
 
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -293,8 +294,14 @@ export interface WhatsappCluster {
     metrics: {
         cpu: number;
         memory: number;
-        storage: number;
-        network: number;
+        storage: {
+            used: number;
+            total: number;
+        };
+        network: {
+            down: number;
+            up: number;
+        };
         instances_count: number;
     } | null;
     created_at: string;
