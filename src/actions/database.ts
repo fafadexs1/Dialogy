@@ -305,11 +305,12 @@ const TABLE_CREATION_QUERIES = `
         id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
         workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
         cluster_id uuid REFERENCES public.whatsapp_clusters(id) ON DELETE SET NULL,
-        name text NOT NULL,
+        instance_name text NOT NULL,
+        display_name text,
         type text, -- e.g., 'baileys', 'wa_cloud'
         webhook_url text,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
-        UNIQUE(workspace_id, name)
+        UNIQUE(workspace_id, instance_name)
     );
 
     CREATE TABLE IF NOT EXISTS public.shortcuts (

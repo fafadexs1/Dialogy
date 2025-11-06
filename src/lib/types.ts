@@ -1,5 +1,4 @@
 
-
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -310,7 +309,8 @@ export interface WhatsappCluster {
 
 export interface EvolutionInstance {
     id: string;
-    name: string;
+    instance_name: string;
+    display_name: string;
     status: 'connected' | 'disconnected' | 'pending';
     type: 'baileys' | 'wa_cloud';
     cluster_id: string; 
@@ -319,7 +319,8 @@ export interface EvolutionInstance {
 }
 
 export interface EvolutionInstanceCreationPayload {
-    instanceName: string;
+    instanceName?: string; // Now generated automatically, but kept for payload structure
+    displayName: string; // New user-facing name
     integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
     
     // Cloud API Fields

@@ -39,7 +39,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
         const payload: EvolutionInstanceCreationPayload = {
-            instanceName: formData.get('instanceName') as string,
+            displayName: formData.get('displayName') as string,
             integration: formData.get('integrationType') as any,
             // Baileys is default
             qrcode: true,
@@ -77,8 +77,8 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
             </DialogHeader>
             <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto px-1">
                 <div className="space-y-2">
-                    <Label htmlFor="instanceName">Nome da Instância</Label>
-                    <Input id="instanceName" name="instanceName" placeholder="Ex: Vendas, Suporte" required/>
+                    <Label htmlFor="displayName">Apelido da Instância</Label>
+                    <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
                 </div>
                  <div className="space-y-2">
                     <Label htmlFor="integrationType">Tipo de Conexão</Label>
@@ -160,10 +160,10 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 
     const checkStatus = useCallback(async () => {
         setIsChecking(true);
-        const result = await checkInstanceStatus(instance.name);
+        const result = await checkInstanceStatus(instance.instance_name);
         setInstance(prev => ({ ...prev, ...result }));
         setIsChecking(false);
-    }, [instance.name]);
+    }, [instance.instance_name]);
 
     useEffect(() => {
         checkStatus();
@@ -171,14 +171,14 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 
     const handleConnect = async () => {
         setIsToggling(true);
-        await connectInstance(instance.name);
+        await connectInstance(instance.instance_name);
         checkStatus(); // Re-check status after attempting to connect
         setIsToggling(false);
     }
     
     const handleDisconnect = async () => {
         setIsToggling(true);
-        await disconnectInstance(instance.name);
+        await disconnectInstance(instance.instance_name);
         checkStatus();
         setIsToggling(false);
     }
@@ -188,7 +188,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
         if (result.error) {
             toast({ title: 'Erro ao deletar', description: result.error, variant: 'destructive'});
         } else {
-            toast({ title: 'Instância Deletada!', description: `A instância ${instance.name} foi removida.`});
+            toast({ title: 'Instância Deletada!', description: `A instância ${instance.display_name} foi removida.`});
             onMutate();
         }
     }
@@ -200,9 +200,9 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                     <div>
                         <CardTitle className="flex items-center gap-2">
                             {instance.status === 'connected' ? <Wifi className="text-green-500"/> : instance.status === 'pending' ? <Loader2 className="animate-spin text-yellow-500" /> : <WifiOff className="text-red-500"/>}
-                            {instance.name}
+                            {instance.display_name}
                         </CardTitle>
-                        <CardDescription>{instance.type === 'wa_cloud' ? 'Cloud API' : 'Baileys'}</CardDescription>
+                        <CardDescription>{instance.type === 'wa_cloud' ? 'Cloud API' : 'Baileys'} • {instance.instance_name}</CardDescription>
                     </div>
                     <AlertDialog>
                         <DropdownMenu>
@@ -220,7 +220,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                         <AlertDialogContent>
                             <AlertDialogHeader>
                                 <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                                <AlertDialogDescription>Esta ação é irreversível e removerá permanentemente a instância <span className="font-bold">{instance.name}</span>.</AlertDialogDescription>
+                                <AlertDialogDescription>Esta ação é irreversível e removerá permanentemente a instância <span className="font-bold">{instance.display_name}</span>.</AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                                 <AlertDialogCancel>Cancelar</AlertDialogCancel>

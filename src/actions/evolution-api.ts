@@ -5,13 +5,14 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { randomUUID } from 'crypto';
 
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
 export async function getEvolutionApiInstances(workspaceId: string): Promise<Omit<EvolutionInstance, 'status' | 'qrCode'>[]> {
     try {
-        const res = await db.query('SELECT id, name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
+        const res = await db.query('SELECT id, instance_name, display_name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
         return res.rows.map(r => ({ ...r, config_id: r.cluster_id })); // Map cluster_id to config_id for compatibility
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
@@ -89,8 +90,12 @@ export async function createEvolutionApiInstance(
     const cluster = clusterRes.rows[0];
     const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
     
-    if (!payload.instanceName) {
-        return { success: false, error: 'O nome da instância é obrigatório.'}
+    // Generate a unique instance name for the API
+    const instanceName = `dialogy_${randomUUID().replace(/-/g, '')}`;
+    payload.instanceName = instanceName;
+
+    if (!payload.displayName) {
+        return { success: false, error: 'O apelido da instância é obrigatório.'}
     }
     
     // Prepara o payload para a API da Evolution
@@ -130,8 +135,8 @@ export async function createEvolutionApiInstance(
         // Se a criação na API for bem-sucedida, salvar no DB local
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
         await db.query(
-            'INSERT INTO evolution_api_instances (workspace_id, cluster_id, name, type, webhook_url) VALUES ($1, $2, $3, $4, $5)',
-            [workspaceId, cluster.id, payload.instanceName, instanceType, payload.webhook.url]
+            'INSERT INTO evolution_api_instances (workspace_id, cluster_id, instance_name, display_name, type, webhook_url) VALUES ($1, $2, $3, $4, $5, $6)',
+            [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, payload.webhook.url]
         );
 
     } catch (error: any) {
@@ -154,7 +159,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     try {
         // Obter detalhes da instância e do cluster associado
         const instanceRes = await db.query(
-          `SELECT i.name, c.api_url, c.api_key 
+          `SELECT i.instance_name, c.api_url, c.api_key 
            FROM evolution_api_instances i
            JOIN whatsapp_clusters c ON i.cluster_id = c.id
            WHERE i.id = $1`,
@@ -163,7 +168,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
         if (instanceRes.rows.length === 0) {
             return { error: 'Instância ou cluster associado não encontrado.' };
         }
-        const { name: instanceName, api_url, api_key } = instanceRes.rows[0];
+        const { instance_name: instanceName, api_url, api_key } = instanceRes.rows[0];
         const apiConfig = { api_url, api_key };
 
         // Chamar a API para deletar
@@ -192,7 +197,7 @@ async function getApiConfigForInstance(instanceName: string) {
       `SELECT c.api_url, c.api_key 
        FROM evolution_api_instances i
        JOIN whatsapp_clusters c ON i.cluster_id = c.id
-       WHERE i.name = $1`,
+       WHERE i.instance_name = $1`,
       [instanceName]
     );
      if (instanceRes.rows.length === 0) {
