@@ -1,5 +1,4 @@
 
-
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -34,6 +33,7 @@ export type User = {
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
   last_active_workspace_id?: string;
+  is_superadmin?: boolean;
   firstName: string;
   lastName: string;
   phone?: string;
@@ -308,6 +308,14 @@ export interface EvolutionInstanceCreationPayload {
     // Cloud API Fields
     token?: string;
     businessId?: string;
+    s3?: {
+        endpoint: string;
+        bucket: string;
+        accessKeyId: string;
+        secretAccessKey: string;
+        useSSL: boolean;
+        port: number;
+    };
 
     // Baileys Fields
     qrcode?: boolean;
@@ -426,3 +434,5 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
+
+    

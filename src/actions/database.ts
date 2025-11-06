@@ -40,6 +40,7 @@ const TABLE_CREATION_QUERIES = `
         avatar_url text,
         email text,
         last_active_workspace_id uuid,
+        is_superadmin boolean DEFAULT false NOT NULL,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
         updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
