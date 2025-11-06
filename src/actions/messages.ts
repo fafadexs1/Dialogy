@@ -14,6 +14,21 @@ import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 
+async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
+    const instanceRes = await db.query(
+      `SELECT c.api_url, c.api_key 
+       FROM evolution_api_instances i
+       JOIN whatsapp_clusters c ON i.cluster_id = c.id
+       WHERE i.instance_name = $1`,
+      [instanceName]
+    );
+     if (instanceRes.rows.length === 0) {
+        return null;
+    }
+    return instanceRes.rows[0];
+}
+
+
 /**
  * Ação genérica para enviar uma mensagem de texto.
  * Pode ser chamada tanto por formulários (agentes) quanto por automações (Piloto Automático).
@@ -66,12 +81,11 @@ async function internalSendMessage(
             throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         }
 
-        const apiConfigRes = await client.query('SELECT * FROM evolution_api_configs WHERE workspace_id = $1', [workspaceId]);
+        const apiConfig = await getApiConfigForInstance(instanceName);
         
-        if (apiConfigRes.rowCount === 0) {
-            throw new Error('Configuração da Evolution API não encontrada para este workspace.');
+        if (!apiConfig) {
+            throw new Error(`Configuração da API não encontrada para a instância ${instanceName}.`);
         }
-        const apiConfig = apiConfigRes.rows[0];
         
         const apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
         
@@ -145,9 +159,8 @@ async function internalSendMedia(
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         
-        const apiConfigRes = await client.query('SELECT * FROM evolution_api_configs WHERE workspace_id = $1', [workspaceId]);
-        if (apiConfigRes.rowCount === 0) throw new Error('Configuração da Evolution API não encontrada.');
-        const apiConfig = apiConfigRes.rows[0];
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
         
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
@@ -373,3 +386,5 @@ export async function startNewConversation(
         client.release();
     }
 }
+
+    

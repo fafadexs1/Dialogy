@@ -109,8 +109,8 @@ async function sendReceiptToWhatsApp(
     const instanceRes = await db.query(`
         SELECT c.api_url, c.api_key 
         FROM evolution_api_instances i
-        JOIN evolution_api_configs c ON i.config_id = c.id
-        WHERE i.name = $1
+        JOIN whatsapp_clusters c ON i.cluster_id = c.id
+        WHERE i.instance_name = $1
     `, [instanceName]);
 
     if (instanceRes.rowCount === 0) {
@@ -140,3 +140,5 @@ async function sendReceiptToWhatsApp(
     });
     console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
 }
+
+    

@@ -213,7 +213,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     return { error: null };
 }
 
-async function getApiConfigForInstance(instanceName: string) {
+async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; }> {
     const instanceRes = await db.query(
       `SELECT c.api_url, c.api_key 
        FROM evolution_api_instances i
@@ -350,3 +350,5 @@ export async function findWhatsappTemplates(
         return { templates: null, error: error.message };
     }
 }
+
+    
