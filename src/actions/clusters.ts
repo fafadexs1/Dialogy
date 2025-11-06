@@ -48,7 +48,7 @@ export async function createCluster(payload: { name: string, apiUrl: string, api
             'INSERT INTO whatsapp_clusters (name, api_url, api_key) VALUES ($1, $2, $3)',
             [name, apiUrl, apiKey]
         );
-        revalidatePath('/superadmin/clusters');
+        revalidatePath('/superadmin/clusters/evolution');
         return { success: true };
     } catch (error: any) {
         console.error('[CREATE_CLUSTER_ACTION]', error);
