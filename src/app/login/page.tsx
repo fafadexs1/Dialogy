@@ -36,16 +36,16 @@ export default function LoginPage() {
           </div>
            <p className="text-sm text-white/80 max-w-sm z-10">
               Gerencie conversas, automatize respostas com IA e organize seu CRM em um só lugar.
-          </p>
+           </p>
         </div>
         
         {/* Right Side - Form */}
         <div className="bg-card flex flex-col justify-center p-8 sm:p-12">
           <div className="w-full max-w-md mx-auto">
             <div className="mb-8">
-                <h2 className="text-3xl font-bold mt-1">Sign in to <span className='text-[#007BFF]'>Dialogy</span></h2>
+                <h2 className="text-3xl font-bold mt-1">Acesse a <span className='text-[#007BFF]'>Dialogy</span></h2>
                 <p className="text-sm text-gray-500 mt-1">
-                    Welcome back! Please enter your details.
+                    Bem-vindo(a) de volta! Por favor, insira seus dados.
                 </p>
             </div>
             
@@ -53,9 +53,9 @@ export default function LoginPage() {
 
             <div className="mt-8 text-center text-sm">
               <p className="text-muted-foreground">
-                Don't have an account?{' '}
+                Não tem uma conta?{' '}
                 <Link href="/register" className="font-medium text-[#007BFF] hover:underline">
-                  Sign up for free
+                  Cadastre-se de graça
                 </Link>
               </p>
             </div>

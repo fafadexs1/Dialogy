@@ -17,7 +17,7 @@ function LoginButton() {
   return (
       <Button type="submit" className="w-full h-12 text-base bg-[#007BFF] hover:bg-[#006ae0] rounded-lg shadow-sm hover:shadow-md transition-all" disabled={pending}>
           {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {pending ? 'Signing in...' : 'Sign in'}
+          {pending ? 'Entrando...' : 'Entrar'}
       </Button>
   )
 }
@@ -53,12 +53,12 @@ export function LoginForm() {
   return (
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="email" className="font-semibold text-gray-600 text-sm">Username or email address</Label>
+        <Label htmlFor="email" className="font-semibold text-gray-600 text-sm">Usuário ou endereço de e-mail</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="Enter your username or email"
+          placeholder="Digite seu usuário ou e-mail"
           required
           autoComplete="email"
           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
@@ -66,16 +66,16 @@ export function LoginForm() {
       </div>
       <div className="space-y-2">
         <div className="flex justify-between items-center">
-            <Label htmlFor="password"  className="font-semibold text-gray-600 text-sm">Password</Label>
+            <Label htmlFor="password"  className="font-semibold text-gray-600 text-sm">Senha</Label>
              <Link href="#" className="text-xs font-medium text-[#007BFF] hover:underline">
-                Forgot Password?
+                Esqueceu a senha?
             </Link>
         </div>
         <Input
           id="password"
           name="password"
           type="password"
-          placeholder="Enter your password"
+          placeholder="Digite sua senha"
           required
           autoComplete="current-password"
           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
@@ -85,7 +85,7 @@ export function LoginForm() {
       {state?.message && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Login Error</AlertTitle>
+          <AlertTitle>Erro no Login</AlertTitle>
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       )}
@@ -99,12 +99,12 @@ export function LoginForm() {
               <span className="w-full border-t border-gray-200" />
           </div>
           <div className="relative flex justify-center text-xs">
-              <span className="bg-card px-2 text-muted-foreground uppercase">Or continue with</span>
+              <span className="bg-card px-2 text-muted-foreground uppercase">Ou continue com</span>
           </div>
       </div>
 
        <div className="flex items-center gap-4">
-            <SocialButton provider="Google" icon="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_28dp.png" label="Sign in with Google" />
+            <SocialButton provider="Google" icon="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_28dp.png" label="Entrar com Google" />
             <SocialButton provider="Facebook" icon="https://picsum.photos/seed/fb/24" label="Facebook" isIconOnly />
             <SocialButton provider="Apple" icon="https://picsum.photos/seed/apple/24" label="Apple" isIconOnly />
         </div>
