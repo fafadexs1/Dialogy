@@ -77,7 +77,7 @@ export async function fetchEvolutionAPI(
 export async function createEvolutionApiInstance(
     payload: EvolutionInstanceCreationPayload,
     workspaceId: string
-): Promise<{ success: boolean, error?: string | null }> {
+): Promise<{ success: boolean; error?: string | null; qrCode?: string }> {
     const client = await db.connect();
     
     if (!workspaceId) {
@@ -126,16 +126,22 @@ export async function createEvolutionApiInstance(
 
         const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
         payload.webhook = {
+            ...payload.webhook,
             url: webhookUrlForInstance,
             enabled: true,
-            events: [
+        };
+        
+        // Default events if none are provided
+        if (!payload.webhook.events || payload.webhook.events.length === 0) {
+            payload.webhook.events = [
                 'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'CONNECTION_UPDATE',
                 'MESSAGES_SET', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_DELETE',
                 'CONTACTS_SET', 'CONTACTS_UPSERT', 'CONTACTS_UPDATE',
                 'CHATS_SET', 'CHATS_UPSERT', 'CHATS_UPDATE', 'CHATS_DELETE',
                 'PRESENCE_UPDATE', 'GROUPS_UPSERT', 'GROUPS_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'
-            ]
-        };
+            ];
+        }
+
 
         // Remove campos vazios ou nulos do payload para não enviar para a API
         Object.keys(payload).forEach(key => {
@@ -162,8 +168,19 @@ export async function createEvolutionApiInstance(
             'INSERT INTO evolution_api_instances (workspace_id, cluster_id, instance_name, display_name, type, webhook_url) VALUES ($1, $2, $3, $4, $5, $6)',
             [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, webhookUrlForInstance]
         );
+        
+        // 6. Fetch QR Code immediately
+        let qrCode;
+        if (instanceType === 'baileys') {
+            const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
+            qrCode = qrData?.base64;
+        }
 
         await client.query('COMMIT');
+        
+        revalidatePath('/integrations/evolution-api');
+        return { success: true, error: null, qrCode };
+
     } catch (error: any) {
         await client.query('ROLLBACK');
         console.error('[EVO_ACTION_CREATE_INSTANCE] Erro ao criar instância:', error);
@@ -171,9 +188,6 @@ export async function createEvolutionApiInstance(
     } finally {
         client.release();
     }
-
-    revalidatePath('/integrations/evolution-api');
-    return { success: true, error: null };
 }
 
 /**
@@ -238,14 +252,20 @@ export async function checkInstanceStatus(instanceName: string): Promise<{ statu
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
+        
         const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, apiConfig);
-        if (data.instance.state === 'connecting') {
+        
+        // This endpoint's response structure might be { "instance": { "state": "open" | "connecting" | "close" } }
+        const state = data?.instance?.state;
+
+        if (state === 'connecting') {
             const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
              return { status: 'pending', qrCode: qrData?.base64 };
         }
-        if (data.instance.state === 'open') {
+        if (state === 'open') {
              return { status: 'connected' };
         }
+        // Default to disconnected for 'close' or any other state
         return { status: 'disconnected' };
     } catch (error) {
         console.error(`[EVO_ACTION_CHECK_STATUS] Erro ao verificar status da instância ${instanceName}:`, error);
@@ -257,10 +277,15 @@ export async function connectInstance(instanceName: string): Promise<{ status: E
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
+        
+        // This is the GET request to fetch the QR code
         const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
+        
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
         }
+        // If there's no QR code, it might still be connecting or already connected.
+        // We'll return 'pending' and let the next status check sort it out.
         return { status: 'pending' };
     } catch (error) {
         console.error(`[EVO_ACTION_CONNECT] Erro ao conectar instância ${instanceName}:`, error);

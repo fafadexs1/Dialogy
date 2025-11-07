@@ -10,12 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,20 +37,21 @@ function SubmitButton() {
     )
 }
 
-function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: () => void, onClose: () => void }) {
+function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
     const [integrationType, setIntegrationType] = useState('WHATSAPP-BAILEYS');
     const [rejectCall, setRejectCall] = useState(false);
     const [useProxy, setUseProxy] = useState(false);
     const { toast } = useToast();
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        setIsSubmitting(true);
         const formData = new FormData(e.currentTarget);
         
         const payload: EvolutionInstanceCreationPayload = {
             displayName: formData.get('displayName') as string,
             integration: formData.get('integrationType') as any,
-            // Common
             number: formData.get('number') as string || undefined,
             // Baileys
             qrcode: true,
@@ -66,14 +62,12 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
             readMessages: formData.get('readMessages') === 'on',
             readStatus: formData.get('readStatus') === 'on',
             syncFullHistory: formData.get('syncFullHistory') === 'on',
-            // Proxy
             proxy: useProxy ? {
                 host: formData.get('proxyHost') as string,
                 port: Number(formData.get('proxyPort')),
                 username: formData.get('proxyUsername') as string || undefined,
                 password: formData.get('proxyPassword') as string || undefined,
             } : undefined,
-             // Chatwoot
             chatwoot: {
                 accountId: formData.get('chatwootAccountId') ? Number(formData.get('chatwootAccountId')) : undefined,
                 token: formData.get('chatwootToken') as string || undefined,
@@ -85,19 +79,20 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         };
         
         if (payload.integration === 'WHATSAPP-BUSINESS') {
-            payload.qrcode = false; // Override for Cloud API
+            payload.qrcode = false;
             payload.token = formData.get('token') as string;
             payload.businessId = formData.get('businessId') as string;
-            payload.number = formData.get('numberId') as string; // Use the specific field for Cloud API
+            payload.number = formData.get('numberId') as string; 
         } else {
              payload.token = formData.get('baileysToken') as string || undefined;
         }
         
         const result = await createEvolutionApiInstance(payload, workspaceId);
+        setIsSubmitting(false);
 
         if (result.success) {
             toast({ title: 'Instância Criada!', description: 'Sua instância está sendo provisionada.' });
-            onSuccess();
+            onSuccess(result.qrCode);
         } else {
             toast({ title: 'Erro ao Criar Instância', description: result.error, variant: 'destructive' });
         }
@@ -272,7 +267,10 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
             </div>
              <DialogFooter className="pt-4">
                 <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-                <SubmitButton />
+                <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Criar Instância
+                </Button>
             </DialogFooter>
         </form>
     )
@@ -297,8 +295,8 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 
     const handleConnect = async () => {
         setIsToggling(true);
-        await connectInstance(instance.instance_name);
-        checkStatus(); // Re-check status after attempting to connect
+        const result = await connectInstance(instance.instance_name);
+        setInstance(prev => ({...prev, ...result }));
         setIsToggling(false);
     }
     
@@ -360,7 +358,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                 {instance.status === 'pending' && instance.qrCode ? (
                     <div className="flex flex-col items-center gap-2">
                         <p className='text-sm text-center'>Escaneie o QR Code com seu WhatsApp para conectar.</p>
-                        <Image src={`data:image/png;base64,${instance.qrCode}`} alt="QR Code" width={200} height={200} />
+                        <Image src={instance.qrCode} alt="QR Code" width={200} height={200} />
                     </div>
                 ) : (
                     <div className='text-sm text-muted-foreground text-center p-4'>
@@ -391,6 +389,7 @@ export default function EvolutionApiPage() {
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [initialQrCode, setInitialQrCode] = useState<string | undefined>();
 
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -416,8 +415,11 @@ export default function EvolutionApiPage() {
         }
     }, [user, fetchData]);
     
-    const handleSuccess = () => {
+    const handleSuccess = (qrCode?: string) => {
         setIsModalOpen(false);
+        if (qrCode) {
+            setInitialQrCode(qrCode);
+        }
         fetchData();
     }
 
