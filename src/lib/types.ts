@@ -319,52 +319,72 @@ export interface EvolutionInstance {
 }
 
 export interface EvolutionInstanceCreationPayload {
-    instanceName?: string; // Now generated automatically, but kept for payload structure
-    displayName: string; // New user-facing name
-    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
-    
-    // Cloud API Fields
-    token?: string;
-    businessId?: string;
+    // Top-level
+    instanceName?: string;
+    displayName: string;
     number?: string;
-    s3?: {
-        endpoint: string;
-        bucket: string;
-        accessKeyId: string;
-        secretAccessKey: string;
-        useSSL: boolean;
-        port: number;
-    };
+    token?: string; // Can be for Baileys instance or Cloud API
+    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
 
-    // Baileys Fields
+    // Baileys Specific
     qrcode?: boolean;
-    
-    // Common fields
     rejectCall?: boolean;
     msgCall?: string;
     groupsIgnore?: boolean;
     alwaysOnline?: boolean;
     readMessages?: boolean;
     readStatus?: boolean;
+    syncFullHistory?: boolean;
+
+    // Cloud API Specific
+    businessId?: string;
+
+    // Proxy
     proxy?: {
         host: string;
         port: number;
         username?: string;
         password?: string;
+        protocol?: string;
     };
+
+    // Webhook
     webhook?: {
         url?: string;
-        enabled?: boolean,
+        byEvents?: boolean;
+        base64?: boolean;
+        headers?: Record<string, string>;
         events?: string[];
     };
+    
+    // RabbitMQ
     rabbitmq?: {
         enabled?: boolean;
         events?: string[];
     };
+
+    // SQS
     sqs?: {
         enabled?: boolean;
         events?: string[];
     };
+
+    // Chatwoot
+    chatwoot?: {
+        accountId?: number;
+        token?: string;
+        url?: string;
+        signMsg?: boolean;
+        reopenConversation?: boolean;
+        conversationPending?: boolean;
+        importContacts?: boolean;
+        nameInbox?: string;
+        mergeBrazilContacts?: boolean;
+        importMessages?: boolean;
+        daysLimitImportMessages?: number;
+        organization?: string;
+        logo?: string;
+    }
 }
 
 

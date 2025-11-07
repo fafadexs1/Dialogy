@@ -54,7 +54,7 @@ export function TemplateManager({ instances }: TemplateManagerProps) {
     const [templates, setTemplates] = useState<any[]>([]);
     const [loadingTemplates, setLoadingTemplates] = useState(false);
 
-    const handleAddButton = (type: 'QUICK_REPLY' | 'URL') => {
+    const handleAddButton = (type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER') => {
         if (buttons.length >= 3) {
             toast({ title: 'Limite de botões atingido', description: 'Você pode adicionar no máximo 3 botões.', variant: 'destructive' });
             return;
@@ -232,12 +232,16 @@ export function TemplateManager({ instances }: TemplateManagerProps) {
                                                             {button.type === 'URL' && (
                                                                 <Input placeholder="https://exemplo.com" value={button.url || ''} onChange={e => handleButtonChange(index, 'url', e.target.value)} />
                                                             )}
+                                                            {button.type === 'PHONE_NUMBER' && (
+                                                                <Input placeholder="5511999998888" value={button.phone_number || ''} onChange={e => handleButtonChange(index, 'phone_number', e.target.value)} />
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <Button type="button" variant="secondary" size="sm" onClick={() => handleAddButton('QUICK_REPLY')}><PlusCircle className="mr-2"/> Resposta Rápida</Button>
                                                     <Button type="button" variant="secondary" size="sm" onClick={() => handleAddButton('URL')}><PlusCircle className="mr-2"/> Botão de URL</Button>
+                                                    <Button type="button" variant="secondary" size="sm" onClick={() => handleAddButton('PHONE_NUMBER')}><PlusCircle className="mr-2"/> Botão de Telefone</Button>
                                                 </div>
                                             </AccordionContent>
                                         </AccordionItem>

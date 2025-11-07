@@ -128,19 +128,25 @@ export async function createEvolutionApiInstance(
             url: webhookUrlForInstance,
             enabled: true,
             events: [
-                'CHATS_UPSERT', 'CONNECTION_UPDATE', 'CONTACTS_UPDATE', 'CONTACTS_UPSERT',
-                'MESSAGES_DELETE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'
+                'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'CONNECTION_UPDATE',
+                'MESSAGES_SET', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_DELETE',
+                'CONTACTS_SET', 'CONTACTS_UPSERT', 'CONTACTS_UPDATE',
+                'CHATS_SET', 'CHATS_UPSERT', 'CHATS_UPDATE', 'CHATS_DELETE',
+                'PRESENCE_UPDATE', 'GROUPS_UPSERT', 'GROUPS_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'
             ]
         };
 
-        if (payload.integration === 'WHATSAPP-BUSINESS') {
-            payload.qrcode = false;
-            if (!payload.token || !payload.number || !payload.businessId) {
-                return { success: false, error: 'Para a Cloud API, Token, ID do Número e ID do Business são obrigatórios.' };
+        // Remove campos vazios ou nulos do payload para não enviar para a API
+        Object.keys(payload).forEach(key => {
+            const typedKey = key as keyof EvolutionInstanceCreationPayload;
+            if (payload[typedKey] === undefined || payload[typedKey] === null || payload[typedKey] === '') {
+                delete payload[typedKey];
             }
-        } else { // WHATSAPP-BAILEYS
-            payload.qrcode = true;
-        }
+             if (typeof payload[typedKey] === 'object' && payload[typedKey] !== null && Object.keys(payload[typedKey]!).length === 0) {
+                delete payload[typedKey];
+            }
+        });
+
 
         // 4. Chamar a API da Evolution para criar a instância
         console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
@@ -153,7 +159,7 @@ export async function createEvolutionApiInstance(
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
         await client.query(
             'INSERT INTO evolution_api_instances (workspace_id, cluster_id, instance_name, display_name, type, webhook_url) VALUES ($1, $2, $3, $4, $5, $6)',
-            [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, payload.webhook.url]
+            [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, webhookUrlForInstance]
         );
 
         await client.query('COMMIT');
@@ -350,5 +356,3 @@ export async function findWhatsappTemplates(
         return { templates: null, error: error.message };
     }
 }
-
-    
