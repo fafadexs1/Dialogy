@@ -109,165 +109,167 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 <DialogTitle>Criar Nova Instância</DialogTitle>
                 <DialogDescription>Conecte um novo número de WhatsApp para usar no atendimento.</DialogDescription>
             </DialogHeader>
-            <ScrollArea className="max-h-[70vh] py-4 px-1">
-                <div className="space-y-4 px-2">
-                    <div className="space-y-2">
-                        <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
-                        <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
-                    </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="integrationType">Tipo de Conexão</Label>
-                        <Select name="integrationType" value={integrationType} onValueChange={setIntegrationType}>
-                            <SelectTrigger><SelectValue/></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
-                                <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
+            <div className="py-4">
+                <ScrollArea className="max-h-[70vh] px-4">
+                    <div className="space-y-4 pr-6">
+                        <div className="space-y-2">
+                            <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
+                            <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="integrationType">Tipo de Conexão</Label>
+                            <Select name="integrationType" value={integrationType} onValueChange={setIntegrationType}>
+                                <SelectTrigger><SelectValue/></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
+                                    <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                    <Accordion type="multiple" className="w-full" defaultValue={['meta', 'baileys-token', 'general-settings', 'behavior-settings']}>
-                        {integrationType === 'WHATSAPP-BUSINESS' && (
-                            <AccordionItem value="meta">
-                                <AccordionTrigger>Configurações da Meta Business API</AccordionTrigger>
-                                <AccordionContent className="space-y-4 pt-2">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
-                                        <Input id="numberId" name="numberId" placeholder="ID do número no seu App da Meta" required />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="businessId">ID da Conta do WhatsApp (WABA ID)</Label>
-                                        <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="token">Token de Acesso Permanente</Label>
-                                        <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required />
-                                    </div>
-                                </AccordionContent>
-                            </AccordionItem>
-                        )}
-                        
-                        {integrationType === 'WHATSAPP-BAILEYS' && (
+                        {integrationType === 'WHATSAPP-BUSINESS' ? (
+                            <Accordion type="single" collapsible defaultValue="meta" className="w-full">
+                                <AccordionItem value="meta">
+                                    <AccordionTrigger>Configurações da Meta Business API</AccordionTrigger>
+                                    <AccordionContent className="space-y-4 pt-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
+                                            <Input id="numberId" name="numberId" placeholder="ID do número no seu App da Meta" required />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="businessId">ID da Conta do WhatsApp (WABA ID)</Label>
+                                            <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="token">Token de Acesso Permanente</Label>
+                                            <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required />
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            </Accordion>
+                        ) : (
                             <>
                                 <div className="space-y-2 pt-4">
                                     <Label htmlFor="number">Número de Telefone (com DDI)</Label>
                                     <Input id="number" name="number" placeholder="Ex: 5511999998888"/>
                                 </div>
-                                <AccordionItem value="baileys-token">
-                                    <AccordionTrigger>Token da Instância (Opcional)</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-2">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="baileysToken">Token</Label>
-                                            <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                <AccordionItem value="general-settings">
-                                    <AccordionTrigger>Configurações Gerais</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="alwaysOnline" name="alwaysOnline" />
-                                            <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="readMessages" name="readMessages" defaultChecked/>
-                                            <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="readStatus" name="readStatus" />
-                                            <Label htmlFor="readStatus">Marcar status como vistos</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="syncFullHistory" name="syncFullHistory" />
-                                            <Label htmlFor="syncFullHistory">Sincronizar histórico completo de conversas</Label>
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                <AccordionItem value="behavior-settings">
-                                    <AccordionTrigger>Comportamento da Instância</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
-                                            <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
-                                        </div>
-                                        {rejectCall && (
-                                            <div className="space-y-2 pl-6 animate-in fade-in-50">
-                                                <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                                <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
-                                            </div>
-                                        )}
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="groupsIgnore" name="groupsIgnore" />
-                                            <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                 <AccordionItem value="proxy">
-                                    <AccordionTrigger>Configurações de Proxy</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2 mb-4">
-                                            <Checkbox id="useProxy" checked={useProxy} onCheckedChange={(checked) => setUseProxy(Boolean(checked))} />
-                                            <Label htmlFor="useProxy">Usar um servidor proxy</Label>
-                                        </div>
-                                        {useProxy && (
-                                            <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyHost">Host</Label>
-                                                    <Input id="proxyHost" name="proxyHost" placeholder="127.0.0.1" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyPort">Porta</Label>
-                                                    <Input id="proxyPort" name="proxyPort" type="number" placeholder="8080" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyUsername">Usuário (Opcional)</Label>
-                                                    <Input id="proxyUsername" name="proxyUsername" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyPassword">Senha (Opcional)</Label>
-                                                    <Input id="proxyPassword" name="proxyPassword" type="password" />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </AccordionContent>
-                                </AccordionItem>
-                                
-                                <AccordionItem value="chatwoot">
-                                    <AccordionTrigger>Integração com Chatwoot (Opcional)</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="grid grid-cols-2 gap-4">
+                                <Accordion type="multiple" className="w-full" defaultValue={['general-settings', 'behavior-settings']}>
+                                    <AccordionItem value="baileys-token">
+                                        <AccordionTrigger>Token da Instância (Opcional)</AccordionTrigger>
+                                        <AccordionContent className="space-y-4 pt-2">
                                             <div className="space-y-2">
-                                                <Label htmlFor="chatwootUrl">URL do Chatwoot</Label>
-                                                <Input id="chatwootUrl" name="chatwootUrl" placeholder="https://app.chatwoot.com" />
+                                                <Label htmlFor="baileysToken">Token</Label>
+                                                <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="chatwootToken">Token da Conta</Label>
-                                                <Input id="chatwootToken" name="chatwootToken" type="password" />
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                    <AccordionItem value="general-settings">
+                                        <AccordionTrigger>Configurações Gerais</AccordionTrigger>
+                                        <AccordionContent className="space-y-4 pt-4">
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="alwaysOnline" name="alwaysOnline" />
+                                                <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="chatwootAccountId">ID da Conta</Label>
-                                                <Input id="chatwootAccountId" name="chatwootAccountId" type="number" />
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="readMessages" name="readMessages" defaultChecked/>
+                                                <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
                                             </div>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootSignMsg" name="chatwootSignMsg" />
-                                            <Label htmlFor="chatwootSignMsg">Assinar mensagens do agente</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootReopenConversation" name="chatwootReopenConversation" />
-                                            <Label htmlFor="chatwootReopenConversation">Reabrir conversa no Chatwoot</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootConversationPending" name="chatwootConversationPending" />
-                                            <Label htmlFor="chatwootConversationPending">Marcar conversas como pendentes</Label>
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="readStatus" name="readStatus" />
+                                                <Label htmlFor="readStatus">Marcar status como vistos</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="syncFullHistory" name="syncFullHistory" />
+                                                <Label htmlFor="syncFullHistory">Sincronizar histórico completo de conversas</Label>
+                                            </div>
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                    <AccordionItem value="behavior-settings">
+                                        <AccordionTrigger>Comportamento da Instância</AccordionTrigger>
+                                        <AccordionContent className="space-y-4 pt-4">
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
+                                                <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
+                                            </div>
+                                            {rejectCall && (
+                                                <div className="space-y-2 pl-6 animate-in fade-in-50">
+                                                    <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
+                                                    <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
+                                                </div>
+                                            )}
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="groupsIgnore" name="groupsIgnore" />
+                                                <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
+                                            </div>
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                    <AccordionItem value="proxy">
+                                        <AccordionTrigger>Configurações de Proxy</AccordionTrigger>
+                                        <AccordionContent className="space-y-4 pt-4">
+                                            <div className="flex items-center space-x-2 mb-4">
+                                                <Checkbox id="useProxy" checked={useProxy} onCheckedChange={(checked) => setUseProxy(Boolean(checked))} />
+                                                <Label htmlFor="useProxy">Usar um servidor proxy</Label>
+                                            </div>
+                                            {useProxy && (
+                                                <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="proxyHost">Host</Label>
+                                                        <Input id="proxyHost" name="proxyHost" placeholder="127.0.0.1" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="proxyPort">Porta</Label>
+                                                        <Input id="proxyPort" name="proxyPort" type="number" placeholder="8080" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="proxyUsername">Usuário (Opcional)</Label>
+                                                        <Input id="proxyUsername" name="proxyUsername" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="proxyPassword">Senha (Opcional)</Label>
+                                                        <Input id="proxyPassword" name="proxyPassword" type="password" />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                    
+                                    <AccordionItem value="chatwoot">
+                                        <AccordionTrigger>Integração com Chatwoot (Opcional)</AccordionTrigger>
+                                        <AccordionContent className="space-y-4 pt-4">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="chatwootUrl">URL do Chatwoot</Label>
+                                                    <Input id="chatwootUrl" name="chatwootUrl" placeholder="https://app.chatwoot.com" />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="chatwootToken">Token da Conta</Label>
+                                                    <Input id="chatwootToken" name="chatwootToken" type="password" />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="chatwootAccountId">ID da Conta</Label>
+                                                    <Input id="chatwootAccountId" name="chatwootAccountId" type="number" />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="chatwootSignMsg" name="chatwootSignMsg" />
+                                                <Label htmlFor="chatwootSignMsg">Assinar mensagens do agente</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="chatwootReopenConversation" name="chatwootReopenConversation" />
+                                                <Label htmlFor="chatwootReopenConversation">Reabrir conversa no Chatwoot</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox id="chatwootConversationPending" name="chatwootConversationPending" />
+                                                <Label htmlFor="chatwootConversationPending">Marcar conversas como pendentes</Label>
+                                            </div>
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                </Accordion>
                             </>
                         )}
-                    </Accordion>
-                </div>
-            </ScrollArea>
+                    </div>
+                </ScrollArea>
+            </div>
              <DialogFooter className="pt-4">
                 <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
                 <SubmitButton />
