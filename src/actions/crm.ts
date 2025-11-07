@@ -3,7 +3,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import type { Contact, Tag, User, Activity, CustomFieldDefinition } from '@/lib/types';
+import type { Contact, Tag, User, Activity, CustomFieldDefinition, SelectableOption } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
@@ -31,14 +31,14 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
                 (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
                 (SELECT MAX(a.date) FROM activities a WHERE a.contact_id = c.id) as last_activity,
                 COALESCE(
-                    (SELECT array_agg(t.id || '::' || t.label || '::' || t.value || '::' || t.color) 
+                    (SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'value', t.value, 'color', t.color))
                      FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id),
-                    '{}'::text[]
-                ) as tags_agg,
+                    '[]'::json
+                ) as tags,
                 COALESCE(
                     (SELECT json_agg(act.* ORDER BY act.date DESC) FROM activities act WHERE act.contact_id = c.id),
                     '[]'::json
-                ) as activities_agg,
+                ) as activities,
                  COALESCE(
                     (SELECT json_object_agg(cfd.id, cfv.value)
                      FROM contact_custom_field_values cfv
@@ -53,13 +53,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
 
         const contacts: Contact[] = res.rows.map(row => ({
             ...row,
-            tags: row.tags_agg?.map((tag: string) => {
-                const [id, label, value, color] = tag.split('::');
-                return { id, label, value, color };
-            }) || [],
             owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
-            activities: row.activities_agg || [],
-            custom_fields: row.custom_fields || {},
         }));
         
         return { contacts };
@@ -313,7 +307,11 @@ export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ 
 
     try {
         const res = await db.query('SELECT id, label, type, placeholder, options FROM custom_field_definitions WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
-        return { fields: res.rows };
+        const fields: CustomFieldDefinition[] = res.rows.map(row => ({
+            ...row,
+            options: typeof row.options === 'string' ? JSON.parse(row.options) : row.options
+        }));
+        return { fields };
     } catch (error) {
         console.error("[GET_CUSTOM_FIELDS] Error:", error);
         return { fields: null, error: "Falha ao buscar os campos personalizados." };
@@ -322,7 +320,7 @@ export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ 
 
 export async function createCustomFieldDefinition(
     workspaceId: string,
-    field: Omit<CustomFieldDefinition, 'id'>
+    field: Omit<CustomFieldDefinition, 'id' | 'workspace_id'>
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -335,7 +333,7 @@ export async function createCustomFieldDefinition(
     try {
         await db.query(
             'INSERT INTO custom_field_definitions (workspace_id, label, type, placeholder, options) VALUES ($1, $2, $3, $4, $5)',
-            [workspaceId, field.label, field.type, field.placeholder, JSON.stringify(field.options || [])]
+            [workspaceId, field.label, field.type, field.placeholder, field.options ? JSON.stringify(field.options) : '[]']
         );
         revalidatePath('/crm');
         return { success: true };
@@ -450,5 +448,3 @@ export async function addActivityAction(
         return { success: false, error: "Falha ao registrar atividade." };
     }
 }
-
-    

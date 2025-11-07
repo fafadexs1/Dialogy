@@ -25,11 +25,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { HTMLInputTypeAttribute } from 'react';
 import { Checkbox } from '../ui/checkbox';
 import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
-import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
 import { getTags, createTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
@@ -137,7 +135,7 @@ function OptionsManager({
                                 <div className='flex flex-col'>
                                     <span className='font-medium'>{option.label}</span>
                                     <span className="text-xs font-mono text-muted-foreground">ID: {option.id}</span>
-                                    {(option as Tag).is_close_reason && (
+                                    {option.is_close_reason && (
                                         <span className='text-xs text-blue-500 font-semibold'>Motivo de Encerramento</span>
                                     )}
                                 </div>
@@ -155,8 +153,7 @@ function OptionsManager({
 }
 
 
-export function CrmSettings({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+export function CrmSettings({ children, user }: { children: React.ReactNode, user: User | null }) {
   const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
@@ -165,16 +162,6 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-            setUser(await res.json());
-        }
-    };
-    fetchUser();
-  }, []);
 
   const fetchAllData = React.useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -230,7 +217,7 @@ export function CrmSettings({ children }: { children: React.ReactNode }) {
         });
     }
 
-    const newField: Omit<CustomFieldDefinition, 'id'> = {
+    const newField: Omit<CustomFieldDefinition, 'id' | 'workspace_id'> = {
       label: newFieldLabel,
       type: newFieldType,
       placeholder: newFieldPlaceholder || `Insira ${newFieldLabel}...`,

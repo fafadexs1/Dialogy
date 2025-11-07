@@ -73,7 +73,7 @@ export type Contact = {
   firstName?: string;
   lastName?: string;
   tags?: Tag[];
-  owner?: User;
+  owner?: Partial<User>;
   activities?: Activity[];
   last_activity?: string;
   address?: string;
@@ -179,10 +179,11 @@ export type InternalMessage = {
 
 export type CustomFieldDefinition = {
     id: string;
+    workspace_id: string;
     label: string;
     type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select';
     placeholder?: string;
-    options?: { id: string; value: string; label: string }[];
+    options?: SelectableOption[];
 };
 
 export interface SelectableOption {
@@ -463,7 +464,3 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
-
-    
-
-    

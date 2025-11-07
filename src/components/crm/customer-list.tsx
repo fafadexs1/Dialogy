@@ -53,7 +53,7 @@ export default function CustomerList({ user }: { user: User }) {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(100);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // State for modals and panels
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -149,12 +149,12 @@ export default function CustomerList({ user }: { user: User }) {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const startItem = filteredCustomers.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endItem = Math.min(currentPage * itemsPerPage, filteredCustomers.length);
 
   const getTagStyle = (tagValue: string) => {
       const tag = tags.find(t => t.value === tagValue);
-      return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
+      return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE') ? '#000' : '#fff', borderColor: 'transparent' } : {};
   };
   
   const handleItemsPerPageChange = (value: string) => {
@@ -185,7 +185,7 @@ export default function CustomerList({ user }: { user: User }) {
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="todos">Todas Tags</SelectItem>
-                            {tags.map(tag => (
+                            {tags.filter(t => !t.is_close_reason).map(tag => (
                                  <SelectItem key={tag.id} value={tag.value}>
                                     <div className='flex items-center gap-2'>
                                         <span className='w-2 h-2 rounded-full' style={{backgroundColor: tag.color}}></span>
@@ -205,7 +205,7 @@ export default function CustomerList({ user }: { user: User }) {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                     <CrmSettings>
+                     <CrmSettings user={user}>
                         <Button variant="ghost" size="icon" title="Configurações do CRM">
                             <Settings className="h-5 w-5" />
                         </Button>
@@ -289,20 +289,21 @@ export default function CustomerList({ user }: { user: User }) {
                                     <SelectValue placeholder={itemsPerPage} />
                                 </SelectTrigger>
                                 <SelectContent>
+                                    <SelectItem value="10">10</SelectItem>
+                                    <SelectItem value="25">25</SelectItem>
+                                    <SelectItem value="50">50</SelectItem>
                                     <SelectItem value="100">100</SelectItem>
-                                    <SelectItem value="500">500</SelectItem>
-                                    <SelectItem value="1000">1000</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                         <span className="w-[1px] h-6 bg-border mx-2"></span>
                         <span className='font-medium'>
-                            Página {currentPage} de {totalPages}
+                            Página {currentPage} de {totalPages || 1}
                         </span>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages || totalPages === 0}>
                             <ChevronRight className="h-4 w-4" />
                         </Button>
                     </div>
