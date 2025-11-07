@@ -32,8 +32,6 @@ import { cn } from '@/lib/utils';
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
     const [step, setStep] = useState(1);
-    const [integrationType, setIntegrationType] = useState('WHATSAPP-BAILEYS');
-    const [rejectCall, setRejectCall] = useState(false);
     const [useProxy, setUseProxy] = useState(false);
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,10 +52,22 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value, type } = e.target;
         const checked = (e.target as HTMLInputElement).checked;
-        setFormData(prev => ({
-            ...prev,
-            [name]: type === 'checkbox' ? checked : value
-        }));
+        
+        if (name.startsWith('proxy.')) {
+            const proxyField = name.split('.')[1];
+            setFormData(prev => ({
+                ...prev,
+                proxy: {
+                    ...prev.proxy,
+                    [proxyField]: value,
+                } as any
+            }));
+        } else {
+             setFormData(prev => ({
+                ...prev,
+                [name]: type === 'checkbox' ? checked : value
+            }));
+        }
     };
     
     const handleSelectChange = (name: string, value: string | boolean) => {
@@ -95,7 +105,32 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         ...(isBaileys ? [{ id: 3, title: "Avançado" }] : [])
     ];
 
-    const nextStep = () => setStep(s => Math.min(s + 1, totalSteps));
+    const nextStep = () => {
+        if (step === 1) {
+            if (!formData.displayName?.trim()) {
+                toast({
+                    title: "Campo Obrigatório",
+                    description: "Por favor, preencha o apelido da instância para continuar.",
+                    variant: "destructive",
+                });
+                return;
+            }
+        }
+
+        if (step === 2 && !isBaileys) { // Validation for Cloud API step
+            if (!formData.number?.trim() || !formData.businessId?.trim() || !formData.token?.trim()) {
+                 toast({
+                    title: "Campos Obrigatórios",
+                    description: "Todos os campos da Meta Business API são obrigatórios.",
+                    variant: "destructive",
+                });
+                return;
+            }
+        }
+        
+        setStep(s => Math.min(s + 1, totalSteps));
+    };
+    
     const prevStep = () => setStep(s => Math.max(s - 1, 1));
     
     return (
@@ -247,7 +282,26 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                                 </div>
                                                 {useProxy && (
                                                     <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
-                                                        {/* Proxy fields here */}
+                                                        <div className="col-span-2 space-y-2">
+                                                             <Label htmlFor="proxy.host">Host do Proxy</Label>
+                                                             <Input id="proxy.host" name="proxy.host" placeholder="127.0.0.1" value={formData.proxy?.host || ''} onChange={handleInputChange} />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                             <Label htmlFor="proxy.port">Porta</Label>
+                                                             <Input id="proxy.port" name="proxy.port" type="number" placeholder="8080" value={formData.proxy?.port || ''} onChange={handleInputChange} />
+                                                        </div>
+                                                         <div className="space-y-2">
+                                                             <Label htmlFor="proxy.protocol">Protocolo</Label>
+                                                             <Input id="proxy.protocol" name="proxy.protocol" placeholder="http" value={formData.proxy?.protocol || ''} onChange={handleInputChange} />
+                                                        </div>
+                                                         <div className="space-y-2">
+                                                             <Label htmlFor="proxy.username">Usuário (Opcional)</Label>
+                                                             <Input id="proxy.username" name="proxy.username" value={formData.proxy?.username || ''} onChange={handleInputChange} />
+                                                        </div>
+                                                         <div className="space-y-2">
+                                                             <Label htmlFor="proxy.password">Senha (Opcional)</Label>
+                                                             <Input id="proxy.password" name="proxy.password" type="password" value={formData.proxy?.password || ''} onChange={handleInputChange} />
+                                                        </div>
                                                     </div>
                                                 )}
                                             </AccordionContent>
