@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useCallback, useActionState, useTransition } from 'react';
@@ -148,58 +149,58 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                 </AccordionContent>
                             </AccordionItem>
                         ) : (
-                             <AccordionItem value="baileys-token">
-                                <AccordionTrigger>Token da Instância (Baileys)</AccordionTrigger>
-                                <AccordionContent className="space-y-4 pt-2">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="baileysToken">Token (Opcional)</Label>
-                                        <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
-                                    </div>
-                                </AccordionContent>
-                            </AccordionItem>
+                            <>
+                                <AccordionItem value="baileys-token">
+                                    <AccordionTrigger>Token da Instância (Baileys)</AccordionTrigger>
+                                    <AccordionContent className="space-y-4 pt-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="baileysToken">Token (Opcional)</Label>
+                                            <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                                <AccordionItem value="general-settings">
+                                    <AccordionTrigger>Configurações Gerais</AccordionTrigger>
+                                    <AccordionContent className="space-y-4 pt-4">
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="alwaysOnline" name="alwaysOnline" />
+                                            <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="readMessages" name="readMessages" defaultChecked/>
+                                            <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="readStatus" name="readStatus" />
+                                            <Label htmlFor="readStatus">Marcar status como vistos</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="syncFullHistory" name="syncFullHistory" />
+                                            <Label htmlFor="syncFullHistory">Sincronizar histórico completo de conversas</Label>
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                                <AccordionItem value="behavior-settings">
+                                    <AccordionTrigger>Comportamento da Instância</AccordionTrigger>
+                                    <AccordionContent className="space-y-4 pt-4">
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
+                                            <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
+                                        </div>
+                                        {rejectCall && (
+                                            <div className="space-y-2 pl-6 animate-in fade-in-50">
+                                                <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
+                                                <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
+                                            </div>
+                                        )}
+                                        <div className="flex items-center space-x-2">
+                                            <Checkbox id="groupsIgnore" name="groupsIgnore" />
+                                            <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            </>
                         )}
-                        <AccordionItem value="general-settings">
-                            <AccordionTrigger>Configurações Gerais</AccordionTrigger>
-                            <AccordionContent className="space-y-4 pt-4">
-                                 <div className="flex items-center space-x-2">
-                                    <Checkbox id="alwaysOnline" name="alwaysOnline" />
-                                    <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
-                                </div>
-                                 <div className="flex items-center space-x-2">
-                                    <Checkbox id="readMessages" name="readMessages" defaultChecked/>
-                                    <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
-                                </div>
-                                 <div className="flex items-center space-x-2">
-                                    <Checkbox id="readStatus" name="readStatus" />
-                                    <Label htmlFor="readStatus">Marcar status como vistos</Label>
-                                </div>
-                                 <div className="flex items-center space-x-2">
-                                    <Checkbox id="syncFullHistory" name="syncFullHistory" />
-                                    <Label htmlFor="syncFullHistory">Sincronizar histórico completo de conversas</Label>
-                                </div>
-                            </AccordionContent>
-                        </AccordionItem>
-
-                        <AccordionItem value="behavior-settings">
-                             <AccordionTrigger>Comportamento da Instância</AccordionTrigger>
-                             <AccordionContent className="space-y-4 pt-4">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
-                                    <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
-                                </div>
-                                {rejectCall && (
-                                     <div className="space-y-2 pl-6 animate-in fade-in-50">
-                                        <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
-                                    </div>
-                                )}
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox id="groupsIgnore" name="groupsIgnore" />
-                                    <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
-                                </div>
-                             </AccordionContent>
-                        </AccordionItem>
-
                         <AccordionItem value="proxy">
                             <AccordionTrigger>Configurações de Proxy</AccordionTrigger>
                             <AccordionContent className="space-y-4 pt-4">
@@ -470,5 +471,3 @@ export default function EvolutionApiPage() {
         </div>
     );
 }
-
-    
