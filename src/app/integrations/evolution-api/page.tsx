@@ -126,8 +126,8 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                         </Select>
                     </div>
 
-                    <Accordion type="multiple" className="w-full" defaultValue={['meta']}>
-                        {integrationType === 'WHATSAPP-BUSINESS' ? (
+                    <Accordion type="multiple" className="w-full" defaultValue={['meta', 'baileys-token', 'general-settings', 'behavior-settings']}>
+                        {integrationType === 'WHATSAPP-BUSINESS' && (
                             <AccordionItem value="meta">
                                 <AccordionTrigger>Configurações da Meta Business API</AccordionTrigger>
                                 <AccordionContent className="space-y-4 pt-2">
@@ -145,9 +145,11 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                     </div>
                                 </AccordionContent>
                             </AccordionItem>
-                        ) : (
+                        )}
+                        
+                        {integrationType === 'WHATSAPP-BAILEYS' && (
                             <>
-                                <div className="space-y-2">
+                                <div className="space-y-2 pt-4">
                                     <Label htmlFor="number">Número de Telefone (com DDI)</Label>
                                     <Input id="number" name="number" placeholder="Ex: 5511999998888"/>
                                 </div>
