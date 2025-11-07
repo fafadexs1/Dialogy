@@ -28,7 +28,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TemplateManager } from './template-manager';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Textarea } from '../ui/textarea';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -469,3 +470,5 @@ export default function EvolutionApiPage() {
         </div>
     );
 }
+
+    
