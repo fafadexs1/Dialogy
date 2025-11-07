@@ -26,16 +26,8 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
-function SubmitButton() {
-    const { pending } = useFormStatus();
-    return (
-        <Button type="submit" disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Criar Instância
-        </Button>
-    )
-}
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
     const [integrationType, setIntegrationType] = useState('WHATSAPP-BAILEYS');
@@ -100,132 +92,174 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 <DialogTitle>Criar Nova Instância</DialogTitle>
                 <DialogDescription>Conecte um novo número de WhatsApp para usar no atendimento.</DialogDescription>
             </DialogHeader>
-            <ScrollArea className="max-h-[70vh]">
-                <div className="py-4 space-y-4 pr-6">
-                    <div className="space-y-2">
-                        <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
-                        <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="integrationType">Tipo de Conexão</Label>
-                        <Select name="integrationType" value={integrationType} onValueChange={setIntegrationType}>
-                            <SelectTrigger><SelectValue/></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
-                                <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                {/* Coluna Esquerda: Campos Principais */}
+                <div className="space-y-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-base">Configurações Essenciais</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                             <div className="space-y-2">
+                                <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
+                                <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="integrationType">Tipo de Conexão</Label>
+                                <Select name="integrationType" value={integrationType} onValueChange={setIntegrationType}>
+                                    <SelectTrigger><SelectValue/></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
+                                        <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                    <Accordion type="multiple" className="w-full" defaultValue={['general-settings', 'behavior-settings']}>
-                         {integrationType === 'WHATSAPP-BUSINESS' ? (
-                            <AccordionItem value="meta">
-                                <AccordionTrigger>Configurações da Meta Business API</AccordionTrigger>
-                                <AccordionContent className="space-y-4 pt-2">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
-                                        <Input id="numberId" name="numberId" placeholder="ID do número no seu App da Meta" required />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="businessId">ID da Conta do WhatsApp (WABA ID)</Label>
-                                        <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="token">Token de Acesso Permanente</Label>
-                                        <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required />
-                                    </div>
-                                </AccordionContent>
-                            </AccordionItem>
-                        ) : (
-                            <>
-                                <div className="space-y-2 pt-4">
+                    {integrationType === 'WHATSAPP-BAILEYS' && (
+                         <Card>
+                             <CardHeader>
+                                <CardTitle className="text-base">Número de Telefone</CardTitle>
+                             </CardHeader>
+                             <CardContent>
+                                <div className="space-y-2">
                                     <Label htmlFor="number">Número de Telefone (com DDI)</Label>
                                     <Input id="number" name="number" placeholder="Ex: 5511999998888"/>
                                 </div>
-                                <AccordionItem value="baileys-token">
-                                    <AccordionTrigger>Token da Instância (Opcional)</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-2">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="baileysToken">Token</Label>
-                                            <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                <AccordionItem value="general-settings">
-                                    <AccordionTrigger>Configurações Gerais</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="alwaysOnline" name="alwaysOnline" />
-                                            <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="readMessages" name="readMessages" defaultChecked/>
-                                            <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="readStatus" name="readStatus" />
-                                            <Label htmlFor="readStatus">Marcar status como vistos</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="syncFullHistory" name="syncFullHistory" />
-                                            <Label htmlFor="syncFullHistory">Sincronizar histórico completo de conversas</Label>
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                <AccordionItem value="behavior-settings">
-                                    <AccordionTrigger>Comportamento da Instância</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
-                                            <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
-                                        </div>
-                                        {rejectCall && (
-                                            <div className="space-y-2 pl-6 animate-in fade-in-50">
-                                                <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                                <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
-                                            </div>
-                                        )}
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="groupsIgnore" name="groupsIgnore" />
-                                            <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
-                                        </div>
-                                    </AccordionContent>
-                                </AccordionItem>
-                                <AccordionItem value="proxy">
-                                    <AccordionTrigger>Configurações de Proxy</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="flex items-center space-x-2 mb-4">
-                                            <Checkbox id="useProxy" checked={useProxy} onCheckedChange={(checked) => setUseProxy(Boolean(checked))} />
-                                            <Label htmlFor="useProxy">Usar um servidor proxy</Label>
-                                        </div>
-                                        {useProxy && (
-                                            <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyHost">Host</Label>
-                                                    <Input id="proxyHost" name="proxyHost" placeholder="127.0.0.1" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyPort">Porta</Label>
-                                                    <Input id="proxyPort" name="proxyPort" type="number" placeholder="8080" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyUsername">Usuário (Opcional)</Label>
-                                                    <Input id="proxyUsername" name="proxyUsername" />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="proxyPassword">Senha (Opcional)</Label>
-                                                    <Input id="proxyPassword" name="proxyPassword" type="password" />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </AccordionContent>
-                                </AccordionItem>
-                            </>
-                        )}
-                    </Accordion>
+                             </CardContent>
+                         </Card>
+                    )}
+
+                    {integrationType === 'WHATSAPP-BUSINESS' && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Configurações da Meta Business API</CardTitle>
+                            </CardHeader>
+                             <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
+                                    <Input id="numberId" name="numberId" placeholder="ID do número no seu App da Meta" required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="businessId">ID da Conta do WhatsApp (WABA ID)</Label>
+                                    <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="token">Token de Acesso Permanente</Label>
+                                    <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required />
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                 </div>
-            </ScrollArea>
-             <DialogFooter className="pt-4">
+
+                {/* Coluna Direita: Configurações Avançadas */}
+                <ScrollArea className="h-[60vh] pr-4">
+                    <div className="space-y-4">
+                        {integrationType === 'WHATSAPP-BAILEYS' && (
+                            <Accordion type="multiple" className="w-full space-y-4" defaultValue={['general-settings']}>
+                                <Card>
+                                    <CardHeader className="p-4">
+                                        <AccordionItem value="baileys-token" className="border-b-0">
+                                            <AccordionTrigger className="p-0 text-base">Token da Instância (Opcional)</AccordionTrigger>
+                                            <AccordionContent className="pt-4">
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="baileysToken">Token</Label>
+                                                    <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
+                                                </div>
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    </CardHeader>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="p-4">
+                                        <AccordionItem value="general-settings" className="border-b-0">
+                                            <AccordionTrigger className="p-0 text-base">Configurações Gerais</AccordionTrigger>
+                                            <AccordionContent className="space-y-4 pt-4">
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="alwaysOnline" name="alwaysOnline" />
+                                                    <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="readMessages" name="readMessages" defaultChecked/>
+                                                    <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="readStatus" name="readStatus" />
+                                                    <Label htmlFor="readStatus">Marcar status como vistos</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="syncFullHistory" name="syncFullHistory" />
+                                                    <Label htmlFor="syncFullHistory">Sincronizar histórico completo</Label>
+                                                </div>
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    </CardHeader>
+                                </Card>
+                                <Card>
+                                     <CardHeader className="p-4">
+                                        <AccordionItem value="behavior-settings" className="border-b-0">
+                                            <AccordionTrigger className="p-0 text-base">Comportamento da Instância</AccordionTrigger>
+                                            <AccordionContent className="space-y-4 pt-4">
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
+                                                    <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
+                                                </div>
+                                                {rejectCall && (
+                                                    <div className="space-y-2 pl-6 animate-in fade-in-50">
+                                                        <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
+                                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
+                                                    </div>
+                                                )}
+                                                <div className="flex items-center space-x-2">
+                                                    <Checkbox id="groupsIgnore" name="groupsIgnore" />
+                                                    <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
+                                                </div>
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    </CardHeader>
+                                </Card>
+                                <Card>
+                                     <CardHeader className="p-4">
+                                        <AccordionItem value="proxy" className="border-b-0">
+                                            <AccordionTrigger className="p-0 text-base">Configurações de Proxy</AccordionTrigger>
+                                            <AccordionContent className="space-y-4 pt-4">
+                                                <div className="flex items-center space-x-2 mb-4">
+                                                    <Checkbox id="useProxy" checked={useProxy} onCheckedChange={(checked) => setUseProxy(Boolean(checked))} />
+                                                    <Label htmlFor="useProxy">Usar um servidor proxy</Label>
+                                                </div>
+                                                {useProxy && (
+                                                    <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxyHost">Host</Label>
+                                                            <Input id="proxyHost" name="proxyHost" placeholder="127.0.0.1" />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxyPort">Porta</Label>
+                                                            <Input id="proxyPort" name="proxyPort" type="number" placeholder="8080" />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxyUsername">Usuário (Opcional)</Label>
+                                                            <Input id="proxyUsername" name="proxyUsername" />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxyPassword">Senha (Opcional)</Label>
+                                                            <Input id="proxyPassword" name="proxyPassword" type="password" />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                     </CardHeader>
+                                </Card>
+                            </Accordion>
+                        )}
+                    </div>
+                </ScrollArea>
+            </div>
+             <DialogFooter className="pt-4 md:col-span-2">
                 <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
                 <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -353,6 +387,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
         let intervalId: NodeJS.Timeout;
 
         const setupPolling = (currentStatus: EvolutionInstance['status']) => {
+            if (intervalId) clearInterval(intervalId); // Clear previous interval
             const intervalTime = currentStatus === 'pending' ? 2000 : 15000;
             intervalId = setInterval(checkStatus, intervalTime);
         };
@@ -533,7 +568,7 @@ export default function EvolutionApiPage() {
                             Criar Instância
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-3xl">
+                    <DialogContent className="max-w-4xl">
                         <AddInstanceForm workspaceId={user.activeWorkspaceId!} onSuccess={handleSuccess} onClose={() => setIsModalOpen(false)} />
                     </DialogContent>
                 </Dialog>
