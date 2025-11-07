@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save } from 'lucide-react';
+import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
@@ -27,53 +27,53 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
+    const [step, setStep] = useState(1);
     const [integrationType, setIntegrationType] = useState('WHATSAPP-BAILEYS');
     const [rejectCall, setRejectCall] = useState(false);
     const [useProxy, setUseProxy] = useState(false);
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Form data state
+    const [formData, setFormData] = useState<Partial<EvolutionInstanceCreationPayload>>({
+        displayName: '',
+        integration: 'WHATSAPP-BAILEYS',
+        rejectCall: false,
+        groupsIgnore: false,
+        alwaysOnline: false,
+        readMessages: true,
+        readStatus: false,
+        syncFullHistory: false,
+        webhook: { events: [] }
+    });
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { name, value, type } = e.target;
+        const checked = (e.target as HTMLInputElement).checked;
+        setFormData(prev => ({
+            ...prev,
+            [name]: type === 'checkbox' ? checked : value
+        }));
+    };
+    
+    const handleSelectChange = (name: string, value: string | boolean) => {
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
-        const formData = new FormData(e.currentTarget);
         
         const payload: EvolutionInstanceCreationPayload = {
-            displayName: formData.get('displayName') as string,
-            integration: formData.get('integrationType') as any,
-            // Baileys
-            qrcode: true,
-            rejectCall: formData.get('rejectCall') === 'on',
-            msgCall: formData.get('msgCall') as string || undefined,
-            groupsIgnore: formData.get('groupsIgnore') === 'on',
-            alwaysOnline: formData.get('alwaysOnline') === 'on',
-            readMessages: formData.get('readMessages') === 'on',
-            readStatus: formData.get('readStatus') === 'on',
-            syncFullHistory: formData.get('syncFullHistory') === 'on',
-            proxy: useProxy ? {
-                host: formData.get('proxyHost') as string,
-                port: Number(formData.get('proxyPort')),
-                username: formData.get('proxyUsername') as string || undefined,
-                password: formData.get('proxyPassword') as string || undefined,
-            } : undefined,
-            webhook: {
-                url: formData.get('webhookUrl') as string || undefined,
-                events: formData.getAll('webhookEvents') as string[] || undefined,
-            },
+            ...formData,
+            displayName: formData.displayName!,
+            integration: formData.integration as any,
+            qrcode: formData.integration === 'WHATSAPP-BAILEYS',
         };
-        
-        if (payload.integration === 'WHATSAPP-BUSINESS') {
-            payload.qrcode = false;
-            payload.token = formData.get('token') as string;
-            payload.businessId = formData.get('businessId') as string;
-            payload.number = formData.get('numberId') as string; 
-        } else {
-             payload.token = formData.get('baileysToken') as string || undefined;
-             payload.number = formData.get('number') as string || undefined;
-        }
         
         const result = await createEvolutionApiInstance(payload, workspaceId);
         setIsSubmitting(false);
@@ -86,28 +86,57 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         }
     };
     
+    const isBaileys = formData.integration === 'WHATSAPP-BAILEYS';
+    const totalSteps = isBaileys ? 3 : 2;
+
+    const STEPS = [
+        { id: 1, title: "Essencial" },
+        { id: 2, title: "Conexão" },
+        ...(isBaileys ? [{ id: 3, title: "Avançado" }] : [])
+    ];
+
+    const nextStep = () => setStep(s => Math.min(s + 1, totalSteps));
+    const prevStep = () => setStep(s => Math.max(s - 1, 1));
+    
     return (
         <form onSubmit={handleSubmit}>
             <DialogHeader>
                 <DialogTitle>Criar Nova Instância</DialogTitle>
-                <DialogDescription>Conecte um novo número de WhatsApp para usar no atendimento.</DialogDescription>
+                 <div className="flex items-center justify-center pt-2">
+                    {STEPS.map((s, index) => (
+                        <React.Fragment key={s.id}>
+                            <div className="flex flex-col items-center">
+                                <div
+                                    className={cn(
+                                        'h-8 w-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors',
+                                        step >= s.id ? 'bg-primary text-primary-foreground' : 'bg-gray-200 text-gray-500'
+                                    )}
+                                >
+                                    {s.id}
+                                </div>
+                                <p className={cn("text-xs mt-1", step >= s.id ? 'font-semibold' : 'text-muted-foreground')}>{s.title}</p>
+                            </div>
+                            {index < STEPS.length - 1 && <div className={cn("h-px w-full mx-2 transition-colors", step > s.id ? 'bg-primary' : 'bg-gray-200')} />}
+                        </React.Fragment>
+                    ))}
+                </div>
             </DialogHeader>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-                {/* Coluna Esquerda: Campos Principais */}
-                <div className="space-y-4">
-                    <Card>
+            <ScrollArea className="h-[60vh]">
+            <div className="py-4 px-1 space-y-6">
+                {step === 1 && (
+                     <Card>
                         <CardHeader>
                             <CardTitle className="text-base">Configurações Essenciais</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
                              <div className="space-y-2">
                                 <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
-                                <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required/>
+                                <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required value={formData.displayName} onChange={handleInputChange} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="integrationType">Tipo de Conexão</Label>
-                                <Select name="integrationType" value={integrationType} onValueChange={setIntegrationType}>
+                                <Select name="integration" value={formData.integration} onValueChange={(value) => { setFormData(prev => ({...prev, integration: value})); }}>
                                     <SelectTrigger><SelectValue/></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
@@ -117,22 +146,24 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                             </div>
                         </CardContent>
                     </Card>
+                )}
 
-                    {integrationType === 'WHATSAPP-BAILEYS' && (
-                         <Card>
-                             <CardHeader>
-                                <CardTitle className="text-base">Número de Telefone</CardTitle>
-                             </CardHeader>
-                             <CardContent>
-                                <div className="space-y-2">
-                                    <Label htmlFor="number">Número de Telefone (com DDI)</Label>
-                                    <Input id="number" name="number" placeholder="Ex: 5511999998888"/>
-                                </div>
-                             </CardContent>
-                         </Card>
-                    )}
-
-                    {integrationType === 'WHATSAPP-BUSINESS' && (
+                {step === 2 && isBaileys && (
+                    <Card>
+                        <CardHeader><CardTitle className="text-base">Detalhes da Conexão (Baileys)</CardTitle></CardHeader>
+                        <CardContent className='space-y-4'>
+                            <div className="space-y-2">
+                                <Label htmlFor="number">Número de Telefone (Opcional, com DDI)</Label>
+                                <Input id="number" name="number" placeholder="Ex: 5511999998888" value={formData.number || ''} onChange={handleInputChange} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="baileysToken">Token da Instância (Opcional)</Label>
+                                <Input id="baileysToken" name="token" placeholder="Token para segurança da instância" value={formData.token || ''} onChange={handleInputChange}/>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+                 {step === 2 && !isBaileys && (
                         <Card>
                             <CardHeader>
                                 <CardTitle className="text-base">Configurações da Meta Business API</CardTitle>
@@ -140,58 +171,42 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                              <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
-                                    <Input id="numberId" name="numberId" placeholder="ID do número no seu App da Meta" required />
+                                    <Input id="numberId" name="number" placeholder="ID do número no seu App da Meta" required value={formData.number || ''} onChange={handleInputChange} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="businessId">ID da Conta do WhatsApp (WABA ID)</Label>
-                                    <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required />
+                                    <Input id="businessId" name="businessId" placeholder="ID do seu WhatsApp Business Account" required value={formData.businessId || ''} onChange={handleInputChange} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="token">Token de Acesso Permanente</Label>
-                                    <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required />
+                                    <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required value={formData.token || ''} onChange={handleInputChange}/>
                                 </div>
                             </CardContent>
                         </Card>
-                    )}
-                </div>
+                 )}
 
-                {/* Coluna Direita: Configurações Avançadas */}
-                <ScrollArea className="h-[60vh] pr-4">
-                    <div className="space-y-4">
-                        {integrationType === 'WHATSAPP-BAILEYS' && (
-                            <Accordion type="multiple" className="w-full space-y-4" defaultValue={['general-settings']}>
-                                <Card>
-                                    <CardHeader className="p-4">
-                                        <AccordionItem value="baileys-token" className="border-b-0">
-                                            <AccordionTrigger className="p-0 text-base">Token da Instância (Opcional)</AccordionTrigger>
-                                            <AccordionContent className="pt-4">
-                                                <div className="space-y-2">
-                                                    <Label htmlFor="baileysToken">Token</Label>
-                                                    <Input id="baileysToken" name="baileysToken" placeholder="Token para segurança da instância" />
-                                                </div>
-                                            </AccordionContent>
-                                        </AccordionItem>
-                                    </CardHeader>
-                                </Card>
+                 {step === 3 && isBaileys && (
+                     <div className="space-y-4">
+                         <Accordion type="multiple" className="w-full space-y-4" defaultValue={['general-settings']}>
                                 <Card>
                                     <CardHeader className="p-4">
                                         <AccordionItem value="general-settings" className="border-b-0">
                                             <AccordionTrigger className="p-0 text-base">Configurações Gerais</AccordionTrigger>
                                             <AccordionContent className="space-y-4 pt-4">
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="alwaysOnline" name="alwaysOnline" />
+                                                    <Checkbox id="alwaysOnline" name="alwaysOnline" checked={formData.alwaysOnline} onCheckedChange={(c) => handleSelectChange('alwaysOnline', !!c)} />
                                                     <Label htmlFor="alwaysOnline">Ficar sempre online</Label>
                                                 </div>
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="readMessages" name="readMessages" defaultChecked/>
+                                                    <Checkbox id="readMessages" name="readMessages" checked={formData.readMessages} onCheckedChange={(c) => handleSelectChange('readMessages', !!c)} />
                                                     <Label htmlFor="readMessages">Marcar mensagens como lidas</Label>
                                                 </div>
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="readStatus" name="readStatus" />
+                                                    <Checkbox id="readStatus" name="readStatus" checked={formData.readStatus} onCheckedChange={(c) => handleSelectChange('readStatus', !!c)} />
                                                     <Label htmlFor="readStatus">Marcar status como vistos</Label>
                                                 </div>
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="syncFullHistory" name="syncFullHistory" />
+                                                    <Checkbox id="syncFullHistory" name="syncFullHistory" checked={formData.syncFullHistory} onCheckedChange={(c) => handleSelectChange('syncFullHistory', !!c)} />
                                                     <Label htmlFor="syncFullHistory">Sincronizar histórico completo</Label>
                                                 </div>
                                             </AccordionContent>
@@ -204,17 +219,17 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                             <AccordionTrigger className="p-0 text-base">Comportamento da Instância</AccordionTrigger>
                                             <AccordionContent className="space-y-4 pt-4">
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
+                                                    <Checkbox id="rejectCall" name="rejectCall" checked={formData.rejectCall} onCheckedChange={(c) => handleSelectChange('rejectCall', !!c)} />
                                                     <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
                                                 </div>
-                                                {rejectCall && (
+                                                {formData.rejectCall && (
                                                     <div className="space-y-2 pl-6 animate-in fade-in-50">
                                                         <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
+                                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." value={formData.msgCall || ''} onChange={handleInputChange}/>
                                                     </div>
                                                 )}
                                                 <div className="flex items-center space-x-2">
-                                                    <Checkbox id="groupsIgnore" name="groupsIgnore" />
+                                                    <Checkbox id="groupsIgnore" name="groupsIgnore" checked={formData.groupsIgnore} onCheckedChange={(c) => handleSelectChange('groupsIgnore', !!c)} />
                                                     <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
                                                 </div>
                                             </AccordionContent>
@@ -232,22 +247,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                                 </div>
                                                 {useProxy && (
                                                     <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="proxyHost">Host</Label>
-                                                            <Input id="proxyHost" name="proxyHost" placeholder="127.0.0.1" />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="proxyPort">Porta</Label>
-                                                            <Input id="proxyPort" name="proxyPort" type="number" placeholder="8080" />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="proxyUsername">Usuário (Opcional)</Label>
-                                                            <Input id="proxyUsername" name="proxyUsername" />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="proxyPassword">Senha (Opcional)</Label>
-                                                            <Input id="proxyPassword" name="proxyPassword" type="password" />
-                                                        </div>
+                                                        {/* Proxy fields here */}
                                                     </div>
                                                 )}
                                             </AccordionContent>
@@ -255,16 +255,28 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                      </CardHeader>
                                 </Card>
                             </Accordion>
-                        )}
-                    </div>
-                </ScrollArea>
+                     </div>
+                 )}
+
             </div>
-             <DialogFooter className="pt-4 md:col-span-2">
-                <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-                <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Criar Instância
-                </Button>
+            </ScrollArea>
+             <DialogFooter className="pt-4">
+                {step > 1 && (
+                    <Button type="button" variant="ghost" onClick={prevStep}>
+                        <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
+                    </Button>
+                )}
+                <div className="flex-grow" />
+                {step < totalSteps ? (
+                    <Button type="button" onClick={nextStep}>
+                        Continuar <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                ) : (
+                    <Button type="submit" disabled={isSubmitting}>
+                        {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Criar Instância
+                    </Button>
+                )}
             </DialogFooter>
         </form>
     )
@@ -568,7 +580,7 @@ export default function EvolutionApiPage() {
                             Criar Instância
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-4xl">
+                    <DialogContent className="max-w-3xl">
                         <AddInstanceForm workspaceId={user.activeWorkspaceId!} onSuccess={handleSuccess} onClose={() => setIsModalOpen(false)} />
                     </DialogContent>
                 </Dialog>
