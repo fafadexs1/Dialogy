@@ -1,9 +1,10 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace } from '@/lib/types';
+import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 
@@ -219,7 +220,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     return { error: null };
 }
 
-async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; }> {
+async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
     const instanceRes = await db.query(
       `SELECT c.api_url, c.api_key 
        FROM evolution_api_instances i
@@ -228,7 +229,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
       [instanceName]
     );
      if (instanceRes.rows.length === 0) {
-        throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);
+        return null;
     }
     return instanceRes.rows[0];
 }
@@ -236,6 +237,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
 export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         const data = await fetchEvolutionAPI(`/instance/connectionState/${instanceName}`, apiConfig);
         if (data.instance.state === 'connecting') {
             const qrData = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
@@ -254,6 +256,7 @@ export async function checkInstanceStatus(instanceName: string): Promise<{ statu
 export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         const data = await fetchEvolutionAPI(`/instance/connect/${instanceName}`, apiConfig);
         if (data?.base64) {
             return { status: 'pending', qrCode: data.base64 };
@@ -268,6 +271,7 @@ export async function connectInstance(instanceName: string): Promise<{ status: E
 export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'] }> {
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         await fetchEvolutionAPI(`/instance/logout/${instanceName}`, apiConfig, { method: 'POST' });
         return { status: 'disconnected' };
     } catch (error) {
@@ -299,6 +303,7 @@ export async function deleteMessageAction(
         const { remotejid: remoteJid } = chatRes.rows[0];
         
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         
         const deletePayload = { id: apiMessageId, remoteJid, fromMe };
         
@@ -332,6 +337,7 @@ export async function createWhatsappTemplate(
 ): Promise<{ success: boolean; error?: string }> {
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         await fetchEvolutionAPI(`/template/add/${instanceName}`, apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload)
@@ -349,6 +355,7 @@ export async function findWhatsappTemplates(
 ): Promise<{ templates: any[] | null; error?: string }> {
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         const response = await fetchEvolutionAPI(`/template/findAll/${instanceName}`, apiConfig);
         return { templates: response };
     } catch (error: any) {

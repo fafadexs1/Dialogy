@@ -1,4 +1,5 @@
 
+
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
@@ -317,6 +318,13 @@ export interface EvolutionInstance {
     qrCode?: string;
     webhook_url?: string;
 }
+
+export type EvolutionApiConfig = {
+  id: string;
+  workspace_id: string;
+  api_url: string;
+  api_key: string;
+};
 
 export interface EvolutionInstanceCreationPayload {
     // Top-level

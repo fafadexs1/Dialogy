@@ -9,6 +9,19 @@ import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
+async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
+    const instanceRes = await db.query(
+        `SELECT c.api_url, c.api_key 
+         FROM evolution_api_instances i
+         JOIN whatsapp_clusters c ON i.cluster_id = c.id
+         WHERE i.instance_name = $1`,
+        [instanceName]
+    );
+    if (instanceRes.rows.length === 0) {
+        return null;
+    }
+    return instanceRes.rows[0];
+}
 
 export async function POST(
     request: Request,
@@ -51,20 +64,6 @@ export async function POST(
     console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-}
-
-async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
-    const instanceRes = await db.query(
-        `SELECT c.api_url, c.api_key 
-         FROM evolution_api_instances i
-         JOIN whatsapp_clusters c ON i.cluster_id = c.id
-         WHERE i.instance_name = $1`,
-        [instanceName]
-    );
-    if (instanceRes.rows.length === 0) {
-        return null;
-    }
-    return instanceRes.rows[0];
 }
 
 
@@ -321,5 +320,3 @@ async function handleChatsUpsert(payload: any) {
         }
     }
 }
-
-    
