@@ -1,5 +1,3 @@
-
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -83,9 +81,13 @@ export async function createEvolutionApiInstance(
     if (!workspaceId) {
         return { success: false, error: 'ID do Workspace não encontrado.' };
     }
-    if (!payload.displayName) {
+    if (!payload.displayName?.trim()) {
         return { success: false, error: 'O apelido da instância é obrigatório.'}
     }
+     if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
+        return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
+    }
+
 
     try {
         await client.query('BEGIN');

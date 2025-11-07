@@ -1,5 +1,3 @@
-
-
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -9,6 +7,19 @@ import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 
+async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
+    const instanceRes = await db.query(
+        `SELECT c.api_url, c.api_key 
+         FROM evolution_api_instances i
+         JOIN whatsapp_clusters c ON i.cluster_id = c.id
+         WHERE i.instance_name = $1`,
+        [instanceName]
+    );
+    if (instanceRes.rows.length === 0) {
+        return null;
+    }
+    return instanceRes.rows[0];
+}
 
 export async function POST(
     request: Request,
@@ -52,6 +63,7 @@ export async function POST(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
 
 async function handleMessagesUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
@@ -149,10 +161,10 @@ async function handleMessagesUpsert(payload: any) {
         await client.query('BEGIN');
 
         const instanceRes = await client.query(
-            `SELECT ec.workspace_id, ec.api_url, ec.api_key 
-             FROM evolution_api_instances AS ei
-             JOIN evolution_api_configs AS ec ON ei.config_id = ec.id 
-             WHERE ei.name = $1`, [instanceName]
+            `SELECT i.workspace_id, c.api_url, c.api_key
+             FROM evolution_api_instances i
+             JOIN whatsapp_clusters c ON i.cluster_id = c.id
+             WHERE i.instance_name = $1`, [instanceName]
         );
         if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
         
@@ -278,13 +290,9 @@ async function handleContactsUpdate(payload: any) {
     if (!remoteJid || !profilePicUrl) return;
 
     try {
-        const instanceRes = await db.query('SELECT config_id FROM evolution_api_instances WHERE name = $1', [instanceName]);
+        const instanceRes = await db.query('SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1', [instanceName]);
         if (instanceRes.rowCount === 0) return;
-        const configId = instanceRes.rows[0].config_id;
-        
-        const configRes = await db.query('SELECT workspace_id FROM evolution_api_configs WHERE id = $1', [configId]);
-        if(configRes.rowCount === 0) return;
-        const workspaceId = configRes.rows[0].workspace_id;
+        const workspaceId = instanceRes.rows[0].workspace_id;
 
         const result = await db.query(
             `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
@@ -312,5 +320,3 @@ async function handleChatsUpsert(payload: any) {
         }
     }
 }
-
-    
