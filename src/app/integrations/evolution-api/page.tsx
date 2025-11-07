@@ -3,21 +3,21 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useActionState, useTransition } from 'react';
-import type { User, EvolutionInstance, EvolutionInstanceCreationPayload } from '@/lib/types';
+import type { User, EvolutionInstance, EvolutionInstanceCreationPayload, EvolutionInstanceSettings } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw } from 'lucide-react';
+import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import Image from 'next/image';
-import { getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance, checkInstanceStatus, connectInstance, disconnectInstance, restartInstance } from '@/actions/evolution-api';
+import { getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance, checkInstanceStatus, connectInstance, disconnectInstance, restartInstance, getInstanceSettings, updateInstanceSettings } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -276,6 +276,109 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     )
 }
 
+function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance, onSave: () => void }) {
+    const { toast } = useToast();
+    const [isOpen, setIsOpen] = useState(false);
+    const [settings, setSettings] = useState<EvolutionInstanceSettings | null>(null);
+    const [loadingSettings, setLoadingSettings] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        const fetchSettings = async () => {
+            if (isOpen) {
+                setLoadingSettings(true);
+                const result = await getInstanceSettings(instance.instance_name);
+                if (result) {
+                    setSettings(result);
+                } else {
+                    toast({ title: 'Erro ao buscar configurações', description: 'Não foi possível carregar as configurações atuais da instância.', variant: 'destructive'});
+                    setIsOpen(false);
+                }
+                setLoadingSettings(false);
+            }
+        };
+        fetchSettings();
+    }, [isOpen, instance.instance_name, toast]);
+    
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const formData = new FormData(e.currentTarget);
+        
+        const newSettings: EvolutionInstanceSettings = {
+            rejectCall: formData.get('rejectCall') === 'on',
+            msgCall: formData.get('msgCall') as string,
+            groupsIgnore: formData.get('groupsIgnore') === 'on',
+            alwaysOnline: formData.get('alwaysOnline') === 'on',
+            readMessages: formData.get('readMessages') === 'on',
+            readStatus: formData.get('readStatus') === 'on',
+            syncFullHistory: formData.get('syncFullHistory') === 'on',
+        };
+
+        const result = await updateInstanceSettings(instance.instance_name, newSettings);
+
+        if (result.success) {
+            toast({ title: 'Configurações Salvas!', description: 'As alterações foram aplicadas à instância.' });
+            setIsOpen(false);
+            onSave();
+        } else {
+            toast({ title: 'Erro ao Salvar', description: result.error, variant: 'destructive' });
+        }
+        setIsSubmitting(false);
+    };
+
+    return (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+                <DropdownMenuItem onSelect={(e) => e.preventDefault()}><Settings className="mr-2"/>Configurações</DropdownMenuItem>
+            </DialogTrigger>
+            <DialogContent>
+                 <form onSubmit={handleSubmit}>
+                    <DialogHeader>
+                        <DialogTitle>Editar Configurações</DialogTitle>
+                        <DialogDescription>Ajuste as configurações para a instância <span className='font-bold'>{instance.display_name}</span>.</DialogDescription>
+                    </DialogHeader>
+                    {loadingSettings ? (
+                        <div className="flex items-center justify-center h-48">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        </div>
+                    ) : settings ? (
+                        <div className="py-4 space-y-4">
+                            <div className="flex items-center space-x-2">
+                                <Switch id="rejectCall" name="rejectCall" defaultChecked={settings.rejectCall} />
+                                <Label htmlFor="rejectCall">Rejeitar chamadas</Label>
+                            </div>
+                             <div className="space-y-2">
+                                <Label htmlFor="msgCall">Mensagem ao rejeitar</Label>
+                                <Input id="msgCall" name="msgCall" defaultValue={settings.msgCall} />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch id="groupsIgnore" name="groupsIgnore" defaultChecked={settings.groupsIgnore} />
+                                <Label htmlFor="groupsIgnore">Ignorar grupos</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch id="alwaysOnline" name="alwaysOnline" defaultChecked={settings.alwaysOnline} />
+                                <Label htmlFor="alwaysOnline">Sempre online</Label>
+                            </div>
+                             <div className="flex items-center space-x-2">
+                                <Switch id="readMessages" name="readMessages" defaultChecked={settings.readMessages} />
+                                <Label htmlFor="readMessages">Marcar como lido</Label>
+                            </div>
+                        </div>
+                    ) : null}
+                    <DialogFooter>
+                         <DialogClose asChild><Button type="button" variant="ghost">Cancelar</Button></DialogClose>
+                         <Button type="submit" disabled={isSubmitting || loadingSettings}>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                             <Save className="mr-2 h-4 w-4" /> Salvar
+                         </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 function InstanceCard({ instance: initialInstance, onMutate, user }: { instance: Omit<EvolutionInstance, 'status' | 'qrCode'>, onMutate: () => void, user: User }) {
     const { toast } = useToast();
     const [instance, setInstance] = useState<EvolutionInstance>({...initialInstance, status: 'disconnected' });
@@ -287,46 +390,31 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
     }, [instance.instance_name]);
 
     useEffect(() => {
-        // Initial check
-        checkStatus();
+        let intervalId: NodeJS.Timeout;
 
-        // Setup interval for polling
-        const intervalId = setInterval(() => {
-            setInstance(prevInstance => {
-                // Determine interval based on current status before the next check
-                const currentStatus = prevInstance.status;
-                const nextInterval = currentStatus === 'pending' ? 2000 : 15000;
-
-                // Re-setup the interval with the new timing
-                clearInterval(intervalId); // Clear the old one
-                const newIntervalId = setInterval(checkStatus, nextInterval);
-                (window as any)[`interval_${instance.id}`] = newIntervalId; // Track it globally if needed for debugging
-
-                checkStatus(); // Perform the check
-                return prevInstance; // Return previous state, as checkStatus will update it
-            });
-        }, 15000); // Default initial interval
-
-        // Cleanup
-        return () => {
-             const finalIntervalId = (window as any)[`interval_${instance.id}`] || intervalId;
-             clearInterval(finalIntervalId);
+        const setupPolling = (currentStatus: EvolutionInstance['status']) => {
+            const intervalTime = currentStatus === 'pending' ? 2000 : 15000;
+            intervalId = setInterval(checkStatus, intervalTime);
         };
-    }, [checkStatus, instance.id]);
+        
+        checkStatus(); // Initial check
+        setupPolling(instance.status);
+
+        return () => clearInterval(intervalId);
+    }, [checkStatus, instance.status]);
 
 
     const handleConnect = async () => {
         setIsToggling(true);
         const result = await connectInstance(instance.instance_name);
         setInstance(prev => ({...prev, ...result }));
-        // The useEffect polling will take over from here
         setIsToggling(false);
     }
     
     const handleDisconnect = async () => {
         setIsToggling(true);
         await disconnectInstance(instance.instance_name);
-        checkStatus(); // Check status immediately after disconnect request
+        checkStatus();
         setIsToggling(false);
     }
 
@@ -347,7 +435,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
             toast({ title: 'Erro ao reiniciar', description: result.error, variant: 'destructive'});
         } else {
             toast({ title: 'Instância Reiniciada', description: 'Aguarde alguns instantes para a reconexão.'});
-            setTimeout(checkStatus, 3000); // Check status after a delay
+            setTimeout(checkStatus, 3000);
         }
     }
     
@@ -368,6 +456,8 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                                 <Button variant="ghost" size="icon"><MoreVertical/></Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent>
+                                {instance.type === 'baileys' && <EditInstanceDialog instance={instance} onSave={onMutate} />}
+                                <DropdownMenuSeparator />
                                 <AlertDialogTrigger asChild>
                                     <DropdownMenuItem className="w-full justify-start text-destructive hover:text-destructive" onSelect={(e) => e.preventDefault()}>
                                         <Trash2 className="mr-2"/>Excluir

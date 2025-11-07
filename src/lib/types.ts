@@ -319,6 +319,17 @@ export interface EvolutionInstance {
     webhook_url?: string;
 }
 
+export type EvolutionInstanceSettings = {
+    rejectCall?: boolean;
+    msgCall?: string;
+    groupsIgnore?: boolean;
+    alwaysOnline?: boolean;
+    readMessages?: boolean;
+    readStatus?: boolean;
+    syncFullHistory?: boolean;
+};
+
+
 export type EvolutionApiConfig = {
   id: string;
   workspace_id: string;

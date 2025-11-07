@@ -4,7 +4,7 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig } from '@/lib/types';
+import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig, EvolutionInstanceSettings } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 
@@ -399,4 +399,54 @@ export async function findWhatsappTemplates(
         console.error('[EVO_ACTION_FIND_TEMPLATES] Error:', error);
         return { templates: null, error: error.message };
     }
+}
+
+export async function getInstanceSettings(instanceName: string): Promise<EvolutionInstanceSettings | null> {
+  try {
+    const apiConfig = await getApiConfigForInstance(instanceName);
+    if (!apiConfig) {
+      throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);
+    }
+    const data = await fetchEvolutionAPI(`/settings/find/${instanceName}`, apiConfig);
+
+    // Mapeia de snake_case para camelCase
+    return {
+      rejectCall: data.reject_call,
+      groupsIgnore: data.groups_ignore,
+      alwaysOnline: data.always_online,
+      readMessages: data.read_messages,
+      readStatus: data.read_status,
+      syncFullHistory: data.sync_full_history,
+      msgCall: data.msg_call, // Assume que a API retorna este campo se existir
+    };
+  } catch (error) {
+    console.error(`[GET_INSTANCE_SETTINGS] Erro ao buscar configurações para ${instanceName}:`, error);
+    return null;
+  }
+}
+
+export async function updateInstanceSettings(
+    instanceName: string,
+    settings: Partial<EvolutionInstanceSettings>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const apiConfig = await getApiConfigForInstance(instanceName);
+    if (!apiConfig) {
+      throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);
+    }
+
+    // O payload da API espera camelCase, então o objeto settings já está no formato correto
+    await fetchEvolutionAPI(
+      `/settings/set/${instanceName}`,
+      apiConfig,
+      {
+        method: 'POST',
+        body: JSON.stringify(settings),
+      }
+    );
+    return { success: true };
+  } catch (error: any) {
+    console.error(`[UPDATE_INSTANCE_SETTINGS] Erro ao atualizar configurações para ${instanceName}:`, error);
+    return { success: false, error: error.message };
+  }
 }
