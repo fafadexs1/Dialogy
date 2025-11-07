@@ -41,6 +41,7 @@ function SubmitButton() {
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: () => void, onClose: () => void }) {
     const [integrationType, setIntegrationType] = useState('WHATSAPP-BAILEYS');
+    const [rejectCall, setRejectCall] = useState(false);
     const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -50,7 +51,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
             displayName: formData.get('displayName') as string,
             integration: formData.get('integrationType') as any,
             qrcode: true, // Default for baileys
-            rejectCall: formData.get('rejectCall') === 'on',
+            rejectCall: rejectCall,
             msgCall: formData.get('msgCall') as string | undefined,
             groupsIgnore: formData.get('groupsIgnore') === 'on',
             alwaysOnline: formData.get('alwaysOnline') === 'on',
@@ -123,13 +124,15 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                             <AccordionTrigger>Configurações Avançadas (Baileys)</AccordionTrigger>
                             <AccordionContent className="space-y-4 pt-4">
                                 <div className="flex items-center space-x-2">
-                                    <Checkbox id="rejectCall" name="rejectCall" />
+                                    <Checkbox id="rejectCall" name="rejectCall" checked={rejectCall} onCheckedChange={(checked) => setRejectCall(Boolean(checked))} />
                                     <Label htmlFor="rejectCall">Rejeitar chamadas de voz e vídeo</Label>
                                 </div>
-                                 <div className="space-y-2">
-                                    <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                    <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
-                                </div>
+                                {rejectCall && (
+                                     <div className="space-y-2 pl-6 animate-in fade-in-50">
+                                        <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
+                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." />
+                                    </div>
+                                )}
                                 <div className="flex items-center space-x-2">
                                     <Checkbox id="groupsIgnore" name="groupsIgnore" />
                                     <Label htmlFor="groupsIgnore">Ignorar mensagens de grupos</Label>
