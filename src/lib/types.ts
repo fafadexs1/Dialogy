@@ -153,6 +153,7 @@ export type Chat = {
   assigned_at?: string;
   source?: string;
   instance_name?: string;
+  instance_type?: 'baileys' | 'wa_cloud';
   unreadCount?: number;
   teamName?: string;
   tag?: string;

@@ -1,4 +1,5 @@
 
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -340,13 +341,24 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const timezone = workspaceRes.rows[0]?.timezone || defaultTimeZone;
 
         const chatQuery = `
+            WITH LastMessageDetails AS (
+                SELECT
+                    chat_id,
+                    (array_agg(instance_name ORDER BY created_at DESC))[1] as last_instance_name
+                FROM messages
+                WHERE workspace_id = $1
+                GROUP BY chat_id
+            )
             SELECT 
                 c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color, c.contact_id, c.agent_id,
                 t.name as team_name,
-                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as instance_name
+                lmd.last_instance_name as instance_name,
+                eai.type as instance_type
             FROM chats c
             LEFT JOIN team_members tm ON c.agent_id = tm.user_id
             LEFT JOIN teams t ON tm.team_id = t.id
+            LEFT JOIN LastMessageDetails lmd ON c.id = lmd.chat_id
+            LEFT JOIN evolution_api_instances eai ON lmd.last_instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
             WHERE c.workspace_id = $1 AND (c.status IN ('gerais', 'atendimentos') OR (c.status = 'encerrados' AND c.agent_id = $2))
         `;
         const chatRes = await db.query(chatQuery, [workspaceId, userId]);
@@ -453,6 +465,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 messages: lastMessage ? [lastMessage] : [],
                 source: lastMessage?.source_from_api,
                 instance_name: r.instance_name,
+                instance_type: r.instance_type,
                 assigned_at: r.assigned_at,
                 unreadCount: unreadCount,
                 teamName: r.team_name,
