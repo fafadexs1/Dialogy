@@ -297,11 +297,23 @@ export async function disconnectInstance(instanceName: string): Promise<{ status
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
-        await fetchEvolutionAPI(`/instance/logout/${instanceName}`, apiConfig, { method: 'POST' });
+        await fetchEvolutionAPI(`/instance/logout/${instanceName}`, apiConfig, { method: 'DELETE' });
         return { status: 'disconnected' };
     } catch (error) {
         console.error(`[EVO_ACTION_DISCONNECT] Erro ao desconectar instância ${instanceName}:`, error);
         return { status: 'disconnected' };
+    }
+}
+
+export async function restartInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const apiConfig = await getApiConfigForInstance(instanceName);
+        if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
+        await fetchEvolutionAPI(`/instance/restart/${instanceName}`, apiConfig, { method: 'PUT' });
+        return { success: true };
+    } catch (error: any) {
+        console.error(`[EVO_ACTION_RESTART] Erro ao reiniciar instância ${instanceName}:`, error);
+        return { success: false, error: error.message };
     }
 }
 

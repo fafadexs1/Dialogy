@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings } from 'lucide-react';
+import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import Image from 'next/image';
-import { getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance, checkInstanceStatus, connectInstance, disconnectInstance } from '@/actions/evolution-api';
+import { getEvolutionApiInstances, createEvolutionApiInstance, deleteEvolutionApiInstance, checkInstanceStatus, connectInstance, disconnectInstance, restartInstance } from '@/actions/evolution-api';
 import { useFormStatus } from 'react-dom';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -340,6 +340,17 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
         }
     }
     
+    const handleRestart = async () => {
+        toast({ title: 'Reiniciando...', description: `A instância ${instance.display_name} está sendo reiniciada.`});
+        const result = await restartInstance(instance.instance_name);
+        if(result.error) {
+            toast({ title: 'Erro ao reiniciar', description: result.error, variant: 'destructive'});
+        } else {
+            toast({ title: 'Instância Reiniciada', description: 'Aguarde alguns instantes para a reconexão.'});
+            setTimeout(checkStatus, 3000); // Check status after a delay
+        }
+    }
+    
     return (
         <Card>
             <CardHeader>
@@ -399,9 +410,15 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                         {isToggling ? <Loader2 className="animate-spin mr-2"/> : <Power className="mr-2"/>} Conectar
                     </Button>
                 )}
-                <Button variant="outline" onClick={checkStatus} disabled={instance.status === 'pending'}>
-                    <QrCode/>
-                </Button>
+                 {instance.status === 'connected' ? (
+                     <Button variant="outline" onClick={handleRestart}>
+                        <RefreshCw/>
+                    </Button>
+                 ) : (
+                    <Button variant="outline" onClick={checkStatus} disabled={instance.status === 'pending'}>
+                        <QrCode/>
+                    </Button>
+                 )}
             </CardFooter>
         </Card>
     )
@@ -499,4 +516,3 @@ export default function EvolutionApiPage() {
         </div>
     );
 }
-
