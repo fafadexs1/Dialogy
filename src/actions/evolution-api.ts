@@ -409,15 +409,15 @@ export async function getInstanceSettings(instanceName: string): Promise<Evoluti
     }
     const data = await fetchEvolutionAPI(`/settings/find/${instanceName}`, apiConfig);
 
-    // Mapeia de snake_case para camelCase
+    // Mapeia de camelCase para camelCase (corrigido)
     return {
-      rejectCall: data.reject_call,
-      groupsIgnore: data.groups_ignore,
-      alwaysOnline: data.always_online,
-      readMessages: data.read_messages,
-      readStatus: data.read_status,
-      syncFullHistory: data.sync_full_history,
-      msgCall: data.msg_call, // Assume que a API retorna este campo se existir
+      rejectCall: data.rejectCall,
+      groupsIgnore: data.groupsIgnore,
+      alwaysOnline: data.alwaysOnline,
+      readMessages: data.readMessages,
+      readStatus: data.readStatus,
+      syncFullHistory: data.syncFullHistory,
+      msgCall: data.msgCall,
     };
   } catch (error) {
     console.error(`[GET_INSTANCE_SETTINGS] Erro ao buscar configurações para ${instanceName}:`, error);
