@@ -375,35 +375,6 @@ export interface EvolutionInstanceCreationPayload {
         headers?: Record<string, string>;
         events?: string[];
     };
-    
-    // RabbitMQ
-    rabbitmq?: {
-        enabled?: boolean;
-        events?: string[];
-    };
-
-    // SQS
-    sqs?: {
-        enabled?: boolean;
-        events?: string[];
-    };
-
-    // Chatwoot
-    chatwoot?: {
-        accountId?: number;
-        token?: string;
-        url?: string;
-        signMsg?: boolean;
-        reopenConversation?: boolean;
-        conversationPending?: boolean;
-        importContacts?: boolean;
-        nameInbox?: string;
-        mergeBrazilContacts?: boolean;
-        importMessages?: boolean;
-        daysLimitImportMessages?: number;
-        organization?: string;
-        logo?: string;
-    }
 }
 
 

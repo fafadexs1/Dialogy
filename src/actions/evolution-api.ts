@@ -412,12 +412,12 @@ export async function getInstanceSettings(instanceName: string): Promise<Evoluti
     // Mapeia de camelCase para camelCase (corrigido)
     return {
       rejectCall: data.rejectCall,
+      msgCall: data.msgCall,
       groupsIgnore: data.groupsIgnore,
       alwaysOnline: data.alwaysOnline,
       readMessages: data.readMessages,
       readStatus: data.readStatus,
       syncFullHistory: data.syncFullHistory,
-      msgCall: data.msgCall,
     };
   } catch (error) {
     console.error(`[GET_INSTANCE_SETTINGS] Erro ao buscar configurações para ${instanceName}:`, error);

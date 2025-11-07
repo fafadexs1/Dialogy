@@ -71,14 +71,6 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 url: formData.get('webhookUrl') as string || undefined,
                 events: formData.getAll('webhookEvents') as string[] || undefined,
             },
-            chatwoot: {
-                accountId: formData.get('chatwootAccountId') ? Number(formData.get('chatwootAccountId')) : undefined,
-                token: formData.get('chatwootToken') as string || undefined,
-                url: formData.get('chatwootUrl') as string || undefined,
-                signMsg: formData.get('chatwootSignMsg') === 'on',
-                reopenConversation: formData.get('chatwootReopenConversation') === 'on',
-                conversationPending: formData.get('chatwootConversationPending') === 'on',
-            },
         };
         
         if (payload.integration === 'WHATSAPP-BUSINESS') {
@@ -226,38 +218,6 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                                 </div>
                                             </div>
                                         )}
-                                    </AccordionContent>
-                                </AccordionItem>
-                                
-                                <AccordionItem value="chatwoot">
-                                    <AccordionTrigger>Integração com Chatwoot (Opcional)</AccordionTrigger>
-                                    <AccordionContent className="space-y-4 pt-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-2">
-                                                <Label htmlFor="chatwootUrl">URL do Chatwoot</Label>
-                                                <Input id="chatwootUrl" name="chatwootUrl" placeholder="https://app.chatwoot.com" />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="chatwootToken">Token da Conta</Label>
-                                                <Input id="chatwootToken" name="chatwootToken" type="password" />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="chatwootAccountId">ID da Conta</Label>
-                                                <Input id="chatwootAccountId" name="chatwootAccountId" type="number" />
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootSignMsg" name="chatwootSignMsg" />
-                                            <Label htmlFor="chatwootSignMsg">Assinar mensagens do agente</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootReopenConversation" name="chatwootReopenConversation" />
-                                            <Label htmlFor="chatwootReopenConversation">Reabrir conversa no Chatwoot</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox id="chatwootConversationPending" name="chatwootConversationPending" />
-                                            <Label htmlFor="chatwootConversationPending">Marcar conversas como pendentes</Label>
-                                        </div>
                                     </AccordionContent>
                                 </AccordionItem>
                             </>
