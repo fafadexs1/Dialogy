@@ -111,7 +111,7 @@ export type Activity = {
     user_id?: string; // ID do agente que registrou
 }
 
-export type MessageSender = User | Contact | SystemAgent | undefined;
+export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'system_agent' } | Partial<Contact> & { type?: 'user' | 'contact' | 'system_agent' } | Partial<SystemAgent> & { type?: 'user' | 'contact' | 'system_agent' } | undefined;
 
 export type MessageMetadata = {
     mediaUrl?: string;
@@ -465,3 +465,5 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
+
+    

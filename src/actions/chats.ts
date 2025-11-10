@@ -326,12 +326,12 @@ function formatMessageDate(date: Date, timezone: string): string {
     return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
-export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]>, error?: string }> {
+export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]>, timezone: string, error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !workspaceId) {
-        return { chats: [], messagesByChat: {}, error: "Usuário ou workspace não encontrado." };
+        return { chats: [], messagesByChat: {}, timezone: defaultTimeZone, error: "Usuário ou workspace não encontrado." };
     }
     
     const userId = user.id;
@@ -367,7 +367,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const chatRes = await db.query(chatQuery, [workspaceId, userId]);
         
         const chatIds = chatRes.rows.map(r => r.id);
-        if (chatIds.length === 0) return { chats: [], messagesByChat: {} };
+        if (chatIds.length === 0) return { chats: [], messagesByChat: {}, timezone };
 
         const contactIds = [...new Set(chatRes.rows.map(r => r.contact_id).filter(Boolean))];
         const agentIds = [...new Set(chatRes.rows.map(r => r.agent_id).filter(Boolean))];
@@ -482,12 +482,14 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
             return timeB - timeA;
         });
 
-        return { chats, messagesByChat };
+        return { chats, messagesByChat, timezone };
 
     } catch (error: any) {
         console.error("[GET_CHATS_ACTION] Error:", error);
-        return { chats: [], messagesByChat: {}, error: `Falha ao buscar dados: ${error.message}` };
+        return { chats: [], messagesByChat: {}, timezone: defaultTimeZone, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
+
+    
 
     

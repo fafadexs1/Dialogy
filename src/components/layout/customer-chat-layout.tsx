@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
+import { type Chat, Message, User, Tag, Contact, MessageMetadata } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getChatsAndMessages } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
@@ -15,9 +15,13 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
+const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
 function LoadingSkeleton() {
   return (
@@ -61,11 +65,22 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
+  const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
 
   const selectedChatIdRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  
+  const workspaceTimezoneRef = useRef<string>(workspaceTimezone);
+  const chatsRef = useRef<Chat[]>([]);
+
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
+
+  useEffect(() => {
+    workspaceTimezoneRef.current = workspaceTimezone;
+  }, [workspaceTimezone]);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -74,22 +89,113 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     }
   }, []);
 
+  const parseMetadata = useCallback((metadata: unknown): MessageMetadata | undefined => {
+    if (!metadata) return undefined;
+    if (typeof metadata === 'object') return metadata as MessageMetadata;
+    if (typeof metadata === 'string') {
+      try {
+        return JSON.parse(metadata) as MessageMetadata;
+      } catch (error) {
+        console.error('[REALTIME] Failed to parse metadata JSON:', error);
+      }
+    }
+    return undefined;
+  }, []);
+
+  const formatMessageDateLabel = useCallback((date: Date, timezone: string) => {
+    const zoned = toZonedTime(date, timezone);
+    if (isToday(zoned)) {
+      return 'Hoje';
+    }
+    if (isYesterday(zoned)) {
+      return 'Ontem';
+    }
+    return formatDate(zoned, 'dd/MM/yyyy', { locale: ptBR });
+  }, []);
+
+  const normalizeRealtimeMessage = useCallback((rawMessage: any): Message | null => {
+    if (!rawMessage) return null;
+
+    if ('formattedDate' in rawMessage && 'createdAt' in rawMessage) {
+      return {
+        ...rawMessage,
+        metadata: parseMetadata(rawMessage.metadata),
+      } as Message;
+    }
+
+    if (!rawMessage.chat_id) {
+      return null;
+    }
+
+    const createdAtIso = rawMessage.created_at || rawMessage.createdAt || rawMessage.timestamp || new Date().toISOString();
+    const createdAtDate = new Date(createdAtIso);
+    const safeCreatedAt = isNaN(createdAtDate.getTime()) ? new Date() : createdAtDate;
+    const timezone = workspaceTimezoneRef.current || FALLBACK_TIMEZONE;
+    const timestamp = formatInTimeZone(safeCreatedAt, 'HH:mm', { locale: ptBR, timeZone: timezone });
+    const formattedDate = formatMessageDateLabel(safeCreatedAt, timezone);
+
+    const chatsSnapshot = chatsRef.current;
+    const relatedChat = chatsSnapshot.find(chat => chat.id === rawMessage.chat_id);
+
+    let sender: Message['sender'];
+    if (rawMessage.from_me) {
+      if (relatedChat?.agent) {
+        sender = relatedChat.agent;
+      } else if (initialUser) {
+        sender = {
+          id: initialUser.id,
+          name: initialUser.name,
+          firstName: initialUser.firstName,
+          lastName: initialUser.lastName,
+          avatar: initialUser.avatar,
+          email: initialUser.email,
+        } as Message['sender'];
+      }
+    } else if (relatedChat?.contact) {
+      sender = relatedChat.contact;
+    }
+
+    return {
+      id: rawMessage.id,
+      chat_id: rawMessage.chat_id,
+      workspace_id: rawMessage.workspace_id,
+      content: rawMessage.content || '',
+      type: rawMessage.type,
+      status: rawMessage.content === 'Mensagem apagada' || rawMessage.status === 'deleted' ? 'deleted' : 'default',
+      metadata: parseMetadata(rawMessage.metadata),
+      transcription: rawMessage.transcription ?? null,
+      timestamp,
+      createdAt: safeCreatedAt.toISOString(),
+      formattedDate,
+      sender,
+      instance_name: rawMessage.instance_name,
+      source_from_api: rawMessage.source_from_api,
+      api_message_status: rawMessage.api_message_status,
+      message_id_from_api: rawMessage.message_id_from_api,
+      from_me: Boolean(rawMessage.from_me),
+      is_read: Boolean(rawMessage.is_read),
+    } as Message;
+  }, [formatMessageDateLabel, initialUser, parseMetadata]);
+
   const fetchData = useCallback(async (isInitial = false) => {
     if (!initialUser?.activeWorkspaceId) return;
-    
+
     if (isInitial) {
         setIsLoading(true);
         setFetchError(null);
     }
-    
+
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, error, timezone } = await getChatsAndMessages(initialUser.activeWorkspaceId);
         
         if (error) throw new Error(error);
-        
+
         setChats(fetchedChats || []);
         setMessagesByChat(fetchedMessagesByChat || {});
-        
+        if (timezone) {
+            setWorkspaceTimezone(timezone);
+        }
+
         if (selectedChatIdRef.current) {
             const updatedSelectedChat = (fetchedChats || []).find(c => c.id === selectedChatIdRef.current);
             setSelectedChat(updatedSelectedChat || null);
@@ -152,44 +258,48 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   }, []);
 
 
-  const handleNewMessage = useCallback((newMessage: Message) => {
-     if (!newMessage || !newMessage.chat_id) return;
-     
+  const handleNewMessage = useCallback((incomingMessage: any) => {
+     const normalizedMessage = normalizeRealtimeMessage(incomingMessage);
+     if (!normalizedMessage || !normalizedMessage.chat_id) return;
+
       // Play sound only if the new message is not from the user, and the chat is not currently selected
-     if (!newMessage.from_me && selectedChatIdRef.current !== newMessage.chat_id) {
+     if (!normalizedMessage.from_me && selectedChatIdRef.current !== normalizedMessage.chat_id) {
         playNotificationSound();
      }
 
     setMessagesByChat(prev => {
-        const currentMessages = prev[newMessage.chat_id] || [];
+        const currentMessages = prev[normalizedMessage.chat_id] || [];
         // Avoid duplicates
-        if (currentMessages.some(m => m.id === newMessage.id)) return prev;
+        if (currentMessages.some(m => m.id === normalizedMessage.id)) return prev;
+        const updatedMessages = [...currentMessages, normalizedMessage].sort((a, b) => {
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
         return {
             ...prev,
-            [newMessage.chat_id]: [...currentMessages, newMessage],
+            [normalizedMessage.chat_id]: updatedMessages,
         };
     });
 
     // Update the chat in the chat list and move it to the top
     setChats(prev => {
-        const chatIndex = prev.findIndex(c => c.id === newMessage.chat_id);
+        const chatIndex = prev.findIndex(c => c.id === normalizedMessage.chat_id);
         if (chatIndex === -1) {
             // If chat is not in the list, we should probably refetch, as it's a new conversation
             fetchData();
             return prev;
         }
-        
-        const updatedChat = { 
-            ...prev[chatIndex], 
-            messages: [newMessage], // Just the latest message for the preview
-            unreadCount: !newMessage.from_me ? (prev[chatIndex].unreadCount || 0) + 1 : prev[chatIndex].unreadCount,
+
+        const updatedChat = {
+            ...prev[chatIndex],
+            messages: [normalizedMessage], // Just the latest message for the preview
+            unreadCount: !normalizedMessage.from_me ? (prev[chatIndex].unreadCount || 0) + 1 : prev[chatIndex].unreadCount,
         };
 
-        const otherChats = prev.filter(c => c.id !== newMessage.chat_id);
+        const otherChats = prev.filter(c => c.id !== normalizedMessage.chat_id);
         return [updatedChat, ...otherChats];
     });
 
-  }, [playNotificationSound, fetchData]);
+  }, [playNotificationSound, fetchData, normalizeRealtimeMessage]);
 
   const handleChatUpdate = useCallback((updatedChat: Partial<Chat> & { id: string }) => {
       setChats(prev => prev.map(c => c.id === updatedChat.id ? { ...c, ...updatedChat } : c));
@@ -244,9 +354,13 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         switch (payload.eventType) {
             case 'INSERT':
                 if (payload.table === 'messages') {
+                    const normalized = normalizeRealtimeMessage(record);
+                    if (!normalized) {
+                        return;
+                    }
                     eventType = 'NEW_MESSAGE';
-                    eventPayload = record as Message;
-                    handleNewMessage(eventPayload);
+                    eventPayload = normalized;
+                    handleNewMessage(normalized);
                 }
                 break;
             case 'UPDATE':
@@ -307,7 +421,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       supabase.removeChannel(contactsChannel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel, handleNewMessage, handleChatUpdate, handleContactUpdate, handleMessageDelete]);
+  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel, handleNewMessage, handleChatUpdate, handleContactUpdate, handleMessageDelete, normalizeRealtimeMessage]);
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
@@ -415,3 +529,5 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     </div>
   );
 }
+
+    
