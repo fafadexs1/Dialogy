@@ -68,8 +68,26 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
   const newUserQuery = await db.query('SELECT * FROM users WHERE id = $1', [data.user.id]);
   
   if (newUserQuery.rowCount === 0) {
-      return { success: false, message: "Falha ao sincronizar o usuário com o banco de dados.", user: null };
+      // Isso pode acontecer se o trigger do DB demorar ou falhar.
+      // Poderíamos adicionar uma pequena espera e retentativa, mas por enquanto retornamos erro.
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Espera 1s pela replicação
+      const retryQuery = await db.query('SELECT * FROM users WHERE id = $1', [data.user.id]);
+      if (retryQuery.rowCount === 0) {
+        return { success: false, message: "Falha ao sincronizar o usuário com o banco de dados. O usuário foi criado na autenticação, mas o perfil não foi encontrado.", user: null };
+      }
+      const dbUser = retryQuery.rows[0];
+        const userForClient: User = {
+        id: dbUser.id,
+        name: dbUser.full_name,
+        email: dbUser.email,
+        avatar: dbUser.avatar_url,
+        firstName: dbUser.full_name.split(' ')[0] || '',
+        lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
+        phone: dbUser.phone
+      };
+      return { success: true, message: null, user: userForClient };
   }
+  
   const dbUser = newUserQuery.rows[0];
 
   const user: User = {
