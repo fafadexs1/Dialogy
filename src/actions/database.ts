@@ -582,6 +582,33 @@ create table if not exists public.billing_info (
 );
 
 -- ============================================
+-- Gatilho para sincronização de novos usuários (Supabase Auth)
+-- ============================================
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.users (id, full_name, avatar_url, email, phone)
+  values (
+    new.id,
+    new.raw_user_meta_data ->> 'full_name',
+    new.raw_user_meta_data ->> 'avatar_url',
+    new.email,
+    new.raw_user_meta_data ->> 'phone'
+  );
+  return new;
+end;
+$$;
+
+-- drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+
+-- ============================================
 -- Triggers de updated_at (somente onde há coluna)
 -- ============================================
 create or replace function public._create_updated_at_trigger(tbl regclass) returns void
@@ -596,7 +623,7 @@ begin
       ) and not exists (
         select 1 from pg_trigger where tgname = ''trg_'' || %L || ''_set_updated_at''
       ) then
-        execute ''create trigger trg_'' || %L || ''_set_updated_at
+        execute ''create trigger trg_'' || %L || ''_set_updated_at''
                  before update on public.'' || %I ||
                  '' for each row execute procedure public.set_updated_at();'';
       end if;
