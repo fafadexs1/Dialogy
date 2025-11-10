@@ -142,12 +142,7 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
                 </Button>
             </div>
         </div>
-      <div className="space-y-2 border-t pt-6">
-        <Label htmlFor="workspaceName">Nome do seu Workspace <span className="text-gray-400">(obrigatório)</span></Label>
-        <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." required />
-        <p className="text-xs text-muted-foreground">Este será o nome da sua empresa ou equipe na plataforma.</p>
-      </div>
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-2 pt-4">
         <Checkbox id="terms" required />
         <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-gray-600">
           Li e aceito os termos de uso da Dialogy.{' '}
