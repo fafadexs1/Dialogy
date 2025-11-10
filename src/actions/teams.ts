@@ -109,10 +109,15 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
         // Create default business hours for the new team
         const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-        const businessHoursValues = days.map(day => `(gen_random_uuid(), '${newTeam.id}', '${day}')`).join(',');
+        // Correctly use query parameters for the teamId
+        const businessHoursValues = days.map((_, index) => `(gen_random_uuid(), $1, $${index + 2})`).join(',');
+        const businessHoursParams = [newTeam.id, ...days];
+        
         await client.query(
-            `INSERT INTO business_hours (id, team_id, day_of_week) VALUES ${businessHoursValues}`
+            `INSERT INTO business_hours (id, team_id, day_of_week) VALUES ${businessHoursValues}`,
+            businessHoursParams
         );
+
 
         await client.query('COMMIT');
         
@@ -381,3 +386,4 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
     return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
   }
 }
+
