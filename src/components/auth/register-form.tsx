@@ -23,15 +23,8 @@ function RegisterButton() {
   );
 }
 
-export function RegisterForm({ onRegisterSuccess }: { onRegisterSuccess: (user: User) => void }) {
-  const [state, formAction] = useActionState(register, { success: false, message: null, user: null });
-
-  useEffect(() => {
-    if (state.success && state.user) {
-      onRegisterSuccess(state.user as User);
-    }
-  }, [state, onRegisterSuccess]);
-
+export function RegisterForm({ action }: { action: (prevState: any, formData: FormData) => Promise<{ success: boolean; message: string | null, user: User | null }> }) {
+  const [state, formAction] = useActionState(action, { success: false, message: null, user: null });
 
   return (
     <form action={formAction} className="space-y-6">

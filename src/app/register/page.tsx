@@ -1,21 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { RegisterForm } from '@/components/auth/register-form';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 import OnboardingSteps from './onboarding-steps';
+import { register } from '@/actions/auth';
 
 export default function RegisterPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [state, formAction] = useActionState(register, { success: false, message: null, user: null });
   const [step, setStep] = useState(1);
 
-  const handleRegisterSuccess = (newUser: User) => {
-    setUser(newUser);
-    setStep(2);
-  };
-  
+  useEffect(() => {
+    if (state.success && state.user) {
+      setStep(2);
+    }
+  }, [state]);
+
   const handleWorkspaceCreated = () => {
     setStep(3);
   }
@@ -56,7 +58,7 @@ export default function RegisterPage() {
                             <p className="text-sm text-gray-500 mt-1">Para continuar, por favor, preencha os campos abaixo</p>
                         </div>
                         <div className="mt-8">
-                            <RegisterForm onRegisterSuccess={handleRegisterSuccess} />
+                            <RegisterForm action={formAction} />
                         </div>
                          <div className="mt-6 text-center text-sm">
                             <p className="text-gray-600">
@@ -68,9 +70,9 @@ export default function RegisterPage() {
                         </div>
                     </>
                 )}
-                 {step > 1 && user && (
+                 {step > 1 && state.user && (
                     <OnboardingSteps
-                        user={user}
+                        user={state.user}
                         currentStep={step}
                         onWorkspaceCreated={handleWorkspaceCreated}
                     />
