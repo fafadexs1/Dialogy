@@ -25,7 +25,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  * Esta ação é chamada pelo botão "Assumir Atendimento".
  */
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -64,7 +64,7 @@ export async function transferChatAction(
     // Optional parameter to accept a session-like object from an API call
     prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     
     let sessionToUse = prefetchedSession;
     
@@ -207,7 +207,7 @@ export async function closeChatAction(
     reasonTagId: string | null,
     notes: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !user.user_metadata.full_name) {
@@ -283,7 +283,7 @@ export async function closeChatAction(
 
 
 export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: "Usuário não autenticado." };
@@ -326,7 +326,7 @@ function formatMessageDate(date: Date, timezone: string): string {
 }
 
 export async function getChatsAndMessages(workspaceId: string): Promise<{ chats: Chat[], messagesByChat: Record<string, Message[]>, timezone: string, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !workspaceId) {
