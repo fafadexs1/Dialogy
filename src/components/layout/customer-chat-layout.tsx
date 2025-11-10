@@ -14,6 +14,7 @@ import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -59,10 +60,10 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
 
   const selectedChatIdRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const previousMessagesCount = useRef<Record<string, number>>({});
   
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
 
@@ -84,41 +85,14 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     try {
         const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
         
-        if (error) {
-            throw new Error(error);
-        }
+        if (error) throw new Error(error);
         
-        const newChats = fetchedChats || [];
-        const newMessagesByChat = fetchedMessagesByChat || {};
-
-        if (initialUser) {
-            // Check for new messages that should trigger a notification
-            newChats.forEach(chat => {
-                const isMyAttendance = chat.status === 'atendimentos' && chat.agent?.id === initialUser.id;
-                const newMessages = newMessagesByChat[chat.id] || [];
-                const oldMessageCount = previousMessagesCount.current[chat.id] || 0;
-                const lastMessage = newMessages[newMessages.length - 1];
-
-                if (isMyAttendance && newMessages.length > oldMessageCount && lastMessage && !lastMessage.from_me) {
-                    playNotificationSound();
-                }
-                previousMessagesCount.current[chat.id] = newMessages.length;
-            });
-        }
-
-        setChats(newChats);
-        setMessagesByChat(newMessagesByChat);
+        setChats(fetchedChats || []);
+        setMessagesByChat(fetchedMessagesByChat || {});
         
-        // If there's a selected chat, find its updated version in the new list and update the state
         if (selectedChatIdRef.current) {
-            const updatedSelectedChat = newChats.find(c => c.id === selectedChatIdRef.current);
-            if (updatedSelectedChat) {
-                setSelectedChat(updatedSelectedChat);
-            } else {
-                // The chat might have been closed or removed from the list
-                setSelectedChat(null);
-                selectedChatIdRef.current = null;
-            }
+            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === selectedChatIdRef.current);
+            setSelectedChat(updatedSelectedChat || null);
         }
         
         setFetchError(null);
@@ -131,17 +105,32 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser?.activeWorkspaceId, initialUser?.id, playNotificationSound]);
+  }, [initialUser?.activeWorkspaceId]);
 
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
-    
-    if (!messagesByChat[chat.id]) {
-        fetchData();
-    }
-  }, [fetchData, messagesByChat]);
+  }, []);
+
+  // Effect to establish the Broadcast Channel for cross-tab communication
+  useEffect(() => {
+    const channel = new BroadcastChannel('chat-updates');
+    setBroadcastChannel(channel);
+
+    const handleMessage = (event: MessageEvent) => {
+      console.log('[BROADCAST] Update received from another tab:', event.data);
+      fetchData(); // Re-fetch data when another tab signals an update
+    };
+
+    channel.addEventListener('message', handleMessage);
+
+    return () => {
+      channel.removeEventListener('message', handleMessage);
+      channel.close();
+    };
+  }, [fetchData]);
+
 
   useEffect(() => {
     if (initialUser) {
@@ -155,10 +144,14 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     if (!initialUser?.activeWorkspaceId) return;
     
     const supabase = createClient();
+    const isMyInstance = true; // Placeholder for more complex logic if needed
 
-    const handleChange = (payload: any) => {
-        console.log('[REALTIME] Mudança detectada:', payload);
-        fetchData();
+    const handleChange = (payload: RealtimePostgresChangesPayload<any>) => {
+        console.log('[REALTIME] Change received:', payload);
+        if (isMyInstance && broadcastChannel) {
+            broadcastChannel.postMessage({ type: 'change', payload });
+        }
+        fetchData(); // Fallback to refetch for simplicity and robustness
     };
 
     const chatsChannel = supabase
@@ -171,10 +164,15 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
       .subscribe();
       
+    const contactsChannel = supabase
+      .channel('public:contacts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
+      .subscribe();
+
     // Re-fetch data when tab becomes visible
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[REALTIME] Tab is visible again, re-fetching data.');
+        console.log('[VISIBILITY] Tab is visible again, re-fetching data.');
         fetchData();
       }
     };
@@ -184,9 +182,10 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     return () => {
       supabase.removeChannel(chatsChannel);
       supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(contactsChannel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData]);
+  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel]);
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
@@ -200,14 +199,13 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
 
   // Effect to mark messages as read
   useEffect(() => {
-    if (!selectedChat || !currentChatMessages.length) return;
+    if (!selectedChat || !currentChatMessages.length || !document.hasFocus()) return;
 
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
 
     if (hasUnread) {
         console.log(`[MARK_AS_READ] Marking messages as read for chat ${selectedChat.id}.`);
 
-        // Optimistically update UI to remove unread count immediately
         setChats(prevChats => prevChats.map(c => 
             c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c
         ));
@@ -215,28 +213,34 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         setMessagesByChat(prevMessages => {
             const updatedMessages = { ...prevMessages };
             if (updatedMessages[selectedChat.id]) {
-                updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => ({ ...m, is_read: true }));
+                updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => 
+                    !m.from_me ? { ...m, is_read: true } : m
+                );
             }
             return updatedMessages;
         });
         
-        // Call API in the background
         fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chatId: selectedChat.id })
-        }).then(res => {
-            if (!res.ok) {
-                console.error("Failed to mark messages as read on the server. Re-fetching to sync.");
-                // If the API call fails, refetch data to get the correct state
-                fetchData();
-            }
         }).catch(() => {
-            console.error("Failed to mark messages as read on the server. Re-fetching to sync.");
-            fetchData();
+            console.error("Failed to mark messages as read on the server. Data will sync on next fetch.");
         });
     }
-}, [selectedChat, currentChatMessages, fetchData]);
+  }, [selectedChat, currentChatMessages]);
+
+  useEffect(() => {
+    // Play sound on new messages if tab is not focused or chat is not selected
+    if (!document.hasFocus() || selectedChatIdRef.current !== chats[0]?.id) {
+      if (chats[0]?.messages.length > (messagesByChat[chats[0]?.id]?.length || 0)) {
+        const lastMessage = chats[0].messages[chats[0].messages.length - 1];
+        if (lastMessage && !lastMessage.from_me) {
+          playNotificationSound();
+        }
+      }
+    }
+  }, [chats, messagesByChat, playNotificationSound]);
 
   
   if (!initialUser) {
@@ -269,7 +273,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const enrichedSelectedChat = selectedChat ? {
       ...selectedChat,
       messages: currentChatMessages,
-      // Calculate unread count on the fly for the selected chat
       unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
   } : null;
 
