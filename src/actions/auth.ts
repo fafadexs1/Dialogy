@@ -43,11 +43,12 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
     const fullName = `${firstName} ${lastName}`;
 
     try {
+        // This will create the user in `auth.users` and our trigger `handle_new_user` will create them in `public.users`
         const { data, error: authError } = await supabase.auth.signUp({
             email,
             password,
             options: {
-                emailRedirectTo: `${process.env.NEXTAUTH_URL}/`,
+                // emailRedirectTo is not needed if we are not requiring email verification
                 data: {
                     full_name: fullName,
                     avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
@@ -68,7 +69,8 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
             throw new Error("Falha ao receber os dados do usuário da autenticação.");
         }
         
-        return redirect('/');
+        // On success, simply return a success state. The client will handle the redirect.
+        return { success: true, message: null, user: data.user as User };
 
     } catch (error: any) {
         console.error('[REGISTER_ACTION] Erro no registro:', error);
