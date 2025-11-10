@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
@@ -11,7 +10,8 @@ import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 
-async function fetchUserAndWorkspaces(userId: string) {
+// This function is now only in layout.tsx to avoid re-fetching
+async function fetchUserAndWorkspaces(userId: string): Promise<User | null> {
      if (!userId) return null;
     try {
         const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
@@ -101,6 +101,7 @@ export default async function Home() {
   if (!user) {
     // This case might happen if there's a desync between auth and public users table.
     // Redirecting to login should resolve it.
+    console.log("[HOME_PAGE] User not found in DB, redirecting to login.");
     return redirect('/login');
   }
   

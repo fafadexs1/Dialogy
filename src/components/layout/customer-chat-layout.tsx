@@ -18,7 +18,40 @@ import { Button } from '../ui/button';
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
 
-function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
+function LoadingSkeleton() {
+  return (
+    <div className="flex flex-1 w-full min-h-0 h-full">
+        <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <div className="space-y-2 mt-4">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+            </div>
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+            <Skeleton className="h-16 w-full" />
+            <div className="flex-1 p-6 space-y-4">
+                <Skeleton className="h-10 w-1/2 ml-auto" />
+                <Skeleton className="h-10 w-1/2" />
+                <Skeleton className="h-10 w-1/2 ml-auto" />
+            </div>
+            <Skeleton className="h-24 w-full" />
+        </div>
+        <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-32 w-full" />
+        </div>
+    </div>
+  );
+}
+
+
+export default function CustomerChatLayout({ initialUser }: { initialUser: User | null }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -41,7 +74,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   }, []);
 
   const fetchData = useCallback(async (isInitial = false) => {
-    if (!initialUser.activeWorkspaceId) return;
+    if (!initialUser?.activeWorkspaceId) return;
     
     if (isInitial) {
         setIsLoading(true);
@@ -58,18 +91,20 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
         const newChats = fetchedChats || [];
         const newMessagesByChat = fetchedMessagesByChat || {};
 
-        // Check for new messages that should trigger a notification
-        newChats.forEach(chat => {
-            const isMyAttendance = chat.status === 'atendimentos' && chat.agent?.id === initialUser.id;
-            const newMessages = newMessagesByChat[chat.id] || [];
-            const oldMessageCount = previousMessagesCount.current[chat.id] || 0;
-            const lastMessage = newMessages[newMessages.length - 1];
+        if (initialUser) {
+            // Check for new messages that should trigger a notification
+            newChats.forEach(chat => {
+                const isMyAttendance = chat.status === 'atendimentos' && chat.agent?.id === initialUser.id;
+                const newMessages = newMessagesByChat[chat.id] || [];
+                const oldMessageCount = previousMessagesCount.current[chat.id] || 0;
+                const lastMessage = newMessages[newMessages.length - 1];
 
-            if (isMyAttendance && newMessages.length > oldMessageCount && lastMessage && !lastMessage.from_me) {
-                 playNotificationSound();
-            }
-            previousMessagesCount.current[chat.id] = newMessages.length;
-        });
+                if (isMyAttendance && newMessages.length > oldMessageCount && lastMessage && !lastMessage.from_me) {
+                    playNotificationSound();
+                }
+                previousMessagesCount.current[chat.id] = newMessages.length;
+            });
+        }
 
         setChats(newChats);
         setMessagesByChat(newMessagesByChat);
@@ -96,7 +131,7 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser.activeWorkspaceId, initialUser.id, playNotificationSound]);
+  }, [initialUser?.activeWorkspaceId, initialUser?.id, playNotificationSound]);
 
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
@@ -109,11 +144,15 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
   }, [fetchData, messagesByChat]);
 
   useEffect(() => {
-    fetchData(true);
-  }, [fetchData]);
+    if (initialUser) {
+      fetchData(true);
+    } else {
+      setIsLoading(false);
+    }
+  }, [initialUser, fetchData]);
 
   useEffect(() => {
-    if (!initialUser.activeWorkspaceId) return;
+    if (!initialUser?.activeWorkspaceId) return;
     
     const supabase = createClient();
 
@@ -147,17 +186,17 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
       supabase.removeChannel(messagesChannel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser.activeWorkspaceId, fetchData]);
+  }, [initialUser?.activeWorkspaceId, fetchData]);
 
   useEffect(() => {
-      if(initialUser.activeWorkspaceId){
+      if(initialUser?.activeWorkspaceId){
           getTags(initialUser.activeWorkspaceId).then(tagsResult => {
               if (!tagsResult.error && tagsResult.tags) {
                   setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
               }
           });
       }
-  }, [initialUser.activeWorkspaceId]);
+  }, [initialUser?.activeWorkspaceId]);
 
   // Effect to mark messages as read
   useEffect(() => {
@@ -200,36 +239,12 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
 }, [selectedChat, currentChatMessages, fetchData]);
 
   
+  if (!initialUser) {
+    return <LoadingSkeleton />;
+  }
+
   if (isLoading) {
-      return (
-         <div className="flex flex-1 w-full min-h-0 h-full">
-          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <div className="space-y-2 mt-4">
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-              </div>
-          </div>
-          <div className="flex-1 flex flex-col min-w-0">
-              <Skeleton className="h-16 w-full" />
-              <div className="flex-1 p-6 space-y-4">
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
-                  <Skeleton className="h-10 w-1/2" />
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
-              </div>
-              <Skeleton className="h-24 w-full" />
-          </div>
-           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-32 w-full" />
-           </div>
-        </div>
-      );
+      return <LoadingSkeleton />;
   }
 
   if (fetchError) {
@@ -284,46 +299,5 @@ function ClientCustomerChatLayout({ initialUser }: { initialUser: User }) {
         onContactUpdate={() => fetchData()}
       />
     </div>
-  );
-}
-
-
-export default function CustomerChatLayout({ initialUser }: { initialUser: User | null }) {
-  if (!initialUser) {
-    return (
-        <div className="flex flex-1 w-full min-h-0 h-full">
-          <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <div className="space-y-2 mt-4">
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-              </div>
-          </div>
-          <div className="flex-1 flex flex-col min-w-0">
-              <Skeleton className="h-16 w-full" />
-              <div className="flex-1 p-6 space-y-4">
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
-                  <Skeleton className="h-10 w-1/2" />
-                  <Skeleton className="h-10 w-1/2 ml-auto" />
-              </div>
-              <Skeleton className="h-24 w-full" />
-          </div>
-           <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-32 w-full" />
-           </div>
-        </div>
-    )
-  }
-  
-  return (
-    <ClientCustomerChatLayout
-        initialUser={initialUser}
-    />
   );
 }
