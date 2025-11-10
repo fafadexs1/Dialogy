@@ -7,7 +7,7 @@ import type { User } from '@/lib/types';
 import { db } from '@/lib/db';
 
 export async function login(prevState: any, formData: FormData) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
@@ -28,7 +28,7 @@ export async function login(prevState: any, formData: FormData) {
 }
 
 export async function register(prevState: any, formData: FormData): Promise<{ success: boolean; message: string | null; user: User | null }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     
     const firstName = formData.get('name') as string;
     const lastName = formData.get('lastname') as string;
@@ -80,7 +80,7 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
 
 
 export async function signOut() {
-  const supabase = createClient();
+  const supabase = await createClient();
   await supabase.auth.signOut();
   return redirect('/login');
 }

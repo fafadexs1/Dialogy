@@ -14,7 +14,7 @@ async function checkSuperAdmin(userId: string): Promise<boolean> {
 }
 
 export async function getClusters(): Promise<{ clusters: WhatsappCluster[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !await checkSuperAdmin(user.id)) {
@@ -31,7 +31,7 @@ export async function getClusters(): Promise<{ clusters: WhatsappCluster[] | nul
 }
 
 export async function createCluster(payload: { name: string, apiUrl: string, apiKey: string }): Promise<{ success: boolean, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !await checkSuperAdmin(user.id)) {

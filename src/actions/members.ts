@@ -15,7 +15,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: [], error: "Usuário não autenticado." };
     
@@ -65,7 +65,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
 }
 
 export async function removeMemberAction(memberId: string, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -99,7 +99,7 @@ export async function updateMemberRoleAction(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

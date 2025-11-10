@@ -253,7 +253,7 @@ export async function sendAgentMessageAction(
     content: string,
     tabId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -292,7 +292,7 @@ export async function sendMediaAction(
     }[],
     tabId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -323,7 +323,7 @@ export async function sendAutomatedMediaAction(
 export async function startNewConversation(
     input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }
 ): Promise<{ success: boolean, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

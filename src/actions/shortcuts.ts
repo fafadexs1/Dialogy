@@ -18,7 +18,7 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
 }
 
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { shortcuts: null, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -43,7 +43,7 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
 
 
 export async function saveShortcut(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;
@@ -108,7 +108,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
 
 export async function deleteShortcut(shortcutId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     const userId = user.id;

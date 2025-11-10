@@ -10,7 +10,8 @@ import NewCampaignPageClient from "@/components/campaigns/new-campaign-page";
 
 async function fetchUser(userId: string): Promise<User | null> {
     // This is a simplified fetch, you might have a more complex one in your actions
-    const { data: user, error } = await createClient(cookies())
+    const supabase = await createClient();
+    const { data: user, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
@@ -26,7 +27,7 @@ async function fetchUser(userId: string): Promise<User | null> {
 }
 
 export default async function NewCampaignPage() {
-    const supabase = createClient(cookies());
+    const supabase = await createClient();
     const { data: { user: authUser } } = await supabase.auth.getUser();
 
     if (!authUser) {

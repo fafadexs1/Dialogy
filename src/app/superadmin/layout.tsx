@@ -22,7 +22,7 @@ async function checkSuperAdmin(userId: string) {
 }
 
 export default async function SuperAdminLayout({ children }: { children: ReactNode }) {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !await checkSuperAdmin(user.id)) {

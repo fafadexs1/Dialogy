@@ -35,7 +35,7 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
 }
 
 export async function updateUserProfile(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

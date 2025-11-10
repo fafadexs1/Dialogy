@@ -16,7 +16,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function getContacts(workspaceId: string): Promise<{ contacts: Contact[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { contacts: null, error: "Usuário não autenticado." };
 
@@ -64,7 +64,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
 }
 
 export async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -156,7 +156,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 }
 
 export async function deleteContactAction(contactId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
     
@@ -192,7 +192,7 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
 // --- TAGS ACTIONS ---
 
 export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { tags: null, error: "Usuário não autenticado." };
 
@@ -211,7 +211,7 @@ export async function createTag(
     color: string, 
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -242,7 +242,7 @@ export async function updateTag(
     color: string, 
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -271,7 +271,7 @@ export async function updateTag(
 
 
 export async function deleteTag(tagId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -301,7 +301,7 @@ export async function deleteTag(tagId: string): Promise<{ success: boolean; erro
 // --- CUSTOM FIELDS ---
 
 export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ fields: CustomFieldDefinition[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { fields: null, error: "Usuário não autenticado." };
 
@@ -322,7 +322,7 @@ export async function createCustomFieldDefinition(
     workspaceId: string,
     field: Omit<CustomFieldDefinition, 'id' | 'workspace_id'>
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -345,7 +345,7 @@ export async function createCustomFieldDefinition(
 
 
 export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -372,7 +372,7 @@ export async function deleteCustomFieldDefinition(fieldId: string): Promise<{ su
 
 
 export async function getWorkspaceUsers(workspaceId: string): Promise<{ users: User[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { users: null, error: "Usuário não autenticado." };
 
@@ -396,7 +396,7 @@ export async function addActivityAction(
     prevState: any,
     formData: FormData
 ): Promise<{ success: boolean; error?: string | null; }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

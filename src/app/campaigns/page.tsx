@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
 import CampaignsPageClient from "@/components/campaigns/campaigns-list-page";
 
 export default async function CampaignsPage() {
-    const supabase = createClient(cookies());
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

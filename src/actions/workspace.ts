@@ -10,7 +10,7 @@ export async function createWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -94,7 +94,7 @@ export async function updateWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
@@ -142,7 +142,7 @@ export async function updateWorkspaceAction(
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');

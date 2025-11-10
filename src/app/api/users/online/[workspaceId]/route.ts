@@ -13,7 +13,7 @@ export async function GET(
   request: Request,
   { params }: { params: { workspaceId: string } }
 ) {
-  const supabase = createClient();
+  const supabase = await createClient();
   
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) {

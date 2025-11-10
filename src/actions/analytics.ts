@@ -53,7 +53,7 @@ export async function getAnalyticsData(
     filters: { teamId?: string; agentId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
@@ -141,7 +141,7 @@ export async function getAgentPerformance(
     filters: { teamId?: string },
     dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
     
@@ -215,7 +215,7 @@ export async function getAgentPerformance(
 }
 
 export async function getWorkspaceMembers(workspaceId: string, teamId?: string): Promise<{ members: User[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: null, error: "Usuário não autenticado." };
 

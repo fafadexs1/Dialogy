@@ -16,7 +16,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { agents: null, error: "Usuário não autenticado." };
 
@@ -38,7 +38,7 @@ export async function createSystemAgent(
     workspaceId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -81,7 +81,7 @@ export async function updateSystemAgent(
     agentId: string,
     data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
 ): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -122,7 +122,7 @@ export async function updateSystemAgent(
 
 
 export async function deleteSystemAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 

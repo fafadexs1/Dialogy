@@ -22,7 +22,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaigns: null, error: "Usuário não autenticado." };
 
@@ -60,7 +60,7 @@ export async function createCampaign(
     message: string,
     contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
 ): Promise<{ campaign: Campaign | null, error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaign: null, error: "Usuário não autenticado." };
     
@@ -235,7 +235,7 @@ async function startCampaignSending(campaignId: string) {
 
 
 export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
@@ -273,7 +273,7 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
 }
 
 export async function deleteCampaigns(campaignIds: string[]): Promise<{ success: boolean; error?: string }> {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
