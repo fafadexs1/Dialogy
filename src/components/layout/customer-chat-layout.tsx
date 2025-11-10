@@ -164,34 +164,38 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     if (!initialUser?.activeWorkspaceId) return;
     
     const supabase = createClient();
+    const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
 
     const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
         console.log('[REALTIME] Change received:', payload.eventType, payload.table);
         
-        // Instead of complex client-side state manipulation, we refetch data.
-        // This is simpler and more robust against race conditions.
-        // The broadcast channel will notify other tabs.
-        fetchData();
-
-        if (broadcastChannel) {
-             broadcastChannel.postMessage({ type: 'REFETCH', sourceTabId: tabIdRef.current });
+        if (payload.errors) {
+            console.error('[REALTIME] Error:', payload.errors);
+            return;
         }
         
-        // Play sound on new message insert if it's not from the current user
-        if (payload.eventType === 'INSERT' && payload.table === 'messages') {
-            const newMessage = payload.new;
-            if (!newMessage.from_me && selectedChatIdRef.current !== newMessage.chat_id) {
-                playNotificationSound();
-            }
-        }
+        // Always refetch for simplicity and data consistency for now
+        // A more advanced implementation would apply optimistic updates
+        fetchData();
     };
 
-    const subscriptions = [
-      supabase.channel('public:chats').on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges).subscribe(),
-      supabase.channel('public:messages').on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges).subscribe(),
-      supabase.channel('public:contacts').on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges).subscribe()
-    ];
-
+    const channel = supabase.channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
+      .subscribe((status) => {
+        console.log(`[REALTIME STATUS] Channel ${channelName}:`, status);
+        if (status === 'SUBSCRIBED') {
+          // Connection is stable, no need to force fetch here unless necessary
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           toast({
+              title: "Conexão em Tempo Real Falhou",
+              description: "Tentando reconectar. Atualizar a página pode ajudar.",
+              variant: "destructive"
+           });
+        }
+      });
+      
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('[VISIBILITY] Tab is visible again, re-fetching data to ensure sync.');
@@ -202,10 +206,10 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      subscriptions.forEach(sub => supabase.removeChannel(sub));
+      supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel, playNotificationSound]);
+  }, [initialUser?.activeWorkspaceId, fetchData]);
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
