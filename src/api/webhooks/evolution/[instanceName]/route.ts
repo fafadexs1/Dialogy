@@ -115,13 +115,16 @@ async function handleMessagesUpsert(payload: any) {
 
     let content = '';
     let dbMessageType: Message['type'] = 'text';
+    const mediaObject = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage;
 
-    const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
-    
-    content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
+    // Correctly determine content: caption for media, or conversation for text
+    if (mediaObject) {
+        content = mediaObject.caption || '';
+    } else {
+        content = message.conversation || message.extendedTextMessage?.text || '';
+    }
 
-    // A URL da mídia está no nível superior do objeto `message`
-    const mediaUrl = message.mediaUrl || null;
+    const mediaUrl = message.mediaUrl || mediaObject?.url || null;
     
     if (messageType) {
         switch (messageType) {
@@ -149,12 +152,11 @@ async function handleMessagesUpsert(payload: any) {
         return;
     }
     
-    // Construir o objeto metadata
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl,
-        mimetype: messageDetails?.mimetype,
-        fileName: messageDetails?.fileName,
-        duration: messageDetails?.seconds
+        mimetype: mediaObject?.mimetype,
+        fileName: mediaObject?.fileName,
+        duration: mediaObject?.seconds,
     };
 
     const contactPhone = sender || contactJid.split('@')[0];
@@ -199,13 +201,14 @@ async function handleMessagesUpsert(payload: any) {
         contactData = contactRes.rows[0];
 
         let chatRes = await client.query(
-            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') LIMIT 1`, [workspaceId, contactData.id]
         );
         
         let chat: Chat;
         if (chatRes.rowCount > 0) {
             chat = chatRes.rows[0];
         } else {
+             console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const newChatRes = await client.query(
                 `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactData.id]
