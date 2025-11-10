@@ -2,12 +2,10 @@
 'use client';
 
 import { useFormStatus } from 'react-dom';
-import type { User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Checkbox } from '../ui/checkbox';
 
 
@@ -22,19 +20,9 @@ function RegisterButton() {
   );
 }
 
-interface RegisterFormProps {
-    action: (formData: FormData) => void;
-    state: {
-        success: boolean;
-        message: string | null;
-        user: User | null;
-    };
-}
-
-
-export function RegisterForm({ action, state }: RegisterFormProps) {
+export function RegisterForm() {
   return (
-    <form action={action} className="space-y-6">
+    <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
             <Label htmlFor="name" className="font-semibold text-gray-700 text-sm">Nome <span className="text-gray-400">(obrigatório)</span></Label>
@@ -107,16 +95,8 @@ export function RegisterForm({ action, state }: RegisterFormProps) {
           <a href="#" className="underline text-primary">Ler termos</a>
         </label>
       </div>
-
-      {state?.message && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Erro no Registro</AlertTitle>
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-      )}
-
+      
       <RegisterButton />
-    </form>
+    </div>
   );
 }

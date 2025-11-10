@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useActionState, useEffect, useState } from 'react';
@@ -8,6 +7,9 @@ import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 import OnboardingSteps from './onboarding-steps';
 import { register } from '@/actions/auth';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
+
 
 export default function RegisterPage() {
   const [state, formAction] = useActionState(register, { success: false, message: null, user: null });
@@ -53,14 +55,21 @@ export default function RegisterPage() {
             {/* Step Content */}
             <div className="bg-white p-8 sm:p-10 rounded-xl shadow-sm border">
                 {step === 1 && (
-                    <>
+                    <form action={formAction}>
                         <div>
                             <h2 className="text-2xl font-bold text-gray-800">Dados de acesso</h2>
                             <p className="text-sm text-gray-500 mt-1">Para continuar, por favor, preencha os campos abaixo</p>
                         </div>
                         <div className="mt-8">
-                           <RegisterForm action={formAction as (formData: FormData) => void} state={state} />
+                           <RegisterForm />
                         </div>
+                         {state?.message && (
+                            <Alert variant="destructive" className="mt-6">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Erro no Registro</AlertTitle>
+                            <AlertDescription>{state.message}</AlertDescription>
+                            </Alert>
+                        )}
                          <div className="mt-6 text-center text-sm">
                             <p className="text-gray-600">
                                 Já tem uma conta?{' '}
@@ -69,7 +78,7 @@ export default function RegisterPage() {
                                 </Link>
                             </p>
                         </div>
-                    </>
+                    </form>
                 )}
                  {step > 1 && state.user && (
                     <OnboardingSteps
