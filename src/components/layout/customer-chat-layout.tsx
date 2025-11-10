@@ -228,7 +228,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const handleNewMessage = useCallback((incomingMessage: any) => {
      const normalizedMessage = normalizeRealtimeMessage(incomingMessage);
      if (!normalizedMessage || !normalizedMessage.chat_id) return;
-     if (normalizedMessage.sent_by_tab === tabIdRef.current) return;
 
      if (!normalizedMessage.from_me && selectedChatIdRef.current !== normalizedMessage.chat_id) {
         playNotificationSound();
@@ -236,7 +235,9 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
 
     setMessagesByChat(prev => {
         const currentMessages = prev[normalizedMessage.chat_id] || [];
+        // Prevent adding duplicates
         if (currentMessages.some(m => m.id === normalizedMessage.id)) return prev;
+
         const updatedMessages = [...currentMessages, normalizedMessage].sort((a, b) => {
             return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
         });
@@ -248,6 +249,8 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
 
     setChats(prev => {
         const chatIndex = prev.findIndex(c => c.id === normalizedMessage.chat_id);
+        
+        // If chat doesn't exist, refetch everything to be safe. This is a fallback.
         if (chatIndex === -1) {
             fetchData();
             return prev;
@@ -255,10 +258,11 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
 
         const updatedChat = {
             ...prev[chatIndex],
-            messages: [normalizedMessage],
+            messages: [normalizedMessage], // Only need the last message for the chat list preview
             unreadCount: !normalizedMessage.from_me ? (prev[chatIndex].unreadCount || 0) + 1 : prev[chatIndex].unreadCount,
         };
-
+        
+        // Filter out the old version of the chat and prepend the updated one
         const otherChats = prev.filter(c => c.id !== normalizedMessage.chat_id);
         return [updatedChat, ...otherChats];
     });
@@ -364,7 +368,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
             case 'INSERT':
                 if (payload.table === 'messages') {
                     const normalized = normalizeRealtimeMessage(record);
-                    if (!normalized || normalized.sent_by_tab === tabIdRef.current) return;
+                    if (!normalized) return;
                     eventType = 'NEW_MESSAGE';
                     eventPayload = normalized;
                     handleNewMessage(normalized);
