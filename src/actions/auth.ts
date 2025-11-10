@@ -57,9 +57,17 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
     },
   });
 
-  if (error || !data.user) {
+  if (error) {
     console.error('[REGISTER_ACTION] Erro no Supabase:', error);
+    // Handle the specific error for an existing user.
+    if (error.message.includes('User already registered') || error.message.includes('users_email_key')) {
+        return { success: false, message: "Este e-mail já está em uso. Por favor, tente fazer login ou use um e-mail diferente.", user: null };
+    }
     return { success: false, message: error?.message || "Ocorreu um erro durante o registro. Tente novamente.", user: null };
+  }
+  
+  if (!data.user) {
+     return { success: false, message: "Ocorreu um erro durante o registro. Tente novamente.", user: null };
   }
 
   // A função on_auth_user_created fará a cópia para a tabela `users`.
