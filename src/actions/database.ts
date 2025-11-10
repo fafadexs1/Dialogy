@@ -47,6 +47,22 @@ end;
 $$;
 
 -- ============================================
+-- ENUMS para chats e messages
+-- ============================================
+DO $$ BEGIN
+    CREATE TYPE public.chat_status_enum AS ENUM ('gerais', 'atendimentos', 'encerrados');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE public.message_type_enum AS ENUM ('text', 'system', 'audio', 'image', 'video', 'document');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+
+-- ============================================
 -- Tabelas independentes / catálogos
 -- ============================================
 
@@ -419,20 +435,6 @@ create table if not exists public.campaign_recipients (
 );
 create index if not exists idx_campaign_recipients_campaign on public.campaign_recipients(campaign_id);
 create index if not exists idx_campaign_recipients_contact on public.campaign_recipients(contact_id);
-
--- ENUMS for chats and messages
-DO $$ BEGIN
-    CREATE TYPE public.chat_status_enum AS ENUM ('gerais', 'atendimentos', 'encerrados');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE public.message_type_enum AS ENUM ('text', 'system', 'audio', 'image', 'video', 'document');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
 
 -- Chats
 create table if not exists public.chats (

@@ -182,7 +182,6 @@ async function handleMessagesUpsert(payload: any) {
             console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
                  RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
