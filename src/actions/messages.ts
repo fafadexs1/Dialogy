@@ -39,6 +39,7 @@ async function internalSendMessage(
     chatId: string,
     content: string,
     senderId: string, // The user ID of the sender (could be an agent or the system for automated messages)
+    tabId: string | null, // ID da aba que está enviando a mensagem
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
@@ -95,18 +96,21 @@ async function internalSendMessage(
             `INSERT INTO messages (
                 workspace_id, chat_id, type, content, from_me, 
                 message_id_from_api, api_message_status, instance_name, 
-                metadata, is_read, ${senderColumn}
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                metadata, is_read, ${senderColumn}, sent_by_tab
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
             [
                 workspaceId, chatId, 'text', content, true,
                 apiResponse?.key?.id, 'SENT', instanceName,
-                metadata || null, true, senderId
+                metadata || null, true, senderId, tabId
             ]
         );
         
         await client.query('COMMIT');
-        revalidatePath(`/api/chats/${workspaceId}`);
-        revalidatePath('/', 'layout');
+        
+        // A revalidação está causando o refresh da UI.
+        // A UI será atualizada via subscriptions do Supabase.
+        // revalidatePath(`/api/chats/${workspaceId}`);
+        // revalidatePath('/', 'layout');
 
         return { success: true, apiResponse };
 
@@ -134,6 +138,7 @@ async function internalSendMedia(
         mediatype: 'image' | 'video' | 'document' | 'audio';
     }[],
     senderId: string,
+    tabId: string | null,
     metadata?: MessageMetadata,
     instanceNameParam?: string,
 ): Promise<{ success: boolean; error?: string }> {
@@ -212,19 +217,22 @@ async function internalSendMedia(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me,
                     message_id_from_api, api_message_status, instance_name,
-                    metadata, is_read, ${senderColumn}
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    metadata, is_read, ${senderColumn}, sent_by_tab
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
                 [
                     workspaceId, chatId, dbMessageType, caption, true,
                     apiResponse?.key?.id, apiResponse?.status || 'SENT', instanceName,
-                    dbMetadata, true, senderId
+                    dbMetadata, true, senderId, tabId
                 ]
             );
         }
         
         await client.query('COMMIT');
-        revalidatePath(`/api/chats/${workspaceId}`);
-        revalidatePath('/', 'layout');
+        
+        // A revalidação está causando o refresh da UI.
+        // A UI será atualizada via subscriptions do Supabase.
+        // revalidatePath(`/api/chats/${workspaceId}`);
+        // revalidatePath('/', 'layout');
 
         return { success: true };
 
@@ -245,6 +253,7 @@ async function internalSendMedia(
 export async function sendAgentMessageAction(
     chatId: string,
     content: string,
+    tabId: string | null
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -252,7 +261,7 @@ export async function sendAgentMessageAction(
         return { success: false, error: 'Usuário não autenticado.' };
     }
 
-    return internalSendMessage(chatId, content, user.id);
+    return internalSendMessage(chatId, content, user.id, tabId);
 }
 
 /**
@@ -266,7 +275,8 @@ export async function sendAutomatedMessageAction(
     instanceName?: string,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     const metadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
-    return internalSendMessage(chatId, content, agentId, metadata, instanceName);
+    // Automated messages don't have a tabId
+    return internalSendMessage(chatId, content, agentId, null, metadata, instanceName);
 }
 
 
@@ -281,14 +291,15 @@ export async function sendMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
-    }[]
+    }[],
+    tabId: string | null
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         return { success: false, error: 'Usuário não autenticado.' };
     }
-    return internalSendMedia(chatId, caption, mediaFiles, user.id);
+    return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId);
 }
 
 /**
@@ -306,12 +317,13 @@ export async function sendAutomatedMediaAction(
     agentId: string,
     instanceName?: string,
 ): Promise<{ success: boolean; error?: string }> {
-    return internalSendMedia(chatId, caption, mediaFiles, agentId, { sentBy: 'system_agent' }, instanceName);
+    // Automated messages don't have a tabId
+    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, { sentBy: 'system_agent' }, instanceName);
 }
 
 
 export async function startNewConversation(
-    input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string }
+    input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }
 ): Promise<{ success: boolean, error?: string }> {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -321,7 +333,7 @@ export async function startNewConversation(
     }
     const senderId = user.id;
 
-    const { workspaceId, instanceName, phoneNumber, message } = input;
+    const { workspaceId, instanceName, phoneNumber, message, tabId } = input;
     if (!workspaceId || !instanceName || !phoneNumber || !message) {
         return { success: false, error: 'Todos os campos são obrigatórios.' };
     }
@@ -368,10 +380,9 @@ export async function startNewConversation(
         
         // 3. Send the message using the existing internal action
         // We pass the instanceName directly to ensure it's used.
-        const sendResult = await internalSendMessage(chatId, message, senderId, {}, instanceName);
+        const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName);
 
         if (sendResult.success) {
-            revalidatePath('/', 'layout');
             return { success: true };
         } else {
             return { success: false, error: sendResult.error };

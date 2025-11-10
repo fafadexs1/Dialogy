@@ -482,6 +482,7 @@ create table if not exists public.messages (
   raw_payload jsonb,
   metadata jsonb,
   transcription text,
+  sent_by_tab text,
   constraint messages_workspace_id_fkey
     foreign key (workspace_id) references public.workspaces(id) on delete cascade,
   constraint messages_chat_id_fkey

@@ -87,6 +87,7 @@ interface ChatPanelProps {
   closeReasons: Tag[];
   showFullHistory: boolean;
   setShowFullHistory: (show: boolean) => void;
+  tabId: string;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
@@ -354,7 +355,7 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory }: ChatPanelProps) {
+export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
@@ -642,18 +643,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 mediatype: mf.mediatype,
                 thumbnail: mf.thumbnail,
             }));
-            result = await sendMediaAction(chat.id, currentMessageText, mediaData as any);
+            result = await sendMediaAction(chat.id, currentMessageText, mediaData as any, tabId);
         } else {
             if (!currentMessageText.trim()) return;
-            result = await sendAgentMessageAction(chat.id, currentMessageText);
+            result = await sendAgentMessageAction(chat.id, currentMessageText, tabId);
         }
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
         }
         
-        // Let the subscription handle the UI update
-        onActionSuccess();
+        // A UI será atualizada via subscriptions, então não precisamos chamar onActionSuccess aqui.
 
     } catch (error) {
         console.error("Error during message submission:", error);
@@ -669,10 +669,10 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       mimetype: mimetype,
       filename: 'audio_gravado.mp3',
       mediatype: 'audio'
-    }]);
+    }], tabId);
 
     if (result.success) {
-      onActionSuccess();
+      // UI will update via subscription
     } else {
       toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
     }
