@@ -24,7 +24,7 @@ export async function login(prevState: any, formData: FormData) {
 
   // Em vez de redirecionar, retorna um estado de sucesso.
   // O redirecionamento será tratado no lado do cliente.
-  return { success: true, message: null };
+  return redirect('/');
 }
 
 export async function register(prevState: any, formData: FormData): Promise<{ success: boolean; message: string | null; user: User | null }> {
@@ -68,22 +68,7 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
             throw new Error("Falha ao receber os dados do usuário da autenticação.");
         }
         
-        const newUserId = data.user.id;
-        
-        // A trigger on_auth_user_created cuidará de criar o usuário na tabela public.users.
-        // A criação do workspace será feita no primeiro login, no onboarding.
-
-        const userForClient: User = {
-            id: newUserId,
-            name: fullName,
-            email: email,
-            avatar: data.user.user_metadata.avatar_url,
-            firstName: firstName,
-            lastName: lastName,
-            phone: phone
-        };
-
-        return { success: true, message: null, user: userForClient };
+        return redirect('/');
 
     } catch (error: any) {
         console.error('[REGISTER_ACTION] Erro no registro:', error);
