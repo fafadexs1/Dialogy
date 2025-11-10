@@ -71,10 +71,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const selectedChatIdRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
-  const workspaceTimezoneRef = useRef<string>(workspaceTimezone);
-  const chatsRef = useRef<Chat[]>([]);
-  const userScrolledUpRef = useRef(false);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // This logic is safe because it only runs on the client
   if (typeof window !== 'undefined' && !tabIdRef.current) {
@@ -82,14 +78,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   }
 
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
-
-  useEffect(() => {
-    workspaceTimezoneRef.current = workspaceTimezone;
-  }, [workspaceTimezone]);
-
-  useEffect(() => {
-    chatsRef.current = chats;
-  }, [chats]);
   
   const fetchData = useCallback(async (isInitial = false) => {
     if (!initialUser?.activeWorkspaceId) return;
@@ -135,164 +123,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         audioRef.current.play().catch(e => console.error("Error playing notification sound:", e));
     }
   }, []);
-
-  const parseMetadata = useCallback((metadata: unknown): MessageMetadata | undefined => {
-    if (!metadata) return undefined;
-    if (typeof metadata === 'object') return metadata as MessageMetadata;
-    if (typeof metadata === 'string') {
-      try {
-        return JSON.parse(metadata) as MessageMetadata;
-      } catch (error) {
-        console.error('[REALTIME] Failed to parse metadata JSON:', error);
-      }
-    }
-    return undefined;
-  }, []);
-
-  const formatMessageDateLabel = useCallback((date: Date, timezone: string) => {
-    const zoned = toZonedTime(date, timezone);
-    if (isToday(zoned)) {
-      return 'Hoje';
-    }
-    if (isYesterday(zoned)) {
-      return 'Ontem';
-    }
-    return formatDate(zoned, 'dd/MM/yyyy', { locale: ptBR });
-  }, []);
-
-  const normalizeRealtimeMessage = useCallback((rawMessage: any): Message | null => {
-    if (!rawMessage) return null;
-
-    if ('formattedDate' in rawMessage && 'createdAt' in rawMessage) {
-      return {
-        ...rawMessage,
-        metadata: parseMetadata(rawMessage.metadata),
-      } as Message;
-    }
-
-    if (!rawMessage.chat_id) {
-      return null;
-    }
-
-    const createdAtIso = rawMessage.created_at || rawMessage.createdAt || rawMessage.timestamp || new Date().toISOString();
-    const createdAtDate = new Date(createdAtIso);
-    const safeCreatedAt = isNaN(createdAtDate.getTime()) ? new Date() : createdAtDate;
-    const timezone = workspaceTimezoneRef.current || FALLBACK_TIMEZONE;
-    const timestamp = formatInTimeZone(safeCreatedAt, 'HH:mm', { locale: ptBR, timeZone: timezone });
-    const formattedDate = formatMessageDateLabel(safeCreatedAt, timezone);
-
-    const chatsSnapshot = chatsRef.current;
-    const relatedChat = chatsSnapshot.find(chat => chat.id === rawMessage.chat_id);
-
-    let sender: Message['sender'];
-    if (rawMessage.from_me) {
-      if (relatedChat?.agent) {
-        sender = relatedChat.agent;
-      } else if (initialUser) {
-        sender = {
-          id: initialUser.id,
-          name: initialUser.name,
-          firstName: initialUser.firstName,
-          lastName: initialUser.lastName,
-          avatar: initialUser.avatar,
-          email: initialUser.email,
-        } as Message['sender'];
-      }
-    } else if (relatedChat?.contact) {
-      sender = relatedChat.contact;
-    }
-
-    return {
-      id: rawMessage.id,
-      chat_id: rawMessage.chat_id,
-      workspace_id: rawMessage.workspace_id,
-      content: rawMessage.content || '',
-      type: rawMessage.type,
-      status: rawMessage.content === 'Mensagem apagada' || rawMessage.status === 'deleted' ? 'deleted' : 'default',
-      metadata: parseMetadata(rawMessage.metadata),
-      transcription: rawMessage.transcription ?? null,
-      timestamp,
-      createdAt: safeCreatedAt.toISOString(),
-      formattedDate,
-      sender,
-      instance_name: rawMessage.instance_name,
-      source_from_api: rawMessage.source_from_api,
-      api_message_status: rawMessage.api_message_status,
-      message_id_from_api: rawMessage.message_id_from_api,
-      from_me: Boolean(rawMessage.from_me),
-      is_read: Boolean(rawMessage.is_read),
-      sent_by_tab: rawMessage.sent_by_tab,
-    } as Message;
-  }, [formatMessageDateLabel, initialUser, parseMetadata]);
-
-  const handleNewMessage = useCallback((incomingMessage: any) => {
-     const normalizedMessage = normalizeRealtimeMessage(incomingMessage);
-     if (!normalizedMessage || !normalizedMessage.chat_id) return;
-
-     if (!normalizedMessage.from_me && selectedChatIdRef.current !== normalizedMessage.chat_id) {
-        playNotificationSound();
-     }
-
-    setMessagesByChat(prev => {
-        const currentMessages = prev[normalizedMessage.chat_id] || [];
-        // Prevent adding duplicates
-        if (currentMessages.some(m => m.id === normalizedMessage.id)) return prev;
-
-        const updatedMessages = [...currentMessages, normalizedMessage].sort((a, b) => {
-            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        });
-        return {
-            ...prev,
-            [normalizedMessage.chat_id]: updatedMessages,
-        };
-    });
-
-    setChats(prev => {
-        const chatIndex = prev.findIndex(c => c.id === normalizedMessage.chat_id);
-        
-        // If chat doesn't exist, refetch everything to be safe. This is a fallback.
-        if (chatIndex === -1) {
-            fetchData();
-            return prev;
-        }
-
-        const updatedChat = {
-            ...prev[chatIndex],
-            messages: [normalizedMessage], // Only need the last message for the chat list preview
-            unreadCount: !normalizedMessage.from_me ? (prev[chatIndex].unreadCount || 0) + 1 : prev[chatIndex].unreadCount,
-        };
-        
-        // Filter out the old version of the chat and prepend the updated one
-        const otherChats = prev.filter(c => c.id !== normalizedMessage.chat_id);
-        return [updatedChat, ...otherChats];
-    });
-
-  }, [playNotificationSound, fetchData, normalizeRealtimeMessage]);
-
-  const handleChatUpdate = useCallback((updatedChat: Partial<Chat> & { id: string }) => {
-      setChats(prev => prev.map(c => c.id === updatedChat.id ? { ...c, ...updatedChat } : c));
-      if (selectedChatIdRef.current === updatedChat.id) {
-          setSelectedChat(prev => prev ? { ...prev, ...updatedChat } : null);
-      }
-  }, []);
   
-  const handleContactUpdate = useCallback((updatedContact: Partial<Contact> & { id: string }) => {
-        setChats(prev => prev.map(c => c.contact.id === updatedContact.id ? { ...c, contact: {...c.contact, ...updatedContact} } : c));
-        if (selectedChat?.contact.id === updatedContact.id) {
-            setSelectedChat(prev => prev ? { ...prev, contact: {...prev.contact, ...updatedContact} } : null);
-        }
-  }, [selectedChat?.contact.id]);
-  
-  const handleMessageDelete = useCallback((deletedMessage: Message) => {
-        setMessagesByChat(prev => {
-         const currentMessages = prev[deletedMessage.chat_id] || [];
-         return {
-             ...prev,
-             [deletedMessage.chat_id]: currentMessages.filter(m => m.id !== deletedMessage.id),
-         };
-     });
-  }, []);
-
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
@@ -311,18 +142,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         
         console.log(`[BROADCAST] Event '${type}' received from another tab.`, payload);
         switch(type) {
-            case 'NEW_MESSAGE':
-                handleNewMessage(payload);
-                break;
-            case 'UPDATE_CHAT':
-                handleChatUpdate(payload);
-                break;
-            case 'UPDATE_CONTACT':
-                handleContactUpdate(payload);
-                break;
-            case 'DELETE_MESSAGE':
-                handleMessageDelete(payload);
-                break;
             case 'REFETCH':
                 fetchData();
                 break;
@@ -359,45 +178,13 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
             console.error('[REALTIME] Error:', payload.errors);
             return;
         }
-
-        const record = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        let eventType: string | null = null;
-        let eventPayload: any = null;
-
-        switch (payload.eventType) {
-            case 'INSERT':
-                if (payload.table === 'messages') {
-                    const normalized = normalizeRealtimeMessage(record);
-                    if (!normalized) return;
-                    eventType = 'NEW_MESSAGE';
-                    eventPayload = normalized;
-                    handleNewMessage(normalized);
-                }
-                break;
-            case 'UPDATE':
-                if (payload.table === 'chats') {
-                    eventType = 'UPDATE_CHAT';
-                    eventPayload = record as Chat;
-                    handleChatUpdate(eventPayload);
-                } else if (payload.table === 'contacts') {
-                    eventType = 'UPDATE_CONTACT';
-                    eventPayload = record as Contact;
-                    handleContactUpdate(eventPayload);
-                }
-                break;
-            case 'DELETE':
-                if(payload.table === 'messages') {
-                    eventType = 'DELETE_MESSAGE';
-                    eventPayload = record as Message;
-                    handleMessageDelete(eventPayload);
-                }
-                 break;
-            default:
-                break;
-        }
-
-        if (eventType && broadcastChannel) {
-            broadcastChannel.postMessage({ type: eventType, payload: eventPayload, sourceTabId: tabIdRef.current });
+        
+        // Always refetch data on any change for simplicity and robustness
+        fetchData();
+        
+        // Notify other tabs to refetch as well
+        if (broadcastChannel) {
+             broadcastChannel.postMessage({ type: 'REFETCH', sourceTabId: tabIdRef.current });
         }
     };
 
@@ -408,7 +195,9 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       .subscribe((status) => {
         console.log(`[REALTIME STATUS] Channel ${channelName}:`, status);
         if (status === 'SUBSCRIBED') {
-          // Connection is stable, no need to force fetch here unless necessary
+           // Connection is stable, do an initial fetch to ensure data is fresh
+           console.log('[REALTIME] Subscribed. Performing initial sync.');
+           fetchData();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
            toast({
               title: "Conexão em Tempo Real Falhou",
@@ -431,7 +220,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel, handleNewMessage, handleChatUpdate, handleContactUpdate, handleMessageDelete, normalizeRealtimeMessage]);
+  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel]);
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
