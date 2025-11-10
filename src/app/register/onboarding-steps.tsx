@@ -58,25 +58,12 @@ export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated 
             </div>
           </>
         );
-      case 3:
-        return (
-             <div className='text-center'>
-                <CardTitle className="text-2xl font-bold text-gray-800">Tudo pronto!</CardTitle>
-                <CardDescription className='mt-1'>Seu workspace foi criado. Você pode convidar sua equipe agora ou fazer isso mais tarde nas configurações.</CardDescription>
-                <div className="p-8 text-center border-2 border-dashed rounded-lg mt-8">
-                    <p className="text-muted-foreground">Funcionalidade de convite em breve.</p>
-                </div>
-                <Button onClick={finishOnboarding} className="w-full mt-8">
-                    Ir para o App <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-            </div>
-        )
       default:
-        // Should not happen, but as a fallback:
+        // Etapas removidas. Se chegar aqui, redireciona.
+        finishOnboarding();
         return (
              <div>
-                <p>Etapa desconhecida.</p>
-                <Button onClick={() => router.push('/')}>Ir para o App</Button>
+                <p>Redirecionando...</p>
             </div>
         )
     }
