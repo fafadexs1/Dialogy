@@ -210,7 +210,7 @@ async function handleMessagesUpsert(payload: any) {
         } else {
              console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
