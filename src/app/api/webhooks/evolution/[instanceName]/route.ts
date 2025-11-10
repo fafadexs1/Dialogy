@@ -1,3 +1,5 @@
+
+
 'use server';
 
 import { NextResponse } from 'next/server';
@@ -15,7 +17,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
          WHERE i.instance_name = $1`,
         [instanceName]
     );
-    if (instanceRes.rows.length === 0) {
+    if (instanceRes.rowCount === 0) {
         return null;
     }
     return instanceRes.rows[0];
@@ -161,17 +163,15 @@ async function handleMessagesUpsert(payload: any) {
         await client.query('BEGIN');
 
         const instanceRes = await client.query(
-            `SELECT i.workspace_id, c.api_url, c.api_key
-             FROM evolution_api_instances i
-             JOIN whatsapp_clusters c ON i.cluster_id = c.id
-             WHERE i.instance_name = $1`, [instanceName]
+            `SELECT workspace_id
+             FROM evolution_api_instances
+             WHERE instance_name = $1`, [instanceName]
         );
-        if (instanceRes.rowCount === 0) throw new Error(`Workspace e config para a instância '${instanceName}' não encontrados.`);
+        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
         
-        const { workspace_id, api_url, api_key } = instanceRes.rows[0];
-        workspaceId = workspace_id;
-        apiConfig = { api_url, api_key };
-        
+        workspaceId = instanceRes.rows[0].workspace_id;
+        apiConfig = await getApiConfigForInstance(instanceName);
+
         let contactRes = await client.query(
             'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
         );
@@ -207,7 +207,7 @@ async function handleMessagesUpsert(payload: any) {
             chat = chatRes.rows[0];
         } else {
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
