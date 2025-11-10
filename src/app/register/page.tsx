@@ -1,55 +1,46 @@
 
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { register } from '@/actions/auth';
-import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 import { RegisterForm } from '@/components/auth/register-form';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { useActionState } from 'react';
 
 export default function RegisterPage() {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<FormData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [registerState, registerAction, isRegisterPending] = useActionState(register, { success: false, message: null, user: null });
   const router = useRouter();
+
+  useEffect(() => {
+    if (registerState.success) {
+      router.push('/');
+    }
+  }, [registerState.success, router]);
+
 
   const handleStep1Submit = (data: FormData) => {
     setFormData(data);
     setStep(2);
   };
   
-  const handleStep2Submit = (data: FormData) => {
+  const handleStep2Submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!formData) return;
 
+    const step2Data = new FormData(e.currentTarget);
     // Append workspace name to existing form data
-    formData.append('workspaceName', data.get('workspaceName') as string);
+    formData.set('workspaceName', step2Data.get('workspaceName') as string);
     
-    startTransition(async () => {
-        const result = await register(null, formData);
-        if (result.success && result.user) {
-            // After user is created, create their workspace
-            const workspaceResult = await createWorkspaceAction(null, formData);
-            if (workspaceResult.success) {
-                // On success, redirect to the main app page
-                router.push('/');
-            } else {
-                setError(workspaceResult.error || "Falha ao criar o workspace.");
-                setStep(2); // Stay on step 2 to show error
-            }
-        } else {
-            setError(result.message || "Ocorreu um erro desconhecido durante o registro.");
-            setStep(1); // Go back to step 1 to show error
-        }
-    });
+    registerAction(formData);
   }
 
   const STEPS = [
@@ -77,21 +68,21 @@ export default function RegisterPage() {
             </div>
 
             <div className="bg-white p-8 sm:p-10 rounded-xl shadow-sm border">
-                {error && (
+                {registerState.message && (
                     <Alert variant="destructive" className="mb-6">
                         <AlertCircle className="h-4 w-4" />
                         <AlertTitle>Erro no Processo</AlertTitle>
-                        <AlertDescription>{error}</AlertDescription>
+                        <AlertDescription>{registerState.message}</AlertDescription>
                     </Alert>
                 )}
-                {isPending && (
+                {isRegisterPending && (
                     <div className="flex justify-center items-center p-10">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
                         <p className="ml-4">Processando...</p>
                     </div>
                 )}
                 
-                {!isPending && (
+                {!isRegisterPending && (
                     <>
                         {step === 1 && (
                             <div>
@@ -100,7 +91,7 @@ export default function RegisterPage() {
                                     <p className="text-sm text-gray-500 mt-1">Para continuar, por favor, preencha os campos abaixo.</p>
                                 </div>
                                 <div className="mt-8">
-                                   <RegisterForm onContinue={handleStep1Submit} pending={isPending}/>
+                                   <RegisterForm onContinue={handleStep1Submit} pending={isRegisterPending}/>
                                 </div>
                                  <div className="mt-6 text-center text-sm">
                                     <p className="text-gray-600">
@@ -113,17 +104,17 @@ export default function RegisterPage() {
                             </div>
                         )}
                         {step === 2 && (
-                            <form onSubmit={(e) => { e.preventDefault(); handleStep2Submit(new FormData(e.currentTarget)); }}>
+                            <form onSubmit={handleStep2Submit}>
                                  <div className='text-center'>
-                                  <CardTitle className="text-2xl font-bold text-gray-800">Crie seu primeiro Workspace</CardTitle>
-                                  <CardDescription className='mt-1'>Um workspace é o espaço onde sua equipe colabora. Você pode ter vários.</CardDescription>
+                                  <h2 className="text-2xl font-bold text-gray-800">Crie seu primeiro Workspace</h2>
+                                  <p className='mt-1 text-sm text-gray-500'>Um workspace é o espaço onde sua equipe colabora. Você pode ter vários.</p>
                                 </div>
                                 <div className='mt-8 space-y-4'>
                                     <div className="space-y-2">
                                         <Label htmlFor="workspaceName">Nome do Workspace</Label>
                                         <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." required />
                                     </div>
-                                    <Button type="submit" className="w-full" disabled={isPending}>
+                                    <Button type="submit" className="w-full" disabled={isRegisterPending}>
                                         <ArrowRight className="mr-2 h-4 w-4" />
                                         Criar e Finalizar
                                     </Button>
