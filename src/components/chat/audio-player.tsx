@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -69,7 +68,7 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
     }, []);
 
     const handleSeek = (event: React.MouseEvent<HTMLDivElement>) => {
-        if (!progressRef.current || !audioRef.current || !isFinite(duration)) return;
+        if (!progressRef.current || !audioRef.current || !isFinite(duration) || duration === 0) return;
         const rect = progressRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const percentage = Math.max(0, Math.min(1, x / rect.width));

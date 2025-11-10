@@ -1,10 +1,5 @@
 import { Pool } from 'pg';
 
-declare global {
-  // eslint-disable-next-line no-var
-  var pool: Pool | undefined;
-}
-
 // Ensure the connection string is correctly typed
 const connectionString: string = process.env.DATABASE_URL!;
 

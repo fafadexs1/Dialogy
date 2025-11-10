@@ -87,7 +87,7 @@ export async function createEvolutionApiInstance(
     }
 
     const isBaileys = payload.integration === 'WHATSAPP-BAILEYS';
-     if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
+    if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
     }
 
@@ -455,5 +455,3 @@ export async function updateInstanceSettings(
     return { success: false, error: error.message };
   }
 }
-
-    

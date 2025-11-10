@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -131,7 +130,8 @@ export async function createCampaign(
         await client.query('COMMIT');
         
         // Now, start sending process and wait for it to complete.
-        await startCampaignSending(newCampaign.id);
+        // We do this in the background to not block the UI response
+        startCampaignSending(newCampaign.id);
         
         revalidatePath('/campaigns');
 
@@ -305,5 +305,3 @@ export async function deleteCampaigns(campaignIds: string[]): Promise<{ success:
         client.release();
     }
 }
-
-    
