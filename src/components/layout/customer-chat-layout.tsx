@@ -186,14 +186,14 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     }
 
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, error, timezone } = await getChatsAndMessages(initialUser.activeWorkspaceId);
-        
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+
         if (error) throw new Error(error);
 
         setChats(fetchedChats || []);
         setMessagesByChat(fetchedMessagesByChat || {});
-        if (timezone) {
-            setWorkspaceTimezone(timezone);
+        if (timezone !== undefined) {
+            setWorkspaceTimezone(timezone || FALLBACK_TIMEZONE);
         }
 
         if (selectedChatIdRef.current) {
@@ -529,5 +529,3 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     </div>
   );
 }
-
-    
