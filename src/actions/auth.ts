@@ -1,8 +1,10 @@
+
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import type { User } from '@/lib/types';
+import { db } from '@/lib/db';
 
 export async function login(prevState: any, formData: FormData) {
   const supabase = createClient();
@@ -28,13 +30,17 @@ export async function login(prevState: any, formData: FormData) {
 export async function register(prevState: any, formData: FormData): Promise<{ success: boolean; message: string | null, user: User | null }> {
   const supabase = createClient();
 
-  const name = formData.get('name') as string;
+  const firstName = formData.get('name') as string;
+  const lastName = formData.get('lastname') as string;
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
+  const phone = formData.get('phone') as string;
   
-  if (!name || !email || !password) {
+  if (!firstName || !lastName || !email || !password || !phone) {
     return { success: false, message: "Todos os campos são obrigatórios.", user: null };
   }
+
+  const fullName = `${firstName} ${lastName}`;
 
   // Desabilita a confirmação por e-mail, conforme solicitado.
   // A opção 'data' permite passar metadados que serão usados pelo trigger do DB.
@@ -44,8 +50,9 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
     options: {
       emailRedirectTo: `${process.env.NEXTAUTH_URL}/`, // Mantido para referência futura, mas o e-mail não será enviado.
       data: {
-        full_name: name,
-        avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name)}`,
+        full_name: fullName,
+        avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+        phone: phone, // Passando o telefone para os metadados
       },
     },
   });
@@ -55,15 +62,24 @@ export async function register(prevState: any, formData: FormData): Promise<{ su
     return { success: false, message: error?.message || "Ocorreu um erro durante o registro. Tente novamente.", user: null };
   }
 
-  // The database trigger (`on_auth_user_created`) will automatically copy the new user
-  // to the `public.users` table. We can now return the user object.
+  // A função on_auth_user_created fará a cópia para a tabela `users`.
+  // O trigger foi atualizado para incluir o campo de telefone.
+  // Buscamos o usuário recém-criado para confirmar que tudo está correto.
+  const newUserQuery = await db.query('SELECT * FROM users WHERE id = $1', [data.user.id]);
+  
+  if (newUserQuery.rowCount === 0) {
+      return { success: false, message: "Falha ao sincronizar o usuário com o banco de dados.", user: null };
+  }
+  const dbUser = newUserQuery.rows[0];
+
   const user: User = {
-    id: data.user.id,
-    name: data.user.user_metadata.full_name,
-    email: data.user.email,
-    avatar: data.user.user_metadata.avatar_url,
-    firstName: data.user.user_metadata.full_name.split(' ')[0] || '',
-    lastName: data.user.user_metadata.full_name.split(' ').slice(1).join(' ') || '',
+    id: dbUser.id,
+    name: dbUser.full_name,
+    email: dbUser.email,
+    avatar: dbUser.avatar_url,
+    firstName: dbUser.full_name.split(' ')[0] || '',
+    lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
+    phone: dbUser.phone
   };
 
   return { success: true, message: null, user };

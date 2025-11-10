@@ -40,6 +40,7 @@ const TABLE_CREATION_QUERIES = `
         full_name text,
         avatar_url text,
         email text,
+        phone text, -- Adicionado campo de telefone
         last_active_workspace_id uuid,
         is_superadmin boolean DEFAULT false NOT NULL,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -103,6 +104,17 @@ const TABLE_CREATION_QUERIES = `
         role_id uuid NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
         created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
         PRIMARY KEY (user_id, workspace_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.billing_info (
+        id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE UNIQUE,
+        plan text,
+        status text, -- e.g., 'active', 'past_due', 'canceled'
+        stripe_customer_id text,
+        stripe_subscription_id text,
+        created_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL,
+        updated_at timestamptz DEFAULT timezone('utc'::text, now()) NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS public.tags (
