@@ -72,7 +72,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
 
-  // This logic is safe because it only runs on the client
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
   }
@@ -165,45 +164,113 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     }
   }, [initialUser, fetchData]);
 
+  const handleNewMessage = useCallback((newMessage: Message) => {
+    setMessagesByChat(prevMessagesByChat => {
+        const chatMessages = prevMessagesByChat[newMessage.chat_id] || [];
+        if (chatMessages.some(m => m.id === newMessage.id)) {
+            return prevMessagesByChat; // Avoid duplicates
+        }
+        return {
+            ...prevMessagesByChat,
+            [newMessage.chat_id]: [...chatMessages, newMessage]
+        };
+    });
+
+    setChats(prevChats => {
+        const chatIndex = prevChats.findIndex(c => c.id === newMessage.chat_id);
+        if (chatIndex === -1) {
+            // If chat doesn't exist, we might need to fetch it.
+            // For now, let's log this case. A full refetch might be necessary here.
+            console.warn(`[REALTIME] Received message for a chat not in the current list: ${newMessage.chat_id}. Refetching data.`);
+            fetchData();
+            return prevChats;
+        }
+
+        const chatToUpdate = { ...prevChats[chatIndex] };
+        chatToUpdate.messages = [...(chatToUpdate.messages || []), newMessage];
+        
+        // Update unread count if the message is not from the current user
+        if (!newMessage.from_me) {
+            chatToUpdate.unreadCount = (chatToUpdate.unreadCount || 0) + 1;
+        }
+        
+        // Move chat to the top
+        const otherChats = prevChats.filter(c => c.id !== newMessage.chat_id);
+        return [chatToUpdate, ...otherChats];
+    });
+
+    if (!newMessage.from_me && document.visibilityState !== 'visible') {
+        playNotificationSound();
+    }
+  }, [playNotificationSound, fetchData]);
+
+ const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
+    setChats(prevChats => {
+        return prevChats.map(chat => {
+            if (chat.id === updatedChatData.id) {
+                // Merge new data, ensuring messages are handled correctly
+                const existingMessages = chat.messages || [];
+                return { ...chat, ...updatedChatData, messages: existingMessages };
+            }
+            return chat;
+        });
+    });
+}, []);
+
+
+const handleContactUpdate = useCallback((updatedContact: Contact) => {
+    setChats(prevChats => {
+        return prevChats.map(chat => {
+            if (chat.contact.id === updatedContact.id) {
+                return { ...chat, contact: updatedContact };
+            }
+            return chat;
+        });
+    });
+}, []);
+
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
-    
+
     const supabase = createClient();
+    // Use a single channel for all related tables
     const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
+    const channel = supabase.channel(channelName);
 
     const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
-        console.log('[REALTIME] Change received:', payload.eventType, payload.table);
-        
-        if (payload.errors) {
-            console.error('[REALTIME] Error:', payload.errors);
-            return;
-        }
-        
-        // Always refetch data on any change for simplicity and robustness
-        fetchData();
-        
-        // Notify other tabs to refetch as well
-        if (broadcastChannel) {
-             broadcastChannel.postMessage({ type: 'REFETCH', sourceTabId: tabIdRef.current });
-        }
+      console.log('[REALTIME] Change received:', payload);
+
+      if (payload.errors) {
+        console.error('[REALTIME] Error:', payload.errors);
+        return;
+      }
+
+      switch(payload.table) {
+        case 'messages':
+          if (payload.eventType === 'INSERT') {
+            handleNewMessage(payload.new as Message);
+          }
+          break;
+        case 'chats':
+          if (payload.eventType === 'UPDATE') {
+             handleChatUpdate(payload.new as Chat);
+          }
+          break;
+        case 'contacts':
+           if (payload.eventType === 'UPDATE') {
+             handleContactUpdate(payload.new as Contact);
+          }
+          break;
+      }
     };
 
-    const channel = supabase.channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, handleChanges)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, handleChanges)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, handleChanges)
       .subscribe((status) => {
-        console.log(`[REALTIME STATUS] Channel ${channelName}:`, status);
         if (status === 'SUBSCRIBED') {
-           // Connection is stable, do an initial fetch to ensure data is fresh
-           console.log('[REALTIME] Subscribed. Performing initial sync.');
-           fetchData();
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           toast({
-              title: "Conexão em Tempo Real Falhou",
-              description: "Tentando reconectar. Atualizar a página pode ajudar.",
-              variant: "destructive"
-           });
+          console.log(`[REALTIME] Subscribed to channel: ${channelName}`);
         }
       });
       
@@ -220,7 +287,8 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel]);
+  }, [initialUser?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
+
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
