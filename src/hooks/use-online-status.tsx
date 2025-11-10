@@ -41,11 +41,21 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
 
     const updatePresenceState = () => {
         const newState = channel.presenceState<User>();
-        const agents: OnlineAgent[] = Object.values(newState).map(presence => ({
-            user: presence[0],
-            joined_at: new Date().toISOString()
-        }));
-        setOnlineAgents(agents);
+        
+        // Use a Map to ensure unique user IDs, preventing duplicates from multiple tabs.
+        const uniqueAgents = new Map<string, OnlineAgent>();
+        
+        Object.values(newState).forEach(presenceArray => {
+            const userPresence = presenceArray[0];
+            if (userPresence && userPresence.id && !uniqueAgents.has(userPresence.id)) {
+                uniqueAgents.set(userPresence.id, {
+                    user: userPresence,
+                    joined_at: new Date().toISOString()
+                });
+            }
+        });
+
+        setOnlineAgents(Array.from(uniqueAgents.values()));
     }
     
     channel
