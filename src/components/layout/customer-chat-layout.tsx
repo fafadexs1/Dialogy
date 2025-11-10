@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, Message, User, Tag } from '@/lib/types';
+import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getChatsAndMessages } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
@@ -100,8 +100,10 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     } catch(e: any) {
         console.error("Failed to fetch chat data", e);
         const errorMessage = e.message || "Não foi possível buscar os dados do chat.";
-        toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
-        setFetchError(errorMessage);
+        if (isInitial) {
+            toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
+            setFetchError(errorMessage);
+        }
     } finally {
         if(isInitial) setIsLoading(false);
     }
@@ -119,8 +121,25 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     setBroadcastChannel(channel);
 
     const handleMessage = (event: MessageEvent) => {
-      console.log('[BROADCAST] Update received from another tab:', event.data);
-      fetchData(); // Re-fetch data when another tab signals an update
+        const { type, payload } = event.data;
+        console.log('[BROADCAST] Event received from another tab:', type, payload);
+        switch (type) {
+            case 'NEW_MESSAGE':
+                handleNewMessage(payload);
+                break;
+            case 'UPDATE_CHAT':
+                handleChatUpdate(payload);
+                break;
+            case 'UPDATE_CONTACT':
+                handleContactUpdate(payload);
+                break;
+            case 'DELETE_MESSAGE':
+                handleMessageDelete(payload);
+                break;
+            case 'REFETCH':
+                fetchData();
+                break;
+        }
     };
 
     channel.addEventListener('message', handleMessage);
@@ -129,7 +148,72 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       channel.removeEventListener('message', handleMessage);
       channel.close();
     };
-  }, [fetchData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  const handleNewMessage = useCallback((newMessage: Message) => {
+     if (!newMessage || !newMessage.chat_id) return;
+     
+      // Play sound only if the new message is not from the user, and the chat is not currently selected
+     if (!newMessage.from_me && selectedChatIdRef.current !== newMessage.chat_id) {
+        playNotificationSound();
+     }
+
+    setMessagesByChat(prev => {
+        const currentMessages = prev[newMessage.chat_id] || [];
+        // Avoid duplicates
+        if (currentMessages.some(m => m.id === newMessage.id)) return prev;
+        return {
+            ...prev,
+            [newMessage.chat_id]: [...currentMessages, newMessage],
+        };
+    });
+
+    // Update the chat in the chat list and move it to the top
+    setChats(prev => {
+        const chatIndex = prev.findIndex(c => c.id === newMessage.chat_id);
+        if (chatIndex === -1) {
+            // If chat is not in the list, we should probably refetch, as it's a new conversation
+            fetchData();
+            return prev;
+        }
+        
+        const updatedChat = { 
+            ...prev[chatIndex], 
+            messages: [newMessage], // Just the latest message for the preview
+            unreadCount: !newMessage.from_me ? (prev[chatIndex].unreadCount || 0) + 1 : prev[chatIndex].unreadCount,
+        };
+
+        const otherChats = prev.filter(c => c.id !== newMessage.chat_id);
+        return [updatedChat, ...otherChats];
+    });
+
+  }, [playNotificationSound, fetchData]);
+
+  const handleChatUpdate = useCallback((updatedChat: Partial<Chat> & { id: string }) => {
+      setChats(prev => prev.map(c => c.id === updatedChat.id ? { ...c, ...updatedChat } : c));
+      if (selectedChatIdRef.current === updatedChat.id) {
+          setSelectedChat(prev => prev ? { ...prev, ...updatedChat } : null);
+      }
+  }, []);
+  
+  const handleContactUpdate = useCallback((updatedContact: Partial<Contact> & { id: string }) => {
+       setChats(prev => prev.map(c => c.contact.id === updatedContact.id ? { ...c, contact: {...c.contact, ...updatedContact} } : c));
+       if (selectedChat?.contact.id === updatedContact.id) {
+           setSelectedChat(prev => prev ? { ...prev, contact: {...prev.contact, ...updatedContact} } : null);
+       }
+  }, [selectedChat?.contact.id]);
+  
+  const handleMessageDelete = useCallback((deletedMessage: Message) => {
+       setMessagesByChat(prev => {
+        const currentMessages = prev[deletedMessage.chat_id] || [];
+        return {
+            ...prev,
+            [deletedMessage.chat_id]: currentMessages.filter(m => m.id !== deletedMessage.id),
+        };
+    });
+  }, []);
 
 
   useEffect(() => {
@@ -144,32 +228,70 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     if (!initialUser?.activeWorkspaceId) return;
     
     const supabase = createClient();
-    const isMyInstance = true; // Placeholder for more complex logic if needed
 
-    const handleChange = (payload: RealtimePostgresChangesPayload<any>) => {
-        console.log('[REALTIME] Change received:', payload);
-        if (isMyInstance && broadcastChannel) {
-            broadcastChannel.postMessage({ type: 'change', payload });
+    const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
+        console.log('[REALTIME] Change received:', payload.eventType, payload.table);
+        
+        if (payload.errors) {
+            console.error('[REALTIME] Error:', payload.errors);
+            return;
         }
-        fetchData(); // Fallback to refetch for simplicity and robustness
+
+        const record = payload.new as any;
+        let eventType: string | null = null;
+        let eventPayload: any = null;
+
+        switch (payload.eventType) {
+            case 'INSERT':
+                if (payload.table === 'messages') {
+                    eventType = 'NEW_MESSAGE';
+                    eventPayload = record as Message;
+                    handleNewMessage(eventPayload);
+                }
+                break;
+            case 'UPDATE':
+                if (payload.table === 'chats') {
+                    eventType = 'UPDATE_CHAT';
+                    eventPayload = record as Chat;
+                    handleChatUpdate(eventPayload);
+                } else if (payload.table === 'contacts') {
+                    eventType = 'UPDATE_CONTACT';
+                    eventPayload = record as Contact;
+                    handleContactUpdate(eventPayload);
+                }
+                break;
+            case 'DELETE':
+                if(payload.table === 'messages') {
+                    eventType = 'DELETE_MESSAGE';
+                    eventPayload = payload.old as Message;
+                    handleMessageDelete(eventPayload);
+                }
+                 break;
+            default:
+                break;
+        }
+
+        if (eventType && broadcastChannel) {
+            broadcastChannel.postMessage({ type: eventType, payload: eventPayload });
+        }
     };
 
     const chatsChannel = supabase
       .channel('public:chats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chats', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
       .subscribe();
 
     const messagesChannel = supabase
       .channel('public:messages')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
       .subscribe();
       
     const contactsChannel = supabase
       .channel('public:contacts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChange)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts', filter: `workspace_id=eq.${initialUser.activeWorkspaceId}` }, handleChanges)
       .subscribe();
 
-    // Re-fetch data when tab becomes visible
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('[VISIBILITY] Tab is visible again, re-fetching data.');
@@ -185,7 +307,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
       supabase.removeChannel(contactsChannel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel]);
+  }, [initialUser?.activeWorkspaceId, fetchData, broadcastChannel, handleNewMessage, handleChatUpdate, handleContactUpdate, handleMessageDelete]);
 
   useEffect(() => {
       if(initialUser?.activeWorkspaceId){
@@ -220,6 +342,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
             return updatedMessages;
         });
         
+        // Fire-and-forget the update to the server. The UI is already updated optimistically.
         fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -229,19 +352,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         });
     }
   }, [selectedChat, currentChatMessages]);
-
-  useEffect(() => {
-    // Play sound on new messages if tab is not focused or chat is not selected
-    if (!document.hasFocus() || selectedChatIdRef.current !== chats[0]?.id) {
-      if (chats[0]?.messages.length > (messagesByChat[chats[0]?.id]?.length || 0)) {
-        const lastMessage = chats[0].messages[chats[0].messages.length - 1];
-        if (lastMessage && !lastMessage.from_me) {
-          playNotificationSound();
-        }
-      }
-    }
-  }, [chats, messagesByChat, playNotificationSound]);
-
   
   if (!initialUser) {
     return <LoadingSkeleton />;
@@ -294,6 +404,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
+        tabId={broadcastChannel?.name || 'no-channel'}
       />
       <ContactPanel
         chat={enrichedSelectedChat}

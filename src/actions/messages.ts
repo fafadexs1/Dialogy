@@ -22,7 +22,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
        WHERE i.instance_name = $1`,
       [instanceName]
     );
-     if (instanceRes.rows.length === 0) {
+     if (instanceRes.rowCount === 0) {
         return null;
     }
     return instanceRes.rows[0];
@@ -107,9 +107,8 @@ async function internalSendMessage(
         
         await client.query('COMMIT');
         
-        // A revalidação está causando o refresh da UI.
-        // A UI será atualizada via subscriptions do Supabase.
-        // revalidatePath(`/api/chats/${workspaceId}`);
+        // Revalidação manual não é mais necessária com subscriptions.
+        // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
 
         return { success: true, apiResponse };
@@ -229,9 +228,8 @@ async function internalSendMedia(
         
         await client.query('COMMIT');
         
-        // A revalidação está causando o refresh da UI.
-        // A UI será atualizada via subscriptions do Supabase.
-        // revalidatePath(`/api/chats/${workspaceId}`);
+        // Revalidação manual não é mais necessária com subscriptions.
+        // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
 
         return { success: true };
@@ -411,7 +409,8 @@ export async function saveTranscriptionAction(messageId: string, transcription: 
         if (result.rowCount === 0) {
             return { success: false, error: "Mensagem não encontrada." };
         }
-        revalidatePath('/', 'layout'); // Revalidate para atualizar a UI em outros clientes
+        // No longer needed with realtime
+        // revalidatePath('/', 'layout');
         return { success: true };
     } catch (error: any) {
         console.error("Erro ao salvar transcrição:", error);

@@ -75,7 +75,7 @@ create table if not exists public.permissions (
 
 -- 1) USERS (ainda sem FK para workspaces)
 create table if not exists public.users (
-  id uuid primary key, -- Removido default para alinhar com Supabase Auth
+  id uuid primary key,
   full_name text,
   email text unique,
   avatar_url text,
