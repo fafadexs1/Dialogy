@@ -1,3 +1,4 @@
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -84,6 +85,8 @@ export async function createEvolutionApiInstance(
     if (!payload.displayName?.trim()) {
         return { success: false, error: 'O apelido da instância é obrigatório.'}
     }
+
+    const isBaileys = payload.integration === 'WHATSAPP-BAILEYS';
      if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
     }
@@ -452,3 +455,5 @@ export async function updateInstanceSettings(
     return { success: false, error: error.message };
   }
 }
+
+    
