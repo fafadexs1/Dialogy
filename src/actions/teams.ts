@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -109,12 +108,11 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
         // Create default business hours for the new team
         const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-        // Correctly use query parameters for the teamId
-        const businessHoursValues = days.map((_, index) => `(gen_random_uuid(), $1, $${index + 2})`).join(',');
+        const businessHoursValues = days.map((day, index) => `($1, $${index + 2})`).join(',');
         const businessHoursParams = [newTeam.id, ...days];
         
         await client.query(
-            `INSERT INTO business_hours (id, team_id, day_of_week) VALUES ${businessHoursValues}`,
+            `INSERT INTO business_hours (team_id, day_of_week) VALUES ${businessHoursValues}`,
             businessHoursParams
         );
 
@@ -387,3 +385,4 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
   }
 }
 
+    
