@@ -39,6 +39,20 @@ const nextConfig: NextConfig = {
         // Adicione outros módulos nativos do Node.js aqui se encontrar mais erros.
       };
     }
+    
+    // Ignorar avisos de "Critical dependency" do `handlebars` que usa `require.extensions`
+    config.externals.push({
+      'handlebars': 'commonjs handlebars',
+      '@opentelemetry/exporter-jaeger': 'commonjs @opentelemetry/exporter-jaeger',
+      '@opentelemetry/winston-transport': 'commonjs @opentelemetry/winston-transport'
+    });
+
+    config.ignoreWarnings = [
+        ...(config.ignoreWarnings || []),
+        /Module not found: Can't resolve 'handlebars'/,
+        /require.extensions is not supported by webpack/
+    ];
+    
     return config;
   },
 };
