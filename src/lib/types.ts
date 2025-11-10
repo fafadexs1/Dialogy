@@ -130,6 +130,7 @@ export type Message = {
   type: 'text' | 'system' | 'audio' | 'image' | 'video' | 'document';
   status: 'default' | 'deleted';
   metadata?: MessageMetadata;
+  transcription: string | null;
   timestamp: string;
   createdAt: string;
   formattedDate: string;

@@ -227,6 +227,7 @@ const TABLE_CREATION_QUERIES = `
         content text,
         type public.message_type_enum,
         metadata jsonb,
+        transcription TEXT,
         from_me boolean DEFAULT false,
         is_read boolean DEFAULT false,
         message_id_from_api text,

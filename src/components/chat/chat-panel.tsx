@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -258,7 +259,7 @@ function MediaMessage({ message }: { message: Message }) {
             );
         }
         if (mimetype.startsWith('audio/')) {
-            return <AudioPlayer src={urlToUse} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
+            return <AudioPlayer src={urlToUse} messageId={message.id} initialTranscription={message.transcription} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
         }
         if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
             return (

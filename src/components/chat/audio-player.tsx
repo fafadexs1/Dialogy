@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -7,9 +8,13 @@ import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { transcribeAudio } from '@/ai/flows/transcribe-audio';
 import { useToast } from '@/hooks/use-toast';
+import { saveTranscriptionAction } from '@/actions/messages';
+import type { Message } from '@/lib/types';
 
 interface AudioPlayerProps {
     src: string;
+    messageId: string;
+    initialTranscription: string | null;
     duration?: number;
     waveform?: number[];
     isFromMe?: boolean;
@@ -22,7 +27,7 @@ const formatTime = (timeInSeconds: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioPlayerProps) {
+export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
@@ -30,7 +35,7 @@ export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioP
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(initialDuration || 0);
-    const [transcription, setTranscription] = useState<string | null>(null);
+    const [transcription, setTranscription] = useState<string | null>(initialTranscription);
     const [isTranscribing, setIsTranscribing] = useState(false);
 
 
@@ -79,7 +84,11 @@ export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioP
         setIsTranscribing(true);
         try {
             const result = await transcribeAudio({ audioUrl: src });
-            setTranscription(result.transcription);
+            if (result.transcription) {
+                setTranscription(result.transcription);
+                // Save to DB in the background
+                await saveTranscriptionAction(messageId, result.transcription);
+            }
         } catch (error: any) {
             toast({ title: "Erro ao transcrever", description: error.message || "Não foi possível transcrever o áudio.", variant: "destructive" });
         } finally {
@@ -171,13 +180,13 @@ export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioP
                 </div>
             </div>
              <div className="mt-1">
-                {isTranscribing ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 rounded-md bg-secondary/50">
+                {transcription ? (
+                    <p className="text-xs italic text-muted-foreground p-2 rounded-md bg-secondary/50">{transcription}</p>
+                ) : isTranscribing ? (
+                     <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 rounded-md bg-secondary/50">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Transcrevendo áudio...
                     </div>
-                ) : transcription ? (
-                     <p className="text-xs italic text-muted-foreground p-2 rounded-md bg-secondary/50">{transcription}</p>
                 ) : (
                     !isFromMe && (
                         <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs">

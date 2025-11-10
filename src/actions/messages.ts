@@ -387,4 +387,23 @@ export async function startNewConversation(
     }
 }
 
-    
+export async function saveTranscriptionAction(messageId: string, transcription: string): Promise<{ success: boolean; error?: string }> {
+    if (!messageId || !transcription) {
+        return { success: false, error: "ID da mensagem e transcrição são obrigatórios." };
+    }
+
+    try {
+        const result = await db.query(
+            'UPDATE messages SET transcription = $1 WHERE id = $2',
+            [transcription, messageId]
+        );
+        if (result.rowCount === 0) {
+            return { success: false, error: "Mensagem não encontrada." };
+        }
+        revalidatePath('/', 'layout'); // Revalidate para atualizar a UI em outros clientes
+        return { success: true };
+    } catch (error: any) {
+        console.error("Erro ao salvar transcrição:", error);
+        return { success: false, error: "Falha no servidor ao salvar a transcrição." };
+    }
+}

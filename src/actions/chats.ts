@@ -436,6 +436,7 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                 type: m.type as Message['type'],
                 status: m.content === 'Mensagem apagada' ? 'deleted' : 'default',
                 metadata: m.metadata as MessageMetadata,
+                transcription: m.transcription,
                 timestamp: formatInTimeZone(zonedDate, 'HH:mm', { locale: ptBR, timeZone: timezone }),
                 createdAt: createdAtDate.toISOString(),
                 formattedDate: formatMessageDate(createdAtDate, timezone),
@@ -485,5 +486,3 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {}, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
-
-    
