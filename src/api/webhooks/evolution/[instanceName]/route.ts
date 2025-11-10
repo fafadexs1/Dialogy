@@ -17,7 +17,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
          WHERE i.instance_name = $1`,
         [instanceName]
     );
-    if (instanceRes.rows.length === 0) {
+    if (instanceRes.rowCount === 0) {
         return null;
     }
     return instanceRes.rows[0];
