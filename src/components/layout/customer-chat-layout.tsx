@@ -73,6 +73,8 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
   const workspaceTimezoneRef = useRef<string>(workspaceTimezone);
   const chatsRef = useRef<Chat[]>([]);
+  const userScrolledUpRef = useRef(false);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // This logic is safe because it only runs on the client
   if (typeof window !== 'undefined' && !tabIdRef.current) {
@@ -88,6 +90,44 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+  
+  const fetchData = useCallback(async (isInitial = false) => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    if (isInitial) {
+        setIsLoading(true);
+        setFetchError(null);
+    }
+
+    try {
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+
+        if (error) throw new Error(error);
+
+        setChats(fetchedChats || []);
+        setMessagesByChat(fetchedMessagesByChat || {});
+        if (timezone) {
+            setWorkspaceTimezone(timezone);
+        }
+
+        if (selectedChatIdRef.current) {
+            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === selectedChatIdRef.current);
+            setSelectedChat(updatedSelectedChat || null);
+        }
+        
+        setFetchError(null);
+        
+    } catch(e: any) {
+        console.error("Failed to fetch chat data", e);
+        const errorMessage = e.message || "Não foi possível buscar os dados do chat.";
+        if (isInitial) {
+            toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
+            setFetchError(errorMessage);
+        }
+    } finally {
+        if(isInitial) setIsLoading(false);
+    }
+  }, [initialUser?.activeWorkspaceId]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -249,44 +289,6 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
      });
   }, []);
 
-  const fetchData = useCallback(async (isInitial = false) => {
-    if (!initialUser?.activeWorkspaceId) return;
-
-    if (isInitial) {
-        setIsLoading(true);
-        setFetchError(null);
-    }
-
-    try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
-
-        if (error) throw new Error(error);
-
-        setChats(fetchedChats || []);
-        setMessagesByChat(fetchedMessagesByChat || {});
-        if (timezone) {
-            setWorkspaceTimezone(timezone);
-        }
-
-        if (selectedChatIdRef.current) {
-            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === selectedChatIdRef.current);
-            setSelectedChat(updatedSelectedChat || null);
-        }
-        
-        setFetchError(null);
-        
-    } catch(e: any) {
-        console.error("Failed to fetch chat data", e);
-        const errorMessage = e.message || "Não foi possível buscar os dados do chat.";
-        if (isInitial) {
-            toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
-            setFetchError(errorMessage);
-        }
-    } finally {
-        if(isInitial) setIsLoading(false);
-    }
-  }, [initialUser?.activeWorkspaceId, toast]);
-
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
@@ -331,7 +333,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
+  
   useEffect(() => {
     if (initialUser) {
       fetchData(true);
@@ -354,7 +356,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
             return;
         }
 
-        const record = payload.new as any;
+        const record = payload.eventType === 'DELETE' ? payload.old : payload.new;
         let eventType: string | null = null;
         let eventPayload: any = null;
 
@@ -382,7 +384,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
             case 'DELETE':
                 if(payload.table === 'messages') {
                     eventType = 'DELETE_MESSAGE';
-                    eventPayload = payload.old as Message;
+                    eventPayload = record as Message;
                     handleMessageDelete(eventPayload);
                 }
                  break;
