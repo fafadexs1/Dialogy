@@ -1,28 +1,27 @@
 
 'use client';
 
-import { useFormStatus } from 'react-dom';
+import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2 } from 'lucide-react';
 import { Checkbox } from '../ui/checkbox';
+import { ArrowRight } from 'lucide-react';
 
-
-function RegisterButton() {
-  const { pending } = useFormStatus();
-
-  return (
-    <Button type="submit" className="w-full h-12 text-base bg-gray-800 hover:bg-gray-900 rounded-lg shadow-sm transition-all" disabled={pending}>
-      {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      {pending ? 'Criando Conta...' : 'Continuar'}
-    </Button>
-  );
+interface RegisterFormProps {
+  onContinue: (data: FormData) => void;
+  pending: boolean;
 }
 
-export function RegisterForm() {
+export function RegisterForm({ onContinue, pending }: RegisterFormProps) {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    onContinue(formData);
+  };
+
   return (
-    <div className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
             <Label htmlFor="name" className="font-semibold text-gray-700 text-sm">Nome <span className="text-gray-400">(obrigatório)</span></Label>
@@ -96,7 +95,10 @@ export function RegisterForm() {
         </label>
       </div>
       
-      <RegisterButton />
-    </div>
+      <Button type="submit" className="w-full h-12 text-base bg-gray-800 hover:bg-gray-900 rounded-lg shadow-sm transition-all" disabled={pending}>
+         <ArrowRight className="mr-2 h-4 w-4" />
+         Continuar
+      </Button>
+    </form>
   );
 }

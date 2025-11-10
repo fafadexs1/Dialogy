@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -9,10 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CheckCircle2, Building, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
 import { createWorkspaceAction } from '@/actions/workspace';
-import { useFormStatus, useActionState } from 'react';
+import { useFormStatus, useActionState as useActionStateFromReact } from 'react';
 
 function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () => void }) {
-  const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
+  const [state, formAction] = useActionStateFromReact(createWorkspaceAction, { success: false, error: null });
   const { pending } = useFormStatus();
 
   useEffect(() => {
