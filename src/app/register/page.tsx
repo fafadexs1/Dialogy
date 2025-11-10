@@ -4,7 +4,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { type User } from '@/lib/types';
+import { useRouter } from 'next/navigation';
 import { register } from '@/actions/auth';
 import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -20,6 +20,7 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState<FormData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
 
   const handleStep1Submit = (data: FormData) => {
     setFormData(data);
@@ -38,7 +39,8 @@ export default function RegisterPage() {
             // After user is created, create their workspace
             const workspaceResult = await createWorkspaceAction(null, formData);
             if (workspaceResult.success) {
-                setStep(3); // Go to final step
+                // On success, redirect to the main app page
+                router.push('/');
             } else {
                 setError(workspaceResult.error || "Falha ao criar o workspace.");
                 setStep(2); // Stay on step 2 to show error
@@ -53,7 +55,6 @@ export default function RegisterPage() {
   const STEPS = [
       { id: 1, title: "Dados de acesso" },
       { id: 2, title: "Crie seu Workspace" },
-      { id: 3, title: "Tudo Pronto" },
   ];
 
   return (
@@ -124,21 +125,10 @@ export default function RegisterPage() {
                                     </div>
                                     <Button type="submit" className="w-full" disabled={isPending}>
                                         <ArrowRight className="mr-2 h-4 w-4" />
-                                        Criar e Continuar
+                                        Criar e Finalizar
                                     </Button>
                                 </div>
                             </form>
-                        )}
-                        {step === 3 && (
-                             <div className='text-center'>
-                                <CardTitle className="text-2xl font-bold text-gray-800">Tudo pronto!</CardTitle>
-                                <CardDescription className='mt-1'>Seu usuário e workspace foram criados com sucesso.</CardDescription>
-                                <Button asChild className="w-full mt-8">
-                                    <Link href="/">
-                                        Ir para o App <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Link>
-                                </Button>
-                            </div>
                         )}
                     </>
                 )}
