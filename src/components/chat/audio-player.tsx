@@ -179,10 +179,12 @@ export function AudioPlayer({ src, duration: initialDuration, isFromMe }: AudioP
                 ) : transcription ? (
                      <p className="text-xs italic text-muted-foreground p-2 rounded-md bg-secondary/50">{transcription}</p>
                 ) : (
-                    <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs">
-                        <Languages className="mr-2 h-3 w-3" />
-                        Transcrever
-                    </Button>
+                    !isFromMe && (
+                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs">
+                            <Languages className="mr-2 h-3 w-3" />
+                            Transcrever
+                        </Button>
+                    )
                 )}
             </div>
         </div>
