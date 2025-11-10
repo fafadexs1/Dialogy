@@ -343,13 +343,16 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         const chatQuery = `
             WITH LastMessageDetails AS (
                 SELECT
+                    DISTINCT ON (chat_id)
                     chat_id,
-                    (array_agg(instance_name ORDER BY created_at DESC))[1] as last_instance_name
+                    instance_name as last_instance_name,
+                    created_at
                 FROM messages
                 WHERE workspace_id = $1
-                GROUP BY chat_id
+                ORDER BY chat_id, created_at DESC
             )
             SELECT 
+                DISTINCT ON (c.id)
                 c.id, c.status, c.workspace_id, c.assigned_at, c.tag, c.color, c.contact_id, c.agent_id,
                 t.name as team_name,
                 lmd.last_instance_name as instance_name,
@@ -486,3 +489,5 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {}, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
+
+    
