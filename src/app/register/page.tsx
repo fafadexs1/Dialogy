@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useActionState, useEffect, useState } from 'react';
@@ -58,7 +59,7 @@ export default function RegisterPage() {
                             <p className="text-sm text-gray-500 mt-1">Para continuar, por favor, preencha os campos abaixo</p>
                         </div>
                         <div className="mt-8">
-                            <RegisterForm action={formAction} />
+                           <RegisterForm action={formAction as (formData: FormData) => void} state={state} />
                         </div>
                          <div className="mt-6 text-center text-sm">
                             <p className="text-gray-600">

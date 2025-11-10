@@ -1,14 +1,13 @@
+
 'use client';
 
-import { useActionState, useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
-import { register } from '@/actions/auth';
+import type { User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import type { User } from '@/lib/types';
 import { Checkbox } from '../ui/checkbox';
 
 
@@ -23,11 +22,19 @@ function RegisterButton() {
   );
 }
 
-export function RegisterForm({ action }: { action: (prevState: any, formData: FormData) => Promise<{ success: boolean; message: string | null, user: User | null }> }) {
-  const [state, formAction] = useActionState(action, { success: false, message: null, user: null });
+interface RegisterFormProps {
+    action: (formData: FormData) => void;
+    state: {
+        success: boolean;
+        message: string | null;
+        user: User | null;
+    };
+}
 
+
+export function RegisterForm({ action, state }: RegisterFormProps) {
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={action} className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
             <Label htmlFor="name" className="font-semibold text-gray-700 text-sm">Nome <span className="text-gray-400">(obrigatório)</span></Label>
