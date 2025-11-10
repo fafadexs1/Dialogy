@@ -1,10 +1,8 @@
 
-
 'use server';
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
@@ -58,7 +56,6 @@ export async function POST(
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
 
-    revalidatePath('/', 'layout');
     return NextResponse.json({ message: 'Webhook received successfully' });
   } catch (error) {
     console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
@@ -115,16 +112,13 @@ async function handleMessagesUpsert(payload: any) {
 
     let content = '';
     let dbMessageType: Message['type'] = 'text';
-    const mediaObject = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage;
 
-    // Correctly determine content: caption for media, or conversation for text
-    if (mediaObject) {
-        content = mediaObject.caption || '';
-    } else {
-        content = message.conversation || message.extendedTextMessage?.text || '';
-    }
+    const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
+    
+    content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
 
-    const mediaUrl = message.mediaUrl || mediaObject?.url || null;
+    // A URL da mídia está no nível superior do objeto `message`
+    const mediaUrl = message.mediaUrl || null;
     
     if (messageType) {
         switch (messageType) {
@@ -152,11 +146,12 @@ async function handleMessagesUpsert(payload: any) {
         return;
     }
     
+    // Construir o objeto metadata
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl,
-        mimetype: mediaObject?.mimetype,
-        fileName: mediaObject?.fileName,
-        duration: mediaObject?.seconds,
+        mimetype: messageDetails?.mimetype,
+        fileName: messageDetails?.fileName,
+        duration: messageDetails?.seconds
     };
 
     const contactPhone = sender || contactJid.split('@')[0];
@@ -200,7 +195,7 @@ async function handleMessagesUpsert(payload: any) {
         contactData = contactRes.rows[0];
 
         let chatRes = await client.query(
-            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') LIMIT 1`, [workspaceId, contactData.id]
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
         );
         
         let chat: Chat;
@@ -209,7 +204,7 @@ async function handleMessagesUpsert(payload: any) {
         } else {
              console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais') RETURNING *`,
+                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactData.id]
             );
             chat = newChatRes.rows[0];
@@ -257,10 +252,6 @@ async function handleMessagesUpsert(payload: any) {
         Promise.all(postTransactionTasks).catch(err => {
             console.error("[WEBHOOK_POST_TRANSACTION] Erro ao executar tarefas em paralelo:", err);
         });
-    }
-
-    if (workspaceId) {
-        revalidatePath(`/api/chats/${workspaceId}`);
     }
 }
 
