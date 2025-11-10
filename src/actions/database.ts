@@ -96,13 +96,12 @@ create table if not exists public.workspaces (
   updated_at timestamptz not null default timezone('utc'::text, now()),
   timezone text default 'America/Sao_Paulo',
   constraint workspaces_owner_id_fkey
-    foreign key (owner_id) references public.users(id) on delete restrict
+    foreign key (owner_id) references public.users(id) on delete cascade
 );
 
 create index if not exists idx_workspaces_owner on public.workspaces(owner_id);
 
 -- 3) Agora adiciona a FK users.last_active_workspace_id -> workspaces.id
--- Adicionando uma verificação para não tentar adicionar a mesma constraint múltiplas vezes
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -166,7 +165,7 @@ create table if not exists public.teams (
   constraint teams_tag_id_fkey
     foreign key (tag_id) references public.tags(id) on delete set null,
   constraint teams_owner_id_fkey
-    foreign key (owner_id) references public.users(id) on delete restrict
+    foreign key (owner_id) references public.users(id) on delete cascade
 );
 create unique index if not exists uq_teams_workspace_name on public.teams(workspace_id, name);
 create index if not exists idx_teams_workspace on public.teams(workspace_id);
@@ -229,7 +228,7 @@ create table if not exists public.workspace_invites (
   constraint workspace_invites_workspace_id_fkey
     foreign key (workspace_id) references public.workspaces(id) on delete cascade,
   constraint workspace_invites_created_by_fkey
-    foreign key (created_by) references public.users(id) on delete restrict
+    foreign key (created_by) references public.users(id) on delete cascade
 );
 create unique index if not exists uq_workspace_invites_workspace_code on public.workspace_invites(workspace_id, code);
 
@@ -302,7 +301,7 @@ create table if not exists public.contact_tags (
     foreign key (tag_id) references public.tags(id) on delete cascade
 );
 
--- Atividades (observação: user_id é NULLABLE por causa do ON DELETE SET NULL)
+-- Atividades
 create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),
   contact_id uuid not null,
@@ -606,6 +605,24 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ============================================
+-- Gatilho para apagar usuário da public.users
+-- ============================================
+create or replace function public.handle_deleted_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  delete from public.users where id = old.id;
+  return old;
+end;
+$$;
+
+create trigger on_auth_user_deleted
+  after delete on auth.users
+  for each row execute procedure public.handle_deleted_user();
 
 
 -- ============================================
