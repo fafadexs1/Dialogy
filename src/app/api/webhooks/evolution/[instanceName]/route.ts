@@ -179,7 +179,8 @@ async function handleMessagesUpsert(payload: any) {
         if (contactRes.rowCount === 0) {
             console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
+                 RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
         } else {
@@ -204,6 +205,7 @@ async function handleMessagesUpsert(payload: any) {
         if (chatRes.rowCount > 0) {
             chat = chatRes.rows[0];
         } else {
+             console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const newChatRes = await client.query(
                 `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
                 [workspaceId, contactData.id]

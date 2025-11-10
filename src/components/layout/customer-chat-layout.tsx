@@ -213,7 +213,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [initialUser?.activeWorkspaceId, toast]);
 
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;

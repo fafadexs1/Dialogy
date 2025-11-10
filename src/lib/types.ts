@@ -465,5 +465,3 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
-
-    

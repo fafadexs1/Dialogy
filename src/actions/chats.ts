@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -489,7 +488,3 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
         return { chats: [], messagesByChat: {}, timezone: defaultTimeZone, error: `Falha ao buscar dados: ${error.message}` };
     }
 }
-
-    
-
-    
