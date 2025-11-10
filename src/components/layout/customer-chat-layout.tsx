@@ -164,6 +164,18 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
     }
   }, [initialUser, fetchData]);
 
+  // Polling mechanism as requested
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    const intervalId = setInterval(() => {
+        fetchData();
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(intervalId);
+  }, [initialUser?.activeWorkspaceId, fetchData]);
+
+
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
         const chatMessages = prevMessagesByChat[newMessage.chat_id] || [];
