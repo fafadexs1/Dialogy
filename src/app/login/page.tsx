@@ -18,7 +18,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   } = await supabase.auth.getUser();
 
   if (user) {
-    redirect('/');
+    redirect('/inbox');
   }
 
   const isRegistered = searchParams?.registered === 'true';
