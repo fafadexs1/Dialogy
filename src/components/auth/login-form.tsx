@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useActionState, useEffect } from 'react';
@@ -45,8 +46,7 @@ export function LoginForm() {
 
   useEffect(() => {
     if (state.success) {
-      // Hard redirect to force a full page reload and re-fetch server data
-      window.location.href = '/';
+      router.push('/inbox');
     }
   }, [state, router]);
   
