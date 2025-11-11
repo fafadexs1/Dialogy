@@ -3,6 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
 import ErrorBoundary from '@/components/layout/error-boundary';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 export default function RootLayout({
   children,
@@ -20,7 +21,9 @@ export default function RootLayout({
       <body className="h-full font-body antialiased">
           <ErrorBoundary>
             <PresenceProvider>
-                {children}
+                <MainAppLayout>
+                    {children}
+                </MainAppLayout>
             </PresenceProvider>
           </ErrorBoundary>
           <Toaster />

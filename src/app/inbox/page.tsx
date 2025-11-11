@@ -7,8 +7,6 @@ import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { db } from '@/lib/db';
 import type { User, Workspace } from '@/lib/types';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
-
 
 // Helper to fetch user data and workspaces in a single query
 async function getUserData(userId: string): Promise<User | null> {
@@ -74,8 +72,6 @@ export default async function InboxPage() {
   
   // Otherwise, show the main chat interface.
   return (
-    <MainAppLayout user={user}>
       <CustomerChatLayout initialUser={user} />
-    </MainAppLayout>
   )
 }
