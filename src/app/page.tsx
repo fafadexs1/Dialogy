@@ -5,9 +5,6 @@ import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Play, Check, Zap, Bot, MessagesSquare, BarChart3, Shield, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 
 // Dialogy brand
 const primary = "#2454d3";
@@ -119,19 +116,6 @@ function Price({ tier, price, features, highlight }: { tier: string, price: stri
 }
 
 export default function DialogyLanding() {
-  const router = useRouter();
-
-  useEffect(() => {
-    const checkUser = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        router.push('/inbox');
-      }
-    };
-
-    checkUser();
-  }, [router]);
   return (
     <div className="min-h-screen w-full bg-[#0b132b] selection:bg-white/20 selection:text-white">
       {/* Background layers */}
