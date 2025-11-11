@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -392,7 +391,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
   } : null;
 
   return (
-    <div className="h-full flex-1 w-full min-h-0 flex">
+    <div className="h-full flex-1 w-full min-h-0 flex overflow-hidden">
       <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
       <ChatList
         chats={chats}

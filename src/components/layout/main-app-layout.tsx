@@ -27,7 +27,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={cn(
-        'h-dvh w-full bg-muted/30 overflow-hidden',
+        'h-dvh w-full bg-muted/30',
         shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'flex'
       )}
     >
@@ -37,7 +37,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
         </aside>
       )}
       
-      <main className="min-h-0 min-w-0 flex flex-col flex-1 overflow-hidden">
+      <main className="min-h-0 min-w-0 flex flex-col flex-1">
         <PageTransition transitionKey={transitionKey} className="flex-1 min-h-0">
           {children}
         </PageTransition>
