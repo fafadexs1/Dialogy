@@ -1,5 +1,3 @@
-'use client';
-
 import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Play, Check, Zap, Bot, MessagesSquare, BarChart3, Shield, Sparkles } from "lucide-react";
@@ -158,7 +156,7 @@ export default function DialogyLanding() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 place-items-center">
                 {[["whatsapp","WhatsApp"],["instagram","Instagram"],["messenger","Messenger"],["ifood","iFood"]].map(([k, label]) => (
                   <div key={k} className="flex items-center gap-2 text-white/90">
-                    <ChannelIcon name={k} />
+                    <ChannelIcon name={k as string} />
                     <span className="text-sm">{label as string}</span>
                   </div>
                 ))}

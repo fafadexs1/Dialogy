@@ -24,7 +24,7 @@ export async function login(prevState: any, formData: FormData) {
 
   // Em vez de redirecionar, retorna um estado de sucesso.
   // O redirecionamento será tratado no lado do cliente.
-  return redirect('/');
+  return redirect('/inbox');
 }
 
 export async function register(prevState: any, formData: FormData): Promise<{ success: boolean; message: string | null; user: User | null }> {

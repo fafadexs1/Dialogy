@@ -53,7 +53,7 @@ interface SidebarProps {
 }
 
 const mainNavItems = [
-  { href: '/', icon: MessageSquare, label: 'Chat' },
+  { href: '/inbox', icon: MessageSquare, label: 'Chat' },
   { href: '/crm', icon: Users, label: 'CRM' },
   { href: '/campaigns', icon: Send, label: 'Campanhas' },
   { href: '/analytics', icon: BarChart2, label: 'Analytics' },
@@ -127,7 +127,7 @@ export function Sidebar({ user }: SidebarProps) {
     <aside className="flex h-full w-20 flex-col items-center border-r bg-card p-4">
         {/* Top Section */}
         <div className="flex flex-col items-center gap-6 flex-shrink-0">
-            <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground">
+            <Link href="/inbox" className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground">
                 <DialogyLogo />
                 <span className="sr-only">Dialogy</span>
             </Link>
@@ -139,7 +139,10 @@ export function Sidebar({ user }: SidebarProps) {
             <nav className="flex flex-col items-center gap-4">
                 <TooltipProvider>
                     {mainNavItems.map((item) => {
-                        const isActive = pathname === item.href;
+                        const isActive = pathname.startsWith(item.href) && (item.href !== '/' || pathname === '/');
+                        if(item.href === '/' && pathname.startsWith('/inbox')) {
+                          // special case because inbox is the new home
+                        }
                         return (
                             <Tooltip key={item.label}>
                                 <TooltipTrigger asChild>

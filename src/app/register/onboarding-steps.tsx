@@ -41,7 +41,7 @@ export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated 
   const router = useRouter();
 
   const finishOnboarding = () => {
-    router.push('/');
+    router.push('/inbox');
   };
 
   const renderStepContent = () => {

@@ -49,7 +49,7 @@ export function Sidebar() {
                 </div>
                 <div className="mt-auto p-4">
                     <Button size="sm" className="w-full" asChild>
-                         <Link href="/">Voltar ao App</Link>
+                         <Link href="/inbox">Voltar ao App</Link>
                     </Button>
                 </div>
             </div>
