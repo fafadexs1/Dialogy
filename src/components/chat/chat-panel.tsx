@@ -169,7 +169,8 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 
 function formatWhatsappText(text: string): string {
     if (!text) return '';
-    // Escape HTML to prevent XSS, except for our allowed tags
+    
+    // Escape HTML to prevent XSS
     const escapeHtml = (unsafe: string) => {
         return unsafe
          .replace(/&/g, "&amp;")
@@ -179,17 +180,27 @@ function formatWhatsappText(text: string): string {
          .replace(/'/g, "&#039;");
     }
 
-    // First, handle code blocks to prevent inner formatting
-    let safeText = text.replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${escapeHtml(p1)}${'\'\'\''}</code></pre>`);
+    // Processar a mensagem completa
+    let processedText = escapeHtml(text);
+    
+    // Formatação de texto (negrito, itálico, etc.)
+    processedText = processedText
+        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>') // Negrito
+        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>') // Itálico
+        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>') // Riscado
+        .replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${p1}${'\'\'\''}</code></pre>`); // Bloco de código
 
-    // Then, format other elements, avoiding what's inside <code>
-    safeText = safeText
-        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>')         // Bold
-        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>')         // Italic
-        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>')         // Strikethrough
-        .replace(/(?<!<pre><code>)`(.*?)`(?!<\/code><\/pre>)/g, '<code>$1</code>');      // Inline code
+    // Detecção de URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    processedText = processedText.replace(urlRegex, (url) => {
+        // Evita transformar em link o que já está dentro de uma tag `<a>` ou `<code>`
+        if (processedText.includes(`>${url}<`) || processedText.includes(`<code>${url}</code>`)) {
+            return url;
+        }
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">${url}</a>`;
+    });
 
-    return safeText.replace(/\n/g, '<br />'); // Handle newlines
+    return processedText.replace(/\n/g, '<br />'); // Lida com quebras de linha
 }
 
 function MediaMessage({ message }: { message: Message }) {
