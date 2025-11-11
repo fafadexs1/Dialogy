@@ -22,8 +22,7 @@ export async function login(prevState: any, formData: FormData) {
     return { success: false, message: 'Credenciais inválidas. Verifique seu e-mail e senha.' };
   }
 
-  // Em vez de redirecionar, retorna um estado de sucesso.
-  // O redirecionamento será tratado no lado do cliente.
+  // Redirecionamento é crucial para o middleware atualizar a sessão.
   return redirect('/inbox');
 }
 

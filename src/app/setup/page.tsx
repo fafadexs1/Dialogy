@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Server, AlertCircle, CheckCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const router = useRouter();
 
   const handleInitialize = async () => {
     setLoading(true);
@@ -18,6 +20,9 @@ export default function SetupPage() {
     const response = await initializeDatabase();
     setResult(response);
     setLoading(false);
+    if(response.success) {
+        router.push('/register');
+    }
   };
 
   return (
