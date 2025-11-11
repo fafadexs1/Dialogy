@@ -21,7 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { getPlans, savePlan, deletePlan, savePlanIntegration } from '@/actions/plans';
-import { availableIntegrations as allIntegrations } from '@/lib/integrations';
+import { getIntegrations } from '@/actions/integrations';
 import type { Plan, Integration } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
@@ -122,7 +122,7 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
     )
 }
 
-function PlanIntegrationsManager({ plan, onUpdate }: { plan: Plan, onUpdate: () => void }) {
+function PlanIntegrationsManager({ plan, allIntegrations, onUpdate }: { plan: Plan, allIntegrations: Integration[], onUpdate: () => void }) {
     const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
 
     const handleIntegrationConfigChange = async (integrationId: string, enabled: boolean, included: number, cost: number) => {
@@ -174,7 +174,7 @@ function PlanIntegrationsManager({ plan, onUpdate }: { plan: Plan, onUpdate: () 
                              <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-10 w-10 border rounded-md">
-                                        <AvatarImage src={integration.iconUrl} />
+                                        <AvatarImage src={integration.icon_url} />
                                         <AvatarFallback>{integration.name.charAt(0)}</AvatarFallback>
                                     </Avatar>
                                     <div>
@@ -210,17 +210,27 @@ function PlanIntegrationsManager({ plan, onUpdate }: { plan: Plan, onUpdate: () 
 
 export default function PlansPage() {
     const [plans, setPlans] = useState<Plan[]>([]);
+    const [allIntegrations, setAllIntegrations] = useState<Integration[]>([]);
     const [loading, setLoading] = useState(true);
     const { toast } = useToast();
 
     const fetchData = useCallback(async () => {
         setLoading(true);
-        const plansRes = await getPlans();
+        const [plansRes, integrationsRes] = await Promise.all([
+            getPlans(),
+            getIntegrations()
+        ]);
         
         if (plansRes.error) {
             toast({ title: 'Erro ao carregar planos', description: plansRes.error, variant: 'destructive'});
         } else {
             setPlans(plansRes.plans || []);
+        }
+
+        if (integrationsRes.error) {
+            toast({ title: 'Erro ao carregar integrações', description: integrationsRes.error, variant: 'destructive'});
+        } else {
+            setAllIntegrations(integrationsRes.integrations || []);
         }
 
         setLoading(false);
@@ -294,7 +304,7 @@ export default function PlansPage() {
                                     </AlertDialog>
                                 </div>
                             </div>
-                            <PlanIntegrationsManager plan={plan} onUpdate={fetchData} />
+                            <PlanIntegrationsManager plan={plan} allIntegrations={allIntegrations} onUpdate={fetchData} />
                         </Card>
                     ))}
                 </div>

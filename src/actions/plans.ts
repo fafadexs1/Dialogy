@@ -5,17 +5,13 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { Plan, Integration, PlanIntegration } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { availableIntegrations } from '@/lib/integrations';
+import { getIntegrations } from './integrations';
+
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     if (!userId) return false;
     const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
     return result.rows[0]?.is_superadmin === true;
-}
-
-export async function getIntegrations(): Promise<{ integrations: Integration[] | null; error?: string }> {
-    // Retorna a lista de integrações definida estaticamente
-    return { integrations: availableIntegrations };
 }
 
 export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string }> {
@@ -29,12 +25,19 @@ export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string
     try {
         const plansRes = await db.query('SELECT * FROM plans ORDER BY name');
         const planIntegrationsRes = await db.query('SELECT * FROM plan_integrations');
+        const allIntegrationsRes = await getIntegrations();
+
+        if (allIntegrationsRes.error || !allIntegrationsRes.integrations) {
+            throw new Error('Falha ao buscar as definições de integrações.');
+        }
+        const allIntegrations = allIntegrationsRes.integrations;
+
 
         const plans = plansRes.rows.map(plan => {
             const planIntegrations = planIntegrationsRes.rows
                 .filter(pi => pi.plan_id === plan.id)
                 .map(pi => {
-                    const integrationDetails = availableIntegrations.find(i => i.id === pi.integration_id);
+                    const integrationDetails = allIntegrations.find(i => i.id === pi.integration_id);
                     return { ...integrationDetails, ...pi };
                 });
             

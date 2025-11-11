@@ -238,9 +238,9 @@ export interface Integration {
   description: string;
   icon_url: string;
   tag: string;
-  tag_type: 'default' | 'primary' | 'secondary' | 'beta';
-  status?: 'active' | 'coming_soon';
-  href?: string;
+  tag_type: 'primary' | 'secondary' | 'beta';
+  href: string;
+  status: 'active' | 'coming_soon';
 }
 
 export type ActionType = 'reply' | 'webhook';

@@ -608,6 +608,20 @@ CREATE TABLE IF NOT EXISTS public.plans (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
+-- Tabela de integrações editáveis
+CREATE TABLE IF NOT EXISTS public.app_integrations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    icon_url TEXT,
+    tag TEXT,
+    tag_type TEXT,
+    href TEXT,
+    status TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_integrations_id on public.app_integrations(id);
+
+
 -- Tabela de junção para configurar integrações por plano
 CREATE TABLE IF NOT EXISTS public.plan_integrations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -744,6 +758,17 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
         INSERT INTO instance_costs (type, cost) VALUES ('wa_cloud', 50.00) ON CONFLICT (type) DO NOTHING;
     `);
     console.log('[DB_SETUP] Custos iniciais das instâncias garantidos.');
+
+    // --- 4. Popular integrações padrão ---
+    console.log('[DB_SETUP] Verificando e populando a tabela de integrações...');
+     await client.query(`
+        INSERT INTO app_integrations (id, name, description, icon_url, tag, tag_type, href, status) VALUES
+        ('evolution-api', 'Evolution API', 'Gerencie as instâncias de WhatsApp (não-oficial) para conectar seus números.', 'https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
+        ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avançados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),
+        ('stripe', 'Stripe', 'Integre pagamentos e cobranças diretamente nas suas conversas.', 'https://stripe.com/img/v3/home/twitter.png', 'Pagamentos', 'beta', '#', 'coming_soon')
+        ON CONFLICT (id) DO NOTHING;
+    `);
+    console.log('[DB_SETUP] Integrações padrão garantidas.');
 
 
     await client.query('COMMIT');
