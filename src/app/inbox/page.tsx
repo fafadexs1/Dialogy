@@ -7,6 +7,7 @@ import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { db } from '@/lib/db';
 import type { User, Workspace } from '@/lib/types';
+import { MainAppLayout } from '@/components/layout/main-app-layout';
 
 
 // Helper to fetch user data and workspaces in a single query
@@ -50,7 +51,7 @@ async function getUserData(userId: string): Promise<User | null> {
 }
 
 
-export default async function HomePage() {
+export default async function InboxPage() {
   const supabase = createClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
 
@@ -72,5 +73,9 @@ export default async function HomePage() {
   }
   
   // Otherwise, show the main chat interface.
-  return <CustomerChatLayout initialUser={user} />;
+  return (
+    <MainAppLayout user={user}>
+      <CustomerChatLayout initialUser={user} />
+    </MainAppLayout>
+  )
 }
