@@ -3,7 +3,6 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
 import ErrorBoundary from '@/components/layout/error-boundary';
-import { Analytics } from "@vercel/analytics/react"
 
 export default function RootLayout({
   children,
@@ -25,7 +24,6 @@ export default function RootLayout({
             </PresenceProvider>
           </ErrorBoundary>
           <Toaster />
-          <Analytics />
       </body>
     </html>
   );
