@@ -48,8 +48,11 @@ async function getUserData(userId: string): Promise<User | null> {
     }
 }
 
+interface InboxPageProps {
+  params: { chatId?: string };
+}
 
-export default async function InboxPage() {
+export default async function InboxPage({ params }: InboxPageProps) {
   const supabase = await createClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
 
@@ -71,7 +74,8 @@ export default async function InboxPage() {
   }
   
   // Otherwise, show the main chat interface.
+  // We pass the chatId from the URL to the layout component.
   return (
-      <CustomerChatLayout initialUser={user} />
+      <CustomerChatLayout initialUser={user} chatId={params.chatId || null} />
   )
 }

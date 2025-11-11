@@ -56,7 +56,7 @@ function LoadingSkeleton() {
 }
 
 
-export default function CustomerChatLayout({ initialUser }: { initialUser: User | null }) {
+export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -67,7 +67,7 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
 
-  const selectedChatIdRef = useRef<string | null>(null);
+  const selectedChatIdRef = useRef<string | null>(initialChatId);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
 
@@ -101,11 +101,18 @@ export default function CustomerChatLayout({ initialUser }: { initialUser: User 
         if (timezone) {
             setWorkspaceTimezone(timezone);
         }
-
-        if (selectedChatIdRef.current) {
-            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === selectedChatIdRef.current);
+        
+        const currentSelectedId = selectedChatIdRef.current;
+        if (currentSelectedId) {
+            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === currentSelectedId);
             setSelectedChat(updatedSelectedChat || null);
+        } else if ((fetchedChats || []).length > 0 && !currentSelectedId) {
+            // If no chat is selected, but we have chats, select the first one.
+            const firstChat = fetchedChats[0];
+            setSelectedChat(firstChat);
+            selectedChatIdRef.current = firstChat.id;
         }
+
         
         setFetchError(null);
         

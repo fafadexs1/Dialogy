@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: 
             instanceName: formData.get('instanceName') as string,
             phoneNumber: formData.get('phoneNumber') as string,
             message: formData.get('message') as string,
+            tabId: null // This action is not tied to a specific tab
         });
 
         if (result.success) {
@@ -97,7 +99,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: 
                                         <div className='p-4 text-center text-sm text-muted-foreground'>Carregando...</div>
                                     ) : (
                                         instances.map(instance => (
-                                            <SelectItem key={instance.id} value={instance.name}>{instance.name}</SelectItem>
+                                            <SelectItem key={instance.id} value={instance.instance_name}>{instance.display_name}</SelectItem>
                                         ))
                                     )}
                                 </SelectContent>
@@ -215,13 +217,19 @@ interface ChatListItemProps {
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
   const lastMessage = chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
+  const router = useRouter();
+
+  const handleSelect = () => {
+    onSelect(chat);
+    router.push(`/inbox/${chat.id}`);
+  }
 
   return (
     <div
       className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
         isSelected ? 'bg-primary/10' : 'hover:bg-accent'
       }`}
-      onClick={() => onSelect(chat)}
+      onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
       <TagSelectionDialog 
@@ -444,4 +452,3 @@ export default function ChatList({
     </div>
   );
 }
-
