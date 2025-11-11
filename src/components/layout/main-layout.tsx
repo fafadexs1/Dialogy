@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -11,6 +12,6 @@ interface MainLayoutProps {
  * A lógica da sidebar e da estrutura principal foi movida para MainAppLayout
  * para garantir que a sidebar seja persistente durante as transições de página.
  */
-export function MainLayout({ children }: MainLayoutProps) {
+export default function MainLayout({ children }: MainLayoutProps) {
   return <div className="h-full w-full">{children}</div>;
 }

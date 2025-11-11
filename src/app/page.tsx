@@ -1,3 +1,6 @@
+
+'use client';
+
 import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Play, Check, Zap, Bot, MessagesSquare, BarChart3, Shield, Sparkles } from "lucide-react";
@@ -8,36 +11,41 @@ const primary = "#2454d3";
 const glow = "shadow-[0_0_40px_rgba(36,84,211,0.35)]";
 const glass = "backdrop-blur-xl bg-white/8 border border-white/10";
 
-const Section = ({ id, children, className = "" }: { id?: string; children: React.ReactNode; className?: string }) => (
-  <section id={id} className={`w-full max-w-7xl mx-auto px-5 md:px-8 ${className}`}>{children}</section>
-);
+function Section({ id, children, className = "" }: { id?: string; children: React.ReactNode; className?: string }) {
+  return <section id={id} className={`w-full max-w-7xl mx-auto px-5 md:px-8 ${className}`}>{children}</section>;
+}
 
-const Badge = ({ children }: { children: React.ReactNode }) => (
-  <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs md:text-sm border border-white/20 bg-white/5 text-white/80">
-    <Sparkles className="w-3.5 h-3.5" /> {children}
-  </span>
-);
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs md:text-sm border border-white/20 bg-white/5 text-white/80">
+      <Sparkles className="w-3.5 h-3.5" /> {children}
+    </span>
+  );
+}
 
-const CTAButton = ({ children, variant = "primary" }: { children: React.ReactNode; variant?: "primary" | "outline" }) => {
+function CTAButton({ children, variant = "primary" }: { children: React.ReactNode; variant?: "primary" | "outline" }) {
   const base = "inline-flex items-center gap-2 rounded-2xl px-5 py-3 font-medium transition-transform hover:scale-[1.02] active:scale-[0.98]";
-  if (variant === "outline")
+  if (variant === "outline") {
     return (
       <button className={`${base} border border-white/30 text-white/90 ${glow}`}>{children}</button>
     );
+  }
   return (
     <button className={`${base} text-white bg-[${primary}]`} style={{ background: `linear-gradient(90deg, ${primary}, #2d8cff)`}}>{children}</button>
   );
 };
 
-const GradientOrb = ({ className = "" }: { className?: string }) => (
-  <div
-    aria-hidden
-    className={`pointer-events-none absolute rounded-full blur-3xl opacity-30 ${className}`}
-    style={{ background: `radial-gradient(closest-side, ${primary}, transparent)` }}
-  />
-);
+function GradientOrb({ className = "" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`pointer-events-none absolute rounded-full blur-3xl opacity-30 ${className}`}
+      style={{ background: `radial-gradient(closest-side, ${primary}, transparent)` }}
+    />
+  );
+}
 
-const ChannelIcon = ({ name }: { name: string }) => {
+function ChannelIcon({ name }: { name: string }) {
   const size = 22;
   const common = "w-5 h-5";
   switch (name) {
@@ -62,41 +70,45 @@ const ChannelIcon = ({ name }: { name: string }) => {
   }
 };
 
-const Feature = ({ icon: Icon, title, children }: { icon: React.ElementType, title: string, children: React.ReactNode }) => (
-  <div className={`relative rounded-2xl p-5 md:p-6 ${glass} ${glow}`}>
-    <div className="flex items-center gap-3 mb-3">
-      <div className="p-2 rounded-xl bg-white/10 border border-white/20">
-        <Icon className="w-5 h-5 text-white" />
+function Feature({ icon: Icon, title, children }: { icon: React.ElementType, title: string, children: React.ReactNode }) {
+  return (
+    <div className={`relative rounded-2xl p-5 md:p-6 ${glass} ${glow}`}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="p-2 rounded-xl bg-white/10 border border-white/20">
+          <Icon className="w-5 h-5 text-white" />
+        </div>
+        <h3 className="text-white text-lg font-semibold">{title}</h3>
       </div>
-      <h3 className="text-white text-lg font-semibold">{title}</h3>
+      <p className="text-white/80 leading-relaxed text-sm md:text-base">{children}</p>
     </div>
-    <p className="text-white/80 leading-relaxed text-sm md:text-base">{children}</p>
-  </div>
-);
+  );
+}
 
-const Price = ({ tier, price, features, highlight }: { tier: string, price: string, features: string[], highlight?: boolean }) => (
-  <div className={`rounded-3xl p-6 md:p-8 ${glass} ${glow} ${highlight ? "ring-2 ring-white/40" : ""}`}>
-    <div className="flex items-baseline justify-between">
-      <h4 className="text-white text-xl font-semibold">{tier}</h4>
-      {highlight && <Badge>Mais popular</Badge>}
+function Price({ tier, price, features, highlight }: { tier: string, price: string, features: string[], highlight?: boolean }) {
+  return (
+    <div className={`rounded-3xl p-6 md:p-8 ${glass} ${glow} ${highlight ? "ring-2 ring-white/40" : ""}`}>
+      <div className="flex items-baseline justify-between">
+        <h4 className="text-white text-xl font-semibold">{tier}</h4>
+        {highlight && <Badge>Mais popular</Badge>}
+      </div>
+      <div className="mt-4 flex items-end gap-2">
+        <span className="text-white text-4xl md:text-5xl font-bold">{price}</span>
+        <span className="text-white/60">/mês</span>
+      </div>
+      <ul className="mt-6 space-y-3">
+        {features.map((f, i) => (
+          <li key={i} className="flex items-start gap-3 text-white/85">
+            <Check className="w-5 h-5 mt-0.5" />
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-8">
+        <CTAButton>{highlight ? "Começar agora" : "Experimentar"} <ArrowRight className="w-4 h-4"/></CTAButton>
+      </div>
     </div>
-    <div className="mt-4 flex items-end gap-2">
-      <span className="text-white text-4xl md:text-5xl font-bold">{price}</span>
-      <span className="text-white/60">/mês</span>
-    </div>
-    <ul className="mt-6 space-y-3">
-      {features.map((f, i) => (
-        <li key={i} className="flex items-start gap-3 text-white/85">
-          <Check className="w-5 h-5 mt-0.5" />
-          <span>{f}</span>
-        </li>
-      ))}
-    </ul>
-    <div className="mt-8">
-      <CTAButton>{highlight ? "Começar agora" : "Experimentar"} <ArrowRight className="w-4 h-4"/></CTAButton>
-    </div>
-  </div>
-);
+  );
+}
 
 export default function DialogyLanding() {
   return (
