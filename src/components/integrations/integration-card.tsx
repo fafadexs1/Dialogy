@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import type { Integration } from '@/lib/types';
@@ -16,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useState } from 'react';
 import { updateIntegration } from '@/actions/integrations';
-import { toast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 
 interface IntegrationCardProps {
   integration: Integration;
@@ -28,6 +27,7 @@ interface IntegrationCardProps {
 function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { integration: Integration, onSave: () => void, isOpen: boolean, setIsOpen: (open: boolean) => void }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState(integration);
+    const { toast } = useToast();
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));

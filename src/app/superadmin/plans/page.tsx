@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { toast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { getPlans, savePlan, deletePlan, savePlanIntegration } from '@/actions/plans';
 import { getIntegrations } from '@/actions/integrations';
 import type { Plan, Integration } from '@/lib/types';
@@ -46,6 +46,7 @@ function formatCurrency(value: number) {
 function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Plan | null }) {
     const [isOpen, setIsOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const { toast } = useToast();
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -124,6 +125,7 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
 
 function PlanIntegrationsManager({ plan, allIntegrations, onUpdate }: { plan: Plan, allIntegrations: Integration[], onUpdate: () => void }) {
     const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+    const { toast } = useToast();
 
     const handleIntegrationConfigChange = async (integrationId: string, enabled: boolean, included: number, cost: number) => {
         setIsSubmitting(integrationId);
