@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { Plan, Integration, PlanIntegration } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { availableIntegrations } from '@/lib/integrations';
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     if (!userId) return false;
@@ -13,13 +14,8 @@ async function checkSuperAdmin(userId: string): Promise<boolean> {
 }
 
 export async function getIntegrations(): Promise<{ integrations: Integration[] | null; error?: string }> {
-    try {
-        const result = await db.query('SELECT * FROM integrations ORDER BY name');
-        return { integrations: result.rows };
-    } catch (error: any) {
-        console.error('[GET_INTEGRATIONS_ACTION]', error);
-        return { integrations: null, error: 'Falha ao buscar integrações.' };
-    }
+    // Retorna a lista de integrações definida estaticamente
+    return { integrations: availableIntegrations };
 }
 
 export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string }> {
@@ -31,36 +27,25 @@ export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string
     }
 
     try {
-        const plansRes = await db.query(`
-            SELECT
-                p.id,
-                p.name,
-                p.description,
-                p.price,
-                p.is_active,
-                p.is_default,
-                COALESCE(
-                    (SELECT json_agg(
-                        json_build_object(
-                            'id', pi.id,
-                            'integration_id', i.id,
-                            'name', i.name,
-                            'icon_url', i.icon_url,
-                            'included_quantity', pi.included_quantity,
-                            'additional_cost', pi.additional_cost,
-                            'is_enabled', pi.is_enabled
-                        )
-                    )
-                    FROM plan_integrations pi
-                    JOIN integrations i ON pi.integration_id = i.id
-                    WHERE pi.plan_id = p.id),
-                    '[]'::json
-                ) as integrations
-            FROM plans p
-            ORDER BY p.name;
-        `);
+        const plansRes = await db.query('SELECT * FROM plans ORDER BY name');
+        const planIntegrationsRes = await db.query('SELECT * FROM plan_integrations');
 
-        return { plans: plansRes.rows };
+        const plans = plansRes.rows.map(plan => {
+            const planIntegrations = planIntegrationsRes.rows
+                .filter(pi => pi.plan_id === plan.id)
+                .map(pi => {
+                    const integrationDetails = availableIntegrations.find(i => i.id === pi.integration_id);
+                    return { ...integrationDetails, ...pi };
+                });
+            
+            return {
+                ...plan,
+                integrations: planIntegrations
+            };
+        });
+
+
+        return { plans };
     } catch (error: any) {
         console.error('[GET_PLANS_ACTION]', error);
         return { plans: null, error: 'Falha ao buscar planos do banco de dados.' };

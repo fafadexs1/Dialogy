@@ -596,20 +596,6 @@ create table if not exists public.instance_costs (
 -- Novas Tabelas: Planos e Integrações
 -- ============================================
 
--- Tabela para gerenciar as integrações disponíveis
-CREATE TABLE IF NOT EXISTS public.integrations (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    icon_url TEXT,
-    tag TEXT,
-    tag_type TEXT,
-    status TEXT,
-    href TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
-
 -- Tabela para os planos de assinatura
 CREATE TABLE IF NOT EXISTS public.plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -631,9 +617,7 @@ CREATE TABLE IF NOT EXISTS public.plan_integrations (
     additional_cost NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT plan_integrations_plan_id_fkey
-        FOREIGN KEY (plan_id) REFERENCES public.plans(id) ON DELETE CASCADE,
-    CONSTRAINT plan_integrations_integration_id_fkey
-        FOREIGN KEY (integration_id) REFERENCES public.integrations(id) ON DELETE CASCADE
+        FOREIGN KEY (plan_id) REFERENCES public.plans(id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_integration on public.plan_integrations(plan_id, integration_id);
 
@@ -717,7 +701,6 @@ select public._create_updated_at_trigger('public.schedule_exceptions');
 select public._create_updated_at_trigger('public.billing_info');
 select public._create_updated_at_trigger('public.autopilot_configs');
 select public._create_updated_at_trigger('public.instance_costs'); -- NEW
-select public._create_updated_at_trigger('public.integrations'); -- NEW
 select public._create_updated_at_trigger('public.plans'); -- NEW
 
 drop function if exists public._create_updated_at_trigger(regclass);
