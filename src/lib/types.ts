@@ -236,11 +236,10 @@ export interface Integration {
   id: string;
   name: string;
   description: string;
-  iconUrl: string;
+  icon_url: string;
   tag: string;
-  tagType: 'default' | 'primary' | 'secondary' | 'beta';
+  tag_type: 'default' | 'primary' | 'secondary' | 'beta';
   status?: 'active' | 'coming_soon';
-  additionalInfo?: string;
   href?: string;
 }
 
@@ -486,4 +485,22 @@ export interface BillingData {
         cloud_count: number;
         subtotal: number;
     }[];
+}
+
+// Plan Management
+export interface PlanIntegration extends Integration {
+    integration_id: string;
+    included_quantity: number;
+    additional_cost: number;
+    is_enabled: boolean;
+}
+
+export interface Plan {
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+    is_active: boolean;
+    is_default: boolean;
+    integrations: PlanIntegration[];
 }

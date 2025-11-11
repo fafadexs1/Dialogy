@@ -1,5 +1,5 @@
 
-import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, Integration, NexusFlowInstance, Contact, Activity } from './types';
+import type { Chat, User, InternalChannel, InternalMessage, CustomFieldDefinition, SelectableOption, Tag, Workspace, NexusFlowInstance, Contact, Activity } from './types';
 
 export const workspaces: Workspace[] = [
     { id: 'ws-1', name: 'Dialogy Inc.', avatar: 'https://placehold.co/40x40.png' },
@@ -14,16 +14,15 @@ export const agents: User[] = [
     lastName: 'Johnson', 
     name: 'Alex Johnson', 
     avatar: 'https://placehold.co/40x40.png', 
-    online: true, 
     email: 'agent@dialogy.com',
     workspaces: workspaces,
     activeWorkspaceId: 'ws-1',
     memberSince: 'Jan 2024',
     geminiUsage: 15.70,
   },
-  { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', online: true, email: 'maria@dialogy.com', memberSince: 'Fev 2024', geminiUsage: 8.45 },
-  { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', online: false, email: 'david@dialogy.com', memberSince: 'Dez 2023', geminiUsage: 22.10 },
-  { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', online: true, email: 'sophia@dialogy.com', memberSince: 'Mar 2024', geminiUsage: 2.30 },
+  { id: 'agent-2', firstName: 'Maria', lastName: 'Garcia', name: 'Maria Garcia', avatar: 'https://placehold.co/40x40.png', email: 'maria@dialogy.com', memberSince: 'Fev 2024', geminiUsage: 8.45 },
+  { id: 'agent-3', firstName: 'David', lastName: 'Smith', name: 'David Smith', avatar: 'https://placehold.co/40x40.png', email: 'david@dialogy.com', memberSince: 'Dez 2023', geminiUsage: 22.10 },
+  { id: 'agent-4', firstName: 'Sophia', lastName: 'Brown', name: 'Sophia Brown', avatar: 'https://placehold.co/40x40.png', email: 'sophia@dialogy.com', memberSince: 'Mar 2024', geminiUsage: 2.30 },
 ];
 
 export const mockTags: Tag[] = [
@@ -153,40 +152,6 @@ export const internalMessages: InternalMessage[] = [
 ];
 
 export const getContactById = (id: string) => contacts.find(c => c.id === id);
-
-
-export const integrations: Integration[] = [
-  { 
-    id: 'nexusflow', 
-    name: 'Agente de IA', 
-    description: 'Controle fluxos de atendimento complexos e envie dados para webhooks externos através de um agente de automação.', 
-    iconUrl: 'https://placehold.co/48x48.png', 
-    tag: 'Automação', 
-    tagType: 'primary', 
-    status: 'active',
-    href: '/autopilot'
-  },
-  {
-    id: 'evolution-api',
-    name: 'Evolution API',
-    description: 'Conecte seu número de WhatsApp para atendimento através da API não-oficial da Evolution.',
-    iconUrl: 'https://placehold.co/48x48.png',
-    tag: 'WhatsApp',
-    tagType: 'primary',
-    status: 'active',
-    href: '/integrations/evolution-api'
-  },
-  {
-    id: 'outras-integracoes',
-    name: 'Outras Integrações',
-    description: 'Em breve: conecte-se com outras ferramentas como RD Station, PipeDrive e muito mais.',
-    iconUrl: 'https://placehold.co/48x48.png',
-    tag: 'Em Breve',
-    tagType: 'beta',
-    status: 'coming_soon',
-    additionalInfo: 'Planejado'
-  }
-];
 
 
 export const nexusFlowInstances: NexusFlowInstance[] = [
