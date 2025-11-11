@@ -29,6 +29,7 @@ import { joinWorkspaceAction } from '@/actions/invites';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, Loader2, LogIn } from 'lucide-react';
 import { useFormStatus } from 'react-dom';
+import { useRouter } from 'next/navigation';
 
 type PopoverTriggerProps = React.ComponentPropsWithoutRef<
   typeof PopoverTrigger
@@ -86,11 +87,12 @@ export function WorkspaceSwitcher({
   user,
 }: WorkspaceSwitcherProps) {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
+  const router = useRouter();
 
   const handleWorkspaceChange = async (workspaceId: string) => {
     setPopoverOpen(false);
     await switchWorkspaceAction(workspaceId);
-    window.location.reload();
+    router.refresh();
   };
   
   if (!user.workspaces || user.workspaces.length === 0) {
