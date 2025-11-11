@@ -3,9 +3,8 @@
 
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
-
-const BAILEYS_INSTANCE_COST = 35.00;
-const WA_CLOUD_INSTANCE_COST = 50.00;
+import type { BillingData, InstanceCost } from '@/lib/types';
+import { revalidatePath } from 'next/cache';
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     if (!userId) return false;
@@ -14,22 +13,38 @@ async function checkSuperAdmin(userId: string): Promise<boolean> {
     return result.rows[0].is_superadmin;
 }
 
-export type BillingData = {
-    totalBaileysInstances: number;
-    totalCloudInstances: number;
-    totalBaileysCost: number;
-    totalCloudCost: number;
-    totalCost: number;
-    workspaces: {
-        id: string;
-        name: string;
-        owner_id: string;
-        owner_name: string;
-        baileys_count: number;
-        cloud_count: number;
-        subtotal: number;
-    }[];
+export async function getInstanceCosts(): Promise<InstanceCost[]> {
+    const res = await db.query('SELECT type, cost FROM instance_costs');
+    return res.rows;
 }
+
+export async function updateInstanceCosts(costs: { baileys: number, wa_cloud: number }): Promise<{ success: boolean, error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !await checkSuperAdmin(user.id)) {
+        return { success: false, error: "Acesso não autorizado." };
+    }
+
+    try {
+        await db.query('BEGIN');
+        await db.query(
+            `INSERT INTO instance_costs (type, cost) VALUES ('baileys', $1) 
+             ON CONFLICT (type) DO UPDATE SET cost = $1`, [costs.baileys]
+        );
+        await db.query(
+            `INSERT INTO instance_costs (type, cost) VALUES ('wa_cloud', $1)
+             ON CONFLICT (type) DO UPDATE SET cost = $1`, [costs.wa_cloud]
+        );
+        await db.query('COMMIT');
+        revalidatePath('/superadmin/billing');
+        return { success: true };
+    } catch (error: any) {
+        await db.query('ROLLBACK');
+        console.error('[UPDATE_INSTANCE_COSTS_ACTION]', error);
+        return { success: false, error: 'Falha ao atualizar custos no banco de dados.' };
+    }
+}
+
 
 export async function getBillingData(): Promise<{ data: BillingData | null, error?: string }> {
     const supabase = await createClient();
@@ -40,6 +55,11 @@ export async function getBillingData(): Promise<{ data: BillingData | null, erro
     }
 
     try {
+        const costsRes = await db.query('SELECT type, cost FROM instance_costs');
+        const costs = Object.fromEntries(costsRes.rows.map(row => [row.type, parseFloat(row.cost)]));
+        const baileysCost = costs['baileys'] || 0;
+        const cloudCost = costs['wa_cloud'] || 0;
+
         const query = `
             SELECT
                 w.id as workspace_id,
@@ -72,7 +92,7 @@ export async function getBillingData(): Promise<{ data: BillingData | null, erro
             totalBaileysInstances += baileysCount;
             totalCloudInstances += cloudCount;
             
-            const subtotal = (baileysCount * BAILEYS_INSTANCE_COST) + (cloudCount * WA_CLOUD_INSTANCE_COST);
+            const subtotal = (baileysCount * baileysCost) + (cloudCount * cloudCost);
 
             return {
                 id: row.workspace_id,
@@ -85,8 +105,8 @@ export async function getBillingData(): Promise<{ data: BillingData | null, erro
             };
         });
 
-        const totalBaileysCost = totalBaileysInstances * BAILEYS_INSTANCE_COST;
-        const totalCloudCost = totalCloudInstances * WA_CLOUD_INSTANCE_COST;
+        const totalBaileysCost = totalBaileysInstances * baileysCost;
+        const totalCloudCost = totalCloudInstances * cloudCost;
         const totalCost = totalBaileysCost + totalCloudCost;
 
         return {
@@ -104,4 +124,20 @@ export async function getBillingData(): Promise<{ data: BillingData | null, erro
         console.error('[GET_BILLING_DATA_ACTION]', error);
         return { data: null, error: 'Falha ao buscar dados de faturamento do banco de dados.' };
     }
+}
+
+export async function getUserBillingData(workspaceId: string): Promise<any> {
+  // Mock data for now. In a real app, this would fetch from a 'billing_info' or 'invoices' table.
+  const now = new Date();
+  const nextBillingDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  return {
+    plan: 'Pro',
+    nextBillingDate: nextBillingDate.toISOString(),
+    invoices: [
+      { id: 'inv_1', date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), amount: 85.00, status: 'paid' },
+      { id: 'inv_2', date: new Date(now.getFullYear(), now.getMonth() -1, 1).toISOString(), amount: 50.00, status: 'paid' },
+      { id: 'inv_3', date: new Date(now.getFullYear(), now.getMonth() -2, 1).toISOString(), amount: 50.00, status: 'paid' },
+    ],
+  };
 }

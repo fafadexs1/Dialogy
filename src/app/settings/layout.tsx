@@ -2,7 +2,7 @@
 'use client';
 
 import React from 'react';
-import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote } from 'lucide-react';
+import { Loader2, User, Building, Shield, PlusCircle, MessageSquareQuote, CreditCard } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import { SettingsProvider, useSettings } from './settings-context';
 const settingsNavItems = [
     { href: '/settings/profile', label: 'Perfil', icon: User },
     { href: '/settings/workspace', label: 'Workspace', icon: Building },
+    { href: '/settings/billing', label: 'Cobrança & Faturas', icon: CreditCard },
     { href: '/settings/shortcuts', label: 'Atalhos', icon: MessageSquareQuote },
     { href: '/settings/security', label: 'Segurança', icon: Shield },
 ]

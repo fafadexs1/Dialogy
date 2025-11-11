@@ -28,6 +28,8 @@ const PERMISSIONS = [
     { id: 'automations:manage', category: 'Automações', description: 'Gerenciar o Piloto Automático e Agentes do Sistema' },
     // Analytics
     { id: 'analytics:view', category: 'Analytics', description: 'Visualizar a página de Analytics' },
+    // Billing
+    { id: 'billing:view', category: 'Faturamento', description: 'Visualizar a página de faturamento e histórico' },
 ];
 
 const TABLE_CREATION_QUERIES = `
@@ -583,6 +585,14 @@ create table if not exists public.billing_info (
     foreign key (workspace_id) references public.workspaces(id) on delete cascade
 );
 
+-- NEW: Instance Costs
+create table if not exists public.instance_costs (
+  type text primary key,
+  cost numeric(10, 2) not null,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+
 -- ============================================
 -- Gatilho para sincronização de novos usuários (Supabase Auth)
 -- ============================================
@@ -661,6 +671,7 @@ select public._create_updated_at_trigger('public.whatsapp_clusters');
 select public._create_updated_at_trigger('public.schedule_exceptions');
 select public._create_updated_at_trigger('public.billing_info');
 select public._create_updated_at_trigger('public.autopilot_configs');
+select public._create_updated_at_trigger('public.instance_costs'); -- NEW
 
 drop function if exists public._create_updated_at_trigger(regclass);
 `;
@@ -693,6 +704,17 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     } else {
         console.log('[DB_SETUP] Todas as permissões padrão já existem. Nenhuma inserção necessária.');
     }
+
+    // --- 3. Popular custos iniciais ---
+    console.log('[DB_SETUP] Verificando e populando a tabela de custos de instância...');
+    await client.query(`
+        INSERT INTO instance_costs (type, cost) VALUES ('baileys', 35.00) ON CONFLICT (type) DO NOTHING;
+    `);
+     await client.query(`
+        INSERT INTO instance_costs (type, cost) VALUES ('wa_cloud', 50.00) ON CONFLICT (type) DO NOTHING;
+    `);
+    console.log('[DB_SETUP] Custos iniciais das instâncias garantidos.');
+
 
     await client.query('COMMIT');
     console.log('[DB_SETUP] Transação concluída com sucesso.');

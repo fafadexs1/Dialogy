@@ -465,3 +465,25 @@ export interface CampaignRecipient {
   sent_at?: string;
   error_message?: string;
 }
+
+export interface InstanceCost {
+    type: 'baileys' | 'wa_cloud';
+    cost: number;
+}
+
+export interface BillingData {
+    totalBaileysInstances: number;
+    totalCloudInstances: number;
+    totalBaileysCost: number;
+    totalCloudCost: number;
+    totalCost: number;
+    workspaces: {
+        id: string;
+        name: string;
+        owner_id: string;
+        owner_name: string;
+        baileys_count: number;
+        cloud_count: number;
+        subtotal: number;
+    }[];
+}

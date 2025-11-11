@@ -18,6 +18,7 @@ import {
   Fingerprint,
   Rocket,
   Send,
+  CreditCard,
   Sun,
   Moon,
   Monitor,
@@ -258,6 +259,12 @@ export function Sidebar({ user }: SidebarProps) {
                         <DropdownMenuItem>
                             <UserIcon className="mr-2 h-4 w-4" />
                             <span>Perfil</span>
+                        </DropdownMenuItem>
+                    </Link>
+                     <Link href="/settings/billing">
+                        <DropdownMenuItem>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            <span>Cobrança & Faturas</span>
                         </DropdownMenuItem>
                     </Link>
                     <Link href="/settings">

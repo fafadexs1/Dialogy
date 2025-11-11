@@ -1,9 +1,16 @@
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+'use client';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getBillingData, type BillingData } from "@/actions/billing";
-import { DollarSign, Server, Badge, Smartphone } from "lucide-react";
+import { getBillingData, type BillingData, getInstanceCosts, updateInstanceCosts, type InstanceCost } from "@/actions/billing";
+import { DollarSign, Server, Smartphone, Badge, Save, Loader2 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "@/hooks/use-toast";
 
 function StatCard({ title, value, icon: Icon, description }: { title: string, value: string, icon: React.ElementType, description: string }) {
     return (
@@ -24,10 +31,93 @@ function formatCurrency(value: number) {
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-export default async function BillingPage() {
-    const { data, error } = await getBillingData();
+function CostSettings({ initialCosts }: { initialCosts: InstanceCost[] }) {
+    const [costs, setCosts] = useState({
+        baileys: initialCosts.find(c => c.type === 'baileys')?.cost || 0,
+        wa_cloud: initialCosts.find(c => c.type === 'wa_cloud')?.cost || 0,
+    });
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    if (error || !data) {
+    const handleSave = async () => {
+        setIsSubmitting(true);
+        const result = await updateInstanceCosts(costs);
+        if (result.success) {
+            toast({ title: 'Custos atualizados com sucesso!' });
+        } else {
+            toast({ title: 'Erro ao atualizar custos', description: result.error, variant: 'destructive' });
+        }
+        setIsSubmitting(false);
+    }
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Configuração de Custos</CardTitle>
+                <CardDescription>Defina o valor cobrado por cada tipo de instância por mês.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                    <Label htmlFor="baileys-cost" className="flex items-center gap-2"><Server className="h-4 w-4" /> Custo Instância Baileys (R$)</Label>
+                    <Input 
+                        id="baileys-cost" 
+                        type="number" 
+                        value={costs.baileys}
+                        onChange={(e) => setCosts(prev => ({ ...prev, baileys: parseFloat(e.target.value) || 0 }))}
+                    />
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="cloud-cost" className="flex items-center gap-2"><Smartphone className="h-4 w-4" /> Custo Instância Cloud API (R$)</Label>
+                    <Input 
+                        id="cloud-cost" 
+                        type="number" 
+                        value={costs.wa_cloud}
+                        onChange={(e) => setCosts(prev => ({ ...prev, wa_cloud: parseFloat(e.target.value) || 0 }))}
+                    />
+                </div>
+            </CardContent>
+            <CardFooter>
+                 <Button onClick={handleSave} disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
+                    <Save className="mr-2 h-4 w-4"/>
+                    Salvar Custos
+                </Button>
+            </CardFooter>
+        </Card>
+    )
+}
+
+export default function BillingPage() {
+    const [billingData, setBillingData] = useState<BillingData | null>(null);
+    const [instanceCosts, setInstanceCosts] = useState<InstanceCost[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        async function loadData() {
+            setLoading(true);
+            const [billingRes, costsRes] = await Promise.all([
+                getBillingData(),
+                getInstanceCosts()
+            ]);
+
+            if (billingRes.error || !billingRes.data) {
+                setError(billingRes.error || "Ocorreu um erro desconhecido.");
+            } else {
+                setBillingData(billingRes.data);
+            }
+            
+            setInstanceCosts(costsRes || []);
+            setLoading(false);
+        }
+        loadData();
+    }, []);
+
+
+    if (loading) {
+        return <div>Carregando...</div>
+    }
+
+    if (error || !billingData) {
         return (
              <Card>
                 <CardHeader>
@@ -45,28 +135,29 @@ export default async function BillingPage() {
 
     return (
         <div className="space-y-6">
+             <CostSettings initialCosts={instanceCosts} />
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                  <StatCard 
                     title="Receita Total Mensal"
-                    value={formatCurrency(data.totalCost)}
+                    value={formatCurrency(billingData.totalCost)}
                     icon={DollarSign}
-                    description={`${data.totalBaileysInstances + data.totalCloudInstances} instâncias ativas`}
+                    description={`${billingData.totalBaileysInstances + billingData.totalCloudInstances} instâncias ativas`}
                 />
                  <StatCard 
                     title="Instâncias Baileys"
-                    value={data.totalBaileysInstances.toString()}
+                    value={billingData.totalBaileysInstances.toString()}
                     icon={Server}
-                    description={`Receita de ${formatCurrency(data.totalBaileysCost)}`}
+                    description={`Receita de ${formatCurrency(billingData.totalBaileysCost)}`}
                 />
                 <StatCard 
                     title="Instâncias Cloud API"
-                    value={data.totalCloudInstances.toString()}
+                    value={billingData.totalCloudInstances.toString()}
                     icon={Smartphone}
-                    description={`Receita de ${formatCurrency(data.totalCloudCost)}`}
+                    description={`Receita de ${formatCurrency(billingData.totalCloudCost)}`}
                 />
                  <StatCard 
                     title="Ticket Médio"
-                    value={formatCurrency(data.totalCost / (data.workspaces.length || 1))}
+                    value={formatCurrency(billingData.totalCost / (billingData.workspaces.length || 1))}
                     icon={Badge}
                     description={`Por workspace`}
                 />
@@ -91,7 +182,7 @@ export default async function BillingPage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {data.workspaces.map(ws => (
+                            {billingData.workspaces.map(ws => (
                                 <TableRow key={ws.id}>
                                     <TableCell className="font-medium">{ws.name}</TableCell>
                                     <TableCell>
@@ -108,7 +199,7 @@ export default async function BillingPage() {
                                     <TableCell className="text-right font-semibold">{formatCurrency(ws.subtotal)}</TableCell>
                                 </TableRow>
                             ))}
-                             {data.workspaces.length === 0 && (
+                             {billingData.workspaces.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={5} className="text-center text-muted-foreground">
                                         Nenhum workspace com instâncias encontrado.
