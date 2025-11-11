@@ -169,39 +169,36 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 
 function formatWhatsappText(text: string): string {
     if (!text) return '';
+
+    // URL regex to find links
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
     
-    // Escape HTML to prevent XSS
-    const escapeHtml = (unsafe: string) => {
-        return unsafe
+    // First, escape HTML to prevent XSS from other content
+    let processedText = text
          .replace(/&/g, "&amp;")
          .replace(/</g, "&lt;")
          .replace(/>/g, "&gt;")
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
-    }
 
-    // Processar a mensagem completa
-    let processedText = escapeHtml(text);
-    
-    // Formatação de texto (negrito, itálico, etc.)
+    // Then, apply rich text formatting for whatsapp-style markdown
     processedText = processedText
-        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>') // Negrito
-        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>') // Itálico
-        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>') // Riscado
-        .replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${'\'\'\''}${p1}${'\'\'\''}</code></pre>`); // Bloco de código
+        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>') // Bold
+        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>') // Italic
+        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>') // Strikethrough
+        .replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
 
-    // Detecção de URLs
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    // Finally, replace URLs with anchor tags
     processedText = processedText.replace(urlRegex, (url) => {
-        // Evita transformar em link o que já está dentro de uma tag `<a>` ou `<code>`
-        if (processedText.includes(`>${url}<`) || processedText.includes(`<code>${url}</code>`)) {
-            return url;
-        }
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">${url}</a>`;
+        // The URL is already escaped, so we can safely use it.
+        // We need to decode it for the href attribute but keep the display version escaped.
+        const decodedUrl = url.replace(/&amp;/g, "&");
+        return `<a href="${decodedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">${url}</a>`;
     });
 
-    return processedText.replace(/\n/g, '<br />'); // Lida com quebras de linha
+    return processedText.replace(/\n/g, '<br />'); // Handle line breaks
 }
+
 
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
