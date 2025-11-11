@@ -4,6 +4,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Play, Check, Zap, Bot, MessagesSquare, BarChart3, Shield, Sparkles } from "lucide-react";
+import Link from "next/link";
 
 // Dialogy brand
 const primary = "#2454d3";
@@ -23,15 +24,15 @@ function Badge({ children }: { children: React.ReactNode }) {
   );
 }
 
-function CTAButton({ children, variant = "primary" }: { children: React.ReactNode; variant?: "primary" | "outline" }) {
+function CTAButton({ children, variant = "primary", href = "#" }: { children: React.ReactNode; variant?: "primary" | "outline", href?: string }) {
   const base = "inline-flex items-center gap-2 rounded-2xl px-5 py-3 font-medium transition-transform hover:scale-[1.02] active:scale-[0.98]";
   if (variant === "outline") {
     return (
-      <button className={`${base} border border-white/30 text-white/90 ${glow}`}>{children}</button>
+      <Link href={href} className={`${base} border border-white/30 text-white/90 ${glow}`}>{children}</Link>
     );
   }
   return (
-    <button className={`${base} text-white bg-[${primary}]`} style={{ background: `linear-gradient(90deg, ${primary}, #2d8cff)`}}>{children}</button>
+    <Link href={href} className={`${base} text-white bg-[${primary}]`} style={{ background: `linear-gradient(90deg, ${primary}, #2d8cff)`}}>{children}</Link>
   );
 };
 
@@ -65,6 +66,10 @@ function ChannelIcon({ name }: { name: string }) {
       return (
         <svg viewBox="0 0 24 24" className={common} aria-label="iFood"><path fill="#e02020" d="M3 10c.8-.2 1.7-.4 2.7-.4 1.6 0 2.3.6 2.3 1.7v4.5H6.3V12c0-.7-.4-1-1.2-1-.3 0-.6 0-.9.1V10zm11.8 5.8c-.7.4-1.6.6-2.6.6-2.4 0-4.1-1.4-4.1-3.7 0-2.2 1.7-3.6 4.2-3.6 1 0 1.8.2 2.5.5l-.5 1.7c-.6-.2-1.1-.3-1.8-.3-1.3 0-2.2.8-2.2 2 0 1.3.9 2 2.2 2 .7 0 1.3-.1 1.9-.4l.4 1.2zm6.8-2.9h-2.2l-.4 1.3h-1.9l2.6-6.6h1.8l2.6 6.6h-1.9l-.6-1.3zM4.7 8.8h1.6L5 12.9H3.4l1.3-4.1z"/></svg>
       );
+    case "telegram":
+      return <div style={{ width: size, height: size }} />;
+    case "email":
+       return <div style={{ width: size, height: size }} />;
     default:
       return <div style={{ width: size, height: size }} />;
   }
@@ -104,7 +109,7 @@ function Price({ tier, price, features, highlight }: { tier: string, price: stri
         ))}
       </ul>
       <div className="mt-8">
-        <CTAButton>{highlight ? "Começar agora" : "Experimentar"} <ArrowRight className="w-4 h-4"/></CTAButton>
+        <CTAButton href="/register">{highlight ? "Começar agora" : "Experimentar"} <ArrowRight className="w-4 h-4"/></CTAButton>
       </div>
     </div>
   );
@@ -136,8 +141,8 @@ export default function DialogyLanding() {
             <a className="hover:text-white" href="#suporte">Suporte</a>
           </div>
           <div className="flex items-center gap-3">
-            <CTAButton variant="outline">Entrar</CTAButton>
-            <CTAButton>Comece grátis <ArrowRight className="w-4 h-4"/></CTAButton>
+            <CTAButton href="/login" variant="outline">Entrar</CTAButton>
+            <CTAButton href="/register">Comece grátis <ArrowRight className="w-4 h-4"/></CTAButton>
           </div>
         </Section>
       </nav>
@@ -157,8 +162,8 @@ export default function DialogyLanding() {
               Centralize WhatsApp, Instagram, Messenger, iFood e muito mais — com IA, automações e equipe conectada.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-              <CTAButton>Comece grátis <ArrowRight className="w-4 h-4"/></CTAButton>
-              <CTAButton variant="outline"><Play className="w-4 h-4"/> Ver demonstração</CTAButton>
+              <CTAButton href="/register">Comece grátis <ArrowRight className="w-4 h-4"/></CTAButton>
+              <CTAButton href="#produto" variant="outline"><Play className="w-4 h-4"/> Ver demonstração</CTAButton>
             </div>
           </motion.div>
 
@@ -295,8 +300,8 @@ export default function DialogyLanding() {
           <h2 className="text-3xl md:text-4xl font-bold text-white">Pronto para transformar sua comunicação?</h2>
           <p className="mt-3 text-white/75 max-w-2xl mx-auto">Comece em minutos. Conecte seus canais e atenda clientes onde eles estiverem.</p>
           <div className="mt-7 flex items-center justify-center gap-3">
-            <CTAButton>Iniciar com Dialogy <ArrowRight className="w-4 h-4"/></CTAButton>
-            <CTAButton variant="outline">Falar com vendas</CTAButton>
+            <CTAButton href="/register">Iniciar com Dialogy <ArrowRight className="w-4 h-4"/></CTAButton>
+            <CTAButton href="#suporte" variant="outline">Falar com vendas</CTAButton>
           </div>
         </div>
       </Section>
