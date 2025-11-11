@@ -1,4 +1,3 @@
-
 'use client';
 
 import { usePathname } from 'next/navigation';
@@ -29,7 +28,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     <div
       className={cn(
         'h-dvh w-full bg-muted/30 overflow-hidden',
-        shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'grid grid-cols-1'
+        shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'flex'
       )}
     >
       {shouldShowSidebar && (
@@ -38,9 +37,9 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
         </aside>
       )}
       
-      <main className="min-h-0 min-w-0 flex flex-col overflow-hidden">
+      <main className="min-h-0 min-w-0 flex flex-col flex-1 overflow-hidden">
         <PageTransition transitionKey={transitionKey} className="flex-1 min-h-0">
-          <div className="h-full w-full">{children}</div>
+          {children}
         </PageTransition>
       </main>
     </div>
