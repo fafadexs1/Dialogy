@@ -1,7 +1,6 @@
-
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -32,102 +31,107 @@ import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { cn } from '@/lib/utils';
-import Link from 'next/link';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
-    const [isOpen, setIsOpen] = useState(false);
-    const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    
-    useEffect(() => {
-        if (isOpen && workspaceId) {
-            setIsLoading(true);
-            getEvolutionApiInstances(workspaceId)
-                .then(setInstances)
-                .finally(() => setIsLoading(false));
-        }
-    }, [isOpen, workspaceId]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        const formData = new FormData(e.currentTarget);
-        const result = await startNewConversation({
-            workspaceId,
-            instanceName: formData.get('instanceName') as string,
-            phoneNumber: formData.get('phoneNumber') as string,
-            message: formData.get('message') as string,
-            tabId: null // This action is not tied to a specific tab
-        });
-
-        if (result.success) {
-            toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
-            setIsOpen(false);
-            onActionSuccess();
-        } else {
-            toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-        }
-        setIsSubmitting(false);
+  useEffect(() => {
+    if (isOpen && workspaceId) {
+      setIsLoading(true);
+      getEvolutionApiInstances(workspaceId)
+        .then(setInstances)
+        .finally(() => setIsLoading(false));
     }
-    
-    return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-            <DialogTrigger asChild>
-                <Button variant="ghost" size="icon">
-                    <PlusCircle className="h-5 w-5" />
-                </Button>
-            </DialogTrigger>
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Iniciar Nova Conversa</DialogTitle>
-                    <DialogDescription>
-                        Envie uma mensagem para um novo número para iniciar um atendimento.
-                    </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit}>
-                    <div className="space-y-4 py-2 pb-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="instanceName">Instância de Envio</Label>
-                             <Select name="instanceName" required>
-                                <SelectTrigger id="instanceName">
-                                    <SelectValue placeholder="Selecione a instância..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {isLoading ? (
-                                        <div className='p-4 text-center text-sm text-muted-foreground'>Carregando...</div>
-                                    ) : (
-                                        instances.map(instance => (
-                                            <SelectItem key={instance.id} value={instance.instance_name}>{instance.display_name}</SelectItem>
-                                        ))
-                                    )}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="phoneNumber">Número do WhatsApp (JID)</Label>
-                            <Input id="phoneNumber" name="phoneNumber" placeholder="5511999998888" required />
-                             <p className="text-xs text-muted-foreground">Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.</p>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="message">Mensagem</Label>
-                            <Textarea id="message" name="message" placeholder="Olá! Gostaria de falar sobre..." required />
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline">Cancelar</Button>
-                        </DialogClose>
-                        <Button type="submit" disabled={isSubmitting}>
-                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Enviar Mensagem
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
-    )
+  }, [isOpen, workspaceId]);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    const formData = new FormData(e.currentTarget);
+    const result = await startNewConversation({
+      workspaceId,
+      instanceName: formData.get('instanceName') as string,
+      phoneNumber: formData.get('phoneNumber') as string,
+      message: formData.get('message') as string,
+      tabId: null
+    });
+
+    if (result.success) {
+      toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
+      setIsOpen(false);
+      onActionSuccess();
+    } else {
+      toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
+    }
+    setIsSubmitting(false);
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <PlusCircle className="h-5 w-5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+          <DialogDescription>
+            Envie uma mensagem para um novo número para iniciar um atendimento.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 py-2 pb-4">
+            <div className="space-y-2">
+              <Label htmlFor="instanceName">Instância de Envio</Label>
+              <Select name="instanceName" required>
+                <SelectTrigger id="instanceName">
+                  <SelectValue placeholder="Selecione a instância..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {isLoading ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">Carregando...</div>
+                  ) : (
+                    instances.map((instance) => (
+                      <SelectItem key={instance.id} value={instance.instance_name}>
+                        {instance.display_name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phoneNumber">Número do WhatsApp (JID)</Label>
+              <Input id="phoneNumber" name="phoneNumber" placeholder="5511999998888" required />
+              <p className="text-xs text-muted-foreground">
+                Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="message">Mensagem</Label>
+              <Textarea id="message" name="message" placeholder="Olá! Gostaria de falar sobre..." required />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancelar
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Enviar Mensagem
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 interface AgentTooltipContentProps {
@@ -138,15 +142,13 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
   const [onlineSince, setOnlineSince] = React.useState('');
 
   React.useEffect(() => {
-    // This effect will only run on the client side, after hydration.
-    // This prevents a mismatch between server and client rendered HTML.
     if (agent.joined_at) {
       const updateOnlineTime = () => {
         const distance = formatDistanceToNow(new Date(agent.joined_at), { addSuffix: true, locale: ptBR });
         setOnlineSince(distance);
       };
       updateOnlineTime();
-      const interval = setInterval(updateOnlineTime, 60000); // Update every minute
+      const interval = setInterval(updateOnlineTime, 60000);
       return () => clearInterval(interval);
     }
   }, [agent.joined_at]);
@@ -154,7 +156,11 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
   return (
     <div className="flex flex-col gap-1">
       <p className="font-semibold">{agent.user.name}</p>
-      {onlineSince ? <p className="text-xs text-muted-foreground">Online {onlineSince}</p> : <p className='text-xs text-muted-foreground'>Carregando...</p>}
+      {onlineSince ? (
+        <p className="text-xs text-muted-foreground">Online {onlineSince}</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">Carregando...</p>
+      )}
     </div>
   );
 };
@@ -178,13 +184,10 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
 
   const getTextContent = () => {
     let text = '';
-    if (message.type === 'system') {
-      text = message.content;
-    } else if (!isMedia) {
-      text = message.content;
-    } else if (message.content) {
-      text = message.content; // caption
-    } else {
+    if (message.type === 'system') text = message.content;
+    else if (!isMedia) text = message.content;
+    else if (message.content) text = message.content;
+    else {
       const mimetype = message.metadata?.mimetype || '';
       if (mimetype.startsWith('image/')) text = 'Imagem';
       else if (mimetype.startsWith('video/')) text = 'Vídeo';
@@ -226,8 +229,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors",
-        isSelected ? 'bg-primary/10' : 'hover:bg-accent'
+        "flex cursor-pointer items-start gap-3 rounded-md p-3 transition-all border border-transparent hover:border-border hover:bg-accent/40",
+        isSelected && "bg-primary/10 border-primary/30 shadow-sm"
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
@@ -264,37 +267,41 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-           <div className="flex-1 min-w-0">
-                <p className="font-semibold truncate" title={chat.contact.name}>
-                    {chat.contact.name}
-                </p>
-                <div className="flex items-center gap-2 mt-0.5">
-                    {chat.tag && chat.color && chat.status !== 'atendimentos' && (
-                        <Badge
-                            style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
-                            className="border-transparent text-xs px-2 py-0.5"
-                            title={chat.tag}
-                        >
-                            {chat.tag}
-                        </Badge>
-                    )}
-
-                    {chat.teamName && chat.status === 'atendimentos' && (
-                        <Badge
-                            variant="secondary"
-                            className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1"
-                            title={chat.teamName}
-                        >
-                            <Users className="h-3 w-3" />
-                            {chat.teamName}
-                        </Badge>
-                    )}
-                </div>
-            </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold truncate" title={chat.contact.name}>
+              {chat.contact.name}
+            </p>
+          </div>
           {lastMessage && (
             <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
               {lastMessage.timestamp}
             </p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 mt-0.5">
+          {chat.tag && chat.color && chat.status !== 'atendimentos' && (
+            <Badge
+              style={{
+                backgroundColor: chat.color,
+                color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff'
+              }}
+              className="border-transparent text-xs px-2 py-0.5"
+              title={chat.tag}
+            >
+              {chat.tag}
+            </Badge>
+          )}
+
+          {chat.teamName && chat.status === 'atendimentos' && (
+            <Badge
+              variant="secondary"
+              className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1"
+              title={chat.teamName}
+            >
+              <Users className="h-3 w-3" />
+              {chat.teamName}
+            </Badge>
           )}
         </div>
 
@@ -321,16 +328,9 @@ interface ChatListProps {
   onUpdate: () => void;
 }
 
-export default function ChatList({
-  chats,
-  selectedChat,
-  setSelectedChat,
-  currentUser,
-  onUpdate,
-}: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
   const onlineAgents = usePresence();
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
-
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -345,27 +345,27 @@ export default function ChatList({
 
     return { gerais, atendimentos, encerrados };
   }, [chats, currentUser.id]);
-  
+
   const TABS = [
-      { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
-      { id: 'atendimentos', label: 'Atendendo', data: sortedChats.atendimentos },
-      { id: 'encerrados', label: 'Encerrados', data: sortedChats.encerrados },
+    { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
+    { id: 'atendimentos', label: 'Atendendo', data: sortedChats.atendimentos },
+    { id: 'encerrados', label: 'Encerrados', data: sortedChats.encerrados }
   ] as const;
 
-  const currentChats = TABS.find(t => t.id === activeTab)?.data || [];
+  const currentChats = TABS.find((t) => t.id === activeTab)?.data || [];
 
   return (
     <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card/95 backdrop-blur-sm min-h-0">
+      {/* Header */}
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
           <div className="flex items-center">
-            <Button variant="ghost" size="icon"><Filter className="h-5 w-5" /></Button>
+            <Button variant="ghost" size="icon">
+              <Filter className="h-5 w-5" />
+            </Button>
             {currentUser.activeWorkspaceId && (
-              <NewConversationDialog 
-                  workspaceId={currentUser.activeWorkspaceId}
-                  onActionSuccess={onUpdate}
-              />
+              <NewConversationDialog workspaceId={currentUser.activeWorkspaceId} onActionSuccess={onUpdate} />
             )}
           </div>
         </div>
@@ -375,6 +375,7 @@ export default function ChatList({
         </div>
       </div>
 
+      {/* Online agents */}
       <div className="p-4 flex-shrink-0 border-b">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
           Agentes Online ({onlineAgents.length})
@@ -398,37 +399,41 @@ export default function ChatList({
         </TooltipProvider>
       </div>
 
+      {/* Tabs */}
       <div className="p-2 flex-shrink-0 border-b">
-          <div className='flex items-center bg-muted rounded-md p-1'>
-            {TABS.map(tab => (
-                 <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={cn(
-                        "flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors",
-                        activeTab === tab.id
-                            ? 'bg-background text-primary shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                    )}
+        <div className="flex items-center bg-muted rounded-md p-1">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors',
+                activeTab === tab.id
+                  ? 'bg-background text-primary shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <span>{tab.label}</span>
+              {tab.data.length > 0 && (
+                <Badge
+                  className={cn(
+                    'px-1.5 h-5 text-xs',
+                    activeTab === tab.id
+                      ? 'bg-primary/20 text-primary'
+                      : 'bg-secondary-foreground/10 text-muted-foreground'
+                  )}
                 >
-                    <span>{tab.label}</span>
-                    {tab.data.length > 0 && (
-                         <Badge
-                            className={cn(
-                                "px-1.5 h-5 text-xs",
-                                activeTab === tab.id ? 'bg-primary/20 text-primary' : 'bg-secondary-foreground/10 text-muted-foreground'
-                            )}
-                        >
-                            {tab.data.length}
-                        </Badge>
-                    )}
-                 </button>
-            ))}
-          </div>
+                  {tab.data.length}
+                </Badge>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
-      
+
+      {/* Chat list (uniform padding for all tabs) */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-4 space-y-2">
+        <div className="space-y-1 p-3">
           {currentChats.length > 0 ? (
             currentChats.map((chat) => (
               <ChatListItem
