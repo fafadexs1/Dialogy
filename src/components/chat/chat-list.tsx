@@ -238,7 +238,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
             <div className="relative flex-shrink-0">
                 <Avatar className="h-10 w-10 border">
-                <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} />
+                <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
                 <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
                 </Avatar>
                 {!!chat.instance_name && (
@@ -262,7 +262,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 <div className="flex items-center justify-between gap-2 min-w-0">
                 <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                     <p className="font-semibold truncate break-all" title={chat.contact.name}>
-                        {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
+                        {chat.contact.name.length > 21 ? `${''}${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
                     </p>
 
                     {chat.tag && chat.color && chat.status !== 'atendimentos' && (
