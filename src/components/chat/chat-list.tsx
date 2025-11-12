@@ -216,13 +216,12 @@ interface ChatListItemProps {
 }
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
-  const router = useRouter();
   const lastMessage = chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
   const handleSelect = () => {
     onSelect(chat);
-    router.push(`/inbox/${chat.id}`);
+    window.history.replaceState(null, '', `/inbox/${chat.id}`);
   };
 
   return (
