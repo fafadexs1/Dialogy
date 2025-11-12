@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
@@ -346,7 +345,7 @@ export default function ChatList({
   }, [chats, currentUser.id]);
 
   const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-1 p-2">
+    <div className="space-y-1">
       {chatList.length > 0 ? (
         chatList.map((chat) => (
           <ChatListItem
@@ -448,7 +447,7 @@ export default function ChatList({
       </div>
       
       <ScrollArea className="flex-1 min-h-0">
-          <div className="p-2">
+          <div className="p-4">
             {renderChatList(currentChats)}
           </div>
       </ScrollArea>
