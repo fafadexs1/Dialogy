@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -57,7 +56,8 @@ function LoadingSkeleton() {
 }
 
 
-export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+export default function CustomerChatLayout({ initialUser: serverUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+  const [user, setUser] = useState<User | null>(serverUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -79,7 +79,10 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
   
   const fetchData = useCallback(async (isInitial = false) => {
-    if (!initialUser?.activeWorkspaceId) {
+    // Prioritize the state `user` object as it might be more up-to-date
+    const userToFetchWith = user || serverUser;
+    
+    if (!userToFetchWith?.activeWorkspaceId) {
       if (isInitial) {
         setFetchError("Usuário ou workspace não encontrado.");
         setIsLoading(false);
@@ -93,7 +96,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
 
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(userToFetchWith.activeWorkspaceId);
 
         if (error) throw new Error(error);
 
@@ -127,7 +130,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [user, serverUser]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -170,12 +173,12 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, []);
   
   useEffect(() => {
-    if (initialUser) {
+    if (user) {
       fetchData(true);
     } else {
       setIsLoading(false);
     }
-  }, [initialUser, fetchData]);
+  }, [user, fetchData]);
 
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
@@ -243,11 +246,11 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
 }, []);
 
   useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
+    if (!user?.activeWorkspaceId) return;
 
     const supabase = createClient();
     // Use a single channel for all related tables
-    const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
+    const channelName = `realtime-updates-${user.activeWorkspaceId}`;
     const channel = supabase.channel(channelName);
 
     const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
@@ -300,18 +303,18 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
+  }, [user?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
 
 
   useEffect(() => {
-      if(initialUser?.activeWorkspaceId){
-          getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+      if(user?.activeWorkspaceId){
+          getTags(user.activeWorkspaceId).then(tagsResult => {
               if (!tagsResult.error && tagsResult.tags) {
                   setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
               }
           });
       }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [user?.activeWorkspaceId]);
 
   // Effect to mark messages as read
   useEffect(() => {
@@ -347,7 +350,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     }
   }, [selectedChat, currentChatMessages]);
   
-  if (!initialUser) {
+  if (!user) {
     return <LoadingSkeleton />;
   }
 
@@ -387,13 +390,13 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onUpdate={() => fetchData()}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={enrichedSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onActionSuccess={() => fetchData()}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
@@ -402,7 +405,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       />
       <ContactPanel
         chat={enrichedSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onTransferSuccess={() => fetchData()}
         onContactUpdate={() => fetchData()}
       />
