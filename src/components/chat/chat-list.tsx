@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -202,7 +202,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-foreground/70 overflow-hidden">
+    <div className="flex items-start gap-1.5 text-sm text-muted-foreground overflow-hidden">
       <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
       <p className="truncate">{getTextContent()}</p>
     </div>
@@ -433,7 +433,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       {/* Chat list (uniform padding for all tabs) */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-1 p-3">
+        <div className="space-y-1 p-4 pb-6">
           {currentChats.length > 0 ? (
             currentChats.map((chat) => (
               <ChatListItem
