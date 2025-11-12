@@ -182,8 +182,9 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
         const chatMessages = prevMessagesByChat[newMessage.chat_id] || [];
+        // Avoid duplicates by checking message ID
         if (chatMessages.some(m => m.id === newMessage.id)) {
-            return prevMessagesByChat; // Avoid duplicates
+            return prevMessagesByChat;
         }
         return {
             ...prevMessagesByChat,
@@ -193,37 +194,46 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
 
     setChats(prevChats => {
         const chatIndex = prevChats.findIndex(c => c.id === newMessage.chat_id);
+
         if (chatIndex === -1) {
-            // If chat doesn't exist, we might need to fetch it.
-            // For now, let's log this case. A full refetch might be necessary here.
+            // If chat is not in the list, we need to refetch to get all its data.
             console.warn(`[REALTIME] Received message for a chat not in the current list: ${newMessage.chat_id}. Refetching data.`);
             fetchData();
             return prevChats;
         }
 
-        const chatToUpdate = { ...prevChats[chatIndex] };
+        // Create a new array for the chats list
+        const newChats = [...prevChats];
+        const chatToUpdate = { ...newChats[chatIndex] }; // Create a new object for the chat to update
+
+        // Create a new messages array for the updated chat
         chatToUpdate.messages = [...(chatToUpdate.messages || []), newMessage];
-        
+
         // Update unread count if the message is not from the current user
         if (!newMessage.from_me) {
             chatToUpdate.unreadCount = (chatToUpdate.unreadCount || 0) + 1;
         }
+
+        // Replace the old chat object with the new one
+        newChats[chatIndex] = chatToUpdate;
+
+        // Move the updated chat to the top of the list
+        const updatedChat = newChats.splice(chatIndex, 1)[0];
         
-        // Move chat to the top
-        const otherChats = prevChats.filter(c => c.id !== newMessage.chat_id);
-        return [chatToUpdate, ...otherChats];
+        return [updatedChat, ...newChats];
     });
 
+    // Play notification sound if the tab is not visible
     if (!newMessage.from_me && document.visibilityState !== 'visible') {
         playNotificationSound();
     }
-  }, [playNotificationSound, fetchData]);
+}, [playNotificationSound, fetchData]);
 
- const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
+const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
     setChats(prevChats => {
         return prevChats.map(chat => {
             if (chat.id === updatedChatData.id) {
-                // Merge new data, ensuring messages are handled correctly
+                // Ensure messages array is preserved from the old state
                 const existingMessages = chat.messages || [];
                 return { ...chat, ...updatedChatData, messages: existingMessages };
             }
@@ -232,17 +242,24 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     });
 }, []);
 
-
 const handleContactUpdate = useCallback((updatedContact: Contact) => {
     setChats(prevChats => {
         return prevChats.map(chat => {
             if (chat.contact.id === updatedContact.id) {
-                return { ...chat, contact: updatedContact };
+                return { ...chat, contact: { ...chat.contact, ...updatedContact } };
             }
             return chat;
         });
     });
+
+    setSelectedChat(prevSelected => {
+        if (prevSelected && prevSelected.contact.id === updatedContact.id) {
+            return { ...prevSelected, contact: { ...prevSelected.contact, ...updatedContact } };
+        }
+        return prevSelected;
+    });
 }, []);
+
 
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
@@ -411,5 +428,3 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     </div>
   );
 }
-
-    
