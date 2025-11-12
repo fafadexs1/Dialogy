@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -141,7 +140,6 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
-    window.history.pushState({}, '', `/inbox/${chat.id}`);
   }, []);
 
   // Effect to establish the Broadcast Channel for cross-tab communication

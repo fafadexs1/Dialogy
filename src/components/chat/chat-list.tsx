@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -199,7 +198,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-muted-foreground overflow-hidden">
+    <div className="flex items-start gap-1.5 text-sm text-foreground/70 overflow-hidden">
       <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
       <p className="truncate">{getTextContent()}</p>
     </div>
@@ -224,8 +223,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
   return (
     <div
-      className={cn("flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors",
-        isSelected ? 'bg-primary/10' : 'hover:bg-accent'
+      className={cn(
+        "flex cursor-pointer items-start gap-3 rounded-md p-3 transition-all border border-transparent hover:border-border hover:bg-accent/40",
+        isSelected && "bg-primary/10 border-primary/30 shadow-sm"
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
@@ -343,27 +343,6 @@ export default function ChatList({
 
     return { gerais, atendimentos, encerrados };
   }, [chats, currentUser.id]);
-
-  const renderChatList = (chatList: Chat[]) => (
-    <div className="space-y-1">
-      {chatList.length > 0 ? (
-        chatList.map((chat) => (
-          <ChatListItem
-            key={chat.id}
-            chat={chat}
-            isSelected={selectedChat?.id === chat.id}
-            onSelect={setSelectedChat}
-            onUpdate={onUpdate}
-            currentUser={currentUser}
-          />
-        ))
-      ) : (
-        <div className="text-center py-10">
-          <p className="text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
-        </div>
-      )}
-    </div>
-  );
   
   const TABS = [
       { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
@@ -374,7 +353,7 @@ export default function ChatList({
   const currentChats = TABS.find(t => t.id === activeTab)?.data || [];
 
   return (
-    <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card min-h-0">
+    <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card/95 backdrop-blur-sm min-h-0">
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -447,9 +426,24 @@ export default function ChatList({
       </div>
       
       <ScrollArea className="flex-1 min-h-0">
-          <div className="p-4">
-            {renderChatList(currentChats)}
-          </div>
+        <div className="p-3 space-y-1">
+          {currentChats.length > 0 ? (
+            currentChats.map((chat) => (
+              <ChatListItem
+                key={chat.id}
+                chat={chat}
+                isSelected={selectedChat?.id === chat.id}
+                onSelect={setSelectedChat}
+                onUpdate={onUpdate}
+                currentUser={currentUser}
+              />
+            ))
+          ) : (
+            <div className="text-center py-10">
+              <p className="text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
+            </div>
+          )}
+        </div>
       </ScrollArea>
     </div>
   );
