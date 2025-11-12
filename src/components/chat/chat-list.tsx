@@ -1,6 +1,7 @@
+
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -219,13 +220,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
   const handleSelect = () => {
     onSelect(chat);
+    window.history.pushState({}, '', `/inbox/${chat.id}`);
   };
 
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-md p-3 transition-all border border-transparent hover:border-border hover:bg-accent/40",
-        isSelected && "bg-primary/10 border-primary/30 shadow-sm"
+        "flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors",
+        isSelected ? 'bg-primary/10' : 'hover:bg-accent'
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
@@ -426,7 +428,7 @@ export default function ChatList({
       </div>
       
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3 space-y-1">
+        <div className="p-4 space-y-2">
           {currentChats.length > 0 ? (
             currentChats.map((chat) => (
               <ChatListItem
