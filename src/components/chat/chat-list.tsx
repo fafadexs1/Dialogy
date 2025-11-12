@@ -225,9 +225,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
   return (
     <div
-      className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
+      className={cn("flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors",
         isSelected ? 'bg-primary/10' : 'hover:bg-accent'
-      }`}
+      )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
@@ -262,41 +262,43 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <p className="font-semibold truncate break-all" title={chat.contact.name}>
-              {chat.contact.name.length > 21 ? `${''}${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
-            </p>
+        <div className="flex items-start justify-between gap-2">
+           <div className="flex-1 min-w-0">
+                <p className="font-semibold truncate" title={chat.contact.name}>
+                    {chat.contact.name}
+                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                    {chat.tag && chat.color && chat.status !== 'atendimentos' && (
+                        <Badge
+                            style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
+                            className="border-transparent text-xs px-2 py-0.5"
+                            title={chat.tag}
+                        >
+                            {chat.tag}
+                        </Badge>
+                    )}
 
-            {chat.tag && chat.color && chat.status !== 'atendimentos' && (
-              <Badge
-                style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
-                className="border-transparent text-xs px-2 py-0.5 flex-shrink-0"
-                title={chat.tag}
-              >
-                {chat.tag}
-              </Badge>
-            )}
-
-            {chat.teamName && chat.status === 'atendimentos' && (
-              <Badge
-                variant="secondary"
-                className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 flex-shrink-0"
-                title={chat.teamName}
-              >
-                <Users className="h-3 w-3" />
-                {chat.teamName}
-              </Badge>
-            )}
-          </div>
-
+                    {chat.teamName && chat.status === 'atendimentos' && (
+                        <Badge
+                            variant="secondary"
+                            className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1"
+                            title={chat.teamName}
+                        >
+                            <Users className="h-3 w-3" />
+                            {chat.teamName}
+                        </Badge>
+                    )}
+                </div>
+            </div>
           {lastMessage && (
-            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{lastMessage.timestamp}</p>
+            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+              {lastMessage.timestamp}
+            </p>
           )}
         </div>
 
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
           </div>
           {chat.unreadCount && chat.unreadCount > 0 ? (
@@ -373,7 +375,7 @@ export default function ChatList({
   const currentChats = TABS.find(t => t.id === activeTab)?.data || [];
 
   return (
-    <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card min-h-0">
+    <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card min-h-0">
       <div className="p-4 flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
@@ -445,11 +447,11 @@ export default function ChatList({
           </div>
       </div>
       
-      <ScrollArea className="flex-1 min-h-0 pr-2">
-          {renderChatList(currentChats)}
+      <ScrollArea className="flex-1 min-h-0">
+          <div className="p-2">
+            {renderChatList(currentChats)}
+          </div>
       </ScrollArea>
     </div>
   );
 }
-
-    
