@@ -218,11 +218,9 @@ interface ChatListItemProps {
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
   const lastMessage = chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
-  const router = useRouter();
 
   const handleSelect = () => {
     onSelect(chat);
-    window.history.pushState({}, '', `/inbox/${chat.id}`);
   };
 
   return (
@@ -453,3 +451,5 @@ export default function ChatList({
     </div>
   );
 }
+
+    

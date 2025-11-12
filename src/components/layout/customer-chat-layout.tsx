@@ -15,9 +15,6 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { format as formatDate, isToday, isYesterday } from 'date-fns';
-import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
-import { ptBR } from 'date-fns/locale';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -115,6 +112,7 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
             const firstChat = fetchedChats[0];
             setSelectedChat(firstChat);
             selectedChatIdRef.current = firstChat.id;
+            window.history.replaceState({}, '', `/inbox/${firstChat.id}`);
         }
 
         
@@ -143,6 +141,7 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
+    window.history.pushState({}, '', `/inbox/${chat.id}`);
   }, []);
 
   // Effect to establish the Broadcast Channel for cross-tab communication
@@ -412,3 +411,5 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     </div>
   );
 }
+
+    

@@ -1,3 +1,4 @@
+
 import { Pool } from 'pg';
 
 // Ensure the connection string is correctly typed
@@ -15,3 +16,5 @@ export const db = new Pool({
 
 // A lógica de pooling global foi removida por ser a causa provável de instabilidade
 // no ambiente serverless.
+
+    
