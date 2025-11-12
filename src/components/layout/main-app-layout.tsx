@@ -1,3 +1,4 @@
+
 'use client';
 
 import { usePathname } from 'next/navigation';
@@ -32,7 +33,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       )}
     >
       {shouldShowSidebar && (
-        <aside className="w-auto shrink-0 overflow-y-auto border-r bg-background">
+        <aside className="w-auto shrink-0 border-r bg-background">
           <Sidebar user={user} />
         </aside>
       )}
@@ -45,3 +46,5 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+    

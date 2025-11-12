@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -79,7 +80,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const fetchData = useCallback(async (isInitial = false) => {
     if (!initialUser?.activeWorkspaceId) {
       if (isInitial) {
-        setFetchError("Workspace não encontrado. Por favor, atualize a página.");
+        setFetchError("Usuário ou workspace não encontrado.");
         setIsLoading(false);
       }
       return;
@@ -419,3 +420,5 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     </div>
   );
 }
+
+    

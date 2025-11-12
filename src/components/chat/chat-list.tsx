@@ -33,6 +33,7 @@ import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
@@ -217,97 +218,93 @@ interface ChatListItemProps {
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
   const lastMessage = chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
-  const router = useRouter();
-
-  const handleSelect = () => {
-    onSelect(chat);
-    router.push(`/inbox/${chat.id}`);
-  }
 
   return (
-    <div
-      className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
-        isSelected ? 'bg-primary/10' : 'hover:bg-accent'
-      }`}
-      onClick={handleSelect}
-      onDoubleClick={() => setIsTagDialogOpen(true)}
-    >
-      <TagSelectionDialog 
-        isOpen={isTagDialogOpen}
-        setIsOpen={setIsTagDialogOpen}
-        chat={chat}
-        onUpdate={onUpdate}
-        user={currentUser}
-      />
+    <Link href={`/inbox/${chat.id}`} passHref>
+        <div
+            className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
+                isSelected ? 'bg-primary/10' : 'hover:bg-accent'
+            }`}
+            onClick={() => onSelect(chat)}
+            onDoubleClick={() => setIsTagDialogOpen(true)}
+            >
+            <TagSelectionDialog 
+                isOpen={isTagDialogOpen}
+                setIsOpen={setIsTagDialogOpen}
+                chat={chat}
+                onUpdate={onUpdate}
+                user={currentUser}
+            />
 
-      <div className="relative flex-shrink-0">
-        <Avatar className="h-10 w-10 border">
-          <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} />
-          <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
-        </Avatar>
-        {!!chat.instance_name && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-card">
-                  <FaWhatsapp size={10} />
+            <div className="relative flex-shrink-0">
+                <Avatar className="h-10 w-10 border">
+                <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} />
+                <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+                </Avatar>
+                {!!chat.instance_name && (
+                <TooltipProvider>
+                    <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-card">
+                        <FaWhatsapp size={10} />
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Canal: WhatsApp</p>
+                        {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
+                    </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                    <p className="font-semibold truncate break-all" title={chat.contact.name}>
+                        {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
+                    </p>
+
+                    {chat.tag && chat.color && chat.status !== 'atendimentos' && (
+                    <Badge
+                        style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
+                        className="border-transparent text-xs px-2 py-0.5 flex-shrink-0"
+                        title={chat.tag}
+                    >
+                        {chat.tag}
+                    </Badge>
+                    )}
+
+                    {chat.teamName && chat.status === 'atendimentos' && (
+                    <Badge
+                        variant="secondary"
+                        className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 flex-shrink-0"
+                        title={chat.teamName}
+                    >
+                        <Users className="h-3 w-3" />
+                        {chat.teamName}
+                    </Badge>
+                    )}
                 </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Canal: WhatsApp</p>
-                {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-      </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <p className="font-semibold truncate break-all" title={chat.contact.name}>
-                {chat.contact.name.length > 21 ? `${chat.contact.name.substring(0, 21)}...` : chat.contact.name}
-            </p>
+                {lastMessage && (
+                    <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{lastMessage.timestamp}</p>
+                )}
+                </div>
 
-            {chat.tag && chat.color && chat.status !== 'atendimentos' && (
-              <Badge
-                style={{ backgroundColor: chat.color, color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff' }}
-                className="border-transparent text-xs px-2 py-0.5 flex-shrink-0"
-                title={chat.tag}
-              >
-                {chat.tag}
-              </Badge>
-            )}
-
-            {chat.teamName && chat.status === 'atendimentos' && (
-              <Badge
-                variant="secondary"
-                className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1 flex-shrink-0"
-                title={chat.teamName}
-              >
-                <Users className="h-3 w-3" />
-                {chat.teamName}
-              </Badge>
-            )}
-          </div>
-
-          {lastMessage && (
-            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{lastMessage.timestamp}</p>
-          )}
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                    {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
+                </div>
+                {chat.unreadCount && chat.unreadCount > 0 ? (
+                    <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
+                    {chat.unreadCount}
+                    </Badge>
+                ) : null}
+                </div>
+            </div>
         </div>
-
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <div className="flex-1 min-w-0 overflow-hidden">
-            {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
-          </div>
-          {chat.unreadCount && chat.unreadCount > 0 ? (
-            <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
-              {chat.unreadCount}
-            </Badge>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    </Link>
   );
 };
 
@@ -452,3 +449,5 @@ export default function ChatList({
     </div>
   );
 }
+
+    
