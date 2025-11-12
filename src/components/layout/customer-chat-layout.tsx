@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -175,18 +176,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       setIsLoading(false);
     }
   }, [initialUser, fetchData]);
-
-  // Polling mechanism as requested
-  useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-
-    const intervalId = setInterval(() => {
-        fetchData();
-    }, 1000); // Poll every 1 second
-
-    return () => clearInterval(intervalId);
-  }, [initialUser?.activeWorkspaceId, fetchData]);
-
 
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
@@ -420,5 +409,3 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     </div>
   );
 }
-
-    
