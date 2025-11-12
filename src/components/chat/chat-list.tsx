@@ -202,7 +202,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-muted-foreground overflow-hidden">
+    <div className="flex items-start gap-1.5 text-sm text-foreground/70 overflow-hidden">
       <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
       <p className="truncate">{getTextContent()}</p>
     </div>
@@ -267,7 +267,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
+          <div className='flex-1 min-w-0'>
             <p className="font-semibold truncate" title={chat.contact.name}>
               {chat.contact.name}
             </p>
@@ -433,7 +433,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       {/* Chat list (uniform padding for all tabs) */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-1 p-4 pb-6">
+        <div className="space-y-1 p-3">
           {currentChats.length > 0 ? (
             currentChats.map((chat) => (
               <ChatListItem
