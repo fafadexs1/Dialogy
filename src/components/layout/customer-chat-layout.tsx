@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
@@ -54,6 +55,7 @@ function LoadingSkeleton() {
 
 
 export default function CustomerChatLayout({ initialUser: serverUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(serverUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -68,10 +70,15 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
   const selectedChatIdRef = useRef<string | null>(initialChatId);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
+  const lastFetchContextRef = useRef<string | null>(null);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
   }
+
+  useEffect(() => {
+    setUser(serverUser);
+  }, [serverUser]);
 
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
   
@@ -107,12 +114,6 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
         if (currentSelectedId) {
             const updatedSelectedChat = (fetchedChats || []).find(c => c.id === currentSelectedId);
             setSelectedChat(updatedSelectedChat || null);
-        } else if ((fetchedChats || []).length > 0 && !currentSelectedId) {
-            // If no chat is selected, but we have chats, select the first one.
-            const firstChat = fetchedChats[0];
-            setSelectedChat(firstChat);
-            selectedChatIdRef.current = firstChat.id;
-            window.history.replaceState({}, '', `/inbox/${firstChat.id}`);
         }
 
         
@@ -128,7 +129,7 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [user, serverUser]);
+  }, [user, serverUser, router]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -141,8 +142,8 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
-    window.history.pushState({}, '', `/inbox/${chat.id}`);
-  }, []);
+    router.push(`/inbox/${chat.id}`, { scroll: false });
+  }, [router]);
 
   // Effect to establish the Broadcast Channel for cross-tab communication
   useEffect(() => {
@@ -172,12 +173,43 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
   }, []);
   
   useEffect(() => {
-    if (user) {
-      fetchData(true);
-    } else {
+    if (!user) {
       setIsLoading(false);
+      return;
     }
+
+    const contextKey = `${user.id}:${user.activeWorkspaceId ?? ''}`;
+    if (lastFetchContextRef.current === contextKey) {
+      return;
+    }
+
+    lastFetchContextRef.current = contextKey;
+    fetchData(true);
   }, [user, fetchData]);
+
+  useEffect(() => {
+    if (!chats.length) return;
+
+    if (initialChatId) {
+      if (selectedChat?.id === initialChatId) return;
+
+      const chatFromUrl = chats.find((chat) => chat.id === initialChatId);
+      if (chatFromUrl) {
+        selectedChatIdRef.current = initialChatId;
+        setSelectedChat(chatFromUrl);
+        setShowFullHistory(false);
+      }
+    } else if (!initialChatId && selectedChat) {
+      selectedChatIdRef.current = selectedChat.id;
+      router.replace(`/inbox/${selectedChat.id}`, { scroll: false });
+    } else if (!initialChatId && !selectedChat && chats.length > 0) {
+      const firstChat = chats[0];
+      selectedChatIdRef.current = firstChat.id;
+      setSelectedChat(firstChat);
+      setShowFullHistory(false);
+      router.replace(`/inbox/${firstChat.id}`, { scroll: false });
+    }
+  }, [initialChatId, chats, selectedChat, router]);
 
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {

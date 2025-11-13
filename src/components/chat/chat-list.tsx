@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -33,7 +32,6 @@ import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { cn } from '@/lib/utils';
-import Link from 'next/link';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
