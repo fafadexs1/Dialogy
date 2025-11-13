@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
@@ -15,9 +16,6 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { format as formatDate, isToday, isYesterday } from 'date-fns';
-import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
-import { ptBR } from 'date-fns/locale';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -56,7 +54,9 @@ function LoadingSkeleton() {
 }
 
 
-export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+export default function CustomerChatLayout({ initialUser: serverUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(serverUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -70,15 +70,23 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const selectedChatIdRef = useRef<string | null>(initialChatId);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
+  const lastFetchContextRef = useRef<string | null>(null);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
   }
 
+  useEffect(() => {
+    setUser(serverUser);
+  }, [serverUser]);
+
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
   
   const fetchData = useCallback(async (isInitial = false) => {
-    if (!initialUser?.activeWorkspaceId) {
+    // Prioritize the state `user` object as it might be more up-to-date
+    const userToFetchWith = user || serverUser;
+    
+    if (!userToFetchWith?.activeWorkspaceId) {
       if (isInitial) {
         setFetchError("Usuário ou workspace não encontrado.");
         setIsLoading(false);
@@ -92,7 +100,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
 
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(userToFetchWith.activeWorkspaceId);
 
         if (error) throw new Error(error);
 
@@ -106,11 +114,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         if (currentSelectedId) {
             const updatedSelectedChat = (fetchedChats || []).find(c => c.id === currentSelectedId);
             setSelectedChat(updatedSelectedChat || null);
-        } else if ((fetchedChats || []).length > 0 && !currentSelectedId) {
-            // If no chat is selected, but we have chats, select the first one.
-            const firstChat = fetchedChats[0];
-            setSelectedChat(firstChat);
-            selectedChatIdRef.current = firstChat.id;
         }
 
         
@@ -126,7 +129,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [user, serverUser, router]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -139,7 +142,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
-  }, []);
+    router.push(`/inbox/${chat.id}`, { scroll: false });
+  }, [router]);
 
   // Effect to establish the Broadcast Channel for cross-tab communication
   useEffect(() => {
@@ -169,24 +173,43 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, []);
   
   useEffect(() => {
-    if (initialUser) {
-      fetchData(true);
-    } else {
+    if (!user) {
       setIsLoading(false);
+      return;
     }
-  }, [initialUser, fetchData]);
 
-  // Polling mechanism as requested
+    const contextKey = `${user.id}:${user.activeWorkspaceId ?? ''}`;
+    if (lastFetchContextRef.current === contextKey) {
+      return;
+    }
+
+    lastFetchContextRef.current = contextKey;
+    fetchData(true);
+  }, [user, fetchData]);
+
   useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
+    if (!chats.length) return;
 
-    const intervalId = setInterval(() => {
-        fetchData();
-    }, 1000); // Poll every 1 second
+    if (initialChatId) {
+      if (selectedChat?.id === initialChatId) return;
 
-    return () => clearInterval(intervalId);
-  }, [initialUser?.activeWorkspaceId, fetchData]);
-
+      const chatFromUrl = chats.find((chat) => chat.id === initialChatId);
+      if (chatFromUrl) {
+        selectedChatIdRef.current = initialChatId;
+        setSelectedChat(chatFromUrl);
+        setShowFullHistory(false);
+      }
+    } else if (!initialChatId && selectedChat) {
+      selectedChatIdRef.current = selectedChat.id;
+      router.replace(`/inbox/${selectedChat.id}`, { scroll: false });
+    } else if (!initialChatId && !selectedChat && chats.length > 0) {
+      const firstChat = chats[0];
+      selectedChatIdRef.current = firstChat.id;
+      setSelectedChat(firstChat);
+      setShowFullHistory(false);
+      router.replace(`/inbox/${firstChat.id}`, { scroll: false });
+    }
+  }, [initialChatId, chats, selectedChat, router]);
 
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
@@ -254,11 +277,11 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
 }, []);
 
   useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
+    if (!user?.activeWorkspaceId) return;
 
     const supabase = createClient();
     // Use a single channel for all related tables
-    const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
+    const channelName = `realtime-updates-${user.activeWorkspaceId}`;
     const channel = supabase.channel(channelName);
 
     const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
@@ -311,18 +334,18 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [initialUser?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
+  }, [user?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
 
 
   useEffect(() => {
-      if(initialUser?.activeWorkspaceId){
-          getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+      if(user?.activeWorkspaceId){
+          getTags(user.activeWorkspaceId).then(tagsResult => {
               if (!tagsResult.error && tagsResult.tags) {
                   setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
               }
           });
       }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [user?.activeWorkspaceId]);
 
   // Effect to mark messages as read
   useEffect(() => {
@@ -358,7 +381,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     }
   }, [selectedChat, currentChatMessages]);
   
-  if (!initialUser) {
+  if (!user) {
     return <LoadingSkeleton />;
   }
 
@@ -398,13 +421,13 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onUpdate={() => fetchData()}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={enrichedSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onActionSuccess={() => fetchData()}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
@@ -413,7 +436,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       />
       <ContactPanel
         chat={enrichedSelectedChat}
-        currentUser={initialUser}
+        currentUser={user}
         onTransferSuccess={() => fetchData()}
         onContactUpdate={() => fetchData()}
       />

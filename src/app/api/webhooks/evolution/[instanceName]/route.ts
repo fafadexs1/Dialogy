@@ -4,7 +4,6 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { revalidatePath } from 'next/cache';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
@@ -58,7 +57,6 @@ export async function POST(
       console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
     }
 
-    revalidatePath('/', 'layout');
     return NextResponse.json({ message: 'Webhook received successfully' });
   } catch (error) {
     console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
@@ -256,10 +254,6 @@ async function handleMessagesUpsert(payload: any) {
             console.error("[WEBHOOK_POST_TRANSACTION] Erro ao executar tarefas em paralelo:", err);
         });
     }
-
-    if (workspaceId) {
-        revalidatePath(`/api/chats/${workspaceId}`);
-    }
 }
 
 async function updateProfilePicture(contactId: string, contactJid: string, instanceName: string, apiConfig: { api_url: string; api_key: string; }) {
@@ -320,3 +314,5 @@ async function handleChatsUpsert(payload: any) {
         }
     }
 }
+
+    
