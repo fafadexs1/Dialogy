@@ -14,6 +14,9 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -52,8 +55,7 @@ function LoadingSkeleton() {
 }
 
 
-export default function CustomerChatLayout({ initialUser: serverUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
-  const [user, setUser] = useState<User | null>(serverUser);
+export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -72,13 +74,38 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     tabIdRef.current = window.crypto.randomUUID();
   }
 
+  const updateSelectedChatPath = useCallback((chatId?: string | null) => {
+    if (typeof window === 'undefined') return;
+
+    const segments = window.location.pathname.split('/').filter(Boolean);
+    const inboxIndex = segments.indexOf('inbox');
+    const baseSegments = inboxIndex === -1 ? ['inbox'] : segments.slice(0, inboxIndex + 1);
+    const basePath = `/${baseSegments.join('/')}`;
+    const nextPathname = chatId ? `${basePath}/${chatId}` : basePath;
+
+    if (window.location.pathname === nextPathname) {
+        return;
+    }
+
+    const search = window.location.search || '';
+    const hash = window.location.hash || '';
+    const nextUrl = `${nextPathname}${search}${hash}`;
+
+    const historyProto = Object.getPrototypeOf(window.history);
+    const nativeReplaceState = historyProto?.replaceState?.bind(window.history);
+
+    if (nativeReplaceState) {
+        // Use the native History.replaceState to avoid triggering Next.js route navigation
+        nativeReplaceState({ chatId }, '', nextUrl);
+    } else {
+        window.history.replaceState({ chatId }, '', nextUrl);
+    }
+  }, []);
+
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
   
   const fetchData = useCallback(async (isInitial = false) => {
-    // Prioritize the state `user` object as it might be more up-to-date
-    const userToFetchWith = user || serverUser;
-    
-    if (!userToFetchWith?.activeWorkspaceId) {
+    if (!initialUser?.activeWorkspaceId) {
       if (isInitial) {
         setFetchError("Usuário ou workspace não encontrado.");
         setIsLoading(false);
@@ -92,7 +119,7 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     }
 
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(userToFetchWith.activeWorkspaceId);
+        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
 
         if (error) throw new Error(error);
 
@@ -111,7 +138,6 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
             const firstChat = fetchedChats[0];
             setSelectedChat(firstChat);
             selectedChatIdRef.current = firstChat.id;
-            window.history.replaceState({}, '', `/inbox/${firstChat.id}`);
         }
 
         
@@ -127,7 +153,7 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     } finally {
         if(isInitial) setIsLoading(false);
     }
-  }, [user, serverUser]);
+  }, [initialUser?.activeWorkspaceId]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
@@ -140,7 +166,8 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
     selectedChatIdRef.current = chat.id;
     setSelectedChat(chat);
     setShowFullHistory(false);
-  }, []);
+    updateSelectedChatPath(chat.id);
+  }, [updateSelectedChatPath]);
 
   // Effect to establish the Broadcast Channel for cross-tab communication
   useEffect(() => {
@@ -170,19 +197,30 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
   }, []);
   
   useEffect(() => {
-    if (user) {
+    if (initialUser) {
       fetchData(true);
     } else {
       setIsLoading(false);
     }
-  }, [user, fetchData]);
+  }, [initialUser, fetchData]);
+
+  // Polling mechanism as requested
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    const intervalId = setInterval(() => {
+        fetchData();
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(intervalId);
+  }, [initialUser?.activeWorkspaceId, fetchData]);
+
 
   const handleNewMessage = useCallback((newMessage: Message) => {
     setMessagesByChat(prevMessagesByChat => {
         const chatMessages = prevMessagesByChat[newMessage.chat_id] || [];
-        // Avoid duplicates by checking message ID
         if (chatMessages.some(m => m.id === newMessage.id)) {
-            return prevMessagesByChat;
+            return prevMessagesByChat; // Avoid duplicates
         }
         return {
             ...prevMessagesByChat,
@@ -192,46 +230,37 @@ export default function CustomerChatLayout({ initialUser: serverUser, chatId: in
 
     setChats(prevChats => {
         const chatIndex = prevChats.findIndex(c => c.id === newMessage.chat_id);
-
         if (chatIndex === -1) {
-            // If chat is not in the list, we need to refetch to get all its data.
+            // If chat doesn't exist, we might need to fetch it.
+            // For now, let's log this case. A full refetch might be necessary here.
             console.warn(`[REALTIME] Received message for a chat not in the current list: ${newMessage.chat_id}. Refetching data.`);
             fetchData();
             return prevChats;
         }
 
-        // Create a new array for the chats list
-        const newChats = [...prevChats];
-        const chatToUpdate = { ...newChats[chatIndex] }; // Create a new object for the chat to update
-
-        // Create a new messages array for the updated chat
+        const chatToUpdate = { ...prevChats[chatIndex] };
         chatToUpdate.messages = [...(chatToUpdate.messages || []), newMessage];
-
+        
         // Update unread count if the message is not from the current user
         if (!newMessage.from_me) {
             chatToUpdate.unreadCount = (chatToUpdate.unreadCount || 0) + 1;
         }
-
-        // Replace the old chat object with the new one
-        newChats[chatIndex] = chatToUpdate;
-
-        // Move the updated chat to the top of the list
-        const updatedChat = newChats.splice(chatIndex, 1)[0];
         
-        return [updatedChat, ...newChats];
+        // Move chat to the top
+        const otherChats = prevChats.filter(c => c.id !== newMessage.chat_id);
+        return [chatToUpdate, ...otherChats];
     });
 
-    // Play notification sound if the tab is not visible
     if (!newMessage.from_me && document.visibilityState !== 'visible') {
         playNotificationSound();
     }
-}, [playNotificationSound, fetchData]);
+  }, [playNotificationSound, fetchData]);
 
-const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
+ const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
     setChats(prevChats => {
         return prevChats.map(chat => {
             if (chat.id === updatedChatData.id) {
-                // Ensure messages array is preserved from the old state
+                // Merge new data, ensuring messages are handled correctly
                 const existingMessages = chat.messages || [];
                 return { ...chat, ...updatedChatData, messages: existingMessages };
             }
@@ -240,31 +269,24 @@ const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: str
     });
 }, []);
 
+
 const handleContactUpdate = useCallback((updatedContact: Contact) => {
     setChats(prevChats => {
         return prevChats.map(chat => {
             if (chat.contact.id === updatedContact.id) {
-                return { ...chat, contact: { ...chat.contact, ...updatedContact } };
+                return { ...chat, contact: updatedContact };
             }
             return chat;
         });
     });
-
-    setSelectedChat(prevSelected => {
-        if (prevSelected && prevSelected.contact.id === updatedContact.id) {
-            return { ...prevSelected, contact: { ...prevSelected.contact, ...updatedContact } };
-        }
-        return prevSelected;
-    });
 }, []);
 
-
   useEffect(() => {
-    if (!user?.activeWorkspaceId) return;
+    if (!initialUser?.activeWorkspaceId) return;
 
     const supabase = createClient();
     // Use a single channel for all related tables
-    const channelName = `realtime-updates-${user.activeWorkspaceId}`;
+    const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
     const channel = supabase.channel(channelName);
 
     const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
@@ -317,18 +339,18 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
+  }, [initialUser?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
 
 
   useEffect(() => {
-      if(user?.activeWorkspaceId){
-          getTags(user.activeWorkspaceId).then(tagsResult => {
+      if(initialUser?.activeWorkspaceId){
+          getTags(initialUser.activeWorkspaceId).then(tagsResult => {
               if (!tagsResult.error && tagsResult.tags) {
                   setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
               }
           });
       }
-  }, [user?.activeWorkspaceId]);
+  }, [initialUser?.activeWorkspaceId]);
 
   // Effect to mark messages as read
   useEffect(() => {
@@ -364,7 +386,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
     }
   }, [selectedChat, currentChatMessages]);
   
-  if (!user) {
+  if (!initialUser) {
     return <LoadingSkeleton />;
   }
 
@@ -404,13 +426,13 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
         chats={chats}
         selectedChat={selectedChat}
         setSelectedChat={handleSetSelectedChat}
-        currentUser={user}
+        currentUser={initialUser}
         onUpdate={() => fetchData()}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={enrichedSelectedChat}
-        currentUser={user}
+        currentUser={initialUser}
         onActionSuccess={() => fetchData()}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
@@ -419,7 +441,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       />
       <ContactPanel
         chat={enrichedSelectedChat}
-        currentUser={user}
+        currentUser={initialUser}
         onTransferSuccess={() => fetchData()}
         onContactUpdate={() => fetchData()}
       />
