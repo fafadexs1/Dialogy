@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 
 export async function createWorkspaceAction(
   prevState: any,
@@ -26,6 +27,7 @@ export async function createWorkspaceAction(
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    await ensurePermissionsSeed();
 
     // 1. Inserir o novo workspace.
     const workspaceRes = await client.query(

@@ -6,6 +6,17 @@ import { db } from '@/lib/db';
 import type { Role, Permission } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { ensurePermissionsSeed } from '@/lib/permissions-seed';
+
+const DEFAULT_MEMBER_PERMISSIONS = [
+    'crm:view',
+    'crm:edit',
+    'teams:view',
+    'campaigns:manage',
+    'automations:manage',
+    'analytics:view',
+    'inbox:access'
+];
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -13,6 +24,77 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
         SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
     return res.rowCount > 0;
+}
+
+async function ensureWorkspaceRoles(workspaceId: string) {
+    const workspaceRes = await db.query('SELECT owner_id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (workspaceRes.rowCount === 0) return;
+    const ownerId = workspaceRes.rows[0].owner_id;
+
+    let rolesRes = await db.query('SELECT id, name, is_default FROM roles WHERE workspace_id = $1', [workspaceId]);
+
+    if (rolesRes.rowCount === 0) {
+        const adminRoleRes = await db.query(
+            `INSERT INTO roles (workspace_id, name, description, is_default)
+             VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
+             RETURNING id`,
+            [workspaceId]
+        );
+
+        await db.query(
+            `INSERT INTO roles (workspace_id, name, description, is_default)
+             VALUES ($1, 'Membro', 'Acesso às funcionalidades principais, mas com permissões limitadas.', TRUE)
+             ON CONFLICT DO NOTHING`,
+            [workspaceId]
+        );
+
+        rolesRes = await db.query('SELECT id, name, is_default FROM roles WHERE workspace_id = $1', [workspaceId]);
+
+        if (ownerId) {
+            await db.query(
+                `INSERT INTO user_workspace_roles (user_id, workspace_id, role_id)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, workspace_id) DO UPDATE SET role_id = EXCLUDED.role_id`,
+                [ownerId, workspaceId, adminRoleRes.rows[0].id]
+            );
+        }
+    }
+
+    const permissionsRes = await db.query('SELECT id FROM permissions');
+    const permissionIds = permissionsRes.rows.map((row: { id: string }) => row.id);
+
+    const adminRole = rolesRes.rows.find((role: any) => role.name === 'Administrador');
+    if (adminRole && permissionIds.length) {
+        const existingAdminPerms = await db.query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [adminRole.id]);
+        const existingAdminSet = new Set(existingAdminPerms.rows.map((row: { permission_id: string }) => row.permission_id));
+        const missingAdminPerms = permissionIds.filter(id => !existingAdminSet.has(id));
+
+        if (missingAdminPerms.length) {
+            await db.query(
+                `INSERT INTO role_permissions (role_id, permission_id)
+                 SELECT $1, perm_id FROM unnest($2::text[]) AS perm_id
+                 ON CONFLICT DO NOTHING`,
+                [adminRole.id, missingAdminPerms]
+            );
+        }
+    }
+
+    const memberRole = rolesRes.rows.find((role: any) => role.name === 'Membro');
+    if (memberRole && DEFAULT_MEMBER_PERMISSIONS.length) {
+        const existingMemberPerms = await db.query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [memberRole.id]);
+        const existingMemberSet = new Set(existingMemberPerms.rows.map((row: { permission_id: string }) => row.permission_id));
+        const allowedMemberPerms = DEFAULT_MEMBER_PERMISSIONS.filter(permissionId => permissionIds.includes(permissionId));
+        const missingMemberPerms = allowedMemberPerms.filter(permissionId => !existingMemberSet.has(permissionId));
+
+        if (missingMemberPerms.length) {
+            await db.query(
+                `INSERT INTO role_permissions (role_id, permission_id)
+                 SELECT $1, perm_id FROM unnest($2::text[]) AS perm_id
+                 ON CONFLICT DO NOTHING`,
+                [memberRole.id, missingMemberPerms]
+            );
+        }
+    }
 }
 
 export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
@@ -25,6 +107,9 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
     }
     
     try {
+        await ensurePermissionsSeed();
+        await ensureWorkspaceRoles(workspaceId);
+
         const rolesRes = await db.query('SELECT id, name, description, is_default FROM roles WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
         const permissionsRes = await db.query('SELECT id, description, category FROM permissions ORDER BY category, id');
         const rolePermissionsRes = await db.query(`

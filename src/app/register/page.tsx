@@ -16,7 +16,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (registerState.success) {
-      router.push('/');
+      router.push('/inbox');
     }
   }, [registerState.success, router]);
 

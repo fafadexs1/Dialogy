@@ -18,6 +18,7 @@ import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
+import { useRouter } from 'next/navigation';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -57,6 +58,7 @@ function LoadingSkeleton() {
 
 
 export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+  const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
@@ -74,6 +76,19 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
   }
+
+  useEffect(() => {
+    const supabase = createClient();
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace('/login');
+      }
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [router]);
 
   const updateSelectedChatPath = useCallback((chatId?: string | null) => {
     replaceChatPath(chatId);

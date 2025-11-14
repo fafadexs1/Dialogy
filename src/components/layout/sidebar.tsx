@@ -43,10 +43,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { User } from '@/lib/types';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { WorkspaceSwitcher } from './workspace-switcher';
-import { createClient } from '@/lib/supabase/client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useTransition } from 'react';
+import { signOut } from '@/actions/auth';
 
 interface SidebarProps {
   user: User;
@@ -99,23 +99,25 @@ function DialogyLogo() {
     )
 }
 
-function SignOutMenuItem({ userId }: { userId: string }) {
-    const router = useRouter();
-    const handleSignOut = async () => {
-        const supabase = createClient();
-        const { error } = await supabase.auth.signOut();
-        if (!error) {
-            router.push('/login');
-        }
-    }
+function SignOutMenuItem() {
+    const [isPending, startTransition] = useTransition();
+
+    const handleSignOut = () => {
+        startTransition(async () => {
+            await signOut();
+        });
+    };
 
     return (
-        <DropdownMenuItem onSelect={(e) => {
-            e.preventDefault();
-            handleSignOut();
-        }}>
+        <DropdownMenuItem
+            disabled={isPending}
+            onSelect={(e) => {
+                e.preventDefault();
+                handleSignOut();
+            }}
+        >
             <LogOut className="mr-2 h-4 w-4" />
-            <span>Sair</span>
+            <span>{isPending ? 'Saindo...' : 'Sair'}</span>
         </DropdownMenuItem>
     );
 }
@@ -277,7 +279,7 @@ export function Sidebar({ user }: SidebarProps) {
                         </DropdownMenuItem>
                     </Link>
                     <DropdownMenuSeparator />
-                    <SignOutMenuItem userId={user.id} />
+                    <SignOutMenuItem />
                 </DropdownMenuContent>
             </DropdownMenu>
         </div>

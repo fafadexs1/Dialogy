@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useOptimistic, useActionState, useRef, startTransition } from 'react';
+import React, { useState, useEffect, useActionState, useRef } from 'react';
 import type { User, Role, Permission } from '@/lib/types';
 import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -103,25 +103,25 @@ function PermissionsMatrix({
     workspaceId: string,
     onMutate: () => void;
 }) {
-    const [optimisticRoles, setOptimisticRoles] = useOptimistic(
-        initialRoles,
-        (state, { roleId, permissionId, checked }: { roleId: string, permissionId: string, checked: boolean }) => {
-            return state.map(role => {
-                if (role.id === roleId) {
-                    const newPermissions = checked
-                        ? [...role.permissions, initialPermissions.find(p => p.id === permissionId)!]
-                        : role.permissions.filter(p => p.id !== permissionId);
-                    return { ...role, permissions: newPermissions };
-                }
-                return role;
-            });
-        }
-    );
+    const [localRoles, setLocalRoles] = useState<Role[]>(initialRoles);
+
+    useEffect(() => {
+        setLocalRoles(initialRoles);
+    }, [initialRoles]);
 
     const handlePermissionChange = async (roleId: string, permissionId: string, checked: boolean) => {
-        startTransition(() => {
-            setOptimisticRoles({ roleId, permissionId, checked });
-        });
+        setLocalRoles(prev =>
+            prev.map(role => {
+                if (role.id !== roleId) return role;
+                const permission = initialPermissions.find(p => p.id === permissionId);
+                if (!permission) return role;
+                const newPermissions = checked
+                    ? [...role.permissions, permission]
+                    : role.permissions.filter(p => p.id !== permissionId);
+                return { ...role, permissions: newPermissions };
+            })
+        );
+
         const result = await updateRolePermissionAction(roleId, permissionId, checked);
         if (result.error) {
             toast({ title: "Erro ao Salvar", description: result.error, variant: "destructive" });
@@ -139,7 +139,7 @@ function PermissionsMatrix({
         }
     }
 
-    const permissionCategories = initialPermissions.reduce((acc, p) => {
+const permissionCategories = initialPermissions.reduce((acc, p) => {
         if (!acc[p.category]) acc[p.category] = [];
         acc[p.category].push(p);
         return acc;
@@ -158,7 +158,7 @@ function PermissionsMatrix({
                             <thead className="bg-muted/50">
                                 <tr className="[&_th]:h-12 [&_th]:px-4 [&_th]:text-left [&_th]:align-middle [&_th]:font-medium [&_th]:text-muted-foreground">
                                     <th className="sticky left-0 bg-muted/50 z-10 min-w-48">Permissão</th>
-                                    {optimisticRoles.map(role => (
+                        {localRoles.map(role => (
                                         <th key={role.id} className="text-center min-w-48">
                                             <div className='flex items-center justify-center gap-2'>
                                                 {role.name}
@@ -210,7 +210,7 @@ function PermissionsMatrix({
                                 {Object.entries(permissionCategories).map(([category, permissions]) => (
                                     <React.Fragment key={category}>
                                         <tr className="border-t">
-                                            <td colSpan={initialRoles.length + 1} className="py-2 px-4 bg-secondary/30 font-semibold text-muted-foreground sticky left-0 z-10">
+                                            <td colSpan={localRoles.length + 1} className="py-2 px-4 bg-secondary/30 font-semibold text-muted-foreground sticky left-0 z-10">
                                                 {category}
                                             </td>
                                         </tr>
@@ -220,7 +220,7 @@ function PermissionsMatrix({
                                                     <div className="font-medium">{permission.description}</div>
                                                     <div className="text-xs text-muted-foreground font-mono">{permission.id}</div>
                                                 </td>
-                                                {optimisticRoles.map(role => (
+                            {localRoles.map(role => (
                                                     <td key={`${role.id}-${permission.id}`} className="text-center">
                                                         <Checkbox
                                                             checked={role.permissions.some(p => p.id === permission.id)}
