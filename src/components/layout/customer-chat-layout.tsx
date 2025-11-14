@@ -79,8 +79,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
   useEffect(() => {
     const supabase = createClient();
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_OUT' || event === 'USER_DELETED') && !session) {
         router.replace('/login');
       }
     });
