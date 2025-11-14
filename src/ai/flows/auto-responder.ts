@@ -104,17 +104,17 @@ const prompt = ai.definePrompt({
   tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `VocǦ Ǹ 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. VocǦ interpreta arquivos treinados, segue regras rígidas e pode acionar integra����es externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
+  prompt: `VocǦ Ǹ 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. VocǦ interpreta arquivos treinados, segue regras rígidas e pode acionar integraes externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
 
 Siga esta hierarquia de mǸtodos para gerar uma resposta:
 
-1.  **Regras de Automa��ǜo (Prioridade Mǭxima)**: Avalie a mensagem do cliente em rela��ǜo ��s "Regras de Automa��ǜo". Use seu racioc��nio para ver se a inten��ǜo corresponde claramente a um gatilho.
-    - Se a regra for do tipo 'reply', retorne exatamente o value daquela a��ǜo em 'response' e informe 'triggeredRule'.
+1.  **Regras de Automaǜo (Prioridade Mǭxima)**: Avalie a mensagem do cliente em relaǜo s "Regras de Automaǜo". Use seu raciocnio para ver se a intenǜo corresponde claramente a um gatilho.
+    - Se a regra for do tipo 'reply', retorne exatamente o value daquela aǜo em 'response' e informe 'triggeredRule'.
     - Se a regra for do tipo 'webhook', use a ferramenta 'makeHttpRequestTool' passando url, method e body previstos (placeholders como {{contact.id}} podem ser usados). Resuma ao cliente o resultado dessa chamada.
 
-2.  **Base de Conhecimento**: Se nenhuma regra for aplicǭvel, consulte os textos e DOCUMENTOS carregados para responder com dados oficiais. Nunca invente informa����es.
+2.  **Base de Conhecimento**: Se nenhuma regra for aplicǭvel, consulte os textos e DOCUMENTOS carregados para responder com dados oficiais. Nunca invente informaes.
 
-3.  **Conhecimento Geral + Hist��rico**: Se ainda assim faltar algo, use o contexto da conversa e descreva claramente o pr��ximo passo (coletar dados, escalar para humano, etc.).
+3.  **Conhecimento Geral + Histrico**: Se ainda assim faltar algo, use o contexto da conversa e descreva claramente o prximo passo (coletar dados, escalar para humano, etc.).
 
 **IMPORTANTE**:
 - Seja conciso e direto.
@@ -132,23 +132,23 @@ Siga esta hierarquia de mǸtodos para gerar uma resposta:
 {{/each}}
 
 ---
-**REGRAS DE AUTOMA��ǟO (prioridade mǭxima)**:
+**REGRAS DE AUTOMAǟO (prioridade mǭxima)**:
 {{#each rules}}
 - Nome da Regra: "{{name}}"
   - Gatilho: "{{trigger}}"
-  - A��ǜo: {{json action}}
+  - Aǜo: {{json action}}
 {{/each}}
 ---
 **DADOS DO CONTATO ATUAL (para interpolar nos webhooks)**:
 {{json contact}}
 ---
-**HIST�"RICO DO CHAT (Para contexto)**:
+**HIST"RICO DO CHAT (Para contexto)**:
 {{{chatHistory}}}
 ---
-**RESPOSTA PADRǕO DE CONTING�NCIA (use somente se nada funcionar)**:
+**RESPOSTA PADRǕO DE CONTINGNCIA (use somente se nada funcionar)**:
 {{{fallbackReply}}}
 ---
-**�sLTIMA MENSAGEM DO CLIENTE**:
+**sLTIMA MENSAGEM DO CLIENTE**:
 {{{customerMessage}}}
 
 Agora, avalie e responda.`,
@@ -167,24 +167,32 @@ const autoResponderFlow = ai.defineFlow(
         knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
         fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
     });
-    const result = await prompt(promptInput, { model });
-    const output = result.output;
     
-    // Log usage in the background without awaiting it.
-    // This allows the flow to return faster.
-    if (result.usage && input.config?.id) {
-        logAutopilotUsage({
-            configId: input.config.id,
-            flowName: 'autoResponderFlow',
-            modelName: model,
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            totalTokens: result.usage.totalTokens,
-            ruleName: output?.triggeredRule ?? undefined,
-        }).catch(err => {
-            // Log the error but don't block the main flow.
-            console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
-        });
+    let output: AgentResponseOutput | null = null;
+    try {
+        const result = await prompt(promptInput, { model });
+        output = result.output;
+        
+        // Log usage in the background without awaiting it.
+        // This allows the flow to return faster.
+        if (result.usage && input.config?.id) {
+            logAutopilotUsage({
+                configId: input.config.id,
+                flowName: 'autoResponderFlow',
+                modelName: model,
+                inputTokens: result.usage.inputTokens,
+                outputTokens: result.usage.outputTokens,
+                totalTokens: result.usage.totalTokens,
+                ruleName: output?.triggeredRule ?? undefined,
+            }).catch(err => {
+                // Log the error but don't block the main flow.
+                console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
+            });
+        }
+    } catch (error) {
+        console.error('[AUTORESPONDER_FLOW_ERROR] Error calling prompt:', error);
+        // Do not re-throw; allow the flow to proceed to fallback logic.
+        output = null; 
     }
 
     // Only return a response if the AI decided a rule was triggered or it could answer.
