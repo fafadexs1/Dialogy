@@ -15,7 +15,8 @@ const DEFAULT_MEMBER_PERMISSIONS = [
     'campaigns:manage',
     'automations:manage',
     'analytics:view',
-    'inbox:access'
+    'inbox:access',
+    'shortcuts:manage'
 ];
 
 // Helper function to check for admin permissions

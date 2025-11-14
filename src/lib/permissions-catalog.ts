@@ -26,4 +26,6 @@ export const PERMISSIONS = [
     { id: 'analytics:view', category: 'Analytics', description: 'Visualizar a página de Analytics' },
     // Billing
     { id: 'billing:view', category: 'Faturamento', description: 'Visualizar a página de faturamento e histórico' },
+    // Shortcuts
+    { id: 'shortcuts:manage', category: 'Atalhos', description: 'Criar e editar atalhos globais visíveis para todos' },
 ];
