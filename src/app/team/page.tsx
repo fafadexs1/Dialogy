@@ -27,6 +27,10 @@ import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogT
 import { Checkbox } from '@/components/ui/checkbox';
 
 const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+const DEFAULT_BUSINESS_HOURS = {
+  start: '09:00',
+  end: '18:00',
+};
 
 const sortBusinessHours = (businessHours: BusinessHour[]) => {
   return [...businessHours].sort((a, b) => daysOrder.indexOf(a.day) - daysOrder.indexOf(b.day));
@@ -214,11 +218,21 @@ function TeamSettingsContent({
   }
   
   const handleBusinessHoursChange = async (businessHourId: string, field: keyof Omit<BusinessHour, 'id' | 'day'>, value: any) => {
-    const result = await updateBusinessHours(team.id, businessHourId, { [field]: value });
+    const currentHour = team.businessHours.find((bh) => bh.id === businessHourId);
+    const payload = { [field]: value } as Partial<Pick<BusinessHour, 'isEnabled' | 'startTime' | 'endTime'>>;
+    if (field === 'isEnabled' && value) {
+      if (!currentHour?.startTime) {
+        payload.startTime = DEFAULT_BUSINESS_HOURS.start;
+      }
+      if (!currentHour?.endTime) {
+        payload.endTime = DEFAULT_BUSINESS_HOURS.end;
+      }
+    }
+    const result = await updateBusinessHours(team.id, businessHourId, payload);
     if(result.error) {
       toast({ title: 'Erro ao salvar horário', description: result.error, variant: 'destructive' });
     } else {
-       const updatedHours = team.businessHours.map(bh => bh.id === businessHourId ? { ...bh, [field]: value } : bh);
+       const updatedHours = team.businessHours.map(bh => bh.id === businessHourId ? { ...bh, ...payload } : bh);
        const updatedTeam = { ...team, businessHours: updatedHours };
        onTeamUpdate(team.id, updatedTeam);
     }
@@ -381,14 +395,14 @@ function TeamSettingsContent({
                 <div className={`flex items-center gap-2 transition-opacity ${bh.isEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                   <Input 
                     type="time" 
-                    defaultValue={bh.startTime || '09:00'}
+                    defaultValue={bh.startTime || DEFAULT_BUSINESS_HOURS.start}
                     onBlur={(e) => handleBusinessHoursChange(bh.id, 'startTime', e.target.value)}
                     className="w-[110px]" 
                   />
                   <span className="text-muted-foreground">às</span>
                   <Input 
                     type="time" 
-                    defaultValue={bh.endTime || '18:00'}
+                    defaultValue={bh.endTime || DEFAULT_BUSINESS_HOURS.end}
                     onBlur={(e) => handleBusinessHoursChange(bh.id, 'endTime', e.target.value)}
                     className="w-[110px]" 
                   />

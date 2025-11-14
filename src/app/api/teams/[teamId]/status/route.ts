@@ -11,10 +11,24 @@ import { ptBR } from 'date-fns/locale';
  * Helper para verificar se um horário está dentro de um intervalo.
  * Ex: isTimeInRange('14:30', '09:00', '18:00') -> true
  */
+function timeToMinutes(timeStr: string | null): number | null {
+    if (!timeStr) return null;
+
+    const [hoursPart, minutesPart] = timeStr.split(':');
+    const hours = Number(hoursPart);
+    const minutes = Number(minutesPart);
+
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    return hours * 60 + minutes;
+}
+
 function isTimeInRange(timeStr: string, startStr: string | null, endStr: string | null): boolean {
-    if (!startStr || !endStr) return false;
-    // Compara como strings 'HH:mm'
-    return timeStr >= startStr && timeStr < endStr;
+    const time = timeToMinutes(timeStr);
+    const start = timeToMinutes(startStr);
+    const end = timeToMinutes(endStr);
+
+    if (time === null || start === null || end === null) return false;
+    return time >= start && time < end;
 }
 
 export async function GET(

@@ -391,7 +391,16 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
 
         const contactsById = new Map(contactsRes.rows.map(c => [c.id, c]));
         const agentsById = new Map(agentsRes.rows.map(a => [a.id, a]));
-        const systemAgents = new Map<string, SystemAgent>(); // Populate if needed
+
+        const systemAgentIds = [...new Set(messagesRes.rows.map(m => m.sender_system_agent_id).filter(Boolean))];
+        let systemAgents = new Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>();
+        if (systemAgentIds.length > 0) {
+            const systemAgentsRes = await db.query(
+                'SELECT id, name, avatar_url FROM system_agents WHERE id::text = ANY($1::text[])',
+                [systemAgentIds]
+            );
+            systemAgents = new Map(systemAgentsRes.rows.map((agent: Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>) => [agent.id, agent]));
+        }
         
         const messagesByChat: Record<string, Message[]> = {};
         for (const m of messagesRes.rows) {
@@ -407,9 +416,8 @@ export async function getChatsAndMessages(workspaceId: string): Promise<{ chats:
                     const agentSender = agentsById.get(m.sender_user_id);
                     sender = { id: agentSender.id, name: agentSender.full_name, avatar: agentSender.avatar_url, type: 'user' };
                 } else if (m.sender_system_agent_id && systemAgents.has(m.sender_system_agent_id)) {
-                    // Logic to fetch/map system agents if they exist
                     const systemAgentSender = systemAgents.get(m.sender_system_agent_id)!;
-                    sender = { ...systemAgentSender, type: 'system_agent' };
+                    sender = { id: systemAgentSender.id, name: systemAgentSender.name, avatar: systemAgentSender.avatar_url, type: 'system_agent' };
                 } else {
                     // Fallback to current user if sender info is missing on an "from_me" message
                     const chat = chatRes.rows.find(c => c.id === m.chat_id);

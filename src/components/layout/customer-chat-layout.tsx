@@ -17,6 +17,7 @@ import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
+import { replaceChatPath } from '@/lib/chat-navigation';
 
 // Base64 encoded, short, and browser-safe notification sound
 const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
@@ -75,31 +76,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }
 
   const updateSelectedChatPath = useCallback((chatId?: string | null) => {
-    if (typeof window === 'undefined') return;
-
-    const segments = window.location.pathname.split('/').filter(Boolean);
-    const inboxIndex = segments.indexOf('inbox');
-    const baseSegments = inboxIndex === -1 ? ['inbox'] : segments.slice(0, inboxIndex + 1);
-    const basePath = `/${baseSegments.join('/')}`;
-    const nextPathname = chatId ? `${basePath}/${chatId}` : basePath;
-
-    if (window.location.pathname === nextPathname) {
-        return;
-    }
-
-    const search = window.location.search || '';
-    const hash = window.location.hash || '';
-    const nextUrl = `${nextPathname}${search}${hash}`;
-
-    const historyProto = Object.getPrototypeOf(window.history);
-    const nativeReplaceState = historyProto?.replaceState?.bind(window.history);
-
-    if (nativeReplaceState) {
-        // Use the native History.replaceState to avoid triggering Next.js route navigation
-        nativeReplaceState({ chatId }, '', nextUrl);
-    } else {
-        window.history.replaceState({ chatId }, '', nextUrl);
-    }
+    replaceChatPath(chatId);
   }, []);
 
   const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];

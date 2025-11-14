@@ -223,7 +223,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
   const handleSelect = () => {
     onSelect(chat);
-    window.history.pushState({}, '', `/inbox/${chat.id}`);
   };
 
   return (
