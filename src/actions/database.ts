@@ -524,13 +524,19 @@ create table if not exists public.team_members (
 create index if not exists idx_team_members_user on public.team_members(user_id);
 
 -- Autopilot: configs
+drop index if exists uq_autopilot_configs_workspace_user;
 create table if not exists public.autopilot_configs (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null,
   user_id uuid not null,
+  name text not null default 'Agente de IA',
   gemini_api_key text,
   ai_model text,
   knowledge_base text,
+  knowledge_base_documents jsonb,
+  is_primary boolean not null default false,
+  is_active boolean not null default false,
+  default_fallback_reply text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint autopilot_configs_workspace_id_fkey
@@ -538,7 +544,7 @@ create table if not exists public.autopilot_configs (
   constraint autopilot_configs_user_id_fkey
     foreign key (user_id) references public.users(id) on delete cascade
 );
-create unique index if not exists uq_autopilot_configs_workspace_user on public.autopilot_configs(workspace_id, user_id);
+create index if not exists idx_autopilot_configs_workspace_user on public.autopilot_configs(workspace_id, user_id);
 create index if not exists idx_autopilot_configs_workspace on public.autopilot_configs(workspace_id);
 
 

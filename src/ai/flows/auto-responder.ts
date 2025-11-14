@@ -37,6 +37,13 @@ const AutomationRuleSchema = z.object({
   action: ActionSchema,
 });
 
+const KnowledgeDocumentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  content: z.string(),
+  summary: z.string().optional(),
+});
+
 const AgentResponseInputSchema = z.object({
   chatId: z.string().describe("The unique identifier for the current chat."),
   customerMessage: z
@@ -47,10 +54,18 @@ const AgentResponseInputSchema = z.object({
     .optional()
     .describe('The history of the chat between the agent and customer.'),
   rules: z.array(AutomationRuleSchema).describe('A list of active automation rules to evaluate against.'),
-   knowledgeBase: z
+  knowledgeBase: z
     .string()
     .optional()
     .describe('A collection of texts, examples, and instructions that the AI should use as a knowledge base to formulate its answers.'),
+  knowledgeBaseDocuments: z
+    .array(KnowledgeDocumentSchema)
+    .optional()
+    .describe('Structured knowledge base documents uploaded by the user.'),
+  fallbackReply: z
+    .string()
+    .optional()
+    .describe('Mensagem de contingência para quando nenhuma resposta segura puder ser gerada.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
   contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
     .describe('The contact details of the customer.'),
@@ -89,45 +104,55 @@ const prompt = ai.definePrompt({
   tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `Você é 'Dialogy', um assistente de IA especialista em atendimento ao cliente. Seu objetivo é resolver o problema do cliente de forma eficiente, precisa e cortês.
+  prompt: `VocǦ Ǹ 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. VocǦ interpreta arquivos treinados, segue regras rígidas e pode acionar integra����es externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
 
-Siga esta hierarquia de métodos para gerar uma resposta:
+Siga esta hierarquia de mǸtodos para gerar uma resposta:
 
-1.  **Regras de Automação (Prioridade Máxima)**: Avalie a mensagem do cliente em relação às "Regras de Automação". Use seu raciocínio para ver se a *intenção* da mensagem corresponde claramente a um gatilho.
-    - Se uma regra for acionada e a ação for do tipo 'reply', você DEVE retornar o "value" exato daquela ação no campo 'response' e o nome da regra em 'triggeredRule'.
-    - Se a regra for do tipo 'webhook', você DEVE usar a ferramenta 'makeHttpRequestTool' para executar a chamada. Passe a 'url', 'method', e 'body' da regra para a ferramenta. A resposta da ferramenta será o seu 'response' final.
+1.  **Regras de Automa��ǜo (Prioridade Mǭxima)**: Avalie a mensagem do cliente em rela��ǜo ��s "Regras de Automa��ǜo". Use seu racioc��nio para ver se a inten��ǜo corresponde claramente a um gatilho.
+    - Se a regra for do tipo 'reply', retorne exatamente o value daquela a��ǜo em 'response' e informe 'triggeredRule'.
+    - Se a regra for do tipo 'webhook', use a ferramenta 'makeHttpRequestTool' passando url, method e body previstos (placeholders como {{contact.id}} podem ser usados). Resuma ao cliente o resultado dessa chamada.
 
-2.  **Base de Conhecimento**: Se nenhuma regra for aplicável, consulte a "Base de Conhecimento" para encontrar informações relevantes para responder à pergunta do cliente.
+2.  **Base de Conhecimento**: Se nenhuma regra for aplicǭvel, consulte os textos e DOCUMENTOS carregados para responder com dados oficiais. Nunca invente informa����es.
 
-3.  **Conhecimento Geral**: Se nem as regras nem a base de conhecimento fornecerem uma resposta, use seu conhecimento geral e o "Histórico do Chat" para ter uma conversa útil e natural.
+3.  **Conhecimento Geral + Hist��rico**: Se ainda assim faltar algo, use o contexto da conversa e descreva claramente o pr��ximo passo (coletar dados, escalar para humano, etc.).
 
 **IMPORTANTE**:
 - Seja conciso e direto.
-- Se nenhuma das suas fontes de conhecimento (regras, base, geral) permitir que você dê uma resposta útil e precisa, você DEVE retornar uma resposta vazia no campo 'response'. Não invente informações.
+- Se nenhuma fonte (regras/base/conhecimento geral) permitir uma resposta segura, retorne vazio em 'response' ou use a resposta de contingência abaixo.
 
 ---
 **BASE DE CONHECIMENTO (Use para responder perguntas)**:
 {{{knowledgeBase}}}
+
 ---
-**REGRAS DE AUTOMAÇÃO (Prioridade máxima se a intenção corresponder)**:
+**DOCUMENTOS CARREGADOS (conhecimento treinado)**:
+{{#each knowledgeBaseDocuments}}
+### {{name}}
+{{{content}}}
+{{/each}}
+
+---
+**REGRAS DE AUTOMA��ǟO (prioridade mǭxima)**:
 {{#each rules}}
 - Nome da Regra: "{{name}}"
   - Gatilho: "{{trigger}}"
-  - Ação: {{json action}}
+  - A��ǜo: {{json action}}
 {{/each}}
 ---
-**DADOS DO CONTATO ATUAL (Para usar em variáveis no body do webhook)**:
+**DADOS DO CONTATO ATUAL (para interpolar nos webhooks)**:
 {{json contact}}
 ---
-**HISTÓRICO DO CHAT (Para contexto)**:
+**HIST�"RICO DO CHAT (Para contexto)**:
 {{{chatHistory}}}
 ---
-**ÚLTIMA MENSAGEM DO CLIENTE**:
+**RESPOSTA PADRǕO DE CONTING�NCIA (use somente se nada funcionar)**:
+{{{fallbackReply}}}
+---
+**�sLTIMA MENSAGEM DO CLIENTE**:
 {{{customerMessage}}}
 
 Agora, avalie e responda.`,
 });
-
 
 const autoResponderFlow = ai.defineFlow(
   {
@@ -137,8 +162,11 @@ const autoResponderFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.model || 'googleai/gemini-2.0-flash';
-    // The prompt only receives the fields defined in its own input schema.
-    const promptInput = AgentResponseInputSchema.parse(input);
+    const promptInput = AgentResponseInputSchema.parse({
+        ...input,
+        knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
+        fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
+    });
     const result = await prompt(promptInput, { model });
     const output = result.output;
     
@@ -163,6 +191,13 @@ const autoResponderFlow = ai.defineFlow(
     // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
         return output;
+    }
+    const fallback = input.config?.default_fallback_reply?.trim();
+    if (fallback) {
+        return {
+            response: fallback,
+            triggeredRule: output?.triggeredRule ?? null,
+        };
     }
     // Otherwise, return an empty object, indicating no action should be taken.
     return {};

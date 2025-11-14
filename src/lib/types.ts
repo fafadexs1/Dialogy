@@ -245,7 +245,7 @@ export interface Integration {
 
 export type ActionType = 'reply' | 'webhook';
 
-export type Action = 
+export type Action =
   | {
       type: 'reply';
       value: string;
@@ -256,6 +256,14 @@ export type Action =
       method: 'GET' | 'POST';
       body?: Record<string, any>;
     };
+
+export interface KnowledgeBaseDocument {
+  id: string;
+  name: string;
+  content: string;
+  tokens?: number;
+  uploaded_at?: string;
+}
 
 export interface NexusFlowInstance {
   id: string;
@@ -269,9 +277,14 @@ export interface NexusFlowInstance {
 export interface AutopilotConfig {
     id: string;
     workspace_id: string;
+    name: string;
     gemini_api_key: string | null;
     ai_model: string | null;
     knowledge_base: string | null;
+    knowledge_base_documents: KnowledgeBaseDocument[] | null;
+    is_primary: boolean;
+    is_active: boolean;
+    default_fallback_reply: string | null;
     created_at: string;
     updated_at: string;
 }

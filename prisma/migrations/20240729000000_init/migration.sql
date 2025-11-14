@@ -266,13 +266,19 @@ CREATE TABLE "messages" (
 );
 
 -- CreateTable
+DROP INDEX IF EXISTS "autopilot_configs_workspace_id_user_id_key";
 CREATE TABLE "autopilot_configs" (
     "id" TEXT NOT NULL,
     "workspace_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
+    "name" TEXT NOT NULL DEFAULT 'Agente de IA',
     "gemini_api_key" TEXT,
     "ai_model" TEXT,
     "knowledge_base" TEXT,
+    "knowledge_base_documents" JSONB,
+    "is_primary" BOOLEAN NOT NULL DEFAULT false,
+    "is_active" BOOLEAN NOT NULL DEFAULT false,
+    "default_fallback_reply" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -389,7 +395,7 @@ CREATE UNIQUE INDEX "system_agents_workspace_id_name_key" ON "system_agents"("wo
 CREATE UNIQUE INDEX "messages_message_id_from_api_key" ON "messages"("message_id_from_api");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "autopilot_configs_workspace_id_user_id_key" ON "autopilot_configs"("workspace_id", "user_id");
+CREATE INDEX "idx_autopilot_configs_workspace_user" ON "autopilot_configs"("workspace_id", "user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "campaign_recipients_campaign_id_contact_id_key" ON "campaign_recipients"("campaign_id", "contact_id");

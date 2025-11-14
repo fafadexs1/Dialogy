@@ -368,6 +368,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
   const [isAiAgentActive, setIsAiAgentActive] = useState(false);
+  const autopilotSwitchTouchedRef = useRef(false);
   const [isAiTyping, setIsAiTyping] = useState(false);
   
   const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
@@ -389,6 +390,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     : messages.filter(m => m.chat_id === chat?.id);
   
   const handleAiSwitchChange = (checked: boolean) => {
+    autopilotSwitchTouchedRef.current = true;
     console.log(`[AUTOPILOT] Agente de IA ${checked ? 'ativado' : 'desativado'}.`);
     setIsAiAgentActive(checked);
   };
@@ -424,6 +426,22 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         // setMessages(chat.messages);
     }
   }, [chat]);
+
+  useEffect(() => {
+    autopilotSwitchTouchedRef.current = false;
+  }, [chat?.id]);
+
+  useEffect(() => {
+    if (!autopilotConfig) {
+        if (!autopilotSwitchTouchedRef.current) {
+            setIsAiAgentActive(false);
+        }
+        return;
+    }
+    if (!autopilotSwitchTouchedRef.current) {
+        setIsAiAgentActive(Boolean(autopilotConfig.is_active));
+    }
+  }, [autopilotConfig, chat?.id]);
 
 
   useEffect(() => {
@@ -480,6 +498,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             return;
         }
 
+        const sanitizedContact = {
+            ...(chat.contact as Contact),
+            email: chat.contact?.email || '',
+        } as Contact;
+
         const result = await generateAgentResponse({
             config: autopilotConfig,
             chatId: chat.id,
@@ -487,8 +510,10 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             chatHistory: chatHistoryForAI,
             rules: activeRules,
             knowledgeBase: autopilotConfig?.knowledge_base || "", 
+            knowledgeBaseDocuments: autopilotConfig?.knowledge_base_documents || [],
+            fallbackReply: autopilotConfig?.default_fallback_reply || '',
             model: autopilotConfig?.ai_model || 'googleai/gemini-2.0-flash',
-            contact: chat.contact as Contact
+            contact: sanitizedContact
         });
 
         console.log('[AUTOPILOT] Resposta da IA recebida:', result);
@@ -1034,16 +1059,26 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             )}
                          </div>
                     </form>
-                    <div className="flex items-center space-x-2">
-                        <Bot className="h-5 w-5 text-muted-foreground" />
-                        <Switch
-                            id="ai-agent-switch"
-                            checked={isAiAgentActive}
-                            onCheckedChange={handleAiSwitchChange}
-                            disabled={isAiTyping}
-                        />
-                        <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Agente de IA</Label>
-                         {isAiTyping && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center space-x-2">
+                            <Bot className="h-5 w-5 text-muted-foreground" />
+                            <Switch
+                                id="ai-agent-switch"
+                                checked={isAiAgentActive}
+                                onCheckedChange={handleAiSwitchChange}
+                                disabled={isAiTyping || !autopilotConfig}
+                            />
+                            <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Agente de IA</Label>
+                            {isAiTyping && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                        </div>
+                        {autopilotConfig && (
+                            <span className="text-xs text-muted-foreground">
+                                {(autopilotConfig.knowledge_base_documents?.length || 0)} docs · {autopilotRules.filter(rule => rule.enabled).length} regras ativas
+                            </span>
+                        )}
+                        <Link href="/autopilot" className="text-xs font-medium text-primary hover:underline">
+                            Treinar agente
+                        </Link>
                     </div>
                 </div>
             </footer>

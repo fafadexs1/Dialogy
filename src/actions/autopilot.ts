@@ -4,7 +4,7 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog } from '@/lib/types';
+import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 
 
@@ -14,48 +14,70 @@ async function isWorkspaceMember(userId: string, workspaceId: string): Promise<b
 }
 
 
-export async function getAutopilotConfig(workspaceId: string): Promise<{
+export async function getAutopilotConfig(workspaceId: string, agentId?: string): Promise<{
     config: AutopilotConfig | null,
     rules: NexusFlowInstance[] | null,
+    agents: AutopilotConfig[] | null,
     error?: string
 }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        return { config: null, rules: null, error: "Usuário não autenticado." };
+        return { config: null, rules: null, agents: null, error: "Usuário não autenticado." };
     }
     const userId = user.id;
     
-    // Simplificamos a lógica - se o usuário é membro, pode acessar.
     if (!await isWorkspaceMember(userId, workspaceId)) {
-        return { config: null, rules: null, error: "Acesso não autorizado." };
+        return { config: null, rules: null, agents: null, error: "Acesso não autorizado." };
     }
 
     try {
-        const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2', [workspaceId, userId]);
+        const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2 ORDER BY created_at', [workspaceId, userId]);
         
-        // Cenário normal: O usuário ainda não configurou o Autopilot.
-        // Retornamos um estado inicial válido para a página renderizar.
         if (configRes.rowCount === 0) {
-            console.log(`[GET_AUTOPILOT_CONFIG] Nenhuma configuração encontrada para o usuário ${userId} no workspace ${workspaceId}. Retornando estado inicial.`);
-            return { config: null, rules: [] };
+            return { config: null, rules: [], agents: [] };
         }
         
-        const config = configRes.rows[0];
+        const agents = configRes.rows.map((row: any) => {
+            const documentsRaw = row.knowledge_base_documents;
+            const normalizedDocs: KnowledgeBaseDocument[] =
+                typeof documentsRaw === 'string'
+                    ? JSON.parse(documentsRaw)
+                    : Array.isArray(documentsRaw)
+                        ? documentsRaw
+                        : [];
+            return {
+                ...row,
+                knowledge_base_documents: normalizedDocs,
+                is_active: Boolean(row.is_active),
+                is_primary: Boolean(row.is_primary),
+                default_fallback_reply: row.default_fallback_reply || null,
+            } as AutopilotConfig;
+        });
 
-        const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name', [config.id]);
+        const selectedConfig =
+            agents.find(agent => agent.id === agentId) ||
+            agents.find(agent => agent.is_primary) ||
+            agents[0] ||
+            null;
+
+        if (!selectedConfig) {
+            return { config: null, rules: [], agents };
+        }
+
+        const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name', [selectedConfig.id]);
         
         const rules = rulesRes.rows.map(r => ({
             ...r,
             action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action
         }));
 
-        return { config, rules };
+        return { config: selectedConfig, rules, agents };
 
     } catch (error) {
-        console.error(`[GET_AUTOPILOT_CONFIG] Erro detalhado ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);
-        return { config: null, rules: null, error: 'Falha ao buscar configurações do banco de dados.'};
+        console.error(`[GET_AUTOPILOT_CONFIG] Erro ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);
+        return { config: null, rules: null, agents: null, error: 'Falha ao buscar configurações do banco de dados.'};
     }
 }
 
@@ -77,9 +99,13 @@ export async function saveAutopilotConfig(
         return { success: false, error: 'ID de Workspace é obrigatório.' };
     }
     
-    // Simplificado: Se é membro, pode salvar.
     if (!await isWorkspaceMember(userId, workspaceId)) {
         return { success: false, error: "Você não tem permissão para editar as configurações." };
+    }
+
+    const configId = formData.get('configId') as string | null;
+    if (!configId) {
+        return { success: false, error: 'Crie ou selecione um agente antes de salvar.' };
     }
     
     try {
@@ -87,31 +113,51 @@ export async function saveAutopilotConfig(
         const geminiApiKey = formData.get('geminiApiKey');
         const aiModel = formData.get('aiModel');
         const knowledgeBase = formData.get('knowledgeBase');
+        const knowledgeBaseDocuments = formData.get('knowledgeBaseDocuments');
+        const isActive = formData.get('isActive');
+        const defaultFallbackReply = formData.get('defaultFallbackReply');
+        const agentName = formData.get('agentName');
         
-        // Adiciona ao objeto apenas se o campo foi enviado no formulário
         if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = geminiApiKey || null;
         if (formData.has('aiModel')) fieldsToUpdate.ai_model = aiModel;
         if (formData.has('knowledgeBase')) fieldsToUpdate.knowledge_base = knowledgeBase;
+        if (formData.has('agentName')) fieldsToUpdate.name = agentName || 'Meu agente de IA';
+        if (formData.has('knowledgeBaseDocuments')) {
+            try {
+                const parsedDocs = knowledgeBaseDocuments ? JSON.parse(knowledgeBaseDocuments.toString()) : [];
+                fieldsToUpdate.knowledge_base_documents = JSON.stringify(parsedDocs);
+            } catch (error) {
+                console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao parsear documentos da base:', error);
+                return { success: false, error: 'Base de conhecimento inválida.' };
+            }
+        }
+        if (formData.has('isActive')) {
+            const value = typeof isActive === 'string' ? isActive : '';
+            const truthy = value === 'true' || value === 'on' || value === '1';
+            fieldsToUpdate.is_active = truthy;
+        }
+        if (formData.has('defaultFallbackReply')) {
+            fieldsToUpdate.default_fallback_reply = defaultFallbackReply || null;
+        }
         
         const fieldNames = Object.keys(fieldsToUpdate);
         if (fieldNames.length === 0) {
-            return { success: true }; // Nada para atualizar
+            return { success: true };
         }
 
-        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 3}`).join(', ');
+        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 4}`).join(', ');
         const values = fieldNames.map(key => fieldsToUpdate[key]);
 
-        const upsertQuery = `
-            INSERT INTO autopilot_configs (workspace_id, user_id, ${fieldNames.join(', ')})
-            VALUES ($1, $2, ${fieldNames.map((_, i) => `$${i + 3}`).join(', ')})
-            ON CONFLICT (workspace_id, user_id)
-            DO UPDATE SET 
-                ${setClauses},
-                updated_at = NOW()
-            WHERE autopilot_configs.workspace_id = $1 AND autopilot_configs.user_id = $2;
+        const updateQuery = `
+            UPDATE autopilot_configs
+            SET ${setClauses}, updated_at = NOW()
+            WHERE workspace_id = $1 AND user_id = $2 AND id = $3
         `;
         
-        await db.query(upsertQuery, [workspaceId, userId, ...values]);
+        const result = await db.query(updateQuery, [workspaceId, userId, configId, ...values]);
+        if (result.rowCount === 0) {
+            return { success: false, error: 'Agente não encontrado.' };
+        }
         
         revalidatePath('/autopilot');
         return { success: true };
@@ -119,6 +165,60 @@ export async function saveAutopilotConfig(
     } catch (error) {
         console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao salvar configurações:', error);
         return { success: false, error: "Falha ao salvar as configurações no banco de dados." };
+    }
+}
+
+export async function createAutopilotAgent(workspaceId: string, name: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+
+    if (!await isWorkspaceMember(user.id, workspaceId)) {
+        return { success: false, error: 'Acesso não autorizado.' };
+    }
+
+    try {
+        const countRes = await db.query('SELECT COUNT(*)::int AS total FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2', [workspaceId, user.id]);
+        const existingCount = countRes.rows[0]?.total ?? 0;
+        const normalizedName = name?.trim() || `Agente ${existingCount + 1}`;
+        const shouldBePrimary = existingCount === 0;
+
+        const insertRes = await db.query(
+            `INSERT INTO autopilot_configs (workspace_id, user_id, name, is_primary)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id`,
+            [workspaceId, user.id, normalizedName, shouldBePrimary]
+        );
+
+        const newId = insertRes.rows[0]?.id;
+        revalidatePath('/autopilot');
+        return { success: true, id: newId };
+    } catch (error) {
+        console.error('[CREATE_AUTOPILOT_AGENT] Erro ao criar agente:', error);
+        return { success: false, error: 'Falha ao criar agente.' };
+    }
+}
+
+export async function setPrimaryAutopilotAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+
+    try {
+        const agentRes = await db.query('SELECT workspace_id, user_id FROM autopilot_configs WHERE id = $1', [agentId]);
+        if (agentRes.rowCount === 0 || agentRes.rows[0].user_id !== user.id) {
+            return { success: false, error: 'Agente não encontrado.' };
+        }
+        const workspaceId = agentRes.rows[0].workspace_id;
+
+        await db.query('UPDATE autopilot_configs SET is_primary = false WHERE workspace_id = $1 AND user_id = $2', [workspaceId, user.id]);
+        await db.query('UPDATE autopilot_configs SET is_primary = true WHERE id = $1 AND user_id = $2', [agentId, user.id]);
+
+        revalidatePath('/autopilot');
+        return { success: true };
+    } catch (error) {
+        console.error('[SET_PRIMARY_AUTOPILOT_AGENT] Erro:', error);
+        return { success: false, error: 'Não foi possível definir o agente principal.' };
     }
 }
 
