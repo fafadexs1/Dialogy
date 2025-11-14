@@ -110,53 +110,62 @@ export async function saveAutopilotConfig(
     
     try {
         const fieldsToUpdate: { [key: string]: any } = {};
-        const geminiApiKey = formData.get('geminiApiKey');
-        const aiModel = formData.get('aiModel');
-        const knowledgeBase = formData.get('knowledgeBase');
-        const knowledgeBaseDocuments = formData.get('knowledgeBaseDocuments');
-        const isActive = formData.get('isActive');
-        const defaultFallbackReply = formData.get('defaultFallbackReply');
-        const agentName = formData.get('agentName');
-        
-        if (formData.has('geminiApiKey')) fieldsToUpdate.gemini_api_key = geminiApiKey || null;
-        if (formData.has('aiModel')) fieldsToUpdate.ai_model = aiModel;
-        if (formData.has('knowledgeBase')) fieldsToUpdate.knowledge_base = knowledgeBase;
-        if (formData.has('agentName')) fieldsToUpdate.name = agentName || 'Meu agente de IA';
+        const setClauses: string[] = [];
+        const values: any[] = [];
+        let valueIndex = 4; // Start index for parameterized query, after workspaceId, userId, configId
+
+        if (formData.has('geminiApiKey')) {
+            setClauses.push(`gemini_api_key = $${valueIndex++}`);
+            values.push(formData.get('geminiApiKey') || null);
+        }
+        if (formData.has('aiModel')) {
+            setClauses.push(`ai_model = $${valueIndex++}`);
+            values.push(formData.get('aiModel'));
+        }
+        if (formData.has('knowledgeBase')) {
+            setClauses.push(`knowledge_base = $${valueIndex++}`);
+            values.push(formData.get('knowledgeBase'));
+        }
+        if (formData.has('agentName')) {
+            setClauses.push(`name = $${valueIndex++}`);
+            values.push(formData.get('agentName') || 'Meu agente de IA');
+        }
         if (formData.has('knowledgeBaseDocuments')) {
             try {
-                const parsedDocs = knowledgeBaseDocuments ? JSON.parse(knowledgeBaseDocuments.toString()) : [];
-                fieldsToUpdate.knowledge_base_documents = JSON.stringify(parsedDocs);
+                const parsedDocs = formData.get('knowledgeBaseDocuments') ? JSON.parse(formData.get('knowledgeBaseDocuments')!.toString()) : [];
+                setClauses.push(`knowledge_base_documents = $${valueIndex++}`);
+                values.push(JSON.stringify(parsedDocs));
             } catch (error) {
                 console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao parsear documentos da base:', error);
                 return { success: false, error: 'Base de conhecimento inválida.' };
             }
         }
         if (formData.has('isActive')) {
+            const isActive = formData.get('isActive');
             const value = typeof isActive === 'string' ? isActive : '';
             const truthy = value === 'true' || value === 'on' || value === '1';
-            fieldsToUpdate.is_active = truthy;
+            setClauses.push(`is_active = $${valueIndex++}`);
+            values.push(truthy);
         }
         if (formData.has('defaultFallbackReply')) {
-            fieldsToUpdate.default_fallback_reply = defaultFallbackReply || null;
+            setClauses.push(`default_fallback_reply = $${valueIndex++}`);
+            values.push(formData.get('defaultFallbackReply') || null);
         }
         
-        const fieldNames = Object.keys(fieldsToUpdate);
-        if (fieldNames.length === 0) {
-            return { success: true };
+        if (setClauses.length === 0) {
+            return { success: true }; // Nothing to update
         }
-
-        const setClauses = fieldNames.map((key, index) => `${key} = $${index + 4}`).join(', ');
-        const values = fieldNames.map(key => fieldsToUpdate[key]);
 
         const updateQuery = `
             UPDATE autopilot_configs
-            SET ${setClauses}, updated_at = NOW()
+            SET ${setClauses.join(', ')}, updated_at = NOW()
             WHERE workspace_id = $1 AND user_id = $2 AND id = $3
         `;
         
         const result = await db.query(updateQuery, [workspaceId, userId, configId, ...values]);
+        
         if (result.rowCount === 0) {
-            return { success: false, error: 'Agente não encontrado.' };
+            return { success: false, error: 'Agente não encontrado ou nenhuma alteração foi feita.' };
         }
         
         revalidatePath('/autopilot');
