@@ -8,15 +8,33 @@ import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 
 /**
- * DEPRECATED: This function is no longer used. Presence is handled by Supabase Realtime.
+ * Persist workspace-level presence so that server-side flows (e.g., load-balancing)
+ * can reason about which agents are currently online.
  */
-export async function updateUserOnlineStatus(userId: string, isOnline: boolean): Promise<void> {
+export async function updateUserOnlineStatus(userId: string, workspaceId: string, isOnline: boolean): Promise<void> {
+    if (!userId || !workspaceId) {
+        console.warn('[UPDATE_USER_STATUS] Missing userId or workspaceId.');
+        return;
+    }
+
     try {
-        // This function is kept to avoid breaking changes if old clients still call it, but it does nothing.
-        console.warn(`[DEPRECATED] updateUserOnlineStatus foi chamada para o usuário ${userId}, mas esta função foi descontinuada.`);
+        await db.query(
+            `
+            INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
+            VALUES ($1, $2, $3, CASE WHEN $3 THEN NOW() ELSE NULL END, NOW())
+            ON CONFLICT (user_id, workspace_id)
+            DO UPDATE SET
+                is_online = EXCLUDED.is_online,
+                online_since = CASE
+                    WHEN EXCLUDED.is_online THEN COALESCE(user_workspace_presence.online_since, NOW())
+                    ELSE NULL
+                END,
+                last_seen = NOW();
+            `,
+            [userId, workspaceId, isOnline]
+        );
     } catch (error) {
         console.error(`[UPDATE_USER_STATUS] Failed to update online status for user ${userId}:`, error);
-        // Do not throw an error, as this is often a background task.
     }
 }
 
@@ -26,12 +44,38 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
         console.error('[GET_ONLINE_AGENTS] Workspace ID não fornecido.');
         return [];
     }
-    
-    // NOTE: This function no longer gets online status from the database.
-    // It is kept for compatibility but will likely be deprecated.
-    // Presence is now handled in real-time by the client via Supabase channels.
-    // We will return an empty array as the client will populate this itself.
-    return [];
+
+    try {
+        const res = await db.query(
+            `
+            SELECT
+                u.id,
+                u.full_name,
+                u.avatar_url,
+                u.email,
+                uwp.online_since
+            FROM user_workspace_presence uwp
+            JOIN users u ON u.id = uwp.user_id
+            WHERE uwp.workspace_id = $1 AND uwp.is_online = TRUE
+            `,
+            [workspaceId]
+        );
+
+        return res.rows.map((row): OnlineAgent => ({
+            user: {
+                id: row.id,
+                name: row.full_name,
+                email: row.email,
+                avatar_url: row.avatar_url,
+                firstName: row.full_name?.split(' ')[0] ?? row.full_name,
+                lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
+            },
+            joined_at: row.online_since ?? new Date().toISOString(),
+        }));
+    } catch (error) {
+        console.error('[GET_ONLINE_AGENTS] Error fetching presence data:', error);
+        return [];
+    }
 }
 
 export async function updateUserProfile(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {

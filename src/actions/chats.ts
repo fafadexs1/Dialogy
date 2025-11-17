@@ -127,8 +127,11 @@ export async function transferChatAction(
                 FROM users u
                 JOIN team_members tm ON u.id = tm.user_id
                 JOIN teams t ON tm.team_id = t.id
+                JOIN user_workspace_presence uwp
+                    ON uwp.user_id = u.id
+                    AND uwp.workspace_id = t.workspace_id
                 LEFT JOIN chats c ON u.id = c.agent_id
-                WHERE tm.team_id = $1 AND u.online = TRUE
+                WHERE tm.team_id = $1 AND uwp.is_online = TRUE
                 GROUP BY u.id, t.name
                 ORDER BY "lastAssigned" ASC NULLS FIRST, random()
                 LIMIT 1;
@@ -136,7 +139,7 @@ export async function transferChatAction(
 
             if (agentRes.rows.length === 0) {
                 await client.query('ROLLBACK');
-                return { success: false, error: "Nenhum agente online disponível nesta equipe no momento." };
+                return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
             }
             finalAgentId = agentRes.rows[0].agentId;
             transferTargetName = agentRes.rows[0].teamName;

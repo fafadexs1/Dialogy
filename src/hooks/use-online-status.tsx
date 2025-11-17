@@ -15,6 +15,23 @@ export const usePresence = () => {
 export const PresenceProvider = ({ children }: { children: ReactNode }) => {
   const [localUser, setLocalUser] = useState<User | null>(null);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
+  const updateServerPresence = useCallback(
+    async (isOnline: boolean) => {
+        if (!localUser?.activeWorkspaceId) return;
+
+        try {
+            await fetch('/api/users/online-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ workspaceId: localUser.activeWorkspaceId, isOnline }),
+                keepalive: !isOnline, // keep the offline request alive during tab close
+            });
+        } catch (error) {
+            console.error('PresenceProvider: Failed to persist presence state.', error);
+        }
+    },
+    [localUser?.activeWorkspaceId]
+  );
 
   useEffect(() => {
     // This effect runs once to get the initial local user data.
@@ -83,6 +100,7 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
             avatar: localUser.avatar,
           };
           await channel.track(presencePayload);
+          void updateServerPresence(true);
         }
       });
 
@@ -90,8 +108,28 @@ export const PresenceProvider = ({ children }: { children: ReactNode }) => {
         // Cleanup: leave the channel when the component unmounts.
         channel.untrack();
         supabase.removeChannel(channel);
+        void updateServerPresence(false);
     };
-  }, [localUser]);
+  }, [localUser, updateServerPresence]);
+
+  useEffect(() => {
+    if (!localUser?.id || !localUser.activeWorkspaceId) return;
+
+    const handleBeforeUnload = () => {
+        try {
+            const payload = JSON.stringify({
+                userId: localUser.id,
+                workspaceId: localUser.activeWorkspaceId,
+            });
+            navigator.sendBeacon('/api/users/online', payload);
+        } catch (error) {
+            console.error('PresenceProvider: Failed to enqueue offline beacon.', error);
+        }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [localUser?.id, localUser?.activeWorkspaceId]);
 
 
   return (

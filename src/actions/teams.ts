@@ -307,7 +307,6 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
     }
 
     try {
-        // This query no longer checks the 'online' column
         const res = await db.query(`
             SELECT 
                 t.id, 
@@ -315,7 +314,14 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
                 t.color, 
                 t.role_id,
                 t.tag_id,
-                (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) as "membersCount"
+                COALESCE((
+                    SELECT COUNT(*)
+                    FROM team_members tm
+                    JOIN user_workspace_presence uwp
+                        ON tm.user_id = uwp.user_id
+                        AND uwp.workspace_id = t.workspace_id
+                    WHERE tm.team_id = t.id AND uwp.is_online = TRUE
+                ), 0) as "membersCount"
             FROM teams t
             WHERE t.workspace_id = $1
             GROUP BY t.id
@@ -328,8 +334,6 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
             color: row.color,
             roleId: row.role_id,
             tagId: row.tag_id,
-            // The online member count will be determined on the client-side using presence.
-            // We can return total members for now.
             onlineMembersCount: parseInt(row.membersCount, 10) || 0,
         }));
 

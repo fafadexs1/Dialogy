@@ -34,9 +34,11 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
                 r.id as role_id,
                 r.name as role_name,
                 uwr.created_at,
-                t.name as team_name
+                t.name as team_name,
+                COALESCE(uwp.is_online, FALSE) as is_online
             FROM users u
             JOIN user_workspace_roles uwr ON u.id = uwr.user_id
+            LEFT JOIN user_workspace_presence uwp ON uwp.user_id = u.id AND uwp.workspace_id = uwr.workspace_id
             LEFT JOIN roles r ON uwr.role_id = r.id
             LEFT JOIN team_members tm ON u.id = tm.user_id
             LEFT JOIN teams t ON tm.team_id = t.id AND t.workspace_id = uwr.workspace_id
@@ -49,7 +51,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
             name: row.full_name,
             email: row.email,
             avatar: row.avatar_url,
-            online: false, // This will be handled by the real-time presence system on the client
+            online: row.is_online,
             roleId: row.role_id,
             role: row.role_name || 'N/A',
             team: row.team_name || 'Nenhuma',
