@@ -228,14 +228,14 @@ export async function closeChatAction(
     try {
         await client.query('BEGIN');
 
-        const chatRes = await client.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
+        const chatRes = await client.query('SELECT workspace_id, tag as current_tag, color as current_color FROM chats WHERE id = $1', [chatId]);
         if(chatRes.rowCount === 0) {
             await client.query('ROLLBACK');
             return { success: false, error: 'Chat não encontrado.'};
         }
-        const { workspace_id } = chatRes.rows[0];
+        const { workspace_id, current_tag, current_color } = chatRes.rows[0];
 
-        let tagInfo = { label: null, color: null };
+        let tagInfo = { label: null as string | null, color: null as string | null };
         if (reasonTagId) {
             const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
             if (tagRes.rowCount > 0) {
@@ -252,7 +252,12 @@ export async function closeChatAction(
                 tag = $2,
                 color = $3
              WHERE id = $4`,
-            [reasonTagId, tagInfo.label, tagInfo.color, chatId]
+            [
+                reasonTagId,
+                tagInfo.label ?? current_tag ?? '',
+                tagInfo.color ?? current_color ?? '',
+                chatId
+            ]
         );
         
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;

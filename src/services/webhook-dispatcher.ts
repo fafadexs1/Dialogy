@@ -120,7 +120,7 @@ export async function dispatchMessageToWebhooks(
             type: message.type,
             from_me: !!message.from_me,
             created_at: message.createdAt,
-            metadata: message.metadata || {},
+            metadata: message.metadata ?? {},
         },
     };
 

@@ -248,9 +248,9 @@ async function handleMessagesUpsert(payload: any) {
                 api_message_status, raw_payload
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
             [
-                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata), key.id, sender,
+                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata ?? {}), key.id, sender,
                 instanceName, data.source, key.fromMe,
-                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload)
+                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload ?? {})
             ]
         );
 

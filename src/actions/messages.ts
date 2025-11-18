@@ -101,7 +101,7 @@ async function internalSendMessage(
             [
                 workspaceId, chatId, 'text', content, true,
                 apiResponse?.key?.id, 'SENT', instanceName,
-                metadata || null, true, senderId, tabId
+                metadata ?? {}, true, senderId, tabId
             ]
         );
         
@@ -205,7 +205,7 @@ async function internalSendMedia(
             const messageDetails = apiResponse.message?.[messageTypeKey] as any;
             
             const dbMetadata: MessageMetadata = {
-                ...(metadata || {}),
+                ...(metadata ?? {}),
                 mediaUrl: apiResponse?.message?.mediaUrl,
                 fileName: messageDetails?.fileName || file.filename,
                 mimetype: messageDetails?.mimetype || file.mimetype,
