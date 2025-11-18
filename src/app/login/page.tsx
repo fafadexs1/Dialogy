@@ -6,9 +6,9 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 
 interface LoginPageProps {
-  searchParams: {
+  searchParams: Promise<{
     registered?: string;
-  };
+  }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -21,7 +21,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     redirect('/inbox');
   }
 
-  const isRegistered = searchParams?.registered === 'true';
+  const resolvedSearchParams = await searchParams;
+  const isRegistered = resolvedSearchParams?.registered === 'true';
 
   return (
     <div className="h-screen w-full flex bg-gray-100">

@@ -1,5 +1,3 @@
-'use server';
-
 type Task<T> = () => Promise<T>;
 
 export interface QueueStats {
@@ -63,7 +61,7 @@ declare global {
   var __evolutionWebhookQueue: TaskQueue | undefined;
 }
 
-const defaultConcurrency = Number(process.env.EVOLUTION_WEBHOOK_CONCURRENCY ?? 10);
+const defaultConcurrency = Number(process.env.EVOLUTION_WEBHOOK_CONCURRENCY ?? 100);
 
 const evolutionQueue =
   globalThis.__evolutionWebhookQueue ?? new TaskQueue(Math.max(defaultConcurrency, 1));
