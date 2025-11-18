@@ -1,12 +1,12 @@
-'use client';
+﻿'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, Message, User, Tag, Contact, MessageMetadata } from '@/lib/types';
+import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
-import { getChatsAndMessages } from '@/actions/chats';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -19,9 +19,10 @@ import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
+import { useInboxStore } from '@/hooks/use-inbox-store';
 
 // Base64 encoded, short, and browser-safe notification sound
-const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgவனின்';
+const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgà®µà®©à®¿à®©à¯';
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
 function LoadingSkeleton() {
@@ -57,11 +58,9 @@ function LoadingSkeleton() {
 }
 
 
+
 export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
   const router = useRouter();
-  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,9 +68,29 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
 
+  const chats = useInboxStore((state) => state.chats);
+  const selectedChatId = useInboxStore((state) => state.selectedChatId);
+  const messagesByChat = useInboxStore((state) => state.messagesByChat);
+  const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
+  const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
+  const setInitialData = useInboxStore((state) => state.setInitialData);
+  const setSelectedChatId = useInboxStore((state) => state.setSelectedChatId);
+  const upsertChats = useInboxStore((state) => state.upsertChats);
+  const setMessagesForChat = useInboxStore((state) => state.setMessagesForChat);
+  const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
+  const prependMessagesToChat = useInboxStore((state) => state.prependMessagesToChat);
+  const updateChatContact = useInboxStore((state) => state.updateChatContact);
+  const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
+  const incrementUnread = useInboxStore((state) => state.incrementUnread);
+  const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+
   const selectedChatIdRef = useRef<string | null>(initialChatId);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const tabIdRef = useRef<string>(''); // Ref to hold the unique tab ID
+  const tabIdRef = useRef<string>('');
+
+  useEffect(() => {
+    useInboxStore.getState().reset();
+  }, []);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
@@ -94,88 +113,296 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     replaceChatPath(chatId);
   }, []);
 
-  const currentChatMessages = selectedChat ? messagesByChat[selectedChat.id] || [] : [];
-  
-  const fetchData = useCallback(async (isInitial = false) => {
-    if (!initialUser?.activeWorkspaceId) {
-      if (isInitial) {
-        setFetchError("Usuário ou workspace não encontrado.");
-        setIsLoading(false);
-      }
-      return;
-    };
+  const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId]);
+  const currentChatMessages = selectedChatId ? messagesByChat[selectedChatId] || [] : [];
+  const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
+  const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
 
-    if (isInitial) {
-        setIsLoading(true);
-        setFetchError(null);
-    }
+  const formatMessageDay = useCallback((date: Date) => {
+    const zonedDate = toZonedTime(date, workspaceTimezone);
+    if (isToday(zonedDate)) return 'Hoje';
+    if (isYesterday(zonedDate)) return 'Ontem';
+    return formatDate(zonedDate, 'dd/MM/yyyy', { locale: ptBR });
+  }, [workspaceTimezone]);
 
+  const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {
+    const data = payload.new as any;
+    if (!data) return null;
     try {
-        const { chats: fetchedChats, messagesByChat: fetchedMessagesByChat, timezone, error } = await getChatsAndMessages(initialUser.activeWorkspaceId);
-
-        if (error) throw new Error(error);
-
-        setChats(fetchedChats || []);
-        setMessagesByChat(fetchedMessagesByChat || {});
-        if (timezone) {
-            setWorkspaceTimezone(timezone);
+      const createdAt = new Date(data.created_at);
+      const zoned = toZonedTime(createdAt, workspaceTimezone);
+      const timestamp = formatInTimeZone(zoned, 'HH:mm', { locale: ptBR, timeZone: workspaceTimezone });
+      const formattedDate = formatMessageDay(createdAt);
+      let metadata;
+      if (data.metadata) {
+        metadata = typeof data.metadata === 'object' ? data.metadata : JSON.parse(data.metadata);
+      }
+      const chat = chats.find((c) => c.id === data.chat_id);
+      let sender = undefined;
+      if (data.from_me) {
+        if (chat?.agent) {
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url, type: 'user' };
+        } else if (initialUser) {
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url, type: 'user' };
         }
-        
-        const currentSelectedId = selectedChatIdRef.current;
-        if (currentSelectedId) {
-            const updatedSelectedChat = (fetchedChats || []).find(c => c.id === currentSelectedId);
-            setSelectedChat(updatedSelectedChat || null);
-        } else if ((fetchedChats || []).length > 0 && !currentSelectedId) {
-            // If no chat is selected, but we have chats, select the first one.
-            const firstChat = fetchedChats[0];
-            setSelectedChat(firstChat);
-            selectedChatIdRef.current = firstChat.id;
-        }
-
-        
-        setFetchError(null);
-        
-    } catch(e: any) {
-        console.error("Failed to fetch chat data", e);
-        const errorMessage = e.message || "Não foi possível buscar os dados do chat.";
-        if (isInitial) {
-            toast({ title: "Erro ao carregar conversas", description: errorMessage, variant: "destructive" });
-            setFetchError(errorMessage);
-        }
-    } finally {
-        if(isInitial) setIsLoading(false);
+      } else if (chat?.contact) {
+        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url, type: 'contact' };
+      }
+      return {
+        id: data.id,
+        chat_id: data.chat_id,
+        workspace_id: data.workspace_id,
+        content: data.content || '',
+        type: data.type,
+        status: data.content === 'Mensagem apagada' ? 'deleted' : 'default',
+        metadata,
+        transcription: data.transcription,
+        timestamp,
+        createdAt: createdAt.toISOString(),
+        updatedAt: data.updated_at ? new Date(data.updated_at).toISOString() : createdAt.toISOString(),
+        formattedDate,
+        sender,
+        instance_name: data.instance_name,
+        source_from_api: data.source_from_api,
+        api_message_status: data.api_message_status,
+        message_id_from_api: data.message_id_from_api,
+        from_me: data.from_me,
+        is_read: data.is_read,
+        sentByTab: data.sent_by_tab ?? null,
+      };
+    } catch (error) {
+      console.error('[REALTIME] Failed to parse payload', error);
+      return null;
     }
-  }, [initialUser?.activeWorkspaceId]);
+  }, [chats, formatMessageDay, workspaceTimezone, initialUser]);
 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
     if (isSoundEnabled && audioRef.current) {
-        audioRef.current.play().catch(e => console.error("Error playing notification sound:", e));
+        audioRef.current.play().catch(e => console.error('Error playing notification sound:', e));
     }
   }, []);
-  
+
+  const handleRealtimeMessage = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
+    const message = mapRealtimePayload(payload);
+    if (!message) return;
+    appendMessagesToChat(message.chat_id, [message], message.updatedAt);
+    if (message.sentByTab && message.sentByTab === tabIdRef.current) {
+      removeMessagesForChat(message.chat_id, (m) => m.optimistic && m.sentByTab === message.sentByTab);
+    }
+    if (!message.from_me) {
+      if (message.chat_id !== selectedChatId) {
+        incrementUnread(message.chat_id);
+      }
+      if (document.visibilityState !== 'visible') {
+        playNotificationSound();
+      }
+    }
+  }, [appendMessagesToChat, incrementUnread, mapRealtimePayload, playNotificationSound, selectedChatId, removeMessagesForChat]);
+
+  const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
+    try {
+      const result = await getChatMessagesWindow({ chatId, before: before ?? undefined });
+      if (result.error) throw new Error(result.error);
+      if (before) {
+        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
+      } else {
+        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.hasMoreHistory);
+      }
+      if (result.contact) {
+        updateChatContact(result.contact);
+      }
+    } catch (error: any) {
+      console.error('[LOAD_MESSAGES] Error:', error);
+      toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
+    }
+  }, [prependMessagesToChat, setMessagesForChat, updateChatContact]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedChatId) return;
+    const before = oldestLoadedMessageDate;
+    if (!before) return;
+    await loadChatMessages(selectedChatId, before);
+  }, [loadChatMessages, oldestLoadedMessageDate, selectedChatId]);
+
+  const ensureMessagesForChat = useCallback(async (chatId: string) => {
+    const currentMessages = useInboxStore.getState().messagesByChat[chatId];
+    if (currentMessages && currentMessages.length) return;
+    await loadChatMessages(chatId);
+  }, [loadChatMessages]);
+
   const handleSetSelectedChat = useCallback((chat: Chat) => {
     selectedChatIdRef.current = chat.id;
-    setSelectedChat(chat);
+    setSelectedChatId(chat.id);
     setShowFullHistory(false);
     updateSelectedChatPath(chat.id);
-  }, [updateSelectedChatPath]);
+    void ensureMessagesForChat(chat.id);
+  }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
 
-  // Effect to establish the Broadcast Channel for cross-tab communication
+  const initializeInbox = useCallback(async () => {
+    if (!initialUser?.activeWorkspaceId) {
+      setFetchError('Usuário ou workspace não encontrado.');
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const result = await getInitialChatsData({
+        workspaceId: initialUser.activeWorkspaceId,
+        selectedChatId: initialChatId,
+      });
+      if (result.error) throw new Error(result.error);
+      setWorkspaceTimezone(result.timezone || FALLBACK_TIMEZONE);
+      setInitialData({
+        chats: result.chats,
+        selectedChatId: result.selectedChatId,
+        messages: result.messages,
+        lastSyncChats: result.lastSyncChats,
+        lastSyncMessageForSelected: result.lastSyncMessageForSelected,
+        oldestMessageDate: result.oldestMessageDate,
+        hasMoreHistory: result.hasMoreHistory,
+      });
+      if (result.selectedChatId) {
+        selectedChatIdRef.current = result.selectedChatId;
+        updateSelectedChatPath(result.selectedChatId);
+      } else {
+        updateSelectedChatPath(null);
+      }
+    } catch (error: any) {
+      console.error('[INITIAL_CHATS] Error:', error);
+      const message = error.message || 'Não foi possível buscar os dados do chat.';
+      toast({ title: 'Erro ao carregar conversas', description: message, variant: 'destructive' });
+      setFetchError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath]);
+
+  const runDeltaSync = useCallback(async () => {
+    if (!initialUser?.activeWorkspaceId) return;
+    const snapshot = useInboxStore.getState();
+    try {
+      const result = await syncInboxData({
+        workspaceId: initialUser.activeWorkspaceId,
+        lastSyncChats: snapshot.lastSyncChats,
+        chatId: snapshot.selectedChatId,
+        lastSyncMessages: snapshot.selectedChatId ? snapshot.lastSyncMessages[snapshot.selectedChatId] ?? null : null,
+      });
+      if (result.error) {
+        console.error('[SYNC_INBOX] Error:', result.error);
+        return;
+      }
+      upsertChats(result.deltaChats, result.lastSyncChats);
+      if (result.updatedContacts.length) {
+        result.updatedContacts.forEach((contact) => updateChatContact(contact));
+      }
+      if (result.deltaMessages.length && snapshot.selectedChatId) {
+        appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
+      }
+    } catch (error) {
+      console.error('[SYNC_INBOX] Unexpected error:', error);
+    }
+  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
+
+  const notifyPeers = useCallback(() => {
+    if (!broadcastChannel) return;
+    broadcastChannel.postMessage({ type: 'DELTA_SYNC', sourceTabId: tabIdRef.current });
+  }, [broadcastChannel]);
+
+  const handleDataMutation = useCallback(async () => {
+    await runDeltaSync();
+    notifyPeers();
+  }, [notifyPeers, runDeltaSync]);
+
+  useEffect(() => {
+    if (initialUser) {
+      initializeInbox();
+    } else {
+      setIsLoading(false);
+    }
+  }, [initialUser, initializeInbox]);
+
+  useEffect(() => {
+    if (selectedChatId) {
+      selectedChatIdRef.current = selectedChatId;
+    }
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const supabase = createClient();
+    if ((window as any).__SCHEMA_DB_CHANNEL__) return;
+
+    const schemaChannel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => console.log('[SCHEMA DB CHANGE]', payload)
+      )
+      .subscribe((status) => console.info('[SCHEMA DB CHANGE] status:', status));
+
+    (window as any).__SCHEMA_DB_CHANNEL__ = schemaChannel;
+    return () => {
+      if ((window as any).__SCHEMA_DB_CHANNEL__) {
+        supabase.removeChannel((window as any).__SCHEMA_DB_CHANNEL__);
+        delete (window as any).__SCHEMA_DB_CHANNEL__;
+      }
+    };
+  }, []);
+
+  const realtimeChannelRef = useRef<any>(null);
+  const subscribedChatRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+    if (!selectedChatId) return;
+
+    if (subscribedChatRef.current === selectedChatId && realtimeChannelRef.current) {
+      return;
+    }
+
+    const supabase = createClient();
+    const channelName = `realtime-messages-${selectedChatId}`;
+
+    if (realtimeChannelRef.current) {
+      console.info(`[REALTIME] Removing channel ${realtimeChannelRef.current.topic}`);
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
+
+    console.info(`[REALTIME] Subscribing to channel ${channelName}`);
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${selectedChatId}` }, handleRealtimeMessage)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${selectedChatId}` }, handleRealtimeMessage)
+      .subscribe((status) => {
+        console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
+      });
+
+    realtimeChannelRef.current = channel;
+    subscribedChatRef.current = selectedChatId;
+
+    return () => {
+      if (realtimeChannelRef.current?.topic === channelName) {
+        console.info(`[REALTIME] Removing channel ${channelName}`);
+        supabase.removeChannel(channel);
+        realtimeChannelRef.current = null;
+        subscribedChatRef.current = null;
+      }
+    };
+  }, [handleRealtimeMessage, initialUser?.activeWorkspaceId, selectedChatId]);
+
   useEffect(() => {
     const channel = new BroadcastChannel('chat-updates');
     setBroadcastChannel(channel);
 
     const handleMessage = (event: MessageEvent) => {
-        const { type, payload, sourceTabId } = event.data;
-        
+        const { type, sourceTabId } = event.data || {};
         if (sourceTabId === tabIdRef.current) return;
-        
-        console.log(`[BROADCAST] Event '${type}' received from another tab.`, payload);
-        switch(type) {
-            case 'REFETCH':
-                fetchData();
-                break;
+        if (type === 'DELTA_SYNC') {
+            runDeltaSync();
         }
     };
 
@@ -185,219 +412,69 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       channel.removeEventListener('message', handleMessage);
       channel.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  
+  }, [runDeltaSync]);
+
   useEffect(() => {
-    if (initialUser) {
-      fetchData(true);
-    } else {
-      setIsLoading(false);
-    }
-  }, [initialUser, fetchData]);
-
-  // Polling mechanism as requested
-  useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-
-    let isStopped = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const scheduleNextTick = () => {
-        if (isStopped) return;
-        timeoutId = setTimeout(runPoll, 1000);
-    };
-
-    const runPoll = async () => {
-        if (isStopped) return;
-        try {
-            await fetchData();
-        } finally {
-            scheduleNextTick();
-        }
-    };
-
-    runPoll();
-
-    return () => {
-        isStopped = true;
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-        }
-    };
-  }, [initialUser?.activeWorkspaceId, fetchData]);
-
-
-  const handleNewMessage = useCallback((newMessage: Message) => {
-    setMessagesByChat(prevMessagesByChat => {
-        const chatMessages = prevMessagesByChat[newMessage.chat_id] || [];
-        if (chatMessages.some(m => m.id === newMessage.id)) {
-            return prevMessagesByChat; // Avoid duplicates
-        }
-        return {
-            ...prevMessagesByChat,
-            [newMessage.chat_id]: [...chatMessages, newMessage]
-        };
-    });
-
-    setChats(prevChats => {
-        const chatIndex = prevChats.findIndex(c => c.id === newMessage.chat_id);
-        if (chatIndex === -1) {
-            // If chat doesn't exist, we might need to fetch it.
-            // For now, let's log this case. A full refetch might be necessary here.
-            console.warn(`[REALTIME] Received message for a chat not in the current list: ${newMessage.chat_id}. Refetching data.`);
-            fetchData();
-            return prevChats;
-        }
-
-        const chatToUpdate = { ...prevChats[chatIndex] };
-        chatToUpdate.messages = [...(chatToUpdate.messages || []), newMessage];
-        
-        // Update unread count if the message is not from the current user
-        if (!newMessage.from_me) {
-            chatToUpdate.unreadCount = (chatToUpdate.unreadCount || 0) + 1;
-        }
-        
-        // Move chat to the top
-        const otherChats = prevChats.filter(c => c.id !== newMessage.chat_id);
-        return [chatToUpdate, ...otherChats];
-    });
-
-    if (!newMessage.from_me && document.visibilityState !== 'visible') {
-        playNotificationSound();
-    }
-  }, [playNotificationSound, fetchData]);
-
- const handleChatUpdate = useCallback((updatedChatData: Partial<Chat> & { id: string }) => {
-    setChats(prevChats => {
-        return prevChats.map(chat => {
-            if (chat.id === updatedChatData.id) {
-                // Merge new data, ensuring messages are handled correctly
-                const existingMessages = chat.messages || [];
-                return { ...chat, ...updatedChatData, messages: existingMessages };
+    if (initialUser?.activeWorkspaceId){
+        getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+            if (!tagsResult.error && tagsResult.tags) {
+                setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
             }
-            return chat;
         });
-    });
-}, []);
-
-
-const handleContactUpdate = useCallback((updatedContact: Contact) => {
-    setChats(prevChats => {
-        return prevChats.map(chat => {
-            if (chat.contact.id === updatedContact.id) {
-                return { ...chat, contact: updatedContact };
-            }
-            return chat;
-        });
-    });
-}, []);
-
-  useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-
-    const supabase = createClient();
-    // Use a single channel for all related tables
-    const channelName = `realtime-updates-${initialUser.activeWorkspaceId}`;
-    const channel = supabase.channel(channelName);
-
-    const handleChanges = (payload: RealtimePostgresChangesPayload<any>) => {
-      console.log('[REALTIME] Change received:', payload);
-
-      if (payload.errors) {
-        console.error('[REALTIME] Error:', payload.errors);
-        return;
-      }
-
-      switch(payload.table) {
-        case 'messages':
-          if (payload.eventType === 'INSERT') {
-            handleNewMessage(payload.new as Message);
-          }
-          break;
-        case 'chats':
-          if (payload.eventType === 'UPDATE') {
-             handleChatUpdate(payload.new as Chat);
-          }
-          break;
-        case 'contacts':
-           if (payload.eventType === 'UPDATE') {
-             handleContactUpdate(payload.new as Contact);
-          }
-          break;
-      }
-    };
-
-    channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, handleChanges)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, handleChanges)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, handleChanges)
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`[REALTIME] Subscribed to channel: ${channelName}`);
-        }
-      });
-      
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[VISIBILITY] Tab is visible again, re-fetching data to ensure sync.');
-        fetchData();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      supabase.removeChannel(channel);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [initialUser?.activeWorkspaceId, handleNewMessage, handleChatUpdate, handleContactUpdate, fetchData]);
-
-
-  useEffect(() => {
-      if(initialUser?.activeWorkspaceId){
-          getTags(initialUser.activeWorkspaceId).then(tagsResult => {
-              if (!tagsResult.error && tagsResult.tags) {
-                  setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
-              }
-          });
-      }
+    }
   }, [initialUser?.activeWorkspaceId]);
 
-  // Effect to mark messages as read
   useEffect(() => {
-    if (!selectedChat || !currentChatMessages.length || !document.hasFocus()) return;
+    if (!initialUser?.activeWorkspaceId) return;
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runDeltaSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+    let stopped = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async () => {
+      if (stopped) return;
+      await runDeltaSync();
+      if (!stopped) {
+        timeoutId = setTimeout(tick, 7000);
+      }
+    };
+
+    timeoutId = setTimeout(tick, 7000);
+
+    return () => {
+      stopped = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
+  useEffect(() => {
+    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
 
     if (hasUnread) {
-        console.log(`[MARK_AS_READ] Marking messages as read for chat ${selectedChat.id}.`);
+        markChatAsReadInStore(selectedChatId);
 
-        setChats(prevChats => prevChats.map(c => 
-            c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c
-        ));
-        
-        setMessagesByChat(prevMessages => {
-            const updatedMessages = { ...prevMessages };
-            if (updatedMessages[selectedChat.id]) {
-                updatedMessages[selectedChat.id] = updatedMessages[selectedChat.id].map(m => 
-                    !m.from_me ? { ...m, is_read: true } : m
-                );
-            }
-            return updatedMessages;
-        });
-        
-        // Fire-and-forget the update to the server. The UI is already updated optimistically.
         fetch('/api/chats/mark-as-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chatId: selectedChat.id })
+            body: JSON.stringify({ chatId: selectedChatId })
         }).catch(() => {
-            console.error("Failed to mark messages as read on the server. Data will sync on next fetch.");
+            console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
         });
     }
-  }, [selectedChat, currentChatMessages]);
-  
+  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+
   if (!initialUser) {
     return <LoadingSkeleton />;
   }
@@ -416,7 +493,7 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
                     Não foi possível carregar os dados das conversas. Por favor, verifique o console do servidor para mais detalhes.
                     <p className="mt-2 text-xs font-mono p-2 bg-secondary rounded">Detalhe: {fetchError}</p>
                 </AlertDescription>
-                 <Button onClick={() => fetchData(true)} className="mt-4">
+                 <Button onClick={() => initializeInbox()} className="mt-4">
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Tentar Novamente
                 </Button>
@@ -436,26 +513,28 @@ const handleContactUpdate = useCallback((updatedContact: Contact) => {
       <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
       <ChatList
         chats={chats}
-        selectedChat={selectedChat}
+        selectedChat={enrichedSelectedChat}
         setSelectedChat={handleSetSelectedChat}
         currentUser={initialUser}
-        onUpdate={() => fetchData()}
+        onUpdate={handleDataMutation}
       />
       <ChatPanel
         key={selectedChat?.id}
         chat={enrichedSelectedChat}
         currentUser={initialUser}
-        onActionSuccess={() => fetchData()}
+        onActionSuccess={handleDataMutation}
         closeReasons={closeReasons}
         showFullHistory={showFullHistory}
         setShowFullHistory={setShowFullHistory}
         tabId={tabIdRef.current}
+        onLoadOlderMessages={loadOlderMessages}
+        canLoadOlder={hasMoreHistory}
       />
       <ContactPanel
         chat={enrichedSelectedChat}
         currentUser={initialUser}
-        onTransferSuccess={() => fetchData()}
-        onContactUpdate={() => fetchData()}
+        onTransferSuccess={handleDataMutation}
+        onContactUpdate={handleDataMutation}
       />
     </div>
   );

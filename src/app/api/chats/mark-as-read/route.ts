@@ -133,12 +133,37 @@ async function sendReceiptToWhatsApp(
             id: messagesToMark.map(m => m.id),
         }
     };
-    
-    await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-    });
-    console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
+
+    try {
+        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+        console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
+        return;
+    } catch (error: any) {
+        const message = error?.message || '';
+        const shouldRetry =
+            typeof message === 'string' &&
+            (message.includes('404') || message.includes('Not Found') || message.includes('Cannot POST /chat/sendRead'));
+
+        if (!shouldRetry) {
+            throw error;
+        }
+
+        const fallbackPayload = {
+            ...payload,
+            sessionName: instanceName,
+            instanceName,
+        };
+
+        console.warn(`[MARK_AS_READ_API] Primary sendRead endpoint unavailable for ${instanceName}. Falling back to legacy payload format.`);
+        await fetchEvolutionAPI(`/chat/sendRead`, apiConfig, {
+            method: 'POST',
+            body: JSON.stringify(fallbackPayload),
+        });
+        console.log(`[MARK_AS_READ_API] Read receipt sent via fallback endpoint for instance ${instanceName}.`);
+    }
 }
 
     

@@ -78,6 +78,7 @@ import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioPlayer } from './audio-player';
 import { AudioRecorder } from './audio-recorder';
+import { useInboxStore } from '@/hooks/use-inbox-store';
 
 
 interface ChatPanelProps {
@@ -88,6 +89,8 @@ interface ChatPanelProps {
   showFullHistory: boolean;
   setShowFullHistory: (show: boolean) => void;
   tabId: string;
+  onLoadOlderMessages: () => Promise<void> | void;
+  canLoadOlder: boolean;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
@@ -363,7 +366,7 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId }: ChatPanelProps) {
+export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
@@ -382,6 +385,10 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
   const processedMessageIds = useRef(new Set());
   const savedRange = useRef<Range | null>(null);
   const userScrolledUpRef = useRef(false);
+  const isFetchingHistoryRef = useRef(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
+  const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
   
   const { toast } = useToast();
 
@@ -446,18 +453,28 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
   useEffect(() => {
     const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
-    if (viewport) {
-      const handleScroll = () => {
-        const { scrollTop, scrollHeight, clientHeight } = viewport;
-        // User is considered "scrolled up" if they are more than a certain threshold from the bottom
-        const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100;
-        userScrolledUpRef.current = isScrolledUp;
-      };
+    if (!viewport) return;
 
-      viewport.addEventListener('scroll', handleScroll);
-      return () => viewport.removeEventListener('scroll', handleScroll);
-    }
-  }, []);
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100;
+      userScrolledUpRef.current = isScrolledUp;
+
+      if (scrollTop < 120 && canLoadOlder && !isFetchingHistoryRef.current) {
+        isFetchingHistoryRef.current = true;
+        setIsLoadingOlderMessages(true);
+        Promise.resolve(onLoadOlderMessages?.())
+          .catch((error) => console.error('[CHAT_PANEL] Failed to load older messages', error))
+          .finally(() => {
+            isFetchingHistoryRef.current = false;
+            setIsLoadingOlderMessages(false);
+          });
+      }
+    };
+
+    viewport.addEventListener('scroll', handleScroll);
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, [canLoadOlder, onLoadOlderMessages]);
 
   useEffect(() => {
     const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
@@ -653,6 +670,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
           .replace(/<[^>]*>/g, '');
   };
 
+  const formatOptimisticTimestamp = (date: Date) =>
+    date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const generateOptimisticId = () =>
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+
 
   const handleFormSubmit = async () => {
     if (!chat) return;
@@ -660,15 +685,48 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     // Capture current content and files
     const currentMessageText = htmlToWhatsappMarkdown(newMessage);
     const currentMediaFiles = [...mediaFiles];
+    const isTextOnly = currentMediaFiles.length === 0;
+
+    if (isTextOnly && !currentMessageText.trim()) return;
     
     // Clear the input fields immediately
     setNewMessage('');
     setMediaFiles([]);
     if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 
+    let optimisticId: string | null = null;
+    if (isTextOnly) {
+      const now = new Date();
+      optimisticId = `optimistic-${generateOptimisticId()}`;
+      const optimisticMessage: Message = {
+        id: optimisticId,
+        chat_id: chat.id,
+        workspace_id: chat.workspace_id,
+        content: currentMessageText,
+        type: 'text',
+        status: 'default',
+        metadata: {},
+        transcription: null,
+        timestamp: formatOptimisticTimestamp(now),
+        createdAt: now.toISOString(),
+        formattedDate: 'Hoje',
+        sender: {
+          id: currentUser.id,
+          name: currentUser.name,
+          avatar: currentUser.avatar_url || currentUser.avatar,
+          type: 'user',
+        },
+        from_me: true,
+        is_read: true,
+        optimistic: true,
+        sentByTab: tabId,
+      };
+      appendMessagesToChat(chat.id, [optimisticMessage]);
+    }
+    
     try {
         let result: { success: boolean; error?: string };
-        if (currentMediaFiles.length > 0) {
+        if (!isTextOnly) {
             const mediaData = currentMediaFiles.map(mf => ({
                 base64: mf.base64,
                 mimetype: mf.type,
@@ -678,12 +736,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             }));
             result = await sendMediaAction(chat.id, currentMessageText, mediaData as any, tabId);
         } else {
-            if (!currentMessageText.trim()) return;
             result = await sendAgentMessageAction(chat.id, currentMessageText, tabId);
         }
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
+            if (optimisticId) {
+              removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
+            }
         }
         
         // A UI será atualizada via subscriptions, então não precisamos chamar onActionSuccess aqui.
@@ -691,6 +751,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     } catch (error) {
         console.error("Error during message submission:", error);
         toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
+        if (optimisticId) {
+          removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
+        }
     }
 };
 
@@ -966,6 +1029,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
       <div className="flex-1 overflow-y-auto relative" >
         <ScrollArea className="h-full" ref={scrollAreaRef}>
           <div className="space-y-1 p-6">
+            {isLoadingOlderMessages && canLoadOlder && (
+              <div className="flex justify-center py-2 text-muted-foreground text-xs">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </div>
+            )}
             {(chat.messages || []).map(renderMessageWithSeparator)}
           </div>
         </ScrollArea>

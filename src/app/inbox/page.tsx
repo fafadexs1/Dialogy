@@ -18,7 +18,7 @@ async function getUserData(userId: string): Promise<User | null> {
         const dbUser = userRes.rows[0];
         
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url, r.name as role_name
+            SELECT w.id, w.name, w.avatar_url, r.name as role_name, (w.owner_id = $1) AS is_owner
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
             JOIN roles r ON uwr.role_id = r.id
@@ -30,6 +30,7 @@ async function getUserData(userId: string): Promise<User | null> {
             name: r.name,
             avatar: r.avatar_url || '',
             roleName: r.role_name,
+            isOwner: r.is_owner,
         }));
         
         return {

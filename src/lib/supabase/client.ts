@@ -18,6 +18,10 @@ export function createClient(): SupabaseClient {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __SUPABASE_CLIENT__?: SupabaseClient }).__SUPABASE_CLIENT__ = client;
+      console.info('[SUPABASE] Realtime client initialized and exposed as window.__SUPABASE_CLIENT__.');
+    }
   }
   return client;
 }

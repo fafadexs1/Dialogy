@@ -8,6 +8,7 @@ export type Workspace = {
     avatar: string;
     timezone?: string;
     roleName?: string;
+    isOwner?: boolean;
 }
 
 export type Permission = {
@@ -133,6 +134,7 @@ export type Message = {
   transcription: string | null;
   timestamp: string;
   createdAt: string;
+  updatedAt?: string;
   formattedDate: string;
   chat_id: string;
   workspace_id: string;
@@ -142,6 +144,8 @@ export type Message = {
   from_me?: boolean;
   api_message_status?: string;
   is_read?: boolean;
+  sentByTab?: string | null;
+  optimistic?: boolean;
 };
 
 export type Chat = {
@@ -149,6 +153,7 @@ export type Chat = {
   contact: Contact;
   agent?: User;
   messages: Message[];
+  updatedAt?: string;
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
   assigned_at?: string;

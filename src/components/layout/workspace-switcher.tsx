@@ -168,7 +168,10 @@ export function WorkspaceSwitcher({
                 </Avatar>
                 <div className="flex-1 text-left">
                     <p className="truncate">{ws.name}</p>
-                    {ws.roleName && <p className="text-xs text-muted-foreground">{ws.roleName}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      {ws.roleName ? `${ws.roleName} • ` : ''}
+                      {ws.isOwner ? 'Proprietário' : 'Membro'}
+                    </p>
                 </div>
                 <CheckIcon
                 className={cn(
