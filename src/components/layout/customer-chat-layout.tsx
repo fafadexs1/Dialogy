@@ -200,11 +200,31 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
-    const intervalId = setInterval(() => {
-        fetchData();
-    }, 1000); // Poll every 1 second
+    let isStopped = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearInterval(intervalId);
+    const scheduleNextTick = () => {
+        if (isStopped) return;
+        timeoutId = setTimeout(runPoll, 1000);
+    };
+
+    const runPoll = async () => {
+        if (isStopped) return;
+        try {
+            await fetchData();
+        } finally {
+            scheduleNextTick();
+        }
+    };
+
+    runPoll();
+
+    return () => {
+        isStopped = true;
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+    };
   }, [initialUser?.activeWorkspaceId, fetchData]);
 
 
