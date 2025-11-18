@@ -3,10 +3,12 @@
 'use server';
 
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+import { evolutionWebhookQueue } from '@/lib/task-queue';
 
 async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
     const instanceRes = await db.query(
@@ -27,40 +29,66 @@ export async function POST(
     { params }: { params: { instanceName: string } }
 ) {
   const instanceNameFromUrl = params.instanceName;
-  console.log(`--- [WEBHOOK] Payload recebido para a instância: ${instanceNameFromUrl} ---`);
+  let payload: any;
 
   try {
-    const payload = await request.json();
-    console.log('[WEBHOOK] Payload completo:', JSON.stringify(payload, null, 2));
-
-    const { event, instance: instanceNameFromPayload } = payload;
-    
-    if (instanceNameFromUrl !== instanceNameFromPayload) {
-        console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
-        return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
-    }
-
-    if (!event) {
-      console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
-      return NextResponse.json({ error: 'Event not found' }, { status: 400 });
-    }
-
-    if (event === 'messages.upsert') {
-      await handleMessagesUpsert(payload);
-    } else if (event === 'messages.update') {
-      await handleMessagesUpdate(payload);
-    } else if (event === 'contacts.update') {
-      await handleContactsUpdate(payload);
-    } else if (event === 'chats.upsert') {
-      await handleChatsUpsert(payload);
-    } else {
-      console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
-    }
-
-    return NextResponse.json({ message: 'Webhook received successfully' });
+    payload = await request.json();
   } catch (error) {
-    console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('[WEBHOOK] Erro ao converter o payload em JSON:', error);
+    return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+  }
+
+  const { event, instance: instanceNameFromPayload } = payload || {};
+
+  if (instanceNameFromUrl !== instanceNameFromPayload) {
+    console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+    return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
+  }
+
+  if (!event) {
+    console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
+    return NextResponse.json({ error: 'Event not found' }, { status: 400 });
+  }
+
+  const jobId = randomUUID();
+  const statsBefore = evolutionWebhookQueue.stats;
+  console.log(`[WEBHOOK][${jobId}] Evento '${event}' recebido para ${instanceNameFromUrl}. Fila: ativos=${statsBefore.active}, pendentes=${statsBefore.pending}`);
+
+  try {
+    const startedAt = Date.now();
+    await evolutionWebhookQueue.add(async () => {
+      await processEvolutionEvent(payload);
+    });
+    console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluído em ${Date.now() - startedAt}ms.`);
+    return NextResponse.json({
+      message: 'Webhook processado com sucesso',
+      jobId,
+      queue: evolutionWebhookQueue.stats,
+    });
+  } catch (error) {
+    console.error(`[WEBHOOK][${jobId}] Erro ao processar evento '${event}':`, error);
+    return NextResponse.json({ error: 'Internal Server Error', jobId }, { status: 500 });
+  }
+}
+
+async function processEvolutionEvent(payload: any) {
+  const { event } = payload;
+
+  switch (event) {
+    case 'messages.upsert':
+      await handleMessagesUpsert(payload);
+      break;
+    case 'messages.update':
+      await handleMessagesUpdate(payload);
+      break;
+    case 'contacts.update':
+      await handleContactsUpdate(payload);
+      break;
+    case 'chats.upsert':
+      await handleChatsUpsert(payload);
+      break;
+    default:
+      console.log(`[WEBHOOK] Evento '${event}' recebido, mas não há handler implementado.`);
   }
 }
 
