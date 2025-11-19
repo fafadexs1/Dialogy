@@ -92,7 +92,7 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     const updates: { full_name?: string; avatar_url?: string } = {};
     if (fullName) updates.full_name = fullName;
     if (avatarUrl) updates.avatar_url = avatarUrl;
-    
+
     // Update public.users table
     if (Object.keys(updates).length > 0) {
         try {
@@ -101,18 +101,18 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
             const values = Object.values(updates);
 
             if (setClauses) {
-                 await db.query(
+                await db.query(
                     `UPDATE users SET ${setClauses}, updated_at = NOW() WHERE id = $${values.length + 1}`,
                     [...values, user.id]
                 );
             }
-           
+
         } catch (dbError: any) {
             console.error("[UPDATE_USER_PROFILE_DB] Erro:", dbError);
             return { success: false, error: 'Falha ao atualizar o perfil no banco de dados.' };
         }
     }
-    
+
     // Update auth.users metadata
     const { error: authError } = await supabase.auth.updateUser({
         data: {
@@ -130,4 +130,50 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     revalidatePath('/', 'layout'); // Revalidate layout to update sidebar avatar/name
 
     return { success: true, error: null };
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+    const supabase = await createClient();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+
+    if (!authUser) {
+        return null;
+    }
+
+    try {
+        const userRes = await db.query('SELECT * FROM users WHERE id = $1', [authUser.id]);
+
+        if (userRes.rowCount === 0) {
+            return null;
+        }
+        const dbUser = userRes.rows[0];
+
+        const workspacesRes = await db.query(`
+            SELECT w.id, w.name, w.avatar_url
+            FROM workspaces w
+            JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
+            WHERE uwr.user_id = $1
+        `, [authUser.id]);
+
+        const workspaces = workspacesRes.rows.map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            avatar: r.avatar_url || ''
+        }));
+
+        return {
+            id: dbUser.id,
+            name: dbUser.full_name,
+            firstName: dbUser.full_name.split(' ')[0] || '',
+            lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
+            avatar: dbUser.avatar_url || '',
+            email: dbUser.email,
+            workspaces,
+            activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
+        };
+
+    } catch (error) {
+        console.error('[GET_CURRENT_USER] Error fetching user:', error);
+        return null;
+    }
 }

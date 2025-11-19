@@ -31,6 +31,9 @@ import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { cn } from '@/lib/utils';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Switch } from '@/components/ui/switch';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
@@ -330,6 +333,10 @@ interface ChatListProps {
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
   const onlineAgents = usePresence();
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
+  const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -339,11 +346,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     });
 
     const gerais = sorted.filter((c) => c.status === 'gerais');
-    const atendimentos = sorted.filter((c) => c.status === 'atendimentos' && c.agent?.id === currentUser.id);
+    const atendimentos = sorted.filter((c) => c.status === 'atendimentos');
     const encerrados = sorted.filter((c) => c.status === 'encerrados');
 
     return { gerais, atendimentos, encerrados };
-  }, [chats, currentUser.id]);
+  }, [chats]);
 
   const TABS = [
     { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
@@ -351,7 +358,43 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     { id: 'encerrados', label: 'Encerrados', data: sortedChats.encerrados }
   ] as const;
 
-  const currentChats = TABS.find((t) => t.id === activeTab)?.data || [];
+  const getBaseChatsForTab = useCallback(
+    (tabId: typeof TABS[number]['id']) => {
+      switch (tabId) {
+        case 'gerais':
+          return sortedChats.gerais;
+        case 'atendimentos':
+          return sortedChats.atendimentos;
+        case 'encerrados':
+        default:
+          return sortedChats.encerrados;
+      }
+    },
+    [sortedChats]
+  );
+
+  const filterChatByControls = useCallback(
+    (chat: Chat) => {
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
+
+      const matchesOwner =
+        ownershipFilter === 'everyone' ||
+        chat.agent?.id === currentUser.id ||
+        chat.status === 'gerais';
+
+      const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
+      const matchesUnassigned = !showUnassignedOnly || !chat.agent;
+
+      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned;
+    },
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id]
+  );
+
+  const filteredChats = useMemo(() => {
+    return getBaseChatsForTab(activeTab).filter(filterChatByControls);
+  }, [activeTab, getBaseChatsForTab, filterChatByControls]);
 
   return (
     <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card/95 backdrop-blur-sm min-h-0">
@@ -360,9 +403,71 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Conversas</h2>
           <div className="flex items-center">
-            <Button variant="ghost" size="icon">
-              <Filter className="h-5 w-5" />
-            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Filtros">
+                  <Filter className="h-5 w-5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-4 space-y-4">
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Responsável</p>
+                  <RadioGroup
+                    value={ownershipFilter}
+                    onValueChange={(value) => setOwnershipFilter(value as 'mine' | 'everyone')}
+                    className="mt-2 space-y-2"
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RadioGroupItem value="mine" id="owner-mine" />
+                      <Label htmlFor="owner-mine" className="cursor-pointer">Somente minhas conversas</Label>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RadioGroupItem value="everyone" id="owner-all" />
+                      <Label htmlFor="owner-all" className="cursor-pointer">Todos os atendentes</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
+                  <RadioGroup
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value as 'all' | 'open' | 'closed')}
+                    className="mt-2 space-y-2"
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RadioGroupItem value="all" id="status-all" />
+                      <Label htmlFor="status-all" className="cursor-pointer">Todos</Label>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RadioGroupItem value="open" id="status-open" />
+                      <Label htmlFor="status-open" className="cursor-pointer">Abertos (Fila + Atendendo)</Label>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <RadioGroupItem value="closed" id="status-closed" />
+                      <Label htmlFor="status-closed" className="cursor-pointer">Encerrados</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Somente não lidas</p>
+                      <p className="text-xs text-muted-foreground">Priorize contatos aguardando resposta</p>
+                    </div>
+                    <Switch checked={onlyUnread} onCheckedChange={setOnlyUnread} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Somente sem responsável</p>
+                      <p className="text-xs text-muted-foreground">Ótimo para dividir a fila com o time</p>
+                    </div>
+                    <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             {currentUser.activeWorkspaceId && (
               <NewConversationDialog workspaceId={currentUser.activeWorkspaceId} onActionSuccess={onUpdate} />
             )}
@@ -401,40 +506,43 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       {/* Tabs */}
       <div className="p-2 flex-shrink-0 border-b">
         <div className="flex items-center bg-muted rounded-md p-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors',
-                activeTab === tab.id
-                  ? 'bg-background text-primary shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <span>{tab.label}</span>
-              {tab.data.length > 0 && (
-                <Badge
-                  className={cn(
-                    'px-1.5 h-5 text-xs',
-                    activeTab === tab.id
-                      ? 'bg-primary/20 text-primary'
-                      : 'bg-secondary-foreground/10 text-muted-foreground'
-                  )}
-                >
-                  {tab.data.length}
-                </Badge>
-              )}
-            </button>
-          ))}
+          {TABS.map((tab) => {
+            const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors',
+                  activeTab === tab.id
+                    ? 'bg-background text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <span>{tab.label}</span>
+                {filteredCount > 0 && (
+                  <Badge
+                    className={cn(
+                      'px-1.5 h-5 text-xs',
+                      activeTab === tab.id
+                        ? 'bg-primary/20 text-primary'
+                        : 'bg-secondary-foreground/10 text-muted-foreground'
+                    )}
+                  >
+                    {filteredCount}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Chat list (uniform padding for all tabs) */}
       <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-1 p-3">
-          {currentChats.length > 0 ? (
-            currentChats.map((chat) => (
+          {filteredChats.length > 0 ? (
+            filteredChats.map((chat) => (
               <ChatListItem
                 key={chat.id}
                 chat={chat}

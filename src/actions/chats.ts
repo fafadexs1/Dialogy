@@ -24,7 +24,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  * Atribui o chat atual ao agente logado.
  * Esta aÃ§Ã£o Ã© chamada pelo botÃ£o "Assumir Atendimento".
  */
-export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string}> {
+export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -65,9 +65,9 @@ export async function transferChatAction(
     prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
-    
+
     let sessionToUse = prefetchedSession;
-    
+
     if (!sessionToUse) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -86,7 +86,7 @@ export async function transferChatAction(
     if (!chatId || (!teamId && !agentId)) {
         return { success: false, error: "ParÃ¢metros invÃ¡lidos para transferÃªncia." };
     }
-    
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
@@ -97,15 +97,15 @@ export async function transferChatAction(
             return { success: false, error: "Conversa nÃ£o encontrada." };
         }
         const { workspace_id: workspaceId, current_chat_agent_id, status } = chatRes.rows[0];
-        
+
         if (status === 'encerrados') {
             await client.query('ROLLBACK');
             return { success: false, error: "NÃ£o Ã© possÃ­vel transferir um atendimento que jÃ¡ foi encerrado." };
         }
-        
+
         // System agents have implicit permission
         if (!prefetchedSession) {
-             if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
+            if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
                 await client.query('ROLLBACK');
                 return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para transferir atendimentos." };
             }
@@ -147,15 +147,15 @@ export async function transferChatAction(
         } else if (agentId) {
             const agentRes = await client.query('SELECT full_name FROM users WHERE id = $1', [agentId]);
             if (agentRes.rows.length === 0) {
-                 await client.query('ROLLBACK');
-                 return { success: false, error: "Agente de destino nÃ£o encontrado." };
+                await client.query('ROLLBACK');
+                return { success: false, error: "Agente de destino nÃ£o encontrado." };
             }
             transferTargetName = agentRes.rows[0].full_name;
         }
 
         if (!finalAgentId) {
-             await client.query('ROLLBACK');
-             return { success: false, error: "NÃ£o foi possÃ­vel determinar um agente para a transferÃªncia." };
+            await client.query('ROLLBACK');
+            return { success: false, error: "NÃ£o foi possÃ­vel determinar um agente para a transferÃªncia." };
         }
 
         // Update chat with the new agent and status
@@ -167,21 +167,21 @@ export async function transferChatAction(
                 assigned_at = NOW()
             WHERE id = $2
         `, [finalAgentId, chatId]);
-        
-         // Log system message
+
+        // Log system message
         const systemMessageContent = current_chat_agent_id
             ? `Atendimento transferido por ${currentAgentName} para ${transferTargetName}.`
             : `Atendimento atribuÃ­do a ${transferTargetName} por ${currentAgentName}.`;
-        
+
         await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata)
             VALUES ($1, $2, 'system', $3, $4)
         `, [
-            workspaceId, 
-            chatId, 
+            workspaceId,
+            chatId,
             systemMessageContent,
-            { 
-                event: 'transfer', 
+            {
+                event: 'transfer',
                 from_agent_id: currentAgentId,
                 to_agent_id: finalAgentId,
                 to_team_id: teamId,
@@ -223,15 +223,15 @@ export async function closeChatAction(
     if (!chatId) {
         return { success: false, error: "ID do chat Ã© obrigatÃ³rio." };
     }
-    
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
 
         const chatRes = await client.query('SELECT workspace_id, tag as current_tag, color as current_color FROM chats WHERE id = $1', [chatId]);
-        if(chatRes.rowCount === 0) {
+        if (chatRes.rowCount === 0) {
             await client.query('ROLLBACK');
-            return { success: false, error: 'Chat nÃ£o encontrado.'};
+            return { success: false, error: 'Chat nÃ£o encontrado.' };
         }
         const { workspace_id, current_tag, current_color } = chatRes.rows[0];
 
@@ -259,18 +259,18 @@ export async function closeChatAction(
                 chatId
             ]
         );
-        
+
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
 
         await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata)
             VALUES ($1, $2, 'system', $3, $4)
         `, [
-            workspace_id, 
-            chatId, 
+            workspace_id,
+            chatId,
             systemMessageContent,
-            { 
-                event: 'close', 
+            {
+                event: 'close',
                 closed_by: currentAgentId,
                 reason_tag_id: reasonTagId,
                 notes: notes,
@@ -296,23 +296,23 @@ export async function updateChatTagAction(chatId: string, tagId: string): Promis
     if (!user) {
         return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
     }
-    
+
     if (!chatId || !tagId) {
         return { success: false, error: "IDs do chat e da tag sÃ£o obrigatÃ³rios." };
     }
-    
+
     try {
         const tagRes = await db.query('SELECT label, color FROM tags WHERE id = $1', [tagId]);
         if (tagRes.rowCount === 0) {
             return { success: false, error: "Etiqueta nÃ£o encontrada." };
         }
         const { label, color } = tagRes.rows[0];
-        
+
         await db.query(
             'UPDATE chats SET tag = $1, color = $2 WHERE id = $3',
             [label, color, chatId]
         );
-        
+
         revalidatePath('/', 'layout');
         return { success: true };
 
@@ -1148,7 +1148,6 @@ function resolveSender(
     }
     return undefined;
 }
-
 function parseMetadata(metadata: any): MessageMetadata | undefined {
     if (!metadata) return undefined;
     if (typeof metadata === 'object') return metadata as MessageMetadata;
@@ -1163,4 +1162,76 @@ function maxIsoDate(current: string | null, candidate: string | null): string | 
     if (!candidate) return current;
     if (!current) return candidate;
     return new Date(candidate).getTime() > new Date(current).getTime() ? candidate : current;
+}
+
+export async function getContactMessages({
+    contactId,
+    workspaceId,
+    limit = 100,
+}: {
+    contactId: string;
+    workspaceId: string;
+    limit?: number;
+}): Promise<{ messages: Message[]; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { messages: [], error: "Usuário não autenticado." };
+    }
+
+    try {
+        const timezone = await getWorkspaceTimezone(workspaceId);
+
+        const { rows } = await db.query(
+            `
+            SELECT 
+                m.*,
+                c.workspace_id AS workspace_id,
+                cont.id AS contact_id,
+                cont.name AS contact_name,
+                cont.avatar_url AS contact_avatar_url,
+                cont.email AS contact_email,
+                cont.phone_number_jid AS contact_phone_number_jid,
+                cont.address AS contact_address
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+            LEFT JOIN contacts cont ON cont.id = c.contact_id
+            WHERE c.contact_id = $1 AND c.workspace_id = $2
+            ORDER BY m.created_at DESC
+            LIMIT $3
+            `,
+            [contactId, workspaceId, limit]
+        );
+
+        const senderIds = [...new Set(rows.map((row) => row.sender_user_id).filter(Boolean))];
+        const systemAgentIds = [...new Set(rows.map((row) => row.sender_system_agent_id).filter(Boolean))];
+
+        const [agentsMap, systemAgentsMap] = await Promise.all([
+            fetchAgentsMap(senderIds as string[]),
+            fetchSystemAgentsMap(systemAgentIds as string[]),
+        ]);
+
+        const contact = rows[0]?.contact_id
+            ? {
+                id: rows[0].contact_id,
+                workspace_id: rows[0].workspace_id,
+                name: rows[0].contact_name || 'Contato',
+                avatar_url: rows[0].contact_avatar_url || undefined,
+                email: rows[0].contact_email || undefined,
+                phone_number_jid: rows[0].contact_phone_number_jid || undefined,
+                address: rows[0].contact_address || undefined,
+            }
+            : undefined;
+
+        const messages = rows
+            .map((row: MessageRow) => mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap))
+            .reverse();
+
+        return { messages };
+
+    } catch (error: any) {
+        console.error("[GET_CONTACT_MESSAGES] Error:", error);
+        return { messages: [], error: `Falha ao buscar histórico do contato: ${error.message}` };
+    }
 }

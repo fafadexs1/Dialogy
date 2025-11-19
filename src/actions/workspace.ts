@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache';
 import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase';
+import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 
 export async function createWorkspaceAction(
@@ -105,7 +107,7 @@ export async function updateWorkspaceAction(
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
     const timezone = formData.get('timezone') as string;
-    const avatarUrl = formData.get('avatarUrl') as string;
+    const avatarFile = formData.get('avatarFile');
 
 
     if (!workspaceId) {
@@ -117,7 +119,41 @@ export async function updateWorkspaceAction(
     const fieldsToUpdate: { [key: string]: any } = {};
     if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
     if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
-    if (formData.has('avatarUrl')) fieldsToUpdate.avatar_url = avatarUrl;
+
+    if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
+        try {
+            const arrayBuffer = await avatarFile.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const extension = avatarFile.name?.split('.').pop() || 'png';
+            const filePath = `public/${workspaceId}-${Date.now()}.${extension}`;
+
+            const { error: uploadError } = await supabaseAdmin.storage
+                .from('workspace-avatars')
+                .upload(filePath, buffer, {
+                    upsert: true,
+                    contentType: avatarFile.type || 'image/png',
+                });
+
+            if (uploadError) {
+                console.error('[UPDATE_WORKSPACE] Upload erro:', uploadError);
+                return { success: false, error: `Erro ao enviar avatar: ${uploadError.message}` };
+            }
+
+            const { data: signedData, error: signedUrlError } = await supabaseAdmin.storage
+                .from('workspace-avatars')
+                .createSignedUrl(filePath, 31536000);
+
+            if (signedUrlError) {
+                console.error('[UPDATE_WORKSPACE] Signed URL erro:', signedUrlError);
+                return { success: false, error: `Erro ao gerar URL do avatar: ${signedUrlError.message}` };
+            }
+
+            fieldsToUpdate.avatar_url = signedData?.signedUrl;
+        } catch (error: any) {
+            console.error('[UPDATE_WORKSPACE] Avatar upload exception:', error);
+            return { success: false, error: 'Erro inesperado ao enviar o avatar do workspace.' };
+        }
+    }
 
     if (Object.keys(fieldsToUpdate).length === 0) {
         return { success: true, error: null }; // Nada para atualizar

@@ -23,17 +23,13 @@ import { useSettings } from '../settings-context';
 import { timezones } from '@/lib/timezones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { createClient } from '@/lib/supabase/client';
 
-function SubmitButton({ isUploading }: { isUploading: boolean }) {
+function SubmitButton() {
     const { pending } = useFormStatus();
-    const isDisabled = pending || isUploading;
     return (
-        <Button type="submit" disabled={isDisabled}>
-            {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> :
-             pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
-             <Save className="mr-2 h-4 w-4" />}
-            {isUploading ? 'Enviando imagem...' : (pending ? 'Salvando...' : 'Salvar Alterações')}
+        <Button type="submit" disabled={pending}>
+            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            {pending ? 'Salvando...' : 'Salvar Alterações'}
         </Button>
     )
 }
@@ -110,8 +106,6 @@ export default function WorkspaceSettingsPage() {
     
     // State for avatar
     const [avatarUrl, setAvatarUrl] = useState('');
-    const [avatarFile, setAvatarFile] = useState<File | null>(null);
-    const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const formRef = useRef<HTMLFormElement>(null);
     
@@ -170,7 +164,6 @@ export default function WorkspaceSettingsPage() {
     const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            setAvatarFile(file);
             const previewUrl = URL.createObjectURL(file);
             setAvatarUrl(previewUrl);
         }
@@ -179,43 +172,7 @@ export default function WorkspaceSettingsPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!formRef.current || !activeWorkspace) return;
-
-        let finalAvatarUrl = activeWorkspace.avatar || '';
-        
-        if (avatarFile) {
-            setIsUploading(true);
-            const supabase = createClient();
-            const fileName = `public/${activeWorkspace.id}-${Date.now()}`;
-            
-            const { data, error } = await supabase.storage
-                .from('workspace-avatars')
-                .upload(fileName, avatarFile);
-
-            if (error) {
-                toast({ title: "Erro no Upload", description: error.message, variant: 'destructive' });
-                setIsUploading(false);
-                return;
-            }
-            
-            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-                .from('workspace-avatars')
-                .createSignedUrl(data.path, 31536000); // 1 year expiry
-
-             if (signedUrlError) {
-                toast({ title: "Erro ao gerar URL", description: signedUrlError.message, variant: 'destructive'});
-                setIsUploading(false);
-                return;
-            }
-
-            finalAvatarUrl = signedUrlData.signedUrl;
-            setAvatarFile(null);
-        }
-        
-        setIsUploading(false);
-
         const formData = new FormData(formRef.current);
-        formData.set('avatarUrl', finalAvatarUrl);
-
         updateAction(formData);
     }
 
@@ -247,7 +204,7 @@ export default function WorkspaceSettingsPage() {
                  <p className="text-muted-foreground">Gerencie o nome e outras configurações do seu workspace atual: <span className='font-semibold'>{activeWorkspace.name}</span></p>
             </header>
             
-            <form ref={formRef} onSubmit={handleSubmit}>
+            <form ref={formRef} onSubmit={handleSubmit} encType="multipart/form-data">
                  <Card>
                     <CardHeader>
                         <CardTitle>Detalhes do Workspace</CardTitle>
@@ -255,7 +212,6 @@ export default function WorkspaceSettingsPage() {
                     </CardHeader>
                     <CardContent className="space-y-6">
                         <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
-                        <input type="hidden" name="avatarUrl" value={avatarUrl} />
                         
                         <div className="flex items-center gap-6">
                             <Avatar className="h-20 w-20 rounded-lg border">
@@ -265,9 +221,9 @@ export default function WorkspaceSettingsPage() {
                              <div className="space-y-2">
                                 <Label>Avatar do Workspace</Label>
                                 <div className="flex gap-2">
-                                    <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
-                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-                                        {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
+                                    <input type="file" name="avatarFile" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
+                                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                                        <UploadCloud className="mr-2 h-4 w-4" />
                                         Carregar Imagem
                                     </Button>
                                 </div>
@@ -301,7 +257,7 @@ export default function WorkspaceSettingsPage() {
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">As alterações serão refletidas em toda a plataforma.</p>
-                        <SubmitButton isUploading={isUploading} />
+                        <SubmitButton />
                     </CardFooter>
                 </Card>
             </form>
