@@ -28,31 +28,31 @@ const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 function LoadingSkeleton() {
   return (
     <div className="flex flex-1 w-full min-h-0 h-full">
-        <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <div className="space-y-2 mt-4">
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-            </div>
+      <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <div className="space-y-2 mt-4">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
         </div>
-        <div className="flex-1 flex flex-col min-w-0">
-            <Skeleton className="h-16 w-full" />
-            <div className="flex-1 p-6 space-y-4">
-                <Skeleton className="h-10 w-1/2 ml-auto" />
-                <Skeleton className="h-10 w-1/2" />
-                <Skeleton className="h-10 w-1/2 ml-auto" />
-            </div>
-            <Skeleton className="h-24 w-full" />
+      </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        <Skeleton className="h-16 w-full" />
+        <div className="flex-1 p-6 space-y-4">
+          <Skeleton className="h-10 w-1/2 ml-auto" />
+          <Skeleton className="h-10 w-1/2" />
+          <Skeleton className="h-10 w-1/2 ml-auto" />
         </div>
-        <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-32 w-full" />
-        </div>
+        <Skeleton className="h-24 w-full" />
+      </div>
+      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
     </div>
   );
 }
@@ -179,7 +179,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const playNotificationSound = useCallback(() => {
     const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
     if (isSoundEnabled && audioRef.current) {
-        audioRef.current.play().catch(e => console.error('Error playing notification sound:', e));
+      audioRef.current.play().catch(e => console.error('Error playing notification sound:', e));
     }
   }, []);
 
@@ -329,28 +329,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [selectedChatId]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const supabase = createClient();
-    if ((window as any).__SCHEMA_DB_CHANNEL__) return;
 
-    const schemaChannel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public' },
-        (payload) => console.log('[SCHEMA DB CHANGE]', payload)
-      )
-      .subscribe((status) => console.info('[SCHEMA DB CHANGE] status:', status));
-
-    (window as any).__SCHEMA_DB_CHANNEL__ = schemaChannel;
-    return () => {
-      if ((window as any).__SCHEMA_DB_CHANNEL__) {
-        supabase.removeChannel((window as any).__SCHEMA_DB_CHANNEL__);
-        delete (window as any).__SCHEMA_DB_CHANNEL__;
-      }
-    };
-  }, []);
 
   const realtimeChannelRef = useRef<any>(null);
   const subscribedChatRef = useRef<string | null>(null);
@@ -399,11 +378,11 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     setBroadcastChannel(channel);
 
     const handleMessage = (event: MessageEvent) => {
-        const { type, sourceTabId } = event.data || {};
-        if (sourceTabId === tabIdRef.current) return;
-        if (type === 'DELTA_SYNC') {
-            runDeltaSync();
-        }
+      const { type, sourceTabId } = event.data || {};
+      if (sourceTabId === tabIdRef.current) return;
+      if (type === 'DELTA_SYNC') {
+        runDeltaSync();
+      }
     };
 
     channel.addEventListener('message', handleMessage);
@@ -415,12 +394,12 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [runDeltaSync]);
 
   useEffect(() => {
-    if (initialUser?.activeWorkspaceId){
-        getTags(initialUser.activeWorkspaceId).then(tagsResult => {
-            if (!tagsResult.error && tagsResult.tags) {
-                setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
-            }
-        });
+    if (initialUser?.activeWorkspaceId) {
+      getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+        if (!tagsResult.error && tagsResult.tags) {
+          setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
+        }
+      });
     }
   }, [initialUser?.activeWorkspaceId]);
 
@@ -463,15 +442,15 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
 
     if (hasUnread) {
-        markChatAsReadInStore(selectedChatId);
+      markChatAsReadInStore(selectedChatId);
 
-        fetch('/api/chats/mark-as-read', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chatId: selectedChatId })
-        }).catch(() => {
-            console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
-        });
+      fetch('/api/chats/mark-as-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: selectedChatId })
+      }).catch(() => {
+        console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+      });
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
@@ -480,32 +459,32 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }
 
   if (isLoading) {
-      return <LoadingSkeleton />;
+    return <LoadingSkeleton />;
   }
 
   if (fetchError) {
-      return (
-        <div className="flex flex-1 w-full min-h-0 h-full items-center justify-center p-6">
-            <Alert variant="destructive" className="max-w-xl">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Erro Crítico ao Carregar Dados</AlertTitle>
-                <AlertDescription className='break-all'>
-                    Não foi possível carregar os dados das conversas. Por favor, verifique o console do servidor para mais detalhes.
-                    <p className="mt-2 text-xs font-mono p-2 bg-secondary rounded">Detalhe: {fetchError}</p>
-                </AlertDescription>
-                 <Button onClick={() => initializeInbox()} className="mt-4">
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Tentar Novamente
-                </Button>
-            </Alert>
-        </div>
-      )
+    return (
+      <div className="flex flex-1 w-full min-h-0 h-full items-center justify-center p-6">
+        <Alert variant="destructive" className="max-w-xl">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Erro Crítico ao Carregar Dados</AlertTitle>
+          <AlertDescription className='break-all'>
+            Não foi possível carregar os dados das conversas. Por favor, verifique o console do servidor para mais detalhes.
+            <p className="mt-2 text-xs font-mono p-2 bg-secondary rounded">Detalhe: {fetchError}</p>
+          </AlertDescription>
+          <Button onClick={() => initializeInbox()} className="mt-4">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Tentar Novamente
+          </Button>
+        </Alert>
+      </div>
+    )
   }
-  
+
   const enrichedSelectedChat = selectedChat ? {
-      ...selectedChat,
-      messages: currentChatMessages,
-      unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
+    ...selectedChat,
+    messages: currentChatMessages,
+    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
   } : null;
 
   return (

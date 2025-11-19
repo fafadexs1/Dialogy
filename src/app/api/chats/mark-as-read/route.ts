@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     if (!user) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
+
     try {
         const body: MarkAsReadPayload = await request.json();
         const { chatId } = body;
@@ -24,21 +24,21 @@ export async function POST(request: Request) {
         if (!chatId) {
             return NextResponse.json({ error: 'Chat ID is required.' }, { status: 400 });
         }
-        
+
         const client = await db.connect();
         try {
             await client.query('BEGIN');
-            
+
             // 1. Find all unread messages for this chat
             const unreadMessagesRes = await client.query(
                 `SELECT id, message_id_from_api, from_me FROM messages WHERE chat_id = $1 AND from_me = FALSE AND is_read = FALSE`,
                 [chatId]
             );
             const unreadMessages: Pick<Message, 'id' | 'message_id_from_api' | 'from_me'>[] = unreadMessagesRes.rows;
-            
+
             if (unreadMessages.length === 0) {
-                 await client.query('ROLLBACK');
-                 return NextResponse.json({ success: true, message: 'No unread messages.' });
+                await client.query('ROLLBACK');
+                return NextResponse.json({ success: true, message: 'No unread messages.' });
             }
 
             const messageIdsToUpdate = unreadMessages.map(m => m.id);
@@ -49,10 +49,10 @@ export async function POST(request: Request) {
                 [messageIdsToUpdate]
             );
             console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
-            
+
             // 3. Secondary Action (Fire and Forget): Send read receipt to WhatsApp API
             const chatInfoRes = await client.query(
-                 `SELECT ct.phone_number_jid as "remoteJid", m.instance_name 
+                `SELECT ct.phone_number_jid as "remoteJid", m.instance_name 
                  FROM chats c 
                  JOIN contacts ct on c.contact_id = ct.id 
                  JOIN messages m on c.id = m.chat_id
@@ -60,31 +60,31 @@ export async function POST(request: Request) {
                  AND m.instance_name IS NOT NULL
                  ORDER BY m.created_at DESC
                  LIMIT 1`,
-                 [chatId]
+                [chatId]
             );
 
             if (chatInfoRes.rowCount > 0) {
-                 const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
-                 const messagesToMarkForApi = unreadMessages
+                const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
+                const messagesToMarkForApi = unreadMessages
                     .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))
                     .filter(m => m.id);
 
                 if (instanceName && remoteJid && messagesToMarkForApi.length > 0) {
-                     sendReceiptToWhatsApp(instanceName, messagesToMarkForApi).catch(error => {
+                    sendReceiptToWhatsApp(instanceName, messagesToMarkForApi).catch(error => {
                         console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${instanceName}:`, error.message);
                     });
                 }
             }
 
             await client.query('COMMIT');
-            
+
             // Revalidate the main path to trigger data refetch on the client.
             revalidatePath('/', 'layout');
 
             return NextResponse.json({ success: true });
         } catch (dbError) {
-             await client.query('ROLLBACK');
-             throw dbError; // Rethrow to be caught by the outer catch block
+            await client.query('ROLLBACK');
+            throw dbError; // Rethrow to be caught by the outer catch block
         } finally {
             client.release();
         }
@@ -104,7 +104,7 @@ async function sendReceiptToWhatsApp(
     instanceName: string,
     messagesToMark: { remoteJid: string; fromMe: boolean; id: string | undefined }[]
 ): Promise<void> {
-    
+
     // Find the API config for the given instance
     const instanceRes = await db.query(`
         SELECT c.api_url, c.api_key 
@@ -117,15 +117,16 @@ async function sendReceiptToWhatsApp(
         console.warn(`[MARK_AS_READ_API] API config not found for instance ${instanceName}. Cannot send read receipt.`);
         return;
     }
-    
+
     const { api_url, api_key } = instanceRes.rows[0];
     const apiConfig = { api_url, api_key };
-    
+
     if (!apiConfig.api_url || !apiConfig.api_key) {
-      console.warn(`[MARK_AS_READ_API] API config incomplete for instance ${instanceName}.`);
-      return;
+        console.warn(`[MARK_AS_READ_API] API config incomplete for instance ${instanceName}.`);
+        return;
     }
 
+    // Evolution API v2 format for markAsRead
     const payload = {
         read: {
             remoteJid: messagesToMark[0].remoteJid,
@@ -135,35 +136,15 @@ async function sendReceiptToWhatsApp(
     };
 
     try {
-        await fetchEvolutionAPI(`/chat/sendRead/${instanceName}`, apiConfig, {
+        // Correct endpoint for Evolution API v2
+        await fetchEvolutionAPI(`/chat/markAsRead/${instanceName}`, apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload),
         });
         console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
         return;
     } catch (error: any) {
-        const message = error?.message || '';
-        const shouldRetry =
-            typeof message === 'string' &&
-            (message.includes('404') || message.includes('Not Found') || message.includes('Cannot POST /chat/sendRead'));
-
-        if (!shouldRetry) {
-            throw error;
-        }
-
-        const fallbackPayload = {
-            ...payload,
-            sessionName: instanceName,
-            instanceName,
-        };
-
-        console.warn(`[MARK_AS_READ_API] Primary sendRead endpoint unavailable for ${instanceName}. Falling back to legacy payload format.`);
-        await fetchEvolutionAPI(`/chat/sendRead`, apiConfig, {
-            method: 'POST',
-            body: JSON.stringify(fallbackPayload),
-        });
-        console.log(`[MARK_AS_READ_API] Read receipt sent via fallback endpoint for instance ${instanceName}.`);
+        console.error(`[MARK_AS_READ_API] Error sending read receipt: ${error.message}`);
+        // No fallback needed as we are now using the correct endpoint
     }
 }
-
-    
