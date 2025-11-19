@@ -417,27 +417,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [initialUser?.activeWorkspaceId, runDeltaSync]);
 
   useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-    let stopped = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const tick = async () => {
-      if (stopped) return;
-      await runDeltaSync();
-      if (!stopped) {
-        timeoutId = setTimeout(tick, 7000);
-      }
-    };
-
-    timeoutId = setTimeout(tick, 7000);
-
-    return () => {
-      stopped = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
-
-  useEffect(() => {
     if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
 

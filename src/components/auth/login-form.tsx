@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useActionState, useEffect } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -43,15 +43,37 @@ function SocialButton({ provider, icon, label, isIconOnly, children }: { provide
 export function LoginForm() {
   const [state, formAction] = useActionState(login, { success: false, message: null });
   const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
     if (state.success) {
       router.push('/inbox');
     }
   }, [state, router]);
+
+  useEffect(() => {
+    const savedRemember = typeof window !== 'undefined' && localStorage.getItem('rememberMe') === 'true';
+    const savedEmail = typeof window !== 'undefined' ? localStorage.getItem('rememberEmail') || '' : '';
+    if (savedRemember) {
+      setRememberMe(true);
+      setEmail(savedEmail);
+    }
+  }, []);
+
+  const handleRemember = () => {
+    if (rememberMe) {
+      localStorage.setItem('rememberMe', 'true');
+      localStorage.setItem('rememberEmail', email);
+    } else {
+      localStorage.removeItem('rememberMe');
+      localStorage.removeItem('rememberEmail');
+    }
+  };
   
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} onSubmit={handleRemember} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email" className="font-semibold text-gray-600 text-sm">Usuário ou endereço de e-mail</Label>
         <Input
@@ -61,13 +83,15 @@ export function LoginForm() {
           placeholder="Digite seu usuário ou e-mail"
           required
           autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
       </div>
       <div className="space-y-2">
         <div className="flex justify-between items-center">
             <Label htmlFor="password"  className="font-semibold text-gray-600 text-sm">Senha</Label>
-             <Link href="#" className="text-xs font-medium text-[#007BFF] hover:underline">
+             <Link href="/forgot-password" className="text-xs font-medium text-[#007BFF] hover:underline">
                 Esqueceu a senha?
             </Link>
         </div>
@@ -78,8 +102,22 @@ export function LoginForm() {
           placeholder="Digite sua senha"
           required
           autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
           className="h-12 bg-white border-[#dcdcdc] rounded-lg px-4 placeholder:text-[#999] focus:border-[#007BFF]"
         />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          id="remember-me"
+          name="remember-me"
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-300 text-[#007BFF] focus:ring-2 focus:ring-[#007BFF]"
+          checked={rememberMe}
+          onChange={(e) => setRememberMe(e.target.checked)}
+        />
+        <Label htmlFor="remember-me" className="text-sm text-gray-600">Lembrar de mim neste dispositivo</Label>
       </div>
       
       {state?.message && (
