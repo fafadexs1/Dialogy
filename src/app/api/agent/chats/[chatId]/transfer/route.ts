@@ -11,6 +11,31 @@ interface TransferPayload {
   agentId?: string;
 }
 
+async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promise<boolean> {
+    try {
+        const onlineAgentRes = await db.query(
+            `
+            SELECT 1
+            FROM team_members tm
+            JOIN teams t ON tm.team_id = t.id
+            JOIN user_workspace_presence uwp
+                ON uwp.user_id = tm.user_id
+                AND uwp.workspace_id = t.workspace_id
+            WHERE tm.team_id = $1
+              AND t.workspace_id = $2
+              AND uwp.is_online = TRUE
+            LIMIT 1;
+            `,
+            [teamId, workspaceId]
+        );
+
+        return onlineAgentRes.rowCount > 0;
+    } catch (error) {
+        console.error('[AGENT_CHAT_TRANSFER_API] Erro ao validar agentes online da equipe:', error);
+        return false;
+    }
+}
+
 /**
  * Common function to authenticate the agent and validate the chat.
  * This ensures the agent is active and has permission to act on the chat's workspace.
@@ -69,6 +94,16 @@ export async function POST(
 
         if (!teamId && !agentId) {
             return NextResponse.json({ error: 'Either teamId or agentId is required.' }, { status: 400 });
+        }
+
+        if (teamId) {
+            const hasOnlineAgent = await hasOnlineAgentOnTeam(teamId, authResult.agent.workspace_id);
+            if (!hasOnlineAgent) {
+                return NextResponse.json(
+                    { error: 'Nenhum agente disponível nesta equipe no momento.' },
+                    { status: 409 }
+                );
+            }
         }
 
         // Mock the session object required by the original `transferChatAction`.
