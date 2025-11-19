@@ -10,6 +10,17 @@ import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 
+const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
+
+function resolveWhatsappJid(...candidates: Array<string | null | undefined>): string | null {
+    const sanitized = candidates
+        .map(candidate => (typeof candidate === 'string' ? candidate.trim() : ''))
+        .filter((jid): jid is string => Boolean(jid));
+    if (sanitized.length === 0) return null;
+    const preferred = sanitized.find(jid => jid.toLowerCase().endsWith(WHATSAPP_STANDARD_JID_SUFFIX));
+    return preferred ?? sanitized[0];
+}
+
 async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
     const instanceRes = await db.query(
         `SELECT c.api_url, c.api_key 
@@ -125,7 +136,12 @@ async function handleMessagesUpsert(payload: any) {
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
-    const contactJid = data?.key?.remoteJid;
+    const contactJid = resolveWhatsappJid(
+        data?.key?.remoteJid,
+        data?.key?.remoteJidAlt,
+        data?.remoteJid,
+        data?.remoteJidAlt
+    );
 
     if (!data || !data.key || !data.message) {
         console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
@@ -175,6 +191,11 @@ async function handleMessagesUpsert(payload: any) {
         return;
     }
     
+    if (!contactJid) {
+        console.log('[WEBHOOK_MSG_UPSERT] Nao foi possivel determinar o JID do contato. Payload ignorado.');
+        return;
+    }
+    
     // Construir o objeto metadata
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl,
@@ -183,7 +204,7 @@ async function handleMessagesUpsert(payload: any) {
         duration: messageDetails?.seconds
     };
 
-    const contactPhone = sender || contactJid.split('@')[0];
+    const contactPhone = contactJid.split('@')[0];
     
     try {
         await client.query('BEGIN');
@@ -307,7 +328,12 @@ async function handleContactsUpdate(payload: any) {
     if (!Array.isArray(data) || data.length === 0) return;
     
     const contactUpdate = data[0];
-    const { id: remoteJid, profilePicUrl } = contactUpdate;
+    const profilePicUrl = contactUpdate?.profilePicUrl;
+    const remoteJid = resolveWhatsappJid(
+        contactUpdate?.id,
+        contactUpdate?.remoteJid,
+        contactUpdate?.remoteJidAlt
+    );
 
     if (!remoteJid || !profilePicUrl) return;
 
@@ -334,7 +360,12 @@ async function handleChatsUpsert(payload: any) {
      if (!Array.isArray(data) || data.length === 0) return;
     
     for (const chatUpdate of data) {
-        const { id: remoteJid, archive } = chatUpdate;
+        const remoteJid = resolveWhatsappJid(
+            chatUpdate?.id,
+            chatUpdate?.remoteJid,
+            chatUpdate?.remoteJidAlt
+        );
+        const archive = chatUpdate?.archive;
         if (!remoteJid) continue;
 
         if (archive) {
