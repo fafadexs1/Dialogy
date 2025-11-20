@@ -416,6 +416,35 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [initialUser?.activeWorkspaceId, runDeltaSync]);
 
+  // Polling mechanism
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    let timeoutId: NodeJS.Timeout;
+    let isPolling = true;
+
+    const poll = async () => {
+      if (!isPolling) return;
+
+      // Only poll if the tab is visible to save resources/bandwidth
+      if (document.visibilityState === 'visible') {
+        await runDeltaSync();
+      }
+
+      if (isPolling) {
+        timeoutId = setTimeout(poll, 1000);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    return () => {
+      isPolling = false;
+      clearTimeout(timeoutId);
+    };
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
   useEffect(() => {
     if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);

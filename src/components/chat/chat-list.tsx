@@ -268,7 +268,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 min-w-0">
           <div className='flex-1 min-w-0'>
             <p className="font-semibold truncate" title={chat.contact.name}>
               {chat.contact.name}
