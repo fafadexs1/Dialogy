@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState } from 'react';
@@ -28,14 +27,14 @@ const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
 
   return (
     <div className="space-y-1">
-      <div className="h-1.5 w-full rounded-full bg-muted">
+      <div className="h-1.5 w-full rounded-full bg-white/10">
         <div
           className={cn('h-1.5 rounded-full transition-all', currentLevel?.color)}
           style={{ width: currentLevel?.width || '0%' }}
         />
       </div>
-      <p className="text-xs font-medium text-muted-foreground">
-        Força da senha: {currentLevel?.label || 'Inválida'}
+      <p className="text-xs font-medium text-white/40">
+        Força da senha: <span className="text-white/80">{currentLevel?.label || 'Inválida'}</span>
       </p>
     </div>
   );
@@ -54,9 +53,7 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
     if (pass.match(/[A-Z]/)) score++;
     if (pass.match(/[0-9]/)) score++;
     if (pass.match(/[^a-zA-Z0-9]/)) score++;
-    
-    // A simple mapping to fit into 5 levels.
-    // Score 0 -> 0, Score 1 -> 0, Score 2 -> 1, Score 3 -> 2, Score 4 -> 3, Score 5 -> 4
+
     setPasswordStrength(Math.max(0, score - 1));
   };
 
@@ -74,85 +71,85 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
     const confirmPass = formData.get('confirmPassword') as string;
 
     if (pass !== confirmPass) {
-        toast({
-            title: "As senhas não coincidem",
-            description: "Por favor, verifique se as senhas digitadas são iguais.",
-            variant: "destructive"
-        });
-        return;
+      toast({
+        title: "As senhas não coincidem",
+        description: "Por favor, verifique se as senhas digitadas são iguais.",
+        variant: "destructive"
+      });
+      return;
     }
-    
+
     onRegister(formData);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-            <Label htmlFor="name">Nome <span className="text-gray-400">(obrigatório)</span></Label>
-            <Input id="name" name="name" type="text" placeholder="Primeiro nome" required autoComplete="given-name" />
+          <Label htmlFor="name" className="font-medium text-white/80 text-sm">Nome <span className="text-white/30">(obrigatório)</span></Label>
+          <Input id="name" name="name" type="text" placeholder="Primeiro nome" required autoComplete="given-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
         </div>
-         <div className="space-y-2">
-            <Label htmlFor="lastname">Sobrenome <span className="text-gray-400">(obrigatório)</span></Label>
-            <Input id="lastname" name="lastname" type="text" placeholder="Sobrenome" required autoComplete="family-name" />
+        <div className="space-y-2">
+          <Label htmlFor="lastname" className="font-medium text-white/80 text-sm">Sobrenome <span className="text-white/30">(obrigatório)</span></Label>
+          <Input id="lastname" name="lastname" type="text" placeholder="Sobrenome" required autoComplete="family-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
         </div>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="email">E-mail <span className="text-gray-400">(obrigatório)</span></Label>
-        <Input id="email" name="email" type="email" placeholder="Insira seu melhor e-mail" required autoComplete="email" />
-      </div>
-       <div className="space-y-2">
-        <Label htmlFor="phone">Telefone pessoal <span className="text-gray-400">(obrigatório)</span></Label>
-        <Input id="phone" name="phone" type="tel" placeholder="Insira o seu número - não é o número da empresa" required autoComplete="tel" />
+        <Label htmlFor="email" className="font-medium text-white/80 text-sm">E-mail <span className="text-white/30">(obrigatório)</span></Label>
+        <Input id="email" name="email" type="email" placeholder="Insira seu melhor e-mail" required autoComplete="email" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Senha <span className="text-gray-400">(obrigatório)</span></Label>
+        <Label htmlFor="phone" className="font-medium text-white/80 text-sm">Telefone pessoal <span className="text-white/30">(obrigatório)</span></Label>
+        <Input id="phone" name="phone" type="tel" placeholder="Insira o seu número" required autoComplete="tel" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password" className="font-medium text-white/80 text-sm">Senha <span className="text-white/30">(obrigatório)</span></Label>
         <div className='relative'>
-             <Input 
-                id="password" 
-                name="password" 
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Insira uma palavra-passe"
-                required 
-                autoComplete="new-password"
-                className="pr-10"
-                value={password}
-                onChange={handlePasswordChange}
-            />
-            <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground" onClick={() => setShowPassword(!showPassword)}>
-                {showPassword ? <EyeOff /> : <Eye />}
-            </Button>
+          <Input
+            id="password"
+            name="password"
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Crie uma senha forte"
+            required
+            autoComplete="new-password"
+            className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
+            value={password}
+            onChange={handlePasswordChange}
+          />
+          <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-white/40 hover:text-white hover:bg-white/10" onClick={() => setShowPassword(!showPassword)}>
+            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
         </div>
         <PasswordStrengthIndicator strength={passwordStrength} />
       </div>
-        <div className="space-y-2">
-            <Label htmlFor="confirmPassword">Confirmar Senha <span className="text-gray-400">(obrigatório)</span></Label>
-            <div className='relative'>
-                <Input 
-                    id="confirmPassword" 
-                    name="confirmPassword" 
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Repita sua senha"
-                    required 
-                    autoComplete="new-password"
-                    className="pr-10"
-                />
-                 <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground" onClick={() => setShowPassword(!showPassword)}>
-                    {showPassword ? <EyeOff /> : <Eye />}
-                </Button>
-            </div>
+      <div className="space-y-2">
+        <Label htmlFor="confirmPassword" className="font-medium text-white/80 text-sm">Confirmar Senha <span className="text-white/30">(obrigatório)</span></Label>
+        <div className='relative'>
+          <Input
+            id="confirmPassword"
+            name="confirmPassword"
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Repita sua senha"
+            required
+            autoComplete="new-password"
+            className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
+          />
+          <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-white/40 hover:text-white hover:bg-white/10" onClick={() => setShowPassword(!showPassword)}>
+            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
         </div>
+      </div>
       <div className="flex items-center space-x-2 pt-4">
-        <Checkbox id="terms" required />
-        <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-gray-600">
+        <Checkbox id="terms" required className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" />
+        <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-white/60">
           Li e aceito os termos de uso da Dialogy.{' '}
-          <a href="#" className="underline text-primary">Ler termos</a>
+          <a href="#" className="underline text-blue-400 hover:text-blue-300">Ler termos</a>
         </label>
       </div>
-      
-      <Button type="submit" className="w-full h-12 text-base bg-gray-800 hover:bg-gray-900 rounded-lg shadow-sm transition-all" disabled={pending}>
-         {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <ArrowRight className="mr-2 h-4 w-4" />}
-         {pending ? 'Criando conta...' : 'Criar Conta e Entrar'}
+
+      <Button type="submit" className="w-full h-12 text-base bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-lg shadow-blue-600/20 transition-all" disabled={pending}>
+        {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+        {pending ? 'Criando conta...' : 'Criar Conta e Entrar'}
       </Button>
     </form>
   );

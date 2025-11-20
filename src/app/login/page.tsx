@@ -1,7 +1,6 @@
 import { LoginForm } from '@/components/auth/login-form';
-import { LifeBuoy } from 'lucide-react';
+import { Code2 } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 
@@ -25,68 +24,45 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const isRegistered = resolvedSearchParams?.registered === 'true';
 
   return (
-    <div className="h-screen w-full flex bg-gray-100">
-      <main className="w-full grid md:grid-cols-2">
-        {/* Left Side - Informational */}
-        <div className="bg-[#007BFF] text-white p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-800 opacity-80 z-0"></div>
-          <div className="z-10">
-            <div className="flex items-center gap-3 mb-8">
-              <LifeBuoy className="h-8 w-8" />
-              <h1 className="text-2xl font-bold">Dialogy</h1>
+    <div className="min-h-screen bg-[#020617] text-white selection:bg-blue-500/30 flex flex-col items-center justify-center relative overflow-hidden">
+      {/* Background Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-20" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-600/10 blur-[120px] rounded-full" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10 px-6">
+        <div className="text-center mb-8">
+          <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <Code2 className="w-6 h-6 text-white" />
             </div>
-            <h2 className="text-4xl font-bold leading-tight drop-shadow-md">
-              Acesse sua conta para continuar
-            </h2>
-            <p className="text-lg text-white/80 mt-2 max-w-sm">
-              Conecte-se com seus clientes de forma inteligente e automatizada.
-            </p>
-          </div>
-          <div className="absolute right-0 bottom-0 w-80 h-80 opacity-20">
-            <Image
-              src="https://picsum.photos/seed/rocket/500/500"
-              alt="3D Illustration"
-              width={320}
-              height={320}
-              className="w-full h-full float-animation"
-              data-ai-hint="3d illustration rocket"
-            />
-          </div>
-          <p className="text-sm text-white/80 max-w-sm z-10">
-            Gerencie conversas, automatize respostas com IA e organize seu CRM em um só lugar.
+            <span className="text-2xl font-bold tracking-tight">Dialogy</span>
+          </Link>
+
+          <h1 className="text-3xl font-bold mb-2 tracking-tight">Bem-vindo de volta</h1>
+          <p className="text-white/60">
+            Acesse sua conta para gerenciar seus bots e conversas.
           </p>
         </div>
 
-        {/* Right Side - Form */}
-        <div className="bg-card flex flex-col justify-center p-8 sm:p-12">
-          <div className="w-full max-w-md mx-auto">
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold mt-1">
-                Acesse a <span className="text-[#007BFF]">Dialogy</span>
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Bem-vindo(a) de volta! Por favor, insira seus dados.
-              </p>
-              {isRegistered && (
-                <p className="mt-3 rounded-md bg-green-100 px-3 py-2 text-sm text-green-800">
-                  Conta criada com sucesso! Faça login para continuar.
-                </p>
-              )}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
+          {isRegistered && (
+            <div className="mb-6 p-4 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center">
+              Conta criada com sucesso! Faça login para continuar.
             </div>
+          )}
 
-            <LoginForm />
-
-            <div className="mt-8 text-center text-sm">
-              <p className="text-muted-foreground">
-                Não tem uma conta?{' '}
-                <Link href="/register" className="font-medium text-[#007BFF] hover:underline">
-                  Cadastre-se de graça
-                </Link>
-              </p>
-            </div>
-          </div>
+          <LoginForm />
         </div>
-      </main>
+
+        <p className="text-center mt-8 text-sm text-white/40">
+          Não tem uma conta?{' '}
+          <Link href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+            Cadastre-se gratuitamente
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }
