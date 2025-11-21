@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -35,8 +35,10 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 
+import { SearchDetailsDialog } from './search-details-dialog';
+
 // --- Start New Conversation Dialog ---
-function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: string, onActionSuccess: () => void }) {
+function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -76,9 +78,11 @@ function NewConversationDialog({ workspaceId, onActionSuccess }: { workspaceId: 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon">
-          <PlusCircle className="h-5 w-5" />
-        </Button>
+        {trigger || (
+          <Button variant="ghost" size="icon">
+            <PlusCircle className="h-5 w-5" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -205,7 +209,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-foreground/70 overflow-hidden">
+    <div className="flex items-start gap-1.5 text-sm text-white/60 overflow-hidden">
       <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
       <p className="truncate">{getTextContent()}</p>
     </div>
@@ -231,12 +235,18 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-md p-3 transition-all border border-transparent hover:border-border hover:bg-accent/40",
-        isSelected && "bg-primary/10 border-primary/30 shadow-sm"
+        "flex cursor-pointer items-start gap-3 rounded-xl p-3 transition-all duration-200 border border-transparent relative overflow-hidden group",
+        isSelected
+          ? "bg-white/10 border-white/10 shadow-lg"
+          : "hover:bg-white/5 hover:border-white/5"
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
+      {isSelected && (
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+      )}
+
       <TagSelectionDialog
         isOpen={isTagDialogOpen}
         setIsOpen={setIsTagDialogOpen}
@@ -246,19 +256,19 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       />
 
       <div className="relative flex-shrink-0">
-        <Avatar className="h-10 w-10 border">
+        <Avatar className="h-10 w-10 border border-white/10">
           <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
-          <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+          <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
         {!!chat.instance_name && (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-card">
+                <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-black shadow-sm">
                   <FaWhatsapp size={10} />
                 </div>
               </TooltipTrigger>
-              <TooltipContent>
+              <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
                 <p>Canal: WhatsApp</p>
                 {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
               </TooltipContent>
@@ -270,25 +280,25 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className='flex-1 min-w-0'>
-            <p className="font-semibold truncate" title={chat.contact.name}>
+            <p className={cn("font-semibold truncate text-sm", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
               {chat.contact.name}
             </p>
           </div>
           {lastMessage && (
-            <p className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+            <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
               {lastMessage.timestamp}
             </p>
           )}
         </div>
 
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-1">
           {chat.tag && chat.color && chat.status !== 'atendimentos' && (
             <Badge
               style={{
                 backgroundColor: chat.color,
                 color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff'
               }}
-              className="border-transparent text-xs px-2 py-0.5"
+              className="border-transparent text-[10px] px-1.5 py-0 rounded-md shadow-sm"
               title={chat.tag}
             >
               {chat.tag}
@@ -298,7 +308,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           {chat.teamName && chat.status === 'atendimentos' && (
             <Badge
               variant="secondary"
-              className="font-medium text-xs py-0.5 px-1.5 flex items-center gap-1"
+              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 bg-white/10 text-white hover:bg-white/20 border-white/5"
               title={chat.teamName}
             >
               <Users className="h-3 w-3" />
@@ -307,12 +317,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           )}
         </div>
 
-        <div className="mt-0.5 flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
           </div>
           {chat.unreadCount && chat.unreadCount > 0 ? (
-            <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-red-500 text-white p-0">
+            <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-gradient-to-r from-blue-600 to-purple-600 text-white border-0 shadow-md text-[10px]">
               {chat.unreadCount}
             </Badge>
           ) : null}
@@ -337,6 +347,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -387,9 +399,17 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
       const matchesUnassigned = !showUnassignedOnly || !chat.agent;
 
-      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned;
+      // Search Logic
+      const query = searchQuery.toLowerCase();
+      const matchesSearch =
+        !query ||
+        (chat.contact.name || '').toLowerCase().includes(query) ||
+        (chat.contact.phone || '').includes(query) ||
+        chat.messages.some(m => (m.content || '').toLowerCase().includes(query));
+
+      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id]
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, searchQuery]
   );
 
   const filteredChats = useMemo(() => {
@@ -397,19 +417,19 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   }, [activeTab, getBaseChatsForTab, filterChatByControls]);
 
   return (
-    <div className="flex h-full w-[360px] flex-shrink-0 flex-col border-r bg-card/95 backdrop-blur-sm min-h-0">
+    <div className="flex h-full w-[380px] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl min-h-0">
       {/* Header */}
-      <div className="p-4 flex-shrink-0 border-b">
+      <div className="p-4 flex-shrink-0 border-b border-white/10 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Conversas</h2>
-          <div className="flex items-center">
+          <h2 className="text-xl font-bold text-white tracking-tight">Conversas</h2>
+          <div className="flex items-center gap-2">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Filtros">
-                  <Filter className="h-5 w-5" />
+                <Button variant="ghost" size="icon" aria-label="Filtros" className="h-8 w-8 text-muted-foreground hover:text-white hover:bg-white/10">
+                  <Filter className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 p-4 space-y-4">
+              <PopoverContent align="end" className="w-72 p-4 space-y-4 bg-black/90 border-white/10 backdrop-blur-xl text-white">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Responsável</p>
                   <RadioGroup
@@ -418,12 +438,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className="mt-2 space-y-2"
                   >
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="mine" id="owner-mine" />
-                      <Label htmlFor="owner-mine" className="cursor-pointer">Somente minhas conversas</Label>
+                      <RadioGroupItem value="mine" id="owner-mine" className="border-white/20 text-blue-500" />
+                      <Label htmlFor="owner-mine" className="cursor-pointer text-white/80">Somente minhas conversas</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="everyone" id="owner-all" />
-                      <Label htmlFor="owner-all" className="cursor-pointer">Todos os atendentes</Label>
+                      <RadioGroupItem value="everyone" id="owner-all" className="border-white/20 text-blue-500" />
+                      <Label htmlFor="owner-all" className="cursor-pointer text-white/80">Todos os atendentes</Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -436,16 +456,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className="mt-2 space-y-2"
                   >
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="all" id="status-all" />
-                      <Label htmlFor="status-all" className="cursor-pointer">Todos</Label>
+                      <RadioGroupItem value="all" id="status-all" className="border-white/20 text-blue-500" />
+                      <Label htmlFor="status-all" className="cursor-pointer text-white/80">Todos</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="open" id="status-open" />
-                      <Label htmlFor="status-open" className="cursor-pointer">Abertos (Fila + Atendendo)</Label>
+                      <RadioGroupItem value="open" id="status-open" className="border-white/20 text-blue-500" />
+                      <Label htmlFor="status-open" className="cursor-pointer text-white/80">Abertos (Fila + Atendendo)</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="closed" id="status-closed" />
-                      <Label htmlFor="status-closed" className="cursor-pointer">Encerrados</Label>
+                      <RadioGroupItem value="closed" id="status-closed" className="border-white/20 text-blue-500" />
+                      <Label htmlFor="status-closed" className="cursor-pointer text-white/80">Encerrados</Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -453,59 +473,94 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium">Somente não lidas</p>
+                      <p className="text-sm font-medium text-white">Somente não lidas</p>
                       <p className="text-xs text-muted-foreground">Priorize contatos aguardando resposta</p>
                     </div>
-                    <Switch checked={onlyUnread} onCheckedChange={setOnlyUnread} />
+                    <Switch checked={onlyUnread} onCheckedChange={setOnlyUnread} className="data-[state=checked]:bg-blue-600" />
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium">Somente sem responsável</p>
+                      <p className="text-sm font-medium text-white">Somente sem responsável</p>
                       <p className="text-xs text-muted-foreground">Ótimo para dividir a fila com o time</p>
                     </div>
-                    <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} />
+                    <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
                   </div>
                 </div>
               </PopoverContent>
             </Popover>
             {currentUser.activeWorkspaceId && (
-              <NewConversationDialog workspaceId={currentUser.activeWorkspaceId} onActionSuccess={onUpdate} />
+              <NewConversationDialog
+                workspaceId={currentUser.activeWorkspaceId}
+                onActionSuccess={onUpdate}
+                trigger={
+                  <Button size="sm" className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md transition-all duration-300 border-0">
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    Nova Conversa
+                  </Button>
+                }
+              />
             )}
           </div>
         </div>
-        <div className="relative mt-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Pesquisar..." className="pl-9" />
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
+          <Input
+            placeholder="Pesquisar por nome, telefone ou mensagem..."
+            className="pl-9 bg-white/5 border-white/10 focus:border-blue-500/50 focus:bg-white/10 focus:ring-1 focus:ring-blue-500/50 transition-all rounded-xl text-white placeholder:text-muted-foreground"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsSearchDialogOpen(true);
+              }
+            }}
+          />
         </div>
       </div>
 
+      <SearchDetailsDialog
+        isOpen={isSearchDialogOpen}
+        onOpenChange={setIsSearchDialogOpen}
+        searchQuery={searchQuery}
+        chats={chats}
+        onSelectChat={setSelectedChat}
+      />
+
       {/* Online agents */}
-      <div className="p-4 flex-shrink-0 border-b">
-        <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
+      <div className="px-4 py-3 flex-shrink-0 border-b border-white/10 bg-white/5">
+        <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Agentes Online ({onlineAgents.length})
         </h3>
         <TooltipProvider>
-          <div className="min-h-[48px] flex flex-wrap items-center gap-2 py-1">
+          <div className="flex flex-wrap items-center gap-2">
             {onlineAgents.map((agent) => (
               <Tooltip key={agent.user.id}>
                 <TooltipTrigger>
-                  <Avatar className="h-8 w-8 border-2 border-green-500 flex-shrink-0">
-                    <AvatarImage src={agent.user.avatar} />
-                    <AvatarFallback>{agent.user.name.charAt(0)}</AvatarFallback>
-                  </Avatar>
+                  <div className="relative">
+                    <Avatar className="h-8 w-8 border-2 border-black ring-2 ring-green-500/50">
+                      <AvatarImage src={agent.user.avatar} />
+                      <AvatarFallback className="bg-zinc-800 text-xs">{agent.user.name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black"></span>
+                  </div>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
                   <AgentTooltipContent agent={agent} />
                 </TooltipContent>
               </Tooltip>
             ))}
+            {onlineAgents.length === 0 && (
+              <p className="text-xs text-muted-foreground italic">Nenhum outro agente online</p>
+            )}
           </div>
         </TooltipProvider>
       </div>
 
       {/* Tabs */}
-      <div className="p-2 flex-shrink-0 border-b">
-        <div className="flex items-center bg-muted rounded-md p-1">
+      <div className="p-3 flex-shrink-0 border-b border-white/10">
+        <div className="flex items-center bg-black/40 rounded-lg p-1 border border-white/5">
           {TABS.map((tab) => {
             const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
             return (
@@ -513,20 +568,20 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-2 text-sm font-medium p-1.5 rounded-sm transition-colors',
+                  'flex-1 flex items-center justify-center gap-2 text-xs font-medium py-1.5 rounded-md transition-all duration-200',
                   activeTab === tab.id
-                    ? 'bg-background text-primary shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-white/10 text-white shadow-sm border border-white/5'
+                    : 'text-muted-foreground hover:text-white hover:bg-white/5'
                 )}
               >
                 <span>{tab.label}</span>
                 {filteredCount > 0 && (
                   <Badge
                     className={cn(
-                      'px-1.5 h-5 text-xs',
+                      'px-1.5 h-4 text-[10px] min-w-[16px] justify-center',
                       activeTab === tab.id
-                        ? 'bg-primary/20 text-primary'
-                        : 'bg-secondary-foreground/10 text-muted-foreground'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white/10 text-muted-foreground'
                     )}
                   >
                     {filteredCount}
@@ -538,9 +593,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
       </div>
 
-      {/* Chat list (uniform padding for all tabs) */}
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-1 p-3">
+      {/* Chat list */}
+      <ScrollArea className="flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="space-y-1 p-2">
           {filteredChats.length > 0 ? (
             filteredChats.map((chat) => (
               <ChatListItem
@@ -553,12 +608,43 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               />
             ))
           ) : (
-            <div className="text-center py-10">
-              <p className="text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
+            <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
+              {activeTab === 'atendimentos' ? (
+                <>
+                  <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
+                    <div className="h-8 w-8 text-blue-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+                    </div>
+                  </div>
+                  <h3 className="font-semibold text-white">Nenhuma conversa</h3>
+                  <p className="text-sm text-muted-foreground max-w-[200px]">
+                    Você não é responsável por nenhuma conversa no momento
+                  </p>
+                  {currentUser.activeWorkspaceId && (
+                    <div className="pt-2 opacity-100 pointer-events-auto">
+                      <NewConversationDialog
+                        workspaceId={currentUser.activeWorkspaceId}
+                        onActionSuccess={onUpdate}
+                        trigger={
+                          <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                            <PlusCircle className="h-4 w-4" />
+                            Nova Conversa
+                          </Button>
+                        }
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
+                  <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
+                </>
+              )}
             </div>
           )}
         </div>
-      </ScrollArea>
-    </div>
+      </ScrollArea >
+    </div >
   );
 }

@@ -13,9 +13,9 @@ interface AudioRecorderProps {
 }
 
 const formatTime = (timeInSeconds: number) => {
-    const minutes = Math.floor(timeInSeconds / 60);
-    const seconds = Math.floor(timeInSeconds % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const minutes = Math.floor(timeInSeconds / 60);
+  const seconds = Math.floor(timeInSeconds % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 export function AudioRecorder({ onSend }: AudioRecorderProps) {
@@ -32,15 +32,15 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
 
   const getMicrophonePermission = async (): Promise<MediaStream | null> => {
     if (!("MediaRecorder" in window)) {
-        toast({ title: "Navegador Incompatível", description: "A gravação de áudio não é suportada pelo seu navegador.", variant: 'destructive' });
-        return null;
+      toast({ title: "Navegador Incompatível", description: "A gravação de áudio não é suportada pelo seu navegador.", variant: 'destructive' });
+      return null;
     }
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        return stream;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      return stream;
     } catch (err) {
-        toast({ title: "Permissão Negada", description: "Você precisa permitir o acesso ao microfone para gravar áudios.", variant: 'destructive' });
-        return null;
+      toast({ title: "Permissão Negada", description: "Você precisa permitir o acesso ao microfone para gravar áudios.", variant: 'destructive' });
+      return null;
     }
   };
 
@@ -51,18 +51,18 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
 
     const mimeType = 'audio/webm'; // Use a more compatible mimetype
     if (!MediaRecorder.isTypeSupported(mimeType)) {
-        toast({ title: "Formato Incompatível", description: "Seu navegador não suporta a gravação no formato necessário (webm).", variant: 'destructive' });
-        setIsRecording(false);
-        return;
+      toast({ title: "Formato Incompatível", description: "Seu navegador não suporta a gravação no formato necessário (webm).", variant: 'destructive' });
+      setIsRecording(false);
+      return;
     }
     const media = new MediaRecorder(stream, { mimeType });
     mediaRecorder.current = media;
     mediaRecorder.current.start();
-    
+
     setRecordingTime(0);
-    if(recordingInterval.current) clearInterval(recordingInterval.current);
+    if (recordingInterval.current) clearInterval(recordingInterval.current);
     recordingInterval.current = setInterval(() => {
-        setRecordingTime(prevTime => prevTime + 1);
+      setRecordingTime(prevTime => prevTime + 1);
     }, 1000);
 
     const localAudioChunks: Blob[] = [];
@@ -76,19 +76,19 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
       const audioUrl = URL.createObjectURL(audioBlob);
       setAudioUrl(audioUrl);
       setAudioBlob(audioBlob);
-      if(recordingInterval.current) clearInterval(recordingInterval.current);
+      if (recordingInterval.current) clearInterval(recordingInterval.current);
       stream.getTracks().forEach(track => track.stop());
     };
   };
 
   const stopRecording = () => {
     if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
-        mediaRecorder.current.stop();
+      mediaRecorder.current.stop();
     }
     setIsRecording(false);
-    if(recordingInterval.current) clearInterval(recordingInterval.current);
+    if (recordingInterval.current) clearInterval(recordingInterval.current);
   };
-  
+
   const handleToggleRecording = async () => {
     if (isRecording) {
       stopRecording();
@@ -122,43 +122,43 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
       setIsSending(false);
     };
   };
-  
+
   if (audioUrl) {
     return (
-        <div className="w-full flex items-center justify-between gap-2 p-2 border rounded-lg bg-background">
-            <div className="flex items-center gap-2">
-                <Button variant="destructive" size="icon" onClick={handleDiscard} className="h-10 w-10">
-                    <Trash2 />
-                </Button>
-                 <AudioPlayer src={audioUrl} duration={recordingTime} />
-            </div>
-            <Button size="icon" className="h-10 w-10 bg-green-500 hover:bg-green-600" onClick={handleSend} disabled={isSending}>
-                {isSending ? <Loader2 className="animate-spin"/> : <Send />}
-            </Button>
+      <div className="w-full flex items-center justify-between gap-2 p-2 border border-white/10 rounded-lg bg-black/20 backdrop-blur-xl">
+        <div className="flex items-center gap-2">
+          <Button variant="destructive" size="icon" onClick={handleDiscard} className="h-10 w-10">
+            <Trash2 />
+          </Button>
+          <AudioPlayer src={audioUrl} duration={recordingTime} />
         </div>
+        <Button size="icon" className="h-10 w-10 bg-green-500 hover:bg-green-600" onClick={handleSend} disabled={isSending}>
+          {isSending ? <Loader2 className="animate-spin" /> : <Send />}
+        </Button>
+      </div>
     )
   }
 
   return (
     <div className="w-full flex items-center gap-2">
-        {isRecording && <p className='text-sm font-mono text-muted-foreground'>{formatTime(recordingTime)}</p>}
-        <Button 
-            type="button" 
-            variant={isRecording ? 'destructive' : 'default'} 
-            size="icon" 
-            className={cn("h-10 w-10 transition-all", isRecording && 'ring-4 ring-destructive/30')}
-            onClick={handleToggleRecording}
-            disabled={isInitializing}
-        >
-            {isInitializing ? (
-                <Loader2 className="h-5 w-5 animate-spin"/>
-            ) : isRecording ? (
-                <Square className="h-5 w-5"/> 
-            ) : (
-                <Mic className="h-5 w-5" />
-            )}
-        </Button>
-        {isRecording && <div className="text-sm text-muted-foreground animate-pulse">Gravando...</div>}
+      {isRecording && <p className='text-sm font-mono text-muted-foreground'>{formatTime(recordingTime)}</p>}
+      <Button
+        type="button"
+        variant={isRecording ? 'destructive' : 'default'}
+        size="icon"
+        className={cn("h-10 w-10 transition-all", isRecording && 'ring-4 ring-destructive/30')}
+        onClick={handleToggleRecording}
+        disabled={isInitializing}
+      >
+        {isInitializing ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : isRecording ? (
+          <Square className="h-5 w-5" />
+        ) : (
+          <Mic className="h-5 w-5" />
+        )}
+      </Button>
+      {isRecording && <div className="text-sm text-muted-foreground animate-pulse">Gravando...</div>}
     </div>
   );
 }

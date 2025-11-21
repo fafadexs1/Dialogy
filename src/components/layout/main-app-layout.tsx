@@ -33,11 +33,11 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       )}
     >
       {shouldShowSidebar && (
-        <aside className="w-auto shrink-0 border-r bg-background">
+        <aside className="w-auto shrink-0 bg-background">
           <Sidebar user={user} />
         </aside>
       )}
-      
+
       <main className="min-h-0 min-w-0 flex flex-col flex-1">
         <PageTransition transitionKey={transitionKey} className="flex-1 min-h-0">
           {children}
@@ -47,4 +47,3 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-    

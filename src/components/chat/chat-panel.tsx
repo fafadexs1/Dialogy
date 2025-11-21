@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -29,12 +27,17 @@ import {
     Bold,
     Italic,
     Strikethrough,
-    Code,
     Hand,
     History,
     Eye,
     EyeOff,
-    Clock
+    Clock,
+    Phone,
+    Video,
+    ArrowRightLeft,
+    XCircle,
+    X,
+    Copy
 } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
@@ -79,6 +82,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { AudioPlayer } from './audio-player';
 import { AudioRecorder } from './audio-recorder';
 import { useInboxStore } from '@/hooks/use-inbox-store';
+import { FaWhatsapp } from 'react-icons/fa6';
+import { Badge } from '../ui/badge';
 
 
 interface ChatPanelProps {
@@ -93,12 +98,15 @@ interface ChatPanelProps {
     canLoadOlder: boolean;
 }
 
-function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[] }) {
-    const [isOpen, setIsOpen] = React.useState(false);
+function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
+    const [internalIsOpen, setInternalIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
     const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
+
+    const show = isOpen !== undefined ? isOpen : internalIsOpen;
+    const setShow = onOpenChange || setInternalIsOpen;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -106,7 +114,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
         const result = await closeChatAction(chat.id, reasonTagId, notes);
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
-            setIsOpen(false);
+            setShow(false);
             onActionSuccess();
         } else {
             toast({ title: "Erro ao encerrar", description: result.error, variant: 'destructive' });
@@ -115,12 +123,14 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
     };
 
     return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-            <DialogTrigger asChild>
-                <Button variant="outline">
-                    <LogOut className="mr-2 h-4 w-4" /> Encerrar Atendimento
-                </Button>
-            </DialogTrigger>
+        <Dialog open={show} onOpenChange={setShow}>
+            {!onOpenChange && (
+                <DialogTrigger asChild>
+                    <Button variant="outline">
+                        <LogOut className="mr-2 h-4 w-4" /> Encerrar Atendimento
+                    </Button>
+                </DialogTrigger>
+            )}
             <DialogContent>
                 <form onSubmit={handleSubmit}>
                     <DialogHeader>
@@ -149,7 +159,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                        <Button type="button" variant="ghost" onClick={() => setShow(false)}>Cancelar</Button>
                         <Button type="submit" variant="destructive" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Encerrar Atendimento
@@ -164,8 +174,13 @@ function CloseChatDialog({ chat, onActionSuccess, reasons }: { chat: Chat, onAct
 function SendMessageButton({ disabled }: { disabled?: boolean }) {
     const { pending } = useFormStatus();
     return (
-        <Button type="submit" size="icon" className='h-10 w-10 shrink-0' disabled={pending || disabled}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        <Button type="submit" size="icon" className={cn(
+            "h-10 w-10 rounded-xl transition-all duration-200",
+            !disabled && !pending
+                ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20"
+                : "bg-white/5 text-muted-foreground hover:bg-white/10"
+        )} disabled={pending || disabled}>
+            {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
         </Button>
     )
 }
@@ -198,7 +213,7 @@ function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}
         // We need to decode it for the href attribute but keep the display version escaped.
         const decodedUrl = url.replace(/&amp;/g, "&");
         const outgoingClasses = 'text-white/90 underline decoration-white/60 hover:decoration-white';
-        const incomingClasses = 'text-blue-600 hover:text-blue-700 underline';
+        const incomingClasses = 'text-blue-400 hover:text-blue-300 underline';
         return `<a href="${decodedUrl}" target="_blank" rel="noopener noreferrer" class="${isOutgoing ? outgoingClasses : incomingClasses}">${url}</a>`;
     });
 
@@ -282,14 +297,14 @@ function MediaMessage({ message }: { message: Message }) {
                     href={urlToUse}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-3 rounded-lg border bg-secondary/50 hover:bg-secondary transition-colors max-w-xs"
+                    className="flex items-center gap-3 p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors max-w-xs"
                 >
-                    <FileIcon className="h-8 w-8 text-muted-foreground flex-shrink-0" />
+                    <FileIcon className="h-8 w-8 text-white/70 flex-shrink-0" />
                     <div className='min-w-0'>
-                        <p className="font-medium truncate">{fileName || 'Documento'}</p>
-                        <p className="text-xs text-muted-foreground">Clique para abrir ou baixar</p>
+                        <p className="font-medium truncate text-white">{fileName || 'Documento'}</p>
+                        <p className="text-xs text-white/50">Clique para abrir ou baixar</p>
                     </div>
-                    <Download className="h-5 w-5 text-muted-foreground ml-auto flex-shrink-0" />
+                    <Download className="h-5 w-5 text-white/50 ml-auto flex-shrink-0" />
                 </a>
             );
         }
@@ -302,27 +317,6 @@ function MediaMessage({ message }: { message: Message }) {
             {message.content && (
                 <p className="whitespace-pre-wrap text-sm" dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: Boolean(message.from_me) }) }} />
             )}
-        </div>
-    )
-}
-
-function FormattingToolbar() {
-    const applyFormat = (format: 'bold' | 'italic' | 'strikethrough' | 'createLink') => {
-        if (format === 'createLink') {
-            const url = prompt("Enter the URL");
-            if (url) {
-                document.execCommand(format, false, url);
-            }
-        } else {
-            document.execCommand(format, false, undefined);
-        }
-    };
-
-    return (
-        <div className="flex items-center gap-1 p-1 rounded-t-md border-b bg-muted/50">
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('bold'); }}><Bold className="h-4 w-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('italic'); }}><Italic className="h-4 w-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onMouseDown={e => { e.preventDefault(); applyFormat('strikethrough'); }}><Strikethrough className="h-4 w-4" /></Button>
         </div>
     )
 }
@@ -343,15 +337,15 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     return (
         <div className={cn(
             "absolute inset-0 z-10 flex flex-col items-center justify-center p-6 transition-all",
-            isPeeking ? "bg-card/30 backdrop-blur-none" : "bg-card/80 backdrop-blur-sm"
+            isPeeking ? "bg-black/30 backdrop-blur-none pointer-events-none" : "bg-black/60 backdrop-blur-sm"
         )}>
-            <div className={cn("text-center transition-opacity", { "opacity-0 pointer-events-none": isPeeking })}>
-                <div className="inline-block p-4 bg-primary/10 rounded-full mb-4">
-                    <Hand className="h-10 w-10 text-primary" />
+            <div className={cn("text-center transition-opacity pointer-events-auto", { "opacity-0 pointer-events-none": isPeeking })}>
+                <div className="inline-block p-4 bg-blue-500/20 rounded-full mb-4">
+                    <Hand className="h-10 w-10 text-blue-400" />
                 </div>
-                <h3 className="text-xl font-bold">Atendimento Disponível</h3>
-                <p className="text-muted-foreground mt-1 mb-6">Este chat está na fila geral e aguardando um atendente.</p>
-                <Button size="lg" onClick={handleTakeOwnershipClick} disabled={isAssigning}>
+                <h3 className="text-xl font-bold text-white">Atendimento Disponível</h3>
+                <p className="text-white/70 mt-1 mb-6">Este chat está na fila geral e aguardando um atendente.</p>
+                <Button size="lg" onClick={handleTakeOwnershipClick} disabled={isAssigning} className="bg-blue-600 hover:bg-blue-500 text-white">
                     {isAssigning && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
                     Assumir este Atendimento
                 </Button>
@@ -359,7 +353,7 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
 
             <Button
                 variant="outline"
-                className="absolute bottom-6"
+                className="absolute bottom-6 border-white/10 bg-black/40 text-white hover:bg-white/10 pointer-events-auto"
                 onClick={() => setIsPeeking(!isPeeking)}
             >
                 {isPeeking ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
@@ -395,6 +389,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const [allContactMessages, setAllContactMessages] = useState<Message[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
 
     const { toast } = useToast();
 
@@ -883,15 +878,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             <React.Fragment key={message.id}>
                 {showDateSeparator && (
                     <div className="relative my-6">
-                        <Separator />
-                        <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-secondary px-2">
-                            <span className="text-xs font-medium text-muted-foreground">{message.formattedDate}</span>
+                        <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-white/10"></div>
+                        </div>
+                        <div className="relative flex justify-center">
+                            <span className="bg-black/40 backdrop-blur-md px-3 py-1 text-xs font-medium text-white/50 rounded-full border border-white/5">{message.formattedDate}</span>
                         </div>
                     </div>
                 )}
                 {message.type === 'system' ? (
                     <div className="flex justify-center items-center my-4">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/70 rounded-full px-3 py-1">
+                        <div className="flex items-center gap-2 text-xs text-white/50 bg-white/5 rounded-full px-3 py-1 border border-white/5">
                             <Info className="h-3.5 w-3.5" />
                             <span>{message.content}</span>
                             <span>-</span>
@@ -899,72 +896,87 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                         </div>
                     </div>
                 ) : (
-                    <div className={`group flex items-start gap-3 animate-in fade-in ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div
+                        className={`group flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300 ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
+                        style={{ willChange: 'transform, opacity', backfaceVisibility: 'hidden' }}
+                    >
                         {message.sender && (
-                            <Avatar className="h-8 w-8">
+                            <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
                                 <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
-                                <AvatarFallback>{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
+                                <AvatarFallback className="bg-zinc-800 text-white/70 text-xs">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                             </Avatar>
                         )}
                         <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                             <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
-                                    className={cn("break-words rounded-xl p-3 max-w-lg shadow-md",
+                                    className={cn("break-words rounded-2xl p-3 max-w-lg shadow-lg relative",
                                         isDeleted
-                                            ? 'bg-secondary text-muted-foreground italic'
+                                            ? 'bg-white/5 text-white/50 italic border border-white/10'
                                             : (isFromMe
-                                                ? 'bg-primary text-primary-foreground rounded-br-none'
-                                                : 'bg-card text-card-foreground rounded-bl-none')
+                                                ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-tr-sm border border-white/10'
+                                                : 'bg-white/10 backdrop-blur-md border border-white/10 text-white rounded-tl-sm')
                                     )}
                                 >
                                     {isDeleted ? (
                                         <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Mensagem apagada</span>
                                     ) : renderMessageContent(message, isFromMe)}
                                 </div>
-                                {isFromMe && !isDeleted && (
+                                {!isDeleted && (
                                     <div className="flex-shrink-0 self-start">
                                         <AlertDialog>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-white/50 hover:text-white hover:bg-white/10">
                                                         <MoreVertical className="h-4 w-4" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent>
-                                                    <AlertDialogTrigger asChild>
-                                                        <DropdownMenuItem className="text-destructive" onSelect={e => e.preventDefault()}>
-                                                            <Trash2 className="mr-2 h-4 w-4" />
-                                                            Apagar para todos
-                                                        </DropdownMenuItem>
-                                                    </AlertDialogTrigger>
+                                                <DropdownMenuContent className="bg-black/90 border-white/10 text-white">
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer hover:bg-white/10 focus:bg-white/10"
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(message.content || '');
+                                                            toast({ title: 'Mensagem copiada!' });
+                                                        }}
+                                                    >
+                                                        <Copy className="mr-2 h-4 w-4" />
+                                                        Copiar
+                                                    </DropdownMenuItem>
+                                                    {isFromMe && (
+                                                        <AlertDialogTrigger asChild>
+                                                            <DropdownMenuItem className="text-red-400 focus:bg-red-500/20 focus:text-red-300 cursor-pointer" onSelect={e => e.preventDefault()}>
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Apagar para todos
+                                                            </DropdownMenuItem>
+                                                        </AlertDialogTrigger>
+                                                    )}
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
-                                            <AlertDialogContent>
+                                            <AlertDialogContent className="bg-black/90 border-white/10 text-white">
                                                 <AlertDialogHeader>
                                                     <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
-                                                    <AlertDialogDescription>
+                                                    <AlertDialogDescription className="text-white/70">
                                                         Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
                                                     </AlertDialogDescription>
                                                 </AlertDialogHeader>
                                                 <AlertDialogFooter>
-                                                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                                    <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)}>Apagar</AlertDialogAction>
+                                                    <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/20 hover:text-white">Cancelar</AlertDialogCancel>
+                                                    <AlertDialogAction onClick={() => handleDeleteMessage(message.id, chat?.instance_name)} className="bg-red-600 hover:bg-red-700 text-white border-none">Apagar</AlertDialogAction>
                                                 </AlertDialogFooter>
                                             </AlertDialogContent>
                                         </AlertDialog>
                                     </div>
                                 )}
                             </div>
-                            <div className={cn("flex items-center text-xs text-muted-foreground mt-1.5", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
+                            <div className={cn("flex items-center text-[10px] text-white/40 mt-1.5", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
                                 <span className="mx-1">{message.timestamp}</span>
                                 {message.from_me && !isDeleted && (
                                     isPending
-                                        ? <Clock className="h-4 w-4 text-muted-foreground" />
+                                        ? <Clock className="h-3 w-3 text-white/40" />
                                         : message.api_message_status === 'READ'
-                                            ? <CheckCheck className="h-4 w-4 text-sky-400" />
+                                            ? <CheckCheck className="h-3 w-3 text-blue-400" />
                                             : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                                ? <CheckCheck className="h-4 w-4 text-muted-foreground" />
-                                                : <Check className="h-4 w-4" />
+                                                ? <CheckCheck className="h-3 w-3 text-white/40" />
+                                                : <Check className="h-3 w-3" />
                                 )}
                             </div>
                         </div>
@@ -977,13 +989,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     if (!chat) {
         return (
-            <main className="flex-1 flex flex-col items-center justify-center bg-secondary/30 min-w-0 p-6">
-                <div className="text-center">
-                    <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
-                    <h2 className="text-2xl font-semibold">Selecione uma conversa</h2>
-                    <p className="mt-1 text-muted-foreground">Escolha uma conversa da lista para ver as mensagens aqui.</p>
+            <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
+                <div className="text-center space-y-4 p-8 rounded-3xl bg-black/20 border border-white/5 backdrop-blur-xl shadow-2xl">
+                    <div className="h-20 w-20 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-white/10">
+                        <MessageSquare className="h-10 w-10 text-blue-400" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-white">Bem-vindo ao Dialogy</h2>
+                    <p className="text-white/50 max-w-md">
+                        Selecione uma conversa na lista ao lado para iniciar o atendimento ou visualizar o histórico.
+                    </p>
                 </div>
-            </main>
+            </div>
         )
     }
 
@@ -993,60 +1009,112 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const showTextInput = !mediaFiles.length;
 
-    const lastCustomerMessage = React.useMemo(() =>
+    const lastCustomerMessage = useMemo(() =>
         (chat.messages || []).slice().reverse().find(m => !m.from_me && m.type !== 'system')
         , [chat.messages]);
 
 
     return (
-        <main className="flex-1 flex flex-col bg-secondary/30 min-w-0">
-            <header className="flex h-16 items-center justify-between border-b bg-background px-6 flex-shrink-0">
+        <div className="flex-1 flex flex-col bg-transparent min-w-0 relative h-full">
+            {/* Header */}
+            <header className="flex h-16 items-center justify-between border-b border-white/10 bg-black/20 backdrop-blur-xl px-6 flex-shrink-0 z-20">
                 <div className="flex items-center gap-3">
-                    <Avatar className="h-9 w-9 border-2 border-background ring-2 ring-primary">
+                    <Avatar className="h-10 w-10 border border-white/10 ring-2 ring-white/5">
                         <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
-                        <AvatarFallback>{chat.contact.name.charAt(0)}</AvatarFallback>
+                        <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <h2 className="font-semibold">{chat.contact.name}</h2>
+                    <div>
+                        <h2 className="font-semibold text-white flex items-center gap-2">
+                            {chat.contact.name}
+                            {chat.status === 'atendimentos' && (
+                                <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/20 text-[10px] px-1.5 h-5">
+                                    Em atendimento
+                                </Badge>
+                            )}
+                        </h2>
+                        <p className="text-xs text-white/50 flex items-center gap-1">
+                            {chat.instance_name && (
+                                <span className="flex items-center gap-1">
+                                    <FaWhatsapp className="h-3 w-3 text-green-500" />
+                                    {chat.instance_name}
+                                </span>
+                            )}
+                            <span className="mx-1">•</span>
+                            <span>{chat.contact.phone}</span>
+                        </p>
+                    </div>
                 </div>
                 <div className="flex items-center gap-2">
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant={showFullHistory ? "secondary" : "ghost"} size="icon" onClick={() => setShowFullHistory(!showFullHistory)}>
-                                    <History className="h-5 w-5" />
+                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10" onClick={() => setShowFullHistory(!showFullHistory)}>
+                                    <History className={cn("h-5 w-5", showFullHistory ? "text-blue-400" : "")} />
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>
                                 <p>{showFullHistory ? 'Mostrar apenas a conversa atual' : 'Mostrar histórico completo'}</p>
                             </TooltipContent>
                         </Tooltip>
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10">
+                                    <Phone className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10">
+                                    <Video className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Videochamada (Em breve)</p></TooltipContent>
+                        </Tooltip>
+
+                        <div className="w-px h-6 bg-white/10 mx-1" />
+
+                        {isChatOpen && isChatAssignedToMe && (
+                            <CloseChatDialog
+                                chat={chat}
+                                onActionSuccess={onActionSuccess}
+                                reasons={closeReasons}
+                                isOpen={isCloseDialogOpen}
+                                onOpenChange={setIsCloseDialogOpen}
+                            />
+                        )}
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setIsCloseDialogOpen(true)}
+                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                >
+                                    <XCircle className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
+                        </Tooltip>
                     </TooltipProvider>
-                    {isChatOpen && isChatAssignedToMe && (
-                        <CloseChatDialog chat={chat} onActionSuccess={onActionSuccess} reasons={closeReasons} />
-                    )}
-                    <Button variant="ghost" size="icon">
-                        <FileDown className="h-5 w-5" />
-                    </Button>
-                    <ChatSummary
-                        chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
-                        workspaceId={currentUser.activeWorkspaceId!}
-                    />
-                    <Button variant="ghost" size="icon">
-                        <MoreVertical className="h-5 w-5" />
-                    </Button>
                 </div>
             </header>
 
+            {/* Messages Area */}
             <div className="flex-1 overflow-y-auto relative" >
                 <ScrollArea className="h-full" ref={scrollAreaRef}>
-                    <div className="space-y-1 p-6">
+                    <div className="space-y-1 p-6 pb-4">
                         {isLoadingOlderMessages && canLoadOlder && (
-                            <div className="flex justify-center py-2 text-muted-foreground text-xs">
+                            <div className="flex justify-center py-4 text-white/50 text-xs">
                                 <Loader2 className="h-4 w-4 animate-spin" />
                             </div>
                         )}
                         {isLoadingHistory && (
-                            <div className="flex justify-center py-2 text-muted-foreground text-xs">
+                            <div className="flex justify-center py-4 text-white/50 text-xs">
                                 <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando histórico completo...
                             </div>
                         )}
@@ -1058,17 +1126,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
 
             {isChatOpen && isChatAssignedToMe ? (
-                <footer className="border-t bg-background p-4 flex-shrink-0">
+                <footer className="p-4 bg-transparent z-20">
                     {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                        <div className="mb-2 p-2 border rounded-md bg-secondary max-h-40 overflow-y-auto">
+                        <div className="mb-2 p-2 border border-white/10 rounded-xl bg-black/60 backdrop-blur-xl max-h-40 overflow-y-auto shadow-xl">
                             {filteredShortcuts.map(shortcut => (
                                 <button
                                     key={shortcut.id}
-                                    className="w-full text-left p-2 rounded hover:bg-background text-sm"
+                                    className="w-full text-left p-2 rounded-lg hover:bg-white/10 text-sm text-white transition-colors"
                                     onClick={() => handleShortcutSelect(shortcut)}
                                 >
-                                    <span className="font-bold">/{shortcut.name}</span>
-                                    <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
+                                    <span className="font-bold text-blue-400">/{shortcut.name}</span>
+                                    <span className="text-white/70 ml-2 truncate">{shortcut.message}</span>
                                 </button>
                             ))}
                         </div>
@@ -1090,89 +1158,97 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     <div className="space-y-4">
                         <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                             <input type="hidden" name="chatId" value={chat.id} />
-                            <div className="relative w-full flex items-center rounded-lg border bg-secondary/50 focus-within:ring-2 focus-within:ring-primary/50">
-                                {showTextInput ? (
-                                    <div className='w-full'>
+
+                            <div className="bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-2 shadow-2xl flex items-end gap-2 relative flex-1">
+                                <div className="flex gap-1 pb-1">
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl" disabled={isAiTyping}>
+                                                <Smile className="h-5 w-5" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
+                                            <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" />
+                                        </PopoverContent>
+                                    </Popover>
+
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
+                                        disabled={isAiTyping}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <Paperclip className="h-5 w-5" />
+                                    </Button>
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        onChange={handleFileChange}
+                                        className="hidden"
+                                        multiple
+                                        accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
+                                    />
+                                </div>
+
+                                <div className="relative flex-1 min-w-0 py-2">
+                                    {showTextInput ? (
                                         <ContentEditable
                                             innerRef={contentEditableRef}
                                             html={newMessage}
                                             disabled={isAiTyping}
                                             onChange={handleMessageChange}
-                                            className="pr-10 pl-4 py-2.5 min-h-[40px] focus:outline-none"
+                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-white placeholder:text-white/30 resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide"
                                             tagName="div"
                                             onKeyUp={saveCursorPosition}
                                             onClick={saveCursorPosition}
+                                            placeholder="Digite sua mensagem..."
                                         />
-                                        <div className="absolute right-2 bottom-2 flex items-center">
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isAiTyping}><Smile className="h-5 w-5" /></Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0 border-none mb-2">
-                                                    <EmojiPicker onEmojiClick={onEmojiClick} />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-                                    </div>
-                                ) : null}
-                            </div>
-                            <div className='flex items-center gap-2'>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleFileChange}
-                                    className="hidden"
-                                    multiple
-                                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-10 w-10 shrink-0"
-                                    disabled={isAiTyping}
-                                    onClick={() => fileInputRef.current?.click()}
-                                >
-                                    <Paperclip className="h-5 w-5" />
-                                </Button>
+                                    ) : null}
+                                </div>
 
-                                {newMessage.trim() === "" && mediaFiles.length === 0 ? (
-                                    <AudioRecorder onSend={handleSendAudio} />
-                                ) : (
-                                    <SendMessageButton disabled={isAiTyping} />
-                                )}
+                                <div className="pb-1 pr-1">
+                                    {newMessage.trim() === "" && mediaFiles.length === 0 ? (
+                                        <AudioRecorder onSend={handleSendAudio} />
+                                    ) : (
+                                        <SendMessageButton disabled={isAiTyping} />
+                                    )}
+                                </div>
                             </div>
                         </form>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center space-x-2">
-                                <Bot className="h-5 w-5 text-muted-foreground" />
+
+                        <div className="flex flex-wrap items-center gap-3 px-2">
+                            <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5">
+                                <Bot className="h-4 w-4 text-blue-400" />
                                 <Switch
                                     id="ai-agent-switch"
                                     checked={isAiAgentActive}
                                     onCheckedChange={handleAiSwitchChange}
                                     disabled={isAiTyping || !autopilotConfig}
+                                    className="data-[state=checked]:bg-blue-600"
                                 />
-                                <Label htmlFor="ai-agent-switch" className="font-medium text-sm">Agente de IA</Label>
-                                {isAiTyping && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                                <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-white cursor-pointer">Agente de IA</Label>
+                                {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
                             </div>
                             {autopilotConfig && (
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-[10px] text-white/30">
                                     {(autopilotConfig.knowledge_base_documents?.length || 0)} docs · {autopilotRules.filter(rule => rule.enabled).length} regras ativas
                                 </span>
                             )}
-                            <Link href="/autopilot" className="text-xs font-medium text-primary hover:underline">
+                            <Link href="/autopilot" className="text-[10px] font-medium text-blue-400 hover:text-blue-300 hover:underline ml-auto">
                                 Treinar agente
                             </Link>
                         </div>
                     </div>
                 </footer>
             ) : (
-                <footer className="border-t bg-card p-4 flex-shrink-0 text-center">
-                    <p className='text-sm font-medium text-muted-foreground'>{
+                <footer className="p-4 flex-shrink-0 text-center bg-black/20 backdrop-blur-xl border-t border-white/10">
+                    <p className='text-sm font-medium text-white/50'>{
                         chat.status === 'gerais' ? "Este atendimento está aguardando um agente." : "Este atendimento foi encerrado."
                     }</p>
                 </footer>
             )}
-        </main>
+        </div>
     );
 }

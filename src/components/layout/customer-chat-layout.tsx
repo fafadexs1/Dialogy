@@ -27,31 +27,31 @@ const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
 function LoadingSkeleton() {
   return (
-    <div className="flex flex-1 w-full min-h-0 h-full">
-      <div className="flex w-[360px] flex-shrink-0 flex-col border-r bg-card p-4 gap-4">
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
+    <div className="flex flex-1 w-full min-h-0 h-full bg-black/20 backdrop-blur-xl">
+      <div className="flex w-[360px] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+        <Skeleton className="h-12 w-full bg-white/5" />
+        <Skeleton className="h-10 w-full bg-white/5" />
+        <Skeleton className="h-10 w-full bg-white/5" />
         <div className="space-y-2 mt-4">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
         </div>
       </div>
-      <div className="flex-1 flex flex-col min-w-0">
-        <Skeleton className="h-16 w-full" />
+      <div className="flex-1 flex flex-col min-w-0 bg-transparent">
+        <Skeleton className="h-16 w-full bg-white/5" />
         <div className="flex-1 p-6 space-y-4">
-          <Skeleton className="h-10 w-1/2 ml-auto" />
-          <Skeleton className="h-10 w-1/2" />
-          <Skeleton className="h-10 w-1/2 ml-auto" />
+          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+          <Skeleton className="h-10 w-1/2 bg-white/5" />
+          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
         </div>
-        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full bg-white/5" />
       </div>
-      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l bg-card p-4 gap-4">
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-32 w-full" />
+      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+        <Skeleton className="h-16 w-full bg-white/5" />
+        <Skeleton className="h-24 w-full bg-white/5" />
+        <Skeleton className="h-32 w-full bg-white/5" />
       </div>
     </div>
   );
@@ -99,7 +99,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   useEffect(() => {
     const supabase = createClient();
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'SIGNED_OUT' || event === 'USER_DELETED') && !session) {
+      if (event === 'SIGNED_OUT' && !session) {
         router.replace('/login');
       }
     });
@@ -130,8 +130,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     if (!data) return null;
     try {
       const createdAt = new Date(data.created_at);
-      const zoned = toZonedTime(createdAt, workspaceTimezone);
-      const timestamp = formatInTimeZone(zoned, 'HH:mm', { locale: ptBR, timeZone: workspaceTimezone });
+      const timestamp = formatInTimeZone(createdAt, workspaceTimezone, 'HH:mm', { locale: ptBR });
       const formattedDate = formatMessageDay(createdAt);
       let metadata;
       if (data.metadata) {
@@ -141,12 +140,12 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       let sender = undefined;
       if (data.from_me) {
         if (chat?.agent) {
-          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url, type: 'user' };
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url, type: 'user' } as const;
         } else if (initialUser) {
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url, type: 'user' };
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url, type: 'user' } as const;
         }
       } else if (chat?.contact) {
-        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url, type: 'contact' };
+        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url, type: 'contact' } as const;
       }
       return {
         id: data.id,
@@ -188,7 +187,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     if (!message) return;
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
-      removeMessagesForChat(message.chat_id, (m) => m.optimistic && m.sentByTab === message.sentByTab);
+      removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab);
     }
     if (!message.from_me) {
       if (message.chat_id !== selectedChatId) {
@@ -293,13 +292,17 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         console.error('[SYNC_INBOX] Error:', result.error);
         return;
       }
-      upsertChats(result.deltaChats, result.lastSyncChats);
-      if (result.updatedContacts.length) {
-        result.updatedContacts.forEach((contact) => updateChatContact(contact));
-      }
-      if (result.deltaMessages.length && snapshot.selectedChatId) {
-        appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
-      }
+
+      // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
+      React.startTransition(() => {
+        upsertChats(result.deltaChats, result.lastSyncChats);
+        if (result.updatedContacts.length) {
+          result.updatedContacts.forEach((contact) => updateChatContact(contact));
+        }
+        if (result.deltaMessages.length && snapshot.selectedChatId) {
+          appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
+        }
+      });
     } catch (error) {
       console.error('[SYNC_INBOX] Unexpected error:', error);
     }
@@ -496,33 +499,42 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   } : null;
 
   return (
-    <div className="h-full flex-1 w-full min-h-0 flex overflow-hidden">
-      <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
-      <ChatList
-        chats={chats}
-        selectedChat={enrichedSelectedChat}
-        setSelectedChat={handleSetSelectedChat}
-        currentUser={initialUser}
-        onUpdate={handleDataMutation}
-      />
-      <ChatPanel
-        key={selectedChat?.id}
-        chat={enrichedSelectedChat}
-        currentUser={initialUser}
-        onActionSuccess={handleDataMutation}
-        closeReasons={closeReasons}
-        showFullHistory={showFullHistory}
-        setShowFullHistory={setShowFullHistory}
-        tabId={tabIdRef.current}
-        onLoadOlderMessages={loadOlderMessages}
-        canLoadOlder={hasMoreHistory}
-      />
-      <ContactPanel
-        chat={enrichedSelectedChat}
-        currentUser={initialUser}
-        onTransferSuccess={handleDataMutation}
-        onContactUpdate={handleDataMutation}
-      />
+    <div className="relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-black selection:bg-blue-500/30">
+      {/* Background Effects */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+        <div className="absolute -left-[10%] top-[20%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[100px]" />
+        <div className="absolute -right-[10%] bottom-[20%] w-[40%] h-[40%] rounded-full bg-purple-500/10 blur-[100px]" />
+      </div>
+
+      <div className="relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px]">
+        <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
+        <ChatList
+          chats={chats}
+          selectedChat={enrichedSelectedChat}
+          setSelectedChat={handleSetSelectedChat}
+          currentUser={initialUser}
+          onUpdate={handleDataMutation}
+        />
+        <ChatPanel
+          key={selectedChat?.id}
+          chat={enrichedSelectedChat}
+          currentUser={initialUser}
+          onActionSuccess={handleDataMutation}
+          closeReasons={closeReasons}
+          showFullHistory={showFullHistory}
+          setShowFullHistory={setShowFullHistory}
+          tabId={tabIdRef.current}
+          onLoadOlderMessages={loadOlderMessages}
+          canLoadOlder={hasMoreHistory}
+        />
+        <ContactPanel
+          chat={enrichedSelectedChat}
+          currentUser={initialUser}
+          onTransferSuccess={handleDataMutation}
+          onContactUpdate={handleDataMutation}
+        />
+      </div>
     </div>
   );
 }
