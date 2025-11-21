@@ -16,13 +16,13 @@ import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 
 async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
     const instanceRes = await db.query(
-      `SELECT c.api_url, c.api_key 
+        `SELECT c.api_url, c.api_key 
        FROM evolution_api_instances i
        JOIN whatsapp_clusters c ON i.cluster_id = c.id
        WHERE i.instance_name = $1`,
-      [instanceName]
+        [instanceName]
     );
-     if (instanceRes.rowCount === 0) {
+    if (instanceRes.rowCount === 0) {
         return null;
     }
     return instanceRes.rows[0];
@@ -66,7 +66,7 @@ async function internalSendMessage(
 
         const chatInfo = chatInfoRes.rows[0];
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
-        
+
         const instanceName = instanceNameParam || lastInstanceName;
 
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
@@ -77,19 +77,19 @@ async function internalSendMessage(
                 [senderId, chatId]
             );
         }
-        
+
         if (!remoteJid || !instanceName) {
             throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
         }
 
         const apiConfig = await getApiConfigForInstance(instanceName);
-        
+
         if (!apiConfig) {
             throw new Error(`Configuração da API não encontrada para a instância ${instanceName}.`);
         }
-        
+
         const apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
-        
+
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         await client.query(
@@ -104,9 +104,9 @@ async function internalSendMessage(
                 metadata ?? {}, true, senderId, tabId
             ]
         );
-        
+
         await client.query('COMMIT');
-        
+
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
@@ -157,15 +157,15 @@ async function internalSendMedia(
         `, [chatId]);
 
         if (chatInfoRes.rowCount === 0) throw new Error('Chat não encontrado.');
-        
+
         const { workspace_id: workspaceId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfoRes.rows[0];
         const instanceName = instanceNameParam || lastInstanceName;
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
-        
+
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
-        
+
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         for (const file of mediaFiles) {
@@ -173,8 +173,8 @@ async function internalSendMedia(
             let dbMessageType: Message['type'];
 
             const base64Data = file.base64; // Already pure base64
-            
-            switch(file.mediatype) {
+
+            switch (file.mediatype) {
                 case 'image':
                     apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'image';
@@ -188,7 +188,7 @@ async function internalSendMedia(
                     dbMessageType = 'document';
                     break;
                 case 'audio':
-                     // Special handling for recorded audio to be sent as voice note
+                    // Special handling for recorded audio to be sent as voice note
                     if (file.filename === 'audio_gravado.mp3') {
                         apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: base64Data });
                     } else {
@@ -203,7 +203,7 @@ async function internalSendMedia(
 
             const messageTypeKey = `${dbMessageType}Message` as keyof typeof apiResponse.message;
             const messageDetails = apiResponse.message?.[messageTypeKey] as any;
-            
+
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),
                 mediaUrl: apiResponse?.message?.mediaUrl,
@@ -225,9 +225,9 @@ async function internalSendMedia(
                 ]
             );
         }
-        
+
         await client.query('COMMIT');
-        
+
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
@@ -260,6 +260,58 @@ export async function sendAgentMessageAction(
     }
 
     return internalSendMessage(chatId, content, user.id, tabId);
+}
+
+/**
+ * Action specifically for sending internal notes.
+ * These messages are NOT sent to WhatsApp.
+ */
+export async function sendInternalNoteAction(
+    chatId: string,
+    content: string,
+    tabId: string | null
+): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        return { success: false, error: 'Usuário não autenticado.' };
+    }
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+
+        const chatInfoRes = await client.query(`
+            SELECT workspace_id FROM chats WHERE id = $1
+        `, [chatId]);
+
+        if (chatInfoRes.rowCount === 0) {
+            throw new Error('Chat não encontrado.');
+        }
+
+        const { workspace_id: workspaceId } = chatInfoRes.rows[0];
+
+        await client.query(
+            `INSERT INTO messages (
+                workspace_id, chat_id, type, content, from_me, 
+                api_message_status, metadata, is_read, sender_user_id, sent_by_tab
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+                workspaceId, chatId, 'text', content, true,
+                'internal', { isInternalNote: true }, true, user.id, tabId
+            ]
+        );
+
+        await client.query('COMMIT');
+        return { success: true };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[SEND_INTERNAL_NOTE] Erro:', error);
+        return { success: false, error: 'Falha ao salvar nota interna.' };
+    } finally {
+        client.release();
+    }
 }
 
 /**
@@ -304,7 +356,7 @@ export async function sendMediaAction(
  * Action for sending media from automated systems.
  */
 export async function sendAutomatedMediaAction(
-     chatId: string,
+    chatId: string,
     caption: string,
     mediaFiles: {
         base64: string;
@@ -339,9 +391,9 @@ export async function startNewConversation(
     const client = await db.connect();
     try {
         await client.query('BEGIN');
-        
+
         const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
-        
+
         // 1. Find or create the contact
         let contactRes = await client.query(
             'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
@@ -357,7 +409,7 @@ export async function startNewConversation(
         } else {
             contactId = contactRes.rows[0].id;
         }
-        
+
         // 2. Find or create the chat
         let chatRes = await client.query(
             `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
@@ -375,7 +427,7 @@ export async function startNewConversation(
         }
 
         await client.query('COMMIT');
-        
+
         // 3. Send the message using the existing internal action
         // We pass the instanceName directly to ensure it's used.
         const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName);
@@ -385,8 +437,8 @@ export async function startNewConversation(
         } else {
             return { success: false, error: sendResult.error };
         }
-        
-    } catch(error) {
+
+    } catch (error) {
         await client.query('ROLLBACK');
         console.error('[START_NEW_CONVERSATION_ACTION] Erro:', error);
         const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";

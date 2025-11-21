@@ -37,7 +37,8 @@ import {
     ArrowRightLeft,
     XCircle,
     X,
-    Copy
+    Copy,
+    StickyNote
 } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
@@ -53,7 +54,7 @@ import { Textarea } from '../ui/textarea';
 import { closeChatAction, assignChatToSelfAction, getContactMessages } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
 import {
@@ -368,6 +369,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const [newMessage, setNewMessage] = useState('');
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
     const [isAiAgentActive, setIsAiAgentActive] = useState(false);
+    const [isInternalNote, setIsInternalNote] = useState(false);
     const autopilotSwitchTouchedRef = useRef(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
 
@@ -736,6 +738,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     thumbnail: mf.thumbnail,
                 }));
                 result = await sendMediaAction(chat.id, currentMessageText, mediaData as any, tabId);
+            } else if (isInternalNote) {
+                result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
             } else {
                 result = await sendAgentMessageAction(chat.id, currentMessageText, tabId);
             }
@@ -873,6 +877,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         const isFromMe = !!message.from_me;
         const isDeleted = message.status === 'deleted';
         const isPending = message.api_message_status === 'PENDING';
+        const isInternalNote = message.metadata?.isInternalNote;
 
         return (
             <React.Fragment key={message.id}>
@@ -912,11 +917,18 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     className={cn("break-words rounded-2xl p-3 max-w-lg shadow-lg relative",
                                         isDeleted
                                             ? 'bg-white/5 text-white/50 italic border border-white/10'
-                                            : (isFromMe
-                                                ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-tr-sm border border-white/10'
-                                                : 'bg-white/10 backdrop-blur-md border border-white/10 text-white rounded-tl-sm')
+                                            : isInternalNote
+                                                ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-200'
+                                                : (isFromMe
+                                                    ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-tr-sm border border-white/10'
+                                                    : 'bg-white/10 backdrop-blur-md border border-white/10 text-white rounded-tl-sm')
                                     )}
                                 >
+                                    {isInternalNote && (
+                                        <div className="flex items-center gap-1 text-xs text-yellow-500/70 mb-1 font-medium uppercase tracking-wider">
+                                            <StickyNote className="h-3 w-3" /> Nota Interna
+                                        </div>
+                                    )}
                                     {isDeleted ? (
                                         <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Mensagem apagada</span>
                                     ) : renderMessageContent(message, isFromMe)}
@@ -1182,6 +1194,22 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     >
                                         <Paperclip className="h-5 w-5" />
                                     </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className={cn(
+                                            "h-9 w-9 rounded-xl transition-colors",
+                                            isInternalNote
+                                                ? "text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20"
+                                                : "text-white/50 hover:text-yellow-400 hover:bg-yellow-500/10"
+                                        )}
+                                        disabled={isAiTyping}
+                                        onClick={() => setIsInternalNote(!isInternalNote)}
+                                        title="Nota Interna (não enviada ao cliente)"
+                                    >
+                                        <StickyNote className="h-5 w-5" />
+                                    </Button>
                                     <input
                                         type="file"
                                         ref={fileInputRef}
@@ -1203,7 +1231,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                             tagName="div"
                                             onKeyUp={saveCursorPosition}
                                             onClick={saveCursorPosition}
-                                            placeholder="Digite sua mensagem..."
+                                            placeholder={isInternalNote ? "Adicionar nota interna..." : "Digite sua mensagem..."}
                                         />
                                     ) : null}
                                 </div>

@@ -3,32 +3,32 @@
 import { HTMLInputTypeAttribute } from "react";
 
 export type Workspace = {
-    id: string;
-    name: string;
-    avatar: string;
-    timezone?: string;
-    roleName?: string;
-    isOwner?: boolean;
+  id: string;
+  name: string;
+  avatar: string;
+  timezone?: string;
+  roleName?: string;
+  isOwner?: boolean;
 }
 
 export type Permission = {
-    id: string;
-    description: string;
-    category: string;
+  id: string;
+  description: string;
+  category: string;
 }
 
 export type Role = {
-    id: string;
-    name: string;
-    description: string;
-    workspace_id?: string;
-    permissions: Permission[];
-    is_default: boolean;
+  id: string;
+  name: string;
+  description: string;
+  workspace_id?: string;
+  permissions: Permission[];
+  is_default: boolean;
 }
 
 export type User = {
   id: string;
-  name: string; 
+  name: string;
   avatar_url?: string; // Made optional to match DB
   avatar?: string;
   email?: string;
@@ -104,24 +104,27 @@ export type Task = {
 };
 
 export type Activity = {
-    id?: string;
-    contact_id?: string;
-    type: 'ligacao' | 'email' | 'whatsapp' | 'visita' | 'viabilidade' | 'contrato' | 'agendamento' | 'tentativa-contato' | 'nota';
-    date: string;
-    notes: string;
-    user_id?: string; // ID do agente que registrou
+  id?: string;
+  contact_id?: string;
+  type: 'ligacao' | 'email' | 'whatsapp' | 'visita' | 'viabilidade' | 'contrato' | 'agendamento' | 'tentativa-contato' | 'nota';
+  date: string;
+  notes: string;
+  user_id?: string; // ID do agente que registrou
 }
 
 export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'system_agent' } | Partial<Contact> & { type?: 'user' | 'contact' | 'system_agent' } | Partial<SystemAgent> & { type?: 'user' | 'contact' | 'system_agent' } | undefined;
 
+
+
 export type MessageMetadata = {
-    mediaUrl?: string;
-    mimetype?: string;
-    fileName?: string;
-    thumbnail?: string; // Base64 encoded thumbnail
-    sentBy?: 'autopilot' | 'agent' | 'system_agent';
-    duration?: number; // Duration in seconds for audio/video
-    waveform?: number[]; // For audio visualization
+  mediaUrl?: string;
+  mimetype?: string;
+  fileName?: string;
+  thumbnail?: string; // Base64 encoded thumbnail
+  sentBy?: 'autopilot' | 'agent' | 'system_agent';
+  duration?: number; // Duration in seconds for audio/video
+  waveform?: number[]; // For audio visualization
+  isInternalNote?: boolean;
 }
 
 export type Message = {
@@ -149,7 +152,7 @@ export type Message = {
 };
 
 export type Chat = {
-  id:string;
+  id: string;
   contact: Contact;
   agent?: User;
   messages: Message[];
@@ -176,7 +179,7 @@ export type InternalChannel = {
 };
 
 export type InternalMessage = {
-  id:string;
+  id: string;
   sender: User;
   content: string;
   timestamp: string;
@@ -184,27 +187,27 @@ export type InternalMessage = {
 };
 
 export type CustomFieldDefinition = {
-    id: string;
-    workspace_id: string;
-    label: string;
-    type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select';
-    placeholder?: string;
-    options?: SelectableOption[];
+  id: string;
+  workspace_id: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select';
+  placeholder?: string;
+  options?: SelectableOption[];
 };
 
 export interface SelectableOption {
-    id: string;
-    value: string;
-    label: string;
-    color?: string;
+  id: string;
+  value: string;
+  label: string;
+  color?: string;
 }
 
 export interface Tag {
-    id: string;
-    value: string;
-    label: string;
-    color: string;
-    is_close_reason: boolean;
+  id: string;
+  value: string;
+  label: string;
+  color: string;
+  is_close_reason: boolean;
 }
 
 
@@ -252,15 +255,15 @@ export type ActionType = 'reply' | 'webhook';
 
 export type Action =
   | {
-      type: 'reply';
-      value: string;
-    }
+    type: 'reply';
+    value: string;
+  }
   | {
-      type: 'webhook';
-      url: string;
-      method: 'GET' | 'POST';
-      body?: Record<string, any>;
-    };
+    type: 'webhook';
+    url: string;
+    method: 'GET' | 'POST';
+    body?: Record<string, any>;
+  };
 
 export interface KnowledgeBaseDocument {
   id: string;
@@ -280,73 +283,73 @@ export interface NexusFlowInstance {
 }
 
 export interface AutopilotConfig {
-    id: string;
-    workspace_id: string;
-    name: string;
-    gemini_api_key: string | null;
-    ai_model: string | null;
-    knowledge_base: string | null;
-    knowledge_base_documents: KnowledgeBaseDocument[] | null;
-    is_primary: boolean;
-    is_active: boolean;
-    default_fallback_reply: string | null;
-    created_at: string;
-    updated_at: string;
+  id: string;
+  workspace_id: string;
+  name: string;
+  gemini_api_key: string | null;
+  ai_model: string | null;
+  knowledge_base: string | null;
+  knowledge_base_documents: KnowledgeBaseDocument[] | null;
+  is_primary: boolean;
+  is_active: boolean;
+  default_fallback_reply: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AutopilotUsageLog {
-    id: string;
-    flow_name: string;
-    rule_name: string | null;
-    model_name: string;
-    total_tokens: number;
-    created_at: string;
-    input_tokens: number;
-    output_tokens: number;
+  id: string;
+  flow_name: string;
+  rule_name: string | null;
+  model_name: string;
+  total_tokens: number;
+  created_at: string;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 export interface WhatsappCluster {
-    id: string;
-    name: string;
-    api_url: string;
-    api_key: string;
-    is_active: boolean;
-    metrics: {
-        cpu: number;
-        memory: number;
-        storage: {
-            used: number;
-            total: number;
-        };
-        network: {
-            down: number;
-            up: number;
-        };
-        instances_count: number;
-    } | null;
-    created_at: string;
-    updated_at: string;
+  id: string;
+  name: string;
+  api_url: string;
+  api_key: string;
+  is_active: boolean;
+  metrics: {
+    cpu: number;
+    memory: number;
+    storage: {
+      used: number;
+      total: number;
+    };
+    network: {
+      down: number;
+      up: number;
+    };
+    instances_count: number;
+  } | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface EvolutionInstance {
-    id: string;
-    instance_name: string;
-    display_name: string;
-    status: 'connected' | 'disconnected' | 'pending';
-    type: 'baileys' | 'wa_cloud';
-    cluster_id: string; 
-    qrCode?: string;
-    webhook_url?: string;
+  id: string;
+  instance_name: string;
+  display_name: string;
+  status: 'connected' | 'disconnected' | 'pending';
+  type: 'baileys' | 'wa_cloud';
+  cluster_id: string;
+  qrCode?: string;
+  webhook_url?: string;
 }
 
 export type EvolutionInstanceSettings = {
-    rejectCall?: boolean;
-    msgCall?: string;
-    groupsIgnore?: boolean;
-    alwaysOnline?: boolean;
-    readMessages?: boolean;
-    readStatus?: boolean;
-    syncFullHistory?: boolean;
+  rejectCall?: boolean;
+  msgCall?: string;
+  groupsIgnore?: boolean;
+  alwaysOnline?: boolean;
+  readMessages?: boolean;
+  readStatus?: boolean;
+  syncFullHistory?: boolean;
 };
 
 
@@ -358,86 +361,86 @@ export type EvolutionApiConfig = {
 };
 
 export interface EvolutionInstanceCreationPayload {
-    // Top-level
-    instanceName?: string;
-    displayName: string;
-    number?: string;
-    token?: string; // Can be for Baileys instance or Cloud API
-    integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
+  // Top-level
+  instanceName?: string;
+  displayName: string;
+  number?: string;
+  token?: string; // Can be for Baileys instance or Cloud API
+  integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
 
-    // Baileys Specific
-    qrcode?: boolean;
-    rejectCall?: boolean;
-    msgCall?: string;
-    groupsIgnore?: boolean;
-    alwaysOnline?: boolean;
-    readMessages?: boolean;
-    readStatus?: boolean;
-    syncFullHistory?: boolean;
+  // Baileys Specific
+  qrcode?: boolean;
+  rejectCall?: boolean;
+  msgCall?: string;
+  groupsIgnore?: boolean;
+  alwaysOnline?: boolean;
+  readMessages?: boolean;
+  readStatus?: boolean;
+  syncFullHistory?: boolean;
 
-    // Cloud API Specific
-    businessId?: string;
+  // Cloud API Specific
+  businessId?: string;
 
-    // Proxy
-    proxy?: {
-        host: string;
-        port: number;
-        username?: string;
-        password?: string;
-        protocol?: string;
-    };
+  // Proxy
+  proxy?: {
+    host: string;
+    port: number;
+    username?: string;
+    password?: string;
+    protocol?: string;
+  };
 
-    // Webhook
-    webhook?: {
-        url?: string;
-        byEvents?: boolean;
-        base64?: boolean;
-        headers?: Record<string, string>;
-        events?: string[];
-    };
+  // Webhook
+  webhook?: {
+    url?: string;
+    byEvents?: boolean;
+    base64?: boolean;
+    headers?: Record<string, string>;
+    events?: string[];
+  };
 }
 
 
 export interface WorkspaceInvite {
-    id: string;
-    workspace_id: string;
-    code: string;
-    created_by: string;
-    created_at: string;
-    expires_at: string;
-    max_uses: number | null;
-    is_revoked: boolean;
-    use_count: number;
+  id: string;
+  workspace_id: string;
+  code: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  max_uses: number | null;
+  is_revoked: boolean;
+  use_count: number;
 }
 
 export interface SystemAgent {
-    id: string;
-    workspace_id: string;
-    name: string;
-    avatar_url: string;
-    token: string;
-    webhook_url: string;
-    is_active: boolean;
-    created_at: string;
+  id: string;
+  workspace_id: string;
+  name: string;
+  avatar_url: string;
+  token: string;
+  webhook_url: string;
+  is_active: boolean;
+  created_at: string;
 }
 
 // Analytics Types
 export interface AnalyticsData {
-    totalConversations: number;
-    newContacts: number;
-    avgFirstResponseTime: string | null;
-    firstContactResolutionRate: number;
-    conversationsByHour: { hour: string; count: number }[];
+  totalConversations: number;
+  newContacts: number;
+  avgFirstResponseTime: string | null;
+  firstContactResolutionRate: number;
+  conversationsByHour: { hour: string; count: number }[];
 }
 
 export interface AgentPerformance {
-    agent_id: string;
-    agent_name: string;
-    avatar_url: string;
-    total_chats: number;
-    resolved_chats: number;
-    avg_first_response_time: string | null;
-    avg_rating: string | null; // Mocked for now
+  agent_id: string;
+  agent_name: string;
+  avatar_url: string;
+  total_chats: number;
+  resolved_chats: number;
+  avg_first_response_time: string | null;
+  avg_rating: string | null; // Mocked for now
 }
 
 export interface Shortcut {
@@ -484,41 +487,41 @@ export interface CampaignRecipient {
 }
 
 export interface InstanceCost {
-    type: 'baileys' | 'wa_cloud';
-    cost: number;
+  type: 'baileys' | 'wa_cloud';
+  cost: number;
 }
 
 export interface BillingData {
-    totalBaileysInstances: number;
-    totalCloudInstances: number;
-    totalBaileysCost: number;
-    totalCloudCost: number;
-    totalCost: number;
-    workspaces: {
-        id: string;
-        name: string;
-        owner_id: string;
-        owner_name: string;
-        baileys_count: number;
-        cloud_count: number;
-        subtotal: number;
-    }[];
+  totalBaileysInstances: number;
+  totalCloudInstances: number;
+  totalBaileysCost: number;
+  totalCloudCost: number;
+  totalCost: number;
+  workspaces: {
+    id: string;
+    name: string;
+    owner_id: string;
+    owner_name: string;
+    baileys_count: number;
+    cloud_count: number;
+    subtotal: number;
+  }[];
 }
 
 // Plan Management
 export interface PlanIntegration extends Integration {
-    integration_id: string;
-    included_quantity: number;
-    additional_cost: number;
-    is_enabled: boolean;
+  integration_id: string;
+  included_quantity: number;
+  additional_cost: number;
+  is_enabled: boolean;
 }
 
 export interface Plan {
-    id: string;
-    name: string;
-    description: string;
-    price: number;
-    is_active: boolean;
-    is_default: boolean;
-    integrations: PlanIntegration[];
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  is_active: boolean;
+  is_default: boolean;
+  integrations: PlanIntegration[];
 }
