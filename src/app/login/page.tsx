@@ -53,7 +53,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </div>
           )}
 
-          <LoginForm />
+          <LoginForm redirectTo={resolvedSearchParams?.next} />
         </div>
 
         <p className="text-center mt-8 text-sm text-white/40">

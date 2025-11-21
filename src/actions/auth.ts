@@ -17,12 +17,17 @@ export async function login(prevState: any, formData: FormData) {
     password,
   });
 
+  const redirectTo = formData.get('redirectTo') as string;
+
   if (error) {
     console.error('[LOGIN_ACTION] Erro:', error);
     return { success: false, message: 'Credenciais inválidas. Verifique seu e-mail e senha.' };
   }
 
   // Redirecionamento é crucial para o middleware atualizar a sessão.
+  if (redirectTo && redirectTo.startsWith('/')) {
+      return redirect(redirectTo);
+  }
   return redirect('/inbox');
 }
 

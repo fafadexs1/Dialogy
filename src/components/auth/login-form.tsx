@@ -39,7 +39,7 @@ function SocialButton({ provider, icon, label, isIconOnly, children }: { provide
   )
 }
 
-export function LoginForm() {
+export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const [state, formAction] = useActionState(login, { success: false, message: null });
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -48,9 +48,13 @@ export function LoginForm() {
 
   useEffect(() => {
     if (state.success) {
-      router.push('/inbox');
+      // The server action handles the redirect now, but just in case:
+      // router.push(redirectTo || '/inbox'); 
+      // Actually, server action redirect throws, so this might not be reached on success if redirect happens.
+      // But if we want client side navigation for some reason:
+      // router.refresh(); 
     }
-  }, [state, router]);
+  }, [state, router, redirectTo]);
 
   useEffect(() => {
     const savedRemember = typeof window !== 'undefined' && localStorage.getItem('rememberMe') === 'true';
@@ -73,6 +77,7 @@ export function LoginForm() {
 
   return (
     <form action={formAction} onSubmit={handleRemember} className="space-y-5">
+      <input type="hidden" name="redirectTo" value={redirectTo || ''} />
       <div className="space-y-2">
         <Label htmlFor="email" className="font-medium text-white/80 text-sm">E-mail</Label>
         <Input

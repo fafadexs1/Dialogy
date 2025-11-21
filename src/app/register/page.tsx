@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { register } from '@/actions/auth';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Code2 } from 'lucide-react';
@@ -12,12 +12,14 @@ import { useActionState } from 'react';
 export default function RegisterPage() {
     const [registerState, registerAction, isRegisterPending] = useActionState(register, { success: false, message: null, user: null });
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirectTo = searchParams.get('next');
 
     useEffect(() => {
         if (registerState.success) {
-            router.push('/inbox');
+            router.push(redirectTo || '/inbox');
         }
-    }, [registerState.success, router]);
+    }, [registerState.success, router, redirectTo]);
 
     return (
         <div className="min-h-screen bg-[#020617] text-white selection:bg-blue-500/30 flex flex-col items-center justify-center relative overflow-hidden">
