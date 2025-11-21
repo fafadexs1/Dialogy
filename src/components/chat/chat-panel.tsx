@@ -38,7 +38,11 @@ import {
     XCircle,
     X,
     Copy,
-    StickyNote
+    StickyNote,
+    MessageSquareQuote,
+    Users,
+    Globe,
+    Lock
 } from 'lucide-react';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
@@ -377,6 +381,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
+    const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
 
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1210,6 +1215,50 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     >
                                         <StickyNote className="h-5 w-5" />
                                     </Button>
+
+                                    <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
+                                                disabled={isAiTyping}
+                                                title="Atalhos"
+                                            >
+                                                <MessageSquareQuote className="h-5 w-5" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-80 p-0 bg-black/90 border-white/10 backdrop-blur-xl text-white max-h-96 overflow-y-auto" align="start">
+                                            <div className="p-2 space-y-1">
+                                                <h4 className="text-xs font-medium text-white/50 px-2 py-1">Atalhos Disponíveis</h4>
+                                                {shortcuts.length === 0 ? (
+                                                    <p className="text-sm text-white/50 px-2 py-2">Nenhum atalho encontrado.</p>
+                                                ) : (
+                                                    shortcuts.map(shortcut => (
+                                                        <button
+                                                            key={shortcut.id}
+                                                            className="w-full text-left p-2 rounded-lg hover:bg-white/10 text-sm text-white transition-colors flex flex-col gap-1 group"
+                                                            onClick={() => {
+                                                                handleShortcutSelect(shortcut);
+                                                                setIsShortcutsOpen(false);
+                                                            }}
+                                                        >
+                                                            <div className="flex items-center justify-between w-full">
+                                                                <span className="font-bold text-blue-400 flex items-center gap-2">
+                                                                    /{shortcut.name}
+                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-white/30" />}
+                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-white/30" />}
+                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-white/30" />}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-white/70 truncate w-full text-xs">{shortcut.message}</span>
+                                                        </button>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
                                     <input
                                         type="file"
                                         ref={fileInputRef}

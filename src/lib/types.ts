@@ -449,10 +449,12 @@ export interface Shortcut {
   user_id: string;
   name: string;
   message: string;
-  type: 'global' | 'private';
+  type: 'global' | 'private' | 'team';
+  team_id?: string;
   created_at: string;
   updated_at: string;
   user_name?: string; // Optional: for displaying the creator's name
+  team_name?: string; // Optional: for displaying the team name
 }
 
 export type CampaignStatus = 'draft' | 'sending' | 'completed' | 'paused' | 'failed';
