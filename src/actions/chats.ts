@@ -50,7 +50,7 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
         }
 
         console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuÃ­do ao agente ${currentAgentId}.`);
-        revalidatePath('/', 'layout');
+        // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
     } catch (error) {
         console.error("Erro ao atribuir chat a si mesmo:", error);
@@ -192,7 +192,7 @@ export async function transferChatAction(
 
         await client.query('COMMIT');
         console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
-        revalidatePath('/', 'layout');
+        // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
 
     } catch (error) {
