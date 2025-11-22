@@ -1,0 +1,7 @@
+[
+  "contacts",
+  "contact_tags",
+  "chats",
+  "messages",
+  "user_workspace_presence"
+]
