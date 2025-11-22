@@ -99,11 +99,22 @@ function DialogyLogo() {
     )
 }
 
-function SignOutMenuItem() {
+function SignOutMenuItem({ user }: { user: User }) {
     const [isPending, startTransition] = useTransition();
 
     const handleSignOut = () => {
         startTransition(async () => {
+            if (user.activeWorkspaceId) {
+                try {
+                    await fetch('/api/users/online-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ workspaceId: user.activeWorkspaceId, isOnline: false }),
+                    });
+                } catch (error) {
+                    console.error("Error setting offline status:", error);
+                }
+            }
             await signOut();
         });
     };
@@ -287,7 +298,7 @@ export function Sidebar({ user }: SidebarProps) {
                             </DropdownMenuItem>
                         </Link>
                         <DropdownMenuSeparator className="bg-white/10" />
-                        <SignOutMenuItem />
+                        <SignOutMenuItem user={user} />
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>

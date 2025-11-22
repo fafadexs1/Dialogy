@@ -54,27 +54,33 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     fetchUser();
   }, [initialUser]);
 
+  const refreshOnlineAgents = useCallback(async () => {
+    if (!localUser?.activeWorkspaceId) return;
+    try {
+      const { getOnlineAgents } = await import('@/actions/user');
+      const agents = await getOnlineAgents(localUser.activeWorkspaceId);
+      setOnlineAgents(agents);
+    } catch (error) {
+      console.error("PresenceProvider: Failed to refresh online agents.", error);
+    }
+  }, [localUser?.activeWorkspaceId]);
+
+  useEffect(() => {
+    // Polling effect: Refresh online agents every 1 second
+    if (!localUser?.activeWorkspaceId) return;
+
+    const intervalId = setInterval(() => {
+      refreshOnlineAgents();
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [refreshOnlineAgents, localUser?.activeWorkspaceId]);
+
   useEffect(() => {
     // This effect establishes the real-time presence connection via Database (user_workspace_presence).
     if (!localUser?.activeWorkspaceId || !localUser.id) return;
 
     const supabase = createClient();
-
-    // Function to fetch the latest online agents list from the server (DB)
-    const refreshOnlineAgents = async () => {
-      if (!localUser.activeWorkspaceId) return;
-      try {
-        // We need to import this dynamically or pass it as a prop if we want to avoid importing server actions directly in hooks if they cause issues, 
-        // but Next.js handles server actions in client components/hooks fine.
-        // However, since we are inside the hook, let's assume getOnlineAgents is available.
-        // We need to import it at the top of the file.
-        const { getOnlineAgents } = await import('@/actions/user');
-        const agents = await getOnlineAgents(localUser.activeWorkspaceId);
-        setOnlineAgents(agents);
-      } catch (error) {
-        console.error("PresenceProvider: Failed to refresh online agents.", error);
-      }
-    };
 
     // Initial fetch
     refreshOnlineAgents();
@@ -104,7 +110,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       supabase.removeChannel(channel);
       void updateServerPresence(false);
     };
-  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence]);
+  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents]);
 
   useEffect(() => {
     if (!localUser?.id || !localUser.activeWorkspaceId) return;
