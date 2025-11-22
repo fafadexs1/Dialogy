@@ -15,9 +15,8 @@ const defaultTimeZone = 'America/Sao_Paulo';
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
 }
 
 /**
@@ -238,7 +237,7 @@ export async function closeChatAction(
         let tagInfo = { label: null as string | null, color: null as string | null };
         if (reasonTagId) {
             const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
-            if (tagRes.rowCount > 0) {
+            if ((tagRes.rowCount ?? 0) > 0) {
                 tagInfo = tagRes.rows[0];
             }
         }
@@ -278,7 +277,7 @@ export async function closeChatAction(
         ]);
 
         await client.query('COMMIT');
-        revalidatePath('/', 'layout');
+        // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
     } catch (error: any) {
         await client.query('ROLLBACK');
@@ -886,7 +885,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
                     metadata: row.last_message_metadata,
                     transcription: row.last_message_transcription,
                     created_at: row.last_message_created_at || new Date().toISOString(),
-                    updated_at: row.last_message_created_at || new Date().toISOString(),
+                    // updated_at removed as it is not in MessageRow
                     from_me: Boolean(row.last_message_from_me),
                     sender_user_id: row.last_message_sender_user_id,
                     sender_system_agent_id: row.last_message_sender_system_agent_id,
