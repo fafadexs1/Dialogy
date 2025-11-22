@@ -3,10 +3,11 @@
 
 import { fetchEvolutionAPI } from "@/actions/evolution-api";
 import type { EvolutionApiConfig } from "@/lib/types";
+import { uploadTempMedia } from "./upload-temp-media";
 
 interface VideoPayload {
     number: string;
-    media: string; // Base64 com data URI prefix
+    media: string; // Base64 (com ou sem prefixo) ou URL remota
     mimetype: string;
     caption?: string;
     filename?: string;
@@ -24,18 +25,22 @@ export async function sendVideoMessage(
     instanceName: string,
     payload: VideoPayload
 ) {
-    const base64Data = payload.media.split(',')[1] || payload.media;
+    const { publicUrl } = await uploadTempMedia({
+        media: payload.media,
+        mimetype: payload.mimetype,
+        fileName: payload.filename,
+    });
 
     const apiPayload = {
         number: payload.number,
         mediatype: 'video',
         mimetype: payload.mimetype,
-        media: base64Data,
+        media: publicUrl,
         caption: payload.caption,
         fileName: payload.filename,
     };
     
-    return await fetchEvolutionAPI(
+    const response = await fetchEvolutionAPI(
         `/message/sendMedia/${instanceName}`,
         apiConfig,
         {
@@ -43,4 +48,6 @@ export async function sendVideoMessage(
             body: JSON.stringify(apiPayload),
         }
     );
+
+    return { ...response, tempMediaPublicUrl: publicUrl };
 }

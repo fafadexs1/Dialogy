@@ -1,10 +1,14 @@
 
-import dotenv from 'dotenv';
-dotenv.config();
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+import type {NextConfig} from 'next';
+
+require('dotenv').config();
+
+const nextConfig: NextConfig = {
   /* config options here */
+  serverActions: {
+    bodySizeLimit: '100mb',
+  },
   typescript: {
     // Evita que erros de tipo parem o build. Útil em desenvolvimento, mas use com cautela em produção.
     ignoreBuildErrors: true,
@@ -38,6 +42,20 @@ const nextConfig = {
         // Adicione outros módulos nativos do Node.js aqui se encontrar mais erros.
       };
     }
+    
+    // Ignorar avisos de "Critical dependency" do `handlebars` que usa `require.extensions`
+    config.externals.push({
+      'handlebars': 'commonjs handlebars',
+      '@opentelemetry/exporter-jaeger': 'commonjs @opentelemetry/exporter-jaeger',
+      '@opentelemetry/winston-transport': 'commonjs @opentelemetry/winston-transport'
+    });
+
+    config.ignoreWarnings = [
+        ...(config.ignoreWarnings || []),
+        /Module not found: Can't resolve 'handlebars'/,
+        /require.extensions is not supported by webpack/
+    ];
+    
     return config;
   },
 };

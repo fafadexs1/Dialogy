@@ -135,6 +135,7 @@ async function internalSendMedia(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string;
     }[],
     senderId: string,
     tabId: string | null,
@@ -172,28 +173,28 @@ async function internalSendMedia(
             let apiResponse;
             let dbMessageType: Message['type'];
 
-            const base64Data = file.base64; // Already pure base64
+            const mediaContent = file.base64; // Pode ser Base64 ou URL remota
 
             switch (file.mediatype) {
                 case 'image':
-                    apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
+                    apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'image';
                     break;
                 case 'video':
-                    apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
+                    apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'video';
                     break;
                 case 'document':
-                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
+                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                     dbMessageType = 'document';
                     break;
                 case 'audio':
                     // Special handling for recorded audio to be sent as voice note
                     if (file.filename === 'audio_gravado.mp3') {
-                        apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: base64Data });
+                        apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent });
                     } else {
                         // Send other audio files as documents
-                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: base64Data, mimetype: file.mimetype, filename: file.filename, caption });
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                     }
                     dbMessageType = 'audio';
                     break;
@@ -203,13 +204,18 @@ async function internalSendMedia(
 
             const messageTypeKey = `${dbMessageType}Message` as keyof typeof apiResponse.message;
             const messageDetails = apiResponse.message?.[messageTypeKey] as any;
+            const resolvedMediaUrl =
+                apiResponse?.message?.mediaUrl ||
+                messageDetails?.url ||
+                (apiResponse as any)?.tempMediaPublicUrl;
 
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),
-                mediaUrl: apiResponse?.message?.mediaUrl,
+                mediaUrl: resolvedMediaUrl,
                 fileName: messageDetails?.fileName || file.filename,
                 mimetype: messageDetails?.mimetype || file.mimetype,
                 duration: messageDetails?.seconds,
+                thumbnail: file.thumbnail || (metadata?.thumbnail ?? undefined),
             };
 
             await client.query(
@@ -341,6 +347,7 @@ export async function sendMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string;
     }[],
     tabId: string | null
 ): Promise<{ success: boolean; error?: string }> {
@@ -363,6 +370,7 @@ export async function sendAutomatedMediaAction(
         mimetype: string;
         filename: string;
         mediatype: 'image' | 'video' | 'document' | 'audio';
+        thumbnail?: string;
     }[],
     agentId: string,
     instanceName?: string,
