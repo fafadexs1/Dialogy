@@ -44,6 +44,7 @@ import {
     Globe,
     Lock
 } from 'lucide-react';
+import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -206,10 +207,11 @@ function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}
         .replace(/'/g, "&#039;");
 
     // Then, apply rich text formatting for whatsapp-style markdown
+    // Note: Lookbehind support varies, so we use a more compatible approach
     processedText = processedText
-        .replace(/(?<!<code>)\*(.*?)\*(?!<\/code>)/g, '<b>$1</b>') // Bold
-        .replace(/(?<!<code>)_(.*?)_(?!<\/code>)/g, '<i>$1</i>') // Italic
-        .replace(/(?<!<code>)~(.*?)~(?!<\/code>)/g, '<s>$1</s>') // Strikethrough
+        .replace(/(\s|^)\*(.*?)\*(\s|$)/g, '$1<b>$2</b>$3') // Bold
+        .replace(/(\s|^)_(.*?)_(\s|$)/g, '$1<i>$2</i>$3') // Italic
+        .replace(/(\s|^)~(.*?)~(\s|$)/g, '$1<s>$2</s>$3') // Strikethrough
         .replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
 
     // Finally, replace URLs with anchor tags
@@ -226,6 +228,8 @@ function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}
 }
 
 
+import { MediaViewer } from './media-viewer';
+
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
@@ -239,66 +243,39 @@ function MediaMessage({ message }: { message: Message }) {
     const renderMedia = () => {
         if (mimetype.startsWith('image/')) {
             return (
-                <Dialog>
-                    <DialogTrigger asChild>
-                        <Image
-                            src={urlToUse}
-                            alt={message.content || fileName || 'Imagem enviada'}
-                            width={300}
-                            height={300}
-                            className="rounded-lg object-cover w-full max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
-                        />
-                    </DialogTrigger>
-                    <DialogContent className="max-w-4xl p-2 bg-transparent border-none">
-                        <DialogHeader>
-                            <DialogTitle className="sr-only">Visualização de Imagem</DialogTitle>
-                            <DialogDescription className="sr-only">Visualizando a imagem enviada no chat em tamanho maior.</DialogDescription>
-                        </DialogHeader>
-                        <Image
-                            src={urlToUse}
-                            alt={message.content || fileName || 'Imagem enviada'}
-                            width={1024}
-                            height={768}
-                            className="rounded-lg object-contain w-full h-auto max-h-[80vh]"
-                        />
-                    </DialogContent>
-                </Dialog>
+                <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
+                    <Image
+                        src={urlToUse}
+                        alt={message.content || fileName || 'Imagem enviada'}
+                        width={300}
+                        height={300}
+                        className="rounded-lg object-cover w-full max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
+                    />
+                </MediaViewer>
             );
         }
         if (mimetype.startsWith('video/')) {
             return (
-                <Dialog>
-                    <DialogTrigger asChild>
-                        <div className="relative group w-full max-w-[300px] aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
-                            {urlToUse ? (
-                                <Image
-                                    src={urlToUse}
-                                    alt="Video thumbnail"
-                                    width={300}
-                                    height={169}
-                                    className="group-hover:brightness-75 transition-all object-cover"
-                                />
-                            ) : null}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
-                            <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
-                            {message.optimistic && (
-                                <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                                    <Loader2 className="h-10 w-10 text-white animate-spin" />
-                                </div>
-                            )}
-                        </div>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-4xl p-0 bg-black/50 border-none">
-                        <DialogHeader>
-                            <DialogTitle className="sr-only">Player de Vídeo</DialogTitle>
-                            <DialogDescription className="sr-only">Reproduzindo o vídeo enviado no chat.</DialogDescription>
-                        </DialogHeader>
-                        <video controls autoPlay className="rounded-lg w-full h-auto max-h-[80vh]">
-                            <source src={mediaUrl} type={mimetype} />
-                            Seu navegador não suporta a tag de vídeo.
-                        </video>
-                    </DialogContent>
-                </Dialog>
+                <MediaViewer src={mediaUrl || ''} type="video" fileName={fileName}>
+                    <div className="relative group w-full max-w-[300px] aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
+                        {urlToUse ? (
+                            <Image
+                                src={urlToUse}
+                                alt="Video thumbnail"
+                                width={300}
+                                height={169}
+                                className="group-hover:brightness-75 transition-all object-cover"
+                            />
+                        ) : null}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
+                        <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
+                        {message.optimistic && (
+                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                                <Loader2 className="h-10 w-10 text-white animate-spin" />
+                            </div>
+                        )}
+                    </div>
+                </MediaViewer>
             );
         }
         if (mimetype.startsWith('audio/')) {
@@ -817,14 +794,24 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         }
     };
 
-    const handleSendAudio = async (audioBase64: string, duration: number, mimetype: string) => {
+    const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
         if (!chat) return;
 
+        // Upload to Supabase Storage
+        const fileName = `audio_${Date.now()}.webm`;
+        const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
+
+        if (uploadError || !publicUrl) {
+            toast({ title: 'Erro ao fazer upload do áudio', description: uploadError || 'Erro desconhecido', variant: 'destructive' });
+            return;
+        }
+
         const result = await sendMediaAction(chat.id, '', [{
-            base64: audioBase64,
+            base64: publicUrl, // Passing URL instead of base64
             mimetype,
-            filename: 'audio_gravado.mp3',
-            mediatype: 'audio'
+            filename: 'audio_gravado.mp3', // Keep this filename to trigger voice note handling
+            mediatype: 'audio',
+            thumbnail: undefined
         }], tabId);
 
         if (result.error) {
@@ -965,7 +952,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     >
                         {message.sender && (
                             <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
-                                <AvatarImage src={message.sender.avatar} alt={message.sender.name || ''} data-ai-hint="person" />
+                                <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url} alt={message.sender.name || ''} data-ai-hint="person" />
                                 <AvatarFallback className="bg-zinc-800 text-white/70 text-xs">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                             </Avatar>
                         )}
@@ -1238,7 +1225,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                            <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" />
+                                            <EmojiPicker onEmojiClick={onEmojiClick} theme={"dark" as any} />
                                         </PopoverContent>
                                     </Popover>
 
@@ -1333,7 +1320,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                             tagName="div"
                                             onKeyUp={saveCursorPosition}
                                             onClick={saveCursorPosition}
-                                            placeholder={isInternalNote ? "Adicionar nota interna..." : "Digite sua mensagem..."}
                                         />
                                     ) : null}
                                 </div>
