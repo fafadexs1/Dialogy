@@ -55,67 +55,56 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   }, [initialUser]);
 
   useEffect(() => {
-    // This effect establishes the real-time presence connection.
+    // This effect establishes the real-time presence connection via Database (user_workspace_presence).
     if (!localUser?.activeWorkspaceId || !localUser.id) return;
 
     const supabase = createClient();
-    const channel = supabase.channel(`workspace-presence-${localUser.activeWorkspaceId}`);
 
-    const updatePresenceState = () => {
-      const newState = channel.presenceState<User>();
+    // Function to fetch the latest online agents list from the server (DB)
+    const refreshOnlineAgents = async () => {
+      if (!localUser.activeWorkspaceId) return;
+      try {
+        // We need to import this dynamically or pass it as a prop if we want to avoid importing server actions directly in hooks if they cause issues, 
+        // but Next.js handles server actions in client components/hooks fine.
+        // However, since we are inside the hook, let's assume getOnlineAgents is available.
+        // We need to import it at the top of the file.
+        const { getOnlineAgents } = await import('@/actions/user');
+        const agents = await getOnlineAgents(localUser.activeWorkspaceId);
+        setOnlineAgents(agents);
+      } catch (error) {
+        console.error("PresenceProvider: Failed to refresh online agents.", error);
+      }
+    };
 
-      // Use a Map to ensure unique user IDs, preventing duplicates from multiple tabs.
-      const uniqueAgents = new Map<string, OnlineAgent>();
+    // Initial fetch
+    refreshOnlineAgents();
 
-      Object.values(newState).forEach(presenceArray => {
-        const userPresence = presenceArray[0];
-        if (userPresence && userPresence.id && !uniqueAgents.has(userPresence.id)) {
-          uniqueAgents.set(userPresence.id, {
-            user: userPresence,
-            joined_at: new Date().toISOString()
-          });
+    // Set self as online immediately
+    void updateServerPresence(true);
+
+    const channel = supabase.channel(`db-presence-${localUser.activeWorkspaceId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_workspace_presence',
+          filter: `workspace_id=eq.${localUser.activeWorkspaceId}`,
+        },
+        () => {
+          // Whenever the presence table changes for this workspace, refresh the full list.
+          // This ensures we always have the correct joined user data.
+          refreshOnlineAgents();
         }
-      });
-
-      setOnlineAgents(Array.from(uniqueAgents.values()));
-    }
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        updatePresenceState();
-      })
-      .on('presence', { event: 'join' }, () => {
-        // A user has joined, refetch the whole state to be safe
-        updatePresenceState();
-      })
-      .on('presence', { event: 'leave' }, () => {
-        // A user has left, refetch the whole state to be safe
-        updatePresenceState();
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          // Client is subscribed, now track its own presence.
-          // Ensure the tracked object has all necessary fields for the UI.
-          const presencePayload: User = {
-            id: localUser.id,
-            name: localUser.name,
-            firstName: localUser.firstName,
-            lastName: localUser.lastName,
-            email: localUser.email,
-            avatar: localUser.avatar,
-          };
-          await channel.track(presencePayload);
-          void updateServerPresence(true);
-        }
-      });
+      )
+      .subscribe();
 
     return () => {
-      // Cleanup: leave the channel when the component unmounts.
-      channel.untrack();
+      // Cleanup
       supabase.removeChannel(channel);
       void updateServerPresence(false);
     };
-  }, [localUser, updateServerPresence]);
+  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence]);
 
   useEffect(() => {
     if (!localUser?.id || !localUser.activeWorkspaceId) return;

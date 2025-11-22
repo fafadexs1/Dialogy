@@ -67,6 +67,7 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 name: row.full_name,
                 email: row.email,
                 avatar_url: row.avatar_url,
+                avatar: row.avatar_url, // Map to avatar for UI compatibility
                 firstName: row.full_name?.split(' ')[0] ?? row.full_name,
                 lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
             },

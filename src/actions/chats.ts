@@ -15,6 +15,7 @@ const defaultTimeZone = 'America/Sao_Paulo';
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
+        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
     return (res.rowCount ?? 0) > 0;
 }
@@ -117,7 +118,8 @@ export async function transferChatAction(
         // Load balancing logic for team transfer
         if (teamId) {
             console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a Ãºltima atribuiÃ§Ã£o...`);
-            const agentRes = await client.query(`
+            console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
+            const query = `
                 SELECT
                     u.id as "agentId",
                     u.full_name as "agentName",
@@ -130,11 +132,13 @@ export async function transferChatAction(
                     ON uwp.user_id = u.id
                     AND uwp.workspace_id = t.workspace_id
                 LEFT JOIN chats c ON u.id = c.agent_id
-                WHERE tm.team_id = $1 AND uwp.is_online = TRUE
+                WHERE tm.team_id = $1 AND uwp.is_online = TRUE AND u.id <> $2
                 GROUP BY u.id, t.name
                 ORDER BY "lastAssigned" ASC NULLS FIRST, random()
-                LIMIT 1;
-            `, [teamId]);
+                LIMIT 1
+            `;
+
+            const agentRes = await client.query(query, [teamId, currentAgentId]);
 
             if (agentRes.rows.length === 0) {
                 await client.query('ROLLBACK');

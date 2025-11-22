@@ -230,26 +230,20 @@ async function handleMessagesUpsert(payload: any) {
                  RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
-        } else {
-            // Update name if it's different and not null
-            if (pushName && pushName !== contactRes.rows[0].name) {
-                console.log(`[WEBHOOK_MSG_UPSERT] Atualizando nome do contato ${contactRes.rows[0].id} para '${pushName}'.`);
-                contactRes = await client.query(
-                    'UPDATE contacts SET name = $1 WHERE id = $2 RETURNING *',
-                    [pushName, contactRes.rows[0].id]
-                );
-            }
         }
 
-        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
+        if ((contactRes.rowCount ?? 0) === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         contactData = contactRes.rows[0];
+
+        // contactData is guaranteed to be non-null here because of the check above
+        if (!contactData) throw new Error("Contact data is null despite rowCount > 0");
 
         let chatRes = await client.query(
             `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
         );
 
         let chat: Chat;
-        if (chatRes.rowCount > 0) {
+        if ((chatRes.rowCount ?? 0) > 0) {
             chat = chatRes.rows[0];
         } else {
             console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
@@ -339,7 +333,7 @@ async function handleContactsUpdate(payload: any) {
 
     try {
         const instanceRes = await db.query('SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1', [instanceName]);
-        if (instanceRes.rowCount === 0) return;
+        if ((instanceRes.rowCount ?? 0) === 0) return;
         const workspaceId = instanceRes.rows[0].workspace_id;
 
         const result = await db.query(
@@ -347,7 +341,7 @@ async function handleContactsUpdate(payload: any) {
             [profilePicUrl, remoteJid, workspaceId]
         );
 
-        if (result.rowCount > 0) {
+        if ((result.rowCount ?? 0) > 0) {
             console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
         }
     } catch (error) {
