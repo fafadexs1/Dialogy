@@ -16,15 +16,14 @@ interface MediaViewerProps {
 export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [scale, setScale] = useState(1);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [isMuted, setIsMuted] = useState(false);
+
     const videoRef = React.useRef<HTMLVideoElement>(null);
 
     // Reset state when closed
     useEffect(() => {
         if (!isOpen) {
             setScale(1);
-            setIsPlaying(false);
+
             if (videoRef.current) {
                 videoRef.current.pause();
                 videoRef.current.currentTime = 0;
@@ -35,23 +34,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
     const handleZoomIn = () => setScale(prev => Math.min(prev + 0.5, 3));
     const handleZoomOut = () => setScale(prev => Math.max(prev - 0.5, 1));
 
-    const togglePlay = () => {
-        if (videoRef.current) {
-            if (isPlaying) {
-                videoRef.current.pause();
-            } else {
-                videoRef.current.play();
-            }
-            setIsPlaying(!isPlaying);
-        }
-    };
 
-    const toggleMute = () => {
-        if (videoRef.current) {
-            videoRef.current.muted = !isMuted;
-            setIsMuted(!isMuted);
-        }
-    };
 
     const handleDownload = async () => {
         try {
@@ -122,49 +105,15 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                             />
                         </div>
                     ) : (
+
                         <div className="relative w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/10">
                             <video
                                 ref={videoRef}
                                 src={src}
                                 className="w-full h-full object-contain"
-                                onClick={togglePlay}
-                                onEnded={() => setIsPlaying(false)}
-                                onPlay={() => setIsPlaying(true)}
-                                onPause={() => setIsPlaying(false)}
+                                controls
+                                playsInline
                             />
-
-                            {/* Custom Video Controls Overlay */}
-                            <div className={cn(
-                                "absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity duration-300",
-                                isPlaying ? "opacity-0 hover:opacity-100" : "opacity-100"
-                            )}>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={togglePlay}
-                                    className="h-20 w-20 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm text-white transition-transform hover:scale-110"
-                                >
-                                    {isPlaying ? (
-                                        <Pause className="h-10 w-10 fill-current" />
-                                    ) : (
-                                        <Play className="h-10 w-10 fill-current ml-1" />
-                                    )}
-                                </Button>
-                            </div>
-
-                            <div className={cn(
-                                "absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-300 flex justify-end",
-                                isPlaying ? "opacity-0 hover:opacity-100" : "opacity-100"
-                            )}>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={toggleMute}
-                                    className="text-white hover:bg-white/10 rounded-full"
-                                >
-                                    {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                                </Button>
-                            </div>
                         </div>
                     )}
                 </div>
@@ -195,6 +144,6 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                     </div>
                 )}
             </DialogContent>
-        </Dialog>
+        </Dialog >
     );
 }

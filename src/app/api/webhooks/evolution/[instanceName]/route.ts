@@ -164,6 +164,15 @@ async function handleMessagesUpsert(payload: any) {
 
     // A URL da mídia está no nível superior do objeto `message`
     const mediaUrl = message.mediaUrl || null;
+    console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
+    console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
+    console.log('[WEBHOOK_MSG_UPSERT] Message Type:', messageType);
+
+    if (messageDetails) {
+        console.log('[WEBHOOK_MSG_UPSERT] Message Details Keys:', Object.keys(messageDetails));
+        console.log('[WEBHOOK_MSG_UPSERT] Raw Mimetype:', messageDetails.mimetype);
+        console.log('[WEBHOOK_MSG_UPSERT] Raw Mime_type:', messageDetails.mime_type);
+    }
 
     if (messageType) {
         switch (messageType) {
@@ -197,9 +206,17 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     // Construir o objeto metadata
+    let mimetype = messageDetails?.mimetype || messageDetails?.mime_type;
+
+    if (!mimetype && messageType) {
+        if (messageType === 'imageMessage') mimetype = 'image/jpeg';
+        else if (messageType === 'videoMessage') mimetype = 'video/mp4';
+        else if (messageType === 'audioMessage') mimetype = 'audio/mp4';
+    }
+
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl,
-        mimetype: messageDetails?.mimetype,
+        mimetype: mimetype,
         fileName: messageDetails?.fileName,
         duration: messageDetails?.seconds
     };

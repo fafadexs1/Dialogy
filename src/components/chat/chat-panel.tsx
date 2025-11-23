@@ -233,15 +233,24 @@ import { MediaViewer } from './media-viewer';
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
-    let urlToUse = mediaUrl || thumbnail;
-    if (mimetype.startsWith('video/') && thumbnail) {
-        urlToUse = thumbnail;
+    // Fallback for mimetype using message.type if available
+    let effectiveMimeType = mimetype;
+    if (!effectiveMimeType && message.type) {
+        if (message.type === 'image') effectiveMimeType = 'image/jpeg';
+        else if (message.type === 'video') effectiveMimeType = 'video/mp4';
+        else if (message.type === 'audio') effectiveMimeType = 'audio/mp4';
     }
+
+    let urlToUse = mediaUrl || thumbnail;
+    // Fix: Do not override urlToUse with thumbnail for videos, as MediaViewer needs the actual video URL
+    // if (effectiveMimeType.startsWith('video/') && thumbnail) {
+    //     urlToUse = thumbnail;
+    // }
 
     if (!urlToUse) return <p>{message.content || 'Mídia inválida'}</p>;
 
     const renderMedia = () => {
-        if (mimetype.startsWith('image/')) {
+        if (effectiveMimeType.startsWith('image/')) {
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
                     <Image
@@ -254,51 +263,51 @@ function MediaMessage({ message }: { message: Message }) {
                 </MediaViewer>
             );
         }
-        if (mimetype.startsWith('video/')) {
+
+        if (effectiveMimeType.startsWith('video/')) {
             return (
-                <MediaViewer src={mediaUrl || ''} type="video" fileName={fileName}>
-                    <div className="relative group w-full max-w-[300px] aspect-video bg-slate-900 rounded-lg flex items-center justify-center cursor-pointer overflow-hidden shadow-md">
-                        {urlToUse ? (
-                            <Image
-                                src={urlToUse}
-                                alt="Video thumbnail"
-                                width={300}
-                                height={169}
-                                className="group-hover:brightness-75 transition-all object-cover"
-                            />
-                        ) : null}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent group-hover:from-black/60 transition-all z-10"></div>
-                        <PlayCircle className="h-16 w-16 text-white/70 group-hover:text-white/90 z-20 group-hover:scale-110 transition-transform" />
-                        {message.optimistic && (
-                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                                <Loader2 className="h-10 w-10 text-white animate-spin" />
+                <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
+                    <div className="relative group cursor-pointer">
+                        <Image
+                            src={thumbnail || '/placeholder-video.png'} // Fallback se não tiver thumbnail
+                            alt="Vídeo"
+                            width={300}
+                            height={200}
+                            className="rounded-lg object-cover w-full max-w-[300px] h-auto brightness-75 group-hover:brightness-90 transition-all"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                                <PlayCircle className="h-8 w-8 text-white" />
                             </div>
-                        )}
+                        </div>
+                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium">
+                            {duration ? formatDuration(duration) : 'Vídeo'}
+                        </div>
                     </div>
                 </MediaViewer>
             );
         }
-        if (mimetype.startsWith('audio/')) {
-            return <AudioPlayer src={urlToUse} messageId={message.id} initialTranscription={message.transcription} duration={duration} waveform={waveform} isFromMe={message.from_me} />;
+
+        if (effectiveMimeType.startsWith('audio/')) {
+            return <AudioPlayer src={urlToUse} duration={duration} waveform={waveform} isFromMe={Boolean(message.from_me)} />;
         }
-        if (mimetype === 'application/pdf' || mimetype.startsWith('application/')) {
-            return (
-                <a
-                    href={urlToUse}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors max-w-xs"
-                >
-                    <FileIcon className="h-8 w-8 text-white/70 flex-shrink-0" />
-                    <div className='min-w-0'>
-                        <p className="font-medium truncate text-white">{fileName || 'Documento'}</p>
-                        <p className="text-xs text-white/50">Clique para abrir ou baixar</p>
-                    </div>
-                    <Download className="h-5 w-5 text-white/50 ml-auto flex-shrink-0" />
-                </a>
-            );
-        }
-        return <p>{message.content}</p>;
+
+        // Default for documents or other files
+        return (
+            <a
+                href={urlToUse}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 bg-white/10 p-3 rounded-lg hover:bg-white/20 transition-colors max-w-[300px]"
+            >
+                <FileIcon className="h-8 w-8 text-white/70 flex-shrink-0" />
+                <div className='min-w-0'>
+                    <p className="font-medium truncate text-white">{fileName || 'Documento'}</p>
+                    <p className="text-xs text-white/50">Clique para abrir ou baixar</p>
+                </div>
+                <Download className="h-5 w-5 text-white/50 ml-auto flex-shrink-0" />
+            </a>
+        );
     };
 
     return (
@@ -615,8 +624,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         });
     };
 
-    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(event.target.files || []);
+    const processFiles = async (files: File[]) => {
         if (!files.length) return;
 
         const filePromises = files.map(async (file): Promise<MediaFileType> => {
@@ -650,7 +658,25 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
         const newFiles = await Promise.all(filePromises);
         setMediaFiles(prev => [...prev, ...newFiles]);
+    };
+
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []);
+        await processFiles(files);
         event.target.value = '';
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+        if (e.clipboardData.files.length > 0) {
+            e.preventDefault();
+            const files = Array.from(e.clipboardData.files);
+            processFiles(files);
+            return;
+        }
+
+        e.preventDefault();
+        const text = e.clipboardData.getData('text/plain');
+        document.execCommand("insertText", false, text);
     };
 
     const htmlToWhatsappMarkdown = (html: string): string => {
@@ -661,6 +687,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             .replace(/<i>(.*?)<\/i>/g, '_$1_')
             .replace(/<em>(.*?)<\/em>/g, '_$1_')
             .replace(/<(s|strike|del)>(.*?)<\/(s|strike|del)>/g, '~$2~')
+            .replace(/<\/div>/g, '\n')
+            .replace(/<\/p>/g, '\n')
             .replace(/<br\s*\/?>/g, '\n')
             .replace(/&nbsp;/g, ' ')
             .replace(/<[^>]*>/g, '');
@@ -884,8 +912,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const handleShortcutSelect = (shortcut: Shortcut) => {
         if (contentEditableRef.current) {
-            contentEditableRef.current.innerHTML = shortcut.message;
-            setNewMessage(shortcut.message);
+            // Use innerText to ensure newlines are handled correctly as plain text
+            contentEditableRef.current.innerText = shortcut.message;
+            setNewMessage(contentEditableRef.current.innerHTML);
             setShowShortcutSuggestions(false);
         }
     };
@@ -1098,6 +1127,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             )}
                             <span className="mx-1">•</span>
                             <span>{chat.contact.phone}</span>
+                            <span className="mx-1">•</span>
+                            <span className="text-[10px] opacity-50">ID: {chat.id}</span>
                         </p>
                     </div>
                 </div>
@@ -1316,7 +1347,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                             html={newMessage}
                                             disabled={isAiTyping}
                                             onChange={handleMessageChange}
-                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-white placeholder:text-white/30 resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide"
+                                            onPaste={handlePaste}
+                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-white placeholder:text-white/30 resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto"
                                             tagName="div"
                                             onKeyUp={saveCursorPosition}
                                             onClick={saveCursorPosition}

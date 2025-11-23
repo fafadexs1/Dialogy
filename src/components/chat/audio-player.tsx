@@ -189,7 +189,7 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
                     </div>
                 ) : (
                     !isFromMe && (
-                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs">
+                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs text-black bg-white hover:bg-white/90 border-none">
                             <Languages className="mr-2 h-3 w-3" />
                             Transcrever
                         </Button>
