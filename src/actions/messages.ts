@@ -329,10 +329,11 @@ export async function sendAutomatedMessageAction(
     agentId: string,
     isSystemAgent: boolean = false,
     instanceName?: string,
+    metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
-    const metadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
+    const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     // Automated messages don't have a tabId
-    return internalSendMessage(chatId, content, agentId, null, metadata, instanceName);
+    return internalSendMessage(chatId, content, agentId, null, { ...baseMetadata, ...(metadata ?? {}) }, instanceName);
 }
 
 

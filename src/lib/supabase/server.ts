@@ -1,6 +1,7 @@
-import { type CookieOptions, createServerClient } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from '@/lib/database.types';
+import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
 
 export const createClient = async () => {
   const cookieStore = await cookies();
@@ -9,26 +10,20 @@ export const createClient = async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: baseCookieOptions,
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(setCookies) {
           try {
-            cookieStore.set({ name, value, ...options });
+            setCookies.forEach(({ name, value, options }) => {
+              const mergedOptions = buildSessionCookieOptions(options);
+              cookieStore.set({ name, value, ...mergedOptions });
+            });
           } catch (error) {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options });
-          } catch (error) {
-            // The `delete` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            // The `set` method was called from a Server Component without
+            // a mutable cookie store. Middleware will refresh the session.
           }
         },
       },

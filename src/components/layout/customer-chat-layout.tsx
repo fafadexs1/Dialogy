@@ -233,7 +233,21 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [needsAudioUnlock]);
 
   const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
-    const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
+    const readFlag = (key: string, fallback = true): boolean => {
+      const stored = localStorage.getItem(key);
+      if (stored === null) return fallback;
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return fallback;
+      }
+    };
+
+    const isGlobalEnabled = readFlag('notificationSoundEnabled', true);
+    const isQueueEnabled = readFlag('notificationSoundQueueEnabled', true);
+    const isAttendingEnabled = readFlag('notificationSoundAttendingEnabled', true);
+    const isSoundEnabled = isGlobalEnabled && (kind === 'queue' ? isQueueEnabled : isAttendingEnabled);
+
     const audio = audioRefs.current[kind];
     const src = SOUND_SOURCES[kind];
     console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);

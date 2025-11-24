@@ -8,6 +8,7 @@ import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgen
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
+import { sendAutomatedMessageAction } from './messages';
 
 // Fallback timezone
 const defaultTimeZone = 'America/Sao_Paulo';
@@ -22,18 +23,18 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 
 /**
  * Atribui o chat atual ao agente logado.
- * Esta aÃ§Ã£o Ã© chamada pelo botÃ£o "Assumir Atendimento".
+ * Esta ação é chamada pelo botão "Assumir Atendimento".
  */
 export async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-        return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        return { success: false, error: "Usuário não autenticado." };
     }
     const currentAgentId = user.id;
 
     if (!chatId) {
-        return { success: false, error: "ID do Chat Ã© obrigatÃ³rio." };
+        return { success: false, error: "ID do Chat é obrigatório." };
     }
 
     try {
@@ -46,10 +47,10 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
 
         if (result.rowCount === 0) {
             // This can happen if another agent took the chat milliseconds before, or if the chat is not in 'gerais' status.
-            return { success: false, error: "Este atendimento nÃ£o estÃ¡ mais na fila geral ou jÃ¡ foi assumido." };
+            return { success: false, error: "Este atendimento não está mais na fila geral ou já foi assumido." };
         }
 
-        console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuÃ­do ao agente ${currentAgentId}.`);
+        console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
         // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
     } catch (error) {
@@ -76,7 +77,7 @@ export async function transferChatAction(
     }
 
     if (!sessionToUse?.user?.id || !sessionToUse?.user?.name) {
-        return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        return { success: false, error: "Usuário não autenticado." };
     }
     const currentAgentId = sessionToUse.user.id;
     const currentAgentName = sessionToUse.user.name;
@@ -84,40 +85,55 @@ export async function transferChatAction(
     const { chatId, teamId, agentId } = input;
 
     if (!chatId || (!teamId && !agentId)) {
-        return { success: false, error: "ParÃ¢metros invÃ¡lidos para transferÃªncia." };
+        return { success: false, error: "Parâmetros inválidos para transferência." };
     }
 
     const client = await db.connect();
     try {
         await client.query('BEGIN');
 
-        const chatRes = await client.query('SELECT workspace_id, agent_id as current_chat_agent_id, status FROM chats WHERE id = $1', [chatId]);
+        const chatRes = await client.query(`
+            SELECT 
+                workspace_id, 
+                agent_id as current_chat_agent_id, 
+                status,
+                (
+                    SELECT m.instance_name 
+                    FROM messages m 
+                    WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL 
+                    ORDER BY m.created_at DESC 
+                    LIMIT 1
+                ) AS last_instance_name
+            FROM chats c
+            WHERE c.id = $1
+        `, [chatId]);
         if (chatRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return { success: false, error: "Conversa nÃ£o encontrada." };
+            return { success: false, error: "Conversa não encontrada." };
         }
-        const { workspace_id: workspaceId, current_chat_agent_id, status } = chatRes.rows[0];
+        const { workspace_id: workspaceId, current_chat_agent_id, status, last_instance_name: lastInstanceName } = chatRes.rows[0];
 
         if (status === 'encerrados') {
             await client.query('ROLLBACK');
-            return { success: false, error: "NÃ£o Ã© possÃ­vel transferir um atendimento que jÃ¡ foi encerrado." };
+            return { success: false, error: "Não é possível transferir um atendimento que já foi encerrado." };
         }
 
         // System agents have implicit permission
         if (!prefetchedSession) {
             if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
                 await client.query('ROLLBACK');
-                return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para transferir atendimentos." };
+                return { success: false, error: "Você não tem permissão para transferir atendimentos." };
             }
         }
 
 
         let finalAgentId = agentId;
         let transferTargetName = '';
+        let transferTemplate: string | undefined;
 
         // Load balancing logic for team transfer
         if (teamId) {
-            console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a Ãºltima atribuiÃ§Ã£o...`);
+            console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
             console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
             const query = `
                 SELECT
@@ -142,7 +158,7 @@ export async function transferChatAction(
 
             if (agentRes.rows.length === 0) {
                 await client.query('ROLLBACK');
-                return { success: false, error: "Nenhum agente disponÃ­vel nesta equipe no momento." };
+                return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
             }
             finalAgentId = agentRes.rows[0].agentId;
             transferTargetName = agentRes.rows[0].teamName;
@@ -151,15 +167,21 @@ export async function transferChatAction(
             const agentRes = await client.query('SELECT full_name FROM users WHERE id = $1', [agentId]);
             if (agentRes.rows.length === 0) {
                 await client.query('ROLLBACK');
-                return { success: false, error: "Agente de destino nÃ£o encontrado." };
+                return { success: false, error: "Agente de destino não encontrado." };
             }
             transferTargetName = agentRes.rows[0].full_name;
         }
 
         if (!finalAgentId) {
             await client.query('ROLLBACK');
-            return { success: false, error: "NÃ£o foi possÃ­vel determinar um agente para a transferÃªncia." };
+            return { success: false, error: "Não foi possível determinar um agente para a transferência." };
         }
+
+        const templateRes = await client.query(
+            'SELECT transfer_team_message_template FROM workspaces WHERE id = $1',
+            [workspaceId]
+        );
+        transferTemplate = (templateRes.rows[0]?.transfer_team_message_template as string | undefined)?.trim();
 
         // Update chat with the new agent and status
         await client.query(`
@@ -174,7 +196,7 @@ export async function transferChatAction(
         // Log system message
         const systemMessageContent = current_chat_agent_id
             ? `Atendimento transferido por ${currentAgentName} para ${transferTargetName}.`
-            : `Atendimento atribuÃ­do a ${transferTargetName} por ${currentAgentName}.`;
+            : `Atendimento atribuído a ${transferTargetName} por ${currentAgentName}.`;
 
         await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata)
@@ -192,9 +214,23 @@ export async function transferChatAction(
             }
         ]);
 
-
         await client.query('COMMIT');
         console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
+        if (transferTemplate) {
+            const appliedTemplate = transferTemplate.replace(/{{\s*dest\s*}}/gi, transferTargetName || 'novo atendente');
+            try {
+                await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, false, lastInstanceName || undefined, {
+                    event: 'transfer_notice',
+                    to_agent_id: finalAgentId,
+                    to_team_id: teamId,
+                    to_name: transferTargetName,
+                    authored_by: currentAgentId,
+                    template_applied: true,
+                });
+            } catch (templateErr) {
+                console.error('[TRANSFER_CHAT] Falha ao enviar mensagem de transfer�ncia:', templateErr);
+            }
+        }
         // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
 
@@ -217,26 +253,47 @@ export async function closeChatAction(
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user || !user.user_metadata.full_name) {
-        return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        return { success: false, error: "Usuario nao autenticado." };
     }
 
     const currentAgentId = user.id;
     const currentAgentName = user.user_metadata.full_name;
 
     if (!chatId) {
-        return { success: false, error: "ID do chat Ã© obrigatÃ³rio." };
+        return { success: false, error: "ID do chat e obrigatorio." };
     }
 
     const client = await db.connect();
+    let closeTemplate: string | undefined;
     try {
         await client.query('BEGIN');
 
-        const chatRes = await client.query('SELECT workspace_id, tag as current_tag, color as current_color FROM chats WHERE id = $1', [chatId]);
+        const chatRes = await client.query(`
+            SELECT 
+                workspace_id, 
+                tag as current_tag, 
+                color as current_color,
+                (
+                    SELECT m.instance_name 
+                    FROM messages m 
+                    WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL 
+                    ORDER BY m.created_at DESC 
+                    LIMIT 1
+                ) AS last_instance_name
+            FROM chats c
+            WHERE id = $1
+        `, [chatId]);
         if (chatRes.rowCount === 0) {
             await client.query('ROLLBACK');
-            return { success: false, error: 'Chat nÃ£o encontrado.' };
+            return { success: false, error: 'Chat nao encontrado.' };
         }
-        const { workspace_id, current_tag, current_color } = chatRes.rows[0];
+        const { workspace_id, current_tag, current_color, last_instance_name } = chatRes.rows[0];
+
+        const templateRes = await client.query(
+            'SELECT close_message_template FROM workspaces WHERE id = $1',
+            [workspace_id]
+        );
+        closeTemplate = (templateRes.rows[0]?.close_message_template as string | undefined)?.trim();
 
         let tagInfo = { label: null as string | null, color: null as string | null };
         if (reasonTagId) {
@@ -281,33 +338,43 @@ export async function closeChatAction(
         ]);
 
         await client.query('COMMIT');
+
+        if (closeTemplate) {
+            try {
+                await sendAutomatedMessageAction(chatId, closeTemplate, currentAgentId, false, last_instance_name || undefined, {
+                    event: 'close_notice',
+                    authored_by: currentAgentId,
+                    template_applied: true,
+                    reason_tag_id: reasonTagId,
+                });
+            } catch (templateErr) {
+                console.error('[CLOSE_CHAT] Falha ao enviar mensagem de encerramento:', templateErr);
+            }
+        }
         // revalidatePath('/', 'layout'); // Removed to prevent page refresh
         return { success: true };
-    } catch (error: any) {
+    } catch (error) {
         await client.query('ROLLBACK');
         console.error("Erro ao encerrar atendimento:", error);
-        return { success: false, error: error.message || "Falha no servidor ao encerrar o atendimento." };
+        return { success: false, error: (error as any)?.message || "Falha no servidor ao encerrar o atendimento." };
     } finally {
         client.release();
     }
-}
-
-
-export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
+}export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-        return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        return { success: false, error: "Usuário não autenticado." };
     }
 
     if (!chatId || !tagId) {
-        return { success: false, error: "IDs do chat e da tag sÃ£o obrigatÃ³rios." };
+        return { success: false, error: "IDs do chat e da tag são obrigatórios." };
     }
 
     try {
         const tagRes = await db.query('SELECT label, color FROM tags WHERE id = $1', [tagId]);
         if (tagRes.rowCount === 0) {
-            return { success: false, error: "Etiqueta nÃ£o encontrada." };
+            return { success: false, error: "Etiqueta não encontrada." };
         }
         const { label, color } = tagRes.rows[0];
 
@@ -373,7 +440,7 @@ export async function getInitialChatsData({
             oldestMessageDate: null,
             hasMoreHistory: false,
             timezone: defaultTimeZone,
-            error: "Usuário ou workspace não encontrado.",
+            error: "Usu�rio ou workspace n�o encontrado.",
         };
     }
 
@@ -475,7 +542,7 @@ export async function syncInboxData({
             deltaMessages: [],
             lastSyncChats,
             lastSyncMessage: lastSyncMessages ?? null,
-            error: "Usuário ou workspace não encontrado.",
+            error: "Usu�rio ou workspace n�o encontrado.",
         };
     }
 
@@ -550,7 +617,7 @@ export async function getChatMessagesWindow({
             lastSyncMessage: null,
             oldestMessageDate: null,
             hasMoreHistory: false,
-            error: "Usuário não autenticado.",
+            error: "Usu�rio n�o autenticado.",
         };
     }
 
@@ -562,7 +629,7 @@ export async function getChatMessagesWindow({
                 lastSyncMessage: null,
                 oldestMessageDate: null,
                 hasMoreHistory: false,
-                error: "Chat não encontrado.",
+                error: "Chat n�o encontrado.",
             };
         }
         const workspaceId = workspaceRes.rows[0].workspace_id as string;
@@ -1180,7 +1247,7 @@ export async function getContactMessages({
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        return { messages: [], error: "Usuário não autenticado." };
+        return { messages: [], error: "Usu�rio n�o autenticado." };
     }
 
     try {
@@ -1235,6 +1302,8 @@ export async function getContactMessages({
 
     } catch (error: any) {
         console.error("[GET_CONTACT_MESSAGES] Error:", error);
-        return { messages: [], error: `Falha ao buscar histórico do contato: ${error.message}` };
+        return { messages: [], error: `Falha ao buscar hist�rico do contato: ${error.message}` };
     }
 }
+
+

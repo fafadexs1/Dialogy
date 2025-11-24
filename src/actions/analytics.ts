@@ -104,32 +104,37 @@ export async function getAnalyticsData(
         );
         const newContacts = parseInt(newContactsRes.rows[0].count, 10);
 
-        // Avg First Response Time
-        // Improved query to handle cases where agent replies first or multiple messages exist
-        const [avgResponseQuery, avgResponseParams] = addFilters(
-            `WITH FirstMessages AS (
-                SELECT
-                    m.chat_id,
-                    c.agent_id,
-                    MIN(CASE WHEN m.from_me = false THEN m.created_at END) as first_customer_message,
-                    MIN(CASE WHEN m.from_me = true THEN m.created_at END) as first_agent_message
-                FROM messages m
-                JOIN chats c ON m.chat_id = c.id
-                WHERE c.workspace_id = $1 AND m.created_at BETWEEN $2 AND $3
-                GROUP BY m.chat_id, c.agent_id
-            )
+        // Avg First Response Time (first agent message after first customer message)
+        const avgParams: (string | number | null)[] = [workspaceId, dateRange.from, dateRange.to];
+        let avgAgentFilter = '';
+        let avgTeamFilter = '';
+
+        if (filters.agentId) {
+            avgAgentFilter = `AND c.agent_id = $${avgParams.length + 1}`;
+            avgParams.push(filters.agentId);
+        }
+        if (filters.teamId) {
+            avgTeamFilter = `AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = $${avgParams.length + 1} AND tm.user_id = c.agent_id)`;
+            avgParams.push(filters.teamId);
+        }
+
+        const avgResponseQuery = `
             SELECT
-                EXTRACT(EPOCH FROM AVG(first_agent_message - first_customer_message)) as avg_seconds
-            FROM FirstMessages
-            WHERE first_agent_message > first_customer_message`,
-            baseParams,
-            { agentId: filters.agentId, teamId: filters.teamId }
-        );
-        const avgFirstResponseTimeRes = await db.query(avgResponseQuery, avgResponseParams);
-        const avgSeconds = avgFirstResponseTimeRes.rows[0]?.avg_seconds;
+                EXTRACT(EPOCH FROM AVG(c.closed_at - c.assigned_at)) AS avg_seconds
+            FROM chats c
+            WHERE c.workspace_id = $1
+              AND c.created_at BETWEEN $2 AND $3
+              AND c.closed_at IS NOT NULL
+              AND c.assigned_at IS NOT NULL
+              ${avgAgentFilter}
+              ${avgTeamFilter}
+        `;
+
+        const avgFirstResponseTimeRes = await db.query(avgResponseQuery, avgParams);
+        const avgSeconds = parseFloat(avgFirstResponseTimeRes.rows[0]?.avg_seconds);
 
         let avgFirstResponseTime = '0m 0s';
-        if (avgSeconds) {
+        if (!Number.isNaN(avgSeconds)) {
             const minutes = Math.floor(avgSeconds / 60);
             const seconds = Math.floor(avgSeconds % 60);
             avgFirstResponseTime = `${minutes}m ${seconds}s`;
@@ -181,62 +186,54 @@ export async function getAgentPerformance(
     if (!user) return null;
 
     try {
-        let query = `
-            SELECT
-                u.id as agent_id,
-                u.full_name as agent_name,
-                u.avatar_url,
-                COUNT(c.id) as total_chats,
-                COUNT(c.id) FILTER (WHERE c.status = 'encerrados') as resolved_chats,
-                (
-                    SELECT EXTRACT(EPOCH FROM AVG(fm.first_agent_message - fm.first_customer_message))
-                    FROM (
-                        SELECT
-                            m.chat_id,
-                            MIN(CASE WHEN m.from_me = false THEN m.created_at END) as first_customer_message,
-                            MIN(CASE WHEN m.from_me = true THEN m.created_at END) as first_agent_message
-                        FROM messages m
-                        -- Filter messages by date range within the sub-subquery
-                        WHERE m.created_at BETWEEN $2 AND $3
-                        GROUP BY m.chat_id
-                    ) fm
-                    JOIN chats fmc ON fm.chat_id = fmc.id
-                    WHERE fmc.agent_id = u.id AND fm.first_agent_message > fm.first_customer_message
-                ) as avg_response_seconds
-            FROM users u
-            LEFT JOIN chats c ON u.id = c.agent_id AND c.workspace_id = $1
-        `;
-
         const params: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
-        // Main WHERE clause filters chats by date range
-        const whereClauses = ['c.created_at BETWEEN $2 AND $3'];
+        let teamJoin = '';
+        let teamWhere = '';
 
         if (filters.teamId) {
-            // This join is only for filtering by team
-            query += ` JOIN team_members tm ON u.id = tm.user_id `;
-            whereClauses.push(`tm.team_id = $${params.length + 1}`);
+            teamJoin = 'JOIN team_members tm ON u.id = tm.user_id';
+            teamWhere = `AND tm.team_id = $${params.length + 1}`;
             params.push(filters.teamId);
         }
 
-        query += ` WHERE ${whereClauses.join(' AND ')}`;
-
-        query += `
+        const query = `
+            WITH chats_filtered AS (
+                SELECT c.*
+                FROM chats c
+                WHERE c.workspace_id = $1
+                  AND c.created_at BETWEEN $2 AND $3
+            )
+            SELECT
+                u.id AS agent_id,
+                u.full_name AS agent_name,
+                u.avatar_url,
+                COUNT(cf.id) AS total_chats,
+                COUNT(cf.id) FILTER (WHERE cf.status = 'encerrados') AS resolved_chats,
+                AVG(EXTRACT(EPOCH FROM (cf.closed_at - cf.assigned_at))) FILTER (WHERE cf.closed_at IS NOT NULL AND cf.assigned_at IS NOT NULL) AS avg_response_seconds
+            FROM users u
+            LEFT JOIN chats_filtered cf ON u.id = cf.agent_id
+            ${teamJoin}
+            WHERE cf.id IS NOT NULL
+            ${teamWhere}
             GROUP BY u.id
-            HAVING COUNT(c.id) > 0
+            HAVING COUNT(cf.id) > 0
             ORDER BY total_chats DESC;
         `;
 
         const res = await db.query(query, params);
 
         const performanceData: AgentPerformance[] = res.rows.map(row => {
-            const avgSeconds = row.avg_response_seconds;
+            const avgSeconds = parseFloat(row.avg_response_seconds);
+            const formattedAvg = !Number.isNaN(avgSeconds)
+                ? `${Math.floor(avgSeconds / 60)}m ${Math.floor(avgSeconds % 60)}s`
+                : null;
             return {
                 agent_id: row.agent_id,
                 agent_name: row.agent_name,
                 avatar_url: row.avatar_url,
                 total_chats: parseInt(row.total_chats, 10),
                 resolved_chats: parseInt(row.resolved_chats, 10),
-                avg_first_response_time: avgSeconds ? `${Math.floor(avgSeconds / 60)}m ${Math.floor(avgSeconds % 60)}s` : null,
+                avg_first_response_time: formattedAvg,
                 avg_rating: (4.5 + Math.random() * 0.4).toFixed(1), // Mocked for now
             };
         });

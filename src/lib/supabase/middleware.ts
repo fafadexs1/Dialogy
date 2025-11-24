@@ -1,11 +1,11 @@
-
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { type NextRequest, NextResponse } from 'next/server'
+import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options'
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: new Headers(request.headers),
     },
   })
 
@@ -13,44 +13,26 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: baseCookieOptions,
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+        getAll() {
+          return request.cookies.getAll()
         },
-        set(name: string, value: string, options: CookieOptions) {
-          // If the cookie is updated, update the cookies for the request and response
-          request.cookies.set({
-            name,
-            value,
-            ...options,
+        setAll(cookies) {
+          const mergedCookies = cookies.map(({ name, value, options }) => {
+            const mergedOptions = buildSessionCookieOptions(options)
+            request.cookies.set({ name, value, ...mergedOptions })
+            return { name, value, options: mergedOptions }
           })
+
           response = NextResponse.next({
             request: {
-              headers: request.headers,
+              headers: new Headers(request.headers),
             },
           })
-          response.cookies.set({
-            name,
-            value,
-            ...options,
-          })
-        },
-        remove(name: string, options: CookieOptions) {
-          // If the cookie is removed, update the cookies for the request and response
-          request.cookies.set({
-            name,
-            value: '',
-            ...options,
-          })
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
-          response.cookies.set({
-            name,
-            value: '',
-            ...options,
+
+          mergedCookies.forEach(({ name, value, options }) => {
+            response.cookies.set({ name, value, ...options })
           })
         },
       },
