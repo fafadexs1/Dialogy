@@ -7,6 +7,8 @@ export type Workspace = {
   name: string;
   avatar: string;
   timezone?: string;
+  closeMessageTemplate?: string;
+  transferTeamMessageTemplate?: string;
   roleName?: string;
   isOwner?: boolean;
 }

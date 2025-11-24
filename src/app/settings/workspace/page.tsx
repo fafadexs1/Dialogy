@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -252,6 +253,29 @@ export default function WorkspaceSettingsPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="closeMessageTemplate">Mensagem pré-definida de encerramento</Label>
+                                <Textarea
+                                    id="closeMessageTemplate"
+                                    name="closeMessageTemplate"
+                                    placeholder="Ex.: Obrigado pelo contato! Encerramos seu atendimento..."
+                                    defaultValue={activeWorkspace.closeMessageTemplate || ''}
+                                    className="min-h-[120px]"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="transferMessageTemplate">Mensagem pré-definida de transferência de equipe</Label>
+                                <Textarea
+                                    id="transferMessageTemplate"
+                                    name="transferMessageTemplate"
+                                    placeholder="Ex.: Seu atendimento será transferido para a equipe..."
+                                    defaultValue={activeWorkspace.transferTeamMessageTemplate || ''}
+                                    className="min-h-[120px]"
+                                />
                             </div>
                         </div>
                     </CardContent>

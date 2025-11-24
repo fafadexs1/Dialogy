@@ -31,7 +31,14 @@ export async function GET(request: Request) {
 
         console.log(`[API /user] Buscando workspaces para o usuário...`);
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url
+            SELECT 
+              w.id, 
+              w.name, 
+              w.avatar_url, 
+              w.timezone, 
+              w.close_message_template, 
+              w.transfer_team_message_template,
+              (w.owner_id = $1) AS is_owner
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
             WHERE uwr.user_id = $1
@@ -40,7 +47,11 @@ export async function GET(request: Request) {
         const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({ 
             id: r.id, 
             name: r.name, 
-            avatar: r.avatar_url || ''
+            avatar: r.avatar_url || '',
+            timezone: r.timezone || undefined,
+            closeMessageTemplate: r.close_message_template || '',
+            transferTeamMessageTemplate: r.transfer_team_message_template || '',
+            isOwner: !!r.is_owner,
         }));
         console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w=>w.name));
 

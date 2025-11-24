@@ -107,6 +107,8 @@ export async function updateWorkspaceAction(
     const workspaceId = formData.get('workspaceId') as string;
     const workspaceName = formData.get('workspaceName') as string;
     const timezone = formData.get('timezone') as string;
+    const closeMessageTemplate = formData.get('closeMessageTemplate') as string;
+    const transferMessageTemplate = formData.get('transferMessageTemplate') as string;
     const avatarFile = formData.get('avatarFile');
 
 
@@ -119,6 +121,8 @@ export async function updateWorkspaceAction(
     const fieldsToUpdate: { [key: string]: any } = {};
     if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
     if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
+    if (formData.has('closeMessageTemplate')) fieldsToUpdate.close_message_template = closeMessageTemplate || '';
+    if (formData.has('transferMessageTemplate')) fieldsToUpdate.transfer_team_message_template = transferMessageTemplate || '';
 
     if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
         try {

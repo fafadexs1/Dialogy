@@ -1,28 +1,27 @@
-
 'use client';
 
 import React, { useState, useEffect, useCallback, useTransition, useMemo } from 'react';
 import type { User } from '@/lib/types';
-import { MainAppLayout } from '@/components/layout/main-app-layout';
-import { 
-    BarChart, 
-    Bar, 
-    XAxis, 
-    YAxis, TICK_LINE_HEIGHT_WITH_PADDING, CartesianGrid, 
-    Tooltip, 
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
     ResponsiveContainer,
     PieChart,
     Pie,
     Cell,
     Legend
 } from 'recharts';
-import { 
-    Users, 
-    MessageSquare, 
-    Clock, 
-    CheckCircle, 
-    Smile, 
-    ArrowUpRight, 
+import {
+    Users,
+    MessageSquare,
+    Clock,
+    CheckCircle,
+    Smile,
+    ArrowUpRight,
     ArrowDownRight,
     Filter,
     FileDown,
@@ -38,11 +37,11 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select"
 import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers } from '@/actions/analytics';
 import { getTeams } from '@/actions/teams';
@@ -54,104 +53,106 @@ type TimeRange = 'last_30_days' | 'last_7_days' | 'today' | 'this_month';
 
 // Componente de Cartão de Estatística
 const StatCard = ({ title, value, change, changeType, icon: Icon, loading }: any) => (
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      <Icon className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-        {loading ? (
-            <Skeleton className="h-10 w-3/4" />
-        ) : (
-            <>
-                <div className="text-2xl font-bold">{value}</div>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    {changeType === 'increase' ? 
-                    <span className="flex items-center text-emerald-500"><ArrowUpRight className="h-3 w-3" /> {change}</span> :
-                    <span className="flex items-center text-red-500"><ArrowDownRight className="h-3 w-3" /> {change}</span>
-                    }
-                    em relação ao período anterior
-                </p>
-            </>
-        )}
-    </CardContent>
-  </Card>
+    <Card className="bg-black/40 border-white/10 backdrop-blur-md text-white">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-white/80">{title}</CardTitle>
+            <Icon className="h-4 w-4 text-white/50" />
+        </CardHeader>
+        <CardContent>
+            {loading ? (
+                <Skeleton className="h-10 w-3/4 bg-white/10" />
+            ) : (
+                <>
+                    <div className="text-2xl font-bold">{value}</div>
+                    <p className="text-xs text-white/50 flex items-center gap-1">
+                        {changeType === 'increase' ?
+                            <span className="flex items-center text-emerald-400"><ArrowUpRight className="h-3 w-3" /> {change}</span> :
+                            <span className="flex items-center text-rose-400"><ArrowDownRight className="h-3 w-3" /> {change}</span>
+                        }
+                        em relação ao período anterior
+                    </p>
+                </>
+            )}
+        </CardContent>
+    </Card>
 );
 
 // Tabela de Desempenho do Agente
 const AgentPerformanceTable = ({ performance, loading }: { performance: AgentPerformance[], loading: boolean }) => (
-    <Table>
-        <TableHeader>
-            <TableRow>
-                <TableHead>Pos.</TableHead>
-                <TableHead>Atendente</TableHead>
-                <TableHead className='text-center'>Atendimentos</TableHead>
-                <TableHead className='text-center'>Resolvidos</TableHead>
-                <TableHead className='text-center'>Tempo Médio Resposta</TableHead>
-                <TableHead className='text-center'>Avaliação Média</TableHead>
-            </TableRow>
-        </TableHeader>
-        <TableBody>
-            {loading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i}>
-                        <TableCell><Skeleton className="h-8 w-8 rounded-full" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-12" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-12" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-20" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-10" /></TableCell>
-                    </TableRow>
-                ))
-            ) : (
-                performance.map((agent, index) => (
-                <TableRow key={agent.agent_id}>
-                    <TableCell>
-                        <div className="flex items-center justify-center h-8 w-8 rounded-full bg-muted font-bold">
-                            {index === 0 && <Award className="h-5 w-5 text-amber-400" />}
-                            {index === 1 && <Award className="h-5 w-5 text-slate-400" />}
-                            {index === 2 && <Award className="h-5 w-5 text-amber-600" />}
-                            {index > 2 && (index + 1)}
-                        </div>
-                    </TableCell>
-                    <TableCell>
-                        <div className="flex items-center gap-3">
-                            <Avatar>
-                                <AvatarImage src={agent.avatar_url} alt={agent.agent_name} />
-                                <AvatarFallback>{agent.agent_name.charAt(0)}</AvatarFallback>
-                            </Avatar>
-                            <span className="font-medium">{agent.agent_name}</span>
-                        </div>
-                    </TableCell>
-                    <TableCell className='text-center font-semibold text-lg'>{agent.total_chats}</TableCell>
-                    <TableCell className='text-center'>{agent.resolved_chats}</TableCell>
-                    <TableCell className='text-center'>{agent.avg_first_response_time || 'N/A'}</TableCell>
-                    <TableCell className='text-center font-semibold text-lg text-primary'>{agent.avg_rating || 'N/A'}</TableCell>
+    <div className="rounded-md border border-white/10 overflow-hidden">
+        <Table>
+            <TableHeader className="bg-white/5">
+                <TableRow className="border-white/10 hover:bg-white/5">
+                    <TableHead className="text-white/70">Pos.</TableHead>
+                    <TableHead className="text-white/70">Atendente</TableHead>
+                    <TableHead className='text-center text-white/70'>Atendimentos</TableHead>
+                    <TableHead className='text-center text-white/70'>Resolvidos</TableHead>
+                    <TableHead className='text-center text-white/70'>Tempo Médio Resposta</TableHead>
+                    <TableHead className='text-center text-white/70'>Avaliação Média</TableHead>
                 </TableRow>
-            )))}
-        </TableBody>
-    </Table>
+            </TableHeader>
+            <TableBody>
+                {loading ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                        <TableRow key={i} className="border-white/10 hover:bg-white/5">
+                            <TableCell><Skeleton className="h-8 w-8 rounded-full bg-white/10" /></TableCell>
+                            <TableCell><Skeleton className="h-6 w-32 bg-white/10" /></TableCell>
+                            <TableCell><Skeleton className="h-6 w-12 bg-white/10" /></TableCell>
+                            <TableCell><Skeleton className="h-6 w-12 bg-white/10" /></TableCell>
+                            <TableCell><Skeleton className="h-6 w-20 bg-white/10" /></TableCell>
+                            <TableCell><Skeleton className="h-6 w-10 bg-white/10" /></TableCell>
+                        </TableRow>
+                    ))
+                ) : (
+                    performance.map((agent, index) => (
+                        <TableRow key={agent.agent_id} className="border-white/10 hover:bg-white/5">
+                            <TableCell>
+                                <div className="flex items-center justify-center h-8 w-8 rounded-full bg-white/10 font-bold text-white">
+                                    {index === 0 && <Award className="h-5 w-5 text-amber-400" />}
+                                    {index === 1 && <Award className="h-5 w-5 text-slate-400" />}
+                                    {index === 2 && <Award className="h-5 w-5 text-amber-600" />}
+                                    {index > 2 && (index + 1)}
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-3">
+                                    <Avatar className="border border-white/10">
+                                        <AvatarImage src={agent.avatar_url} alt={agent.agent_name} />
+                                        <AvatarFallback className="bg-white/10 text-white">{agent.agent_name.charAt(0)}</AvatarFallback>
+                                    </Avatar>
+                                    <span className="font-medium text-white">{agent.agent_name}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell className='text-center font-semibold text-lg text-white'>{agent.total_chats}</TableCell>
+                            <TableCell className='text-center text-white/70'>{agent.resolved_chats}</TableCell>
+                            <TableCell className='text-center text-white/70'>{agent.avg_first_response_time || 'N/A'}</TableCell>
+                            <TableCell className='text-center font-semibold text-lg text-emerald-400'>{agent.avg_rating || 'N/A'}</TableCell>
+                        </TableRow>
+                    )))}
+            </TableBody>
+        </Table>
+    </div>
 );
 
 const channelsData = [
-  { name: 'WhatsApp', value: 100, color: '#25D366' },
+    { name: 'WhatsApp', value: 100, color: '#25D366' },
 ];
 
 // Página Principal de Analytics
 export default function AnalyticsPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
-  const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
-  const [allMembers, setAllMembers] = useState<User[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+    const [user, setUser] = useState<User | null>(null);
+    const [isPending, startTransition] = useTransition();
+    const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+    const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
+    const [allMembers, setAllMembers] = useState<User[]>([]);
+    const [teams, setTeams] = useState<Team[]>([]);
 
-  // --- Filter States ---
-  const [timeRange, setTimeRange] = useState<TimeRange>('last_30_days');
-  const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
-  
-  useEffect(() => {
+    // --- Filter States ---
+    const [timeRange, setTimeRange] = useState<TimeRange>('last_30_days');
+    const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
+    const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
+
+    useEffect(() => {
         const fetchUser = async () => {
             const res = await fetch('/api/user');
             if (res.ok) {
@@ -161,144 +162,151 @@ export default function AnalyticsPage() {
         fetchUser();
     }, []);
 
-  const getDateRange = (range: TimeRange): { from: string, to: string } => {
-    const now = new Date();
-    switch (range) {
-        case 'today':
-            return { from: startOfDay(now).toISOString(), to: endOfDay(now).toISOString() };
-        case 'last_7_days':
-            return { from: startOfDay(subDays(now, 6)).toISOString(), to: endOfDay(now).toISOString() };
-        case 'this_month':
-            return { from: startOfMonth(now).toISOString(), to: endOfMonth(now).toISOString() };
-        case 'last_30_days':
-        default:
-            return { from: startOfDay(subDays(now, 29)).toISOString(), to: endOfDay(now).toISOString() };
-    }
-  };
+    const getDateRange = (range: TimeRange): { from: string, to: string } => {
+        const now = new Date();
+        switch (range) {
+            case 'today':
+                return { from: startOfDay(now).toISOString(), to: endOfDay(now).toISOString() };
+            case 'last_7_days':
+                return { from: startOfDay(subDays(now, 6)).toISOString(), to: endOfDay(now).toISOString() };
+            case 'this_month':
+                return { from: startOfMonth(now).toISOString(), to: endOfMonth(now).toISOString() };
+            case 'last_30_days':
+            default:
+                return { from: startOfDay(subDays(now, 29)).toISOString(), to: endOfDay(now).toISOString() };
+        }
+    };
 
-  const fetchPageData = useCallback((
-    workspaceId: string, 
-    filters: { teamId?: string; agentId?: string },
-    dateRange: { from: string, to: string }
-  ) => {
-    startTransition(async () => {
-        const [data, performance] = await Promise.all([
-             getAnalyticsData(workspaceId, filters, dateRange),
-             getAgentPerformance(workspaceId, { teamId: filters.teamId }, dateRange)
-        ]);
-        if(data) setAnalyticsData(data);
-        if(performance) setAgentPerformance(performance);
-    });
-  }, []);
-  
-  // Fetch filter options (teams, members)
-  useEffect(() => {
-    if (user?.activeWorkspaceId) {
-        getWorkspaceMembers(user.activeWorkspaceId).then(res => {
-            if (res.members) setAllMembers(res.members as User[]);
+    const fetchPageData = useCallback((
+        workspaceId: string,
+        filters: { teamId?: string; agentId?: string },
+        dateRange: { from: string, to: string }
+    ) => {
+        startTransition(async () => {
+            const [data, performance] = await Promise.all([
+                getAnalyticsData(workspaceId, filters, dateRange),
+                getAgentPerformance(workspaceId, { teamId: filters.teamId }, dateRange)
+            ]);
+            if (data) setAnalyticsData(data);
+            if (performance) setAgentPerformance(performance);
         });
-        getTeams(user.activeWorkspaceId).then(res => {
-             if (res.teams) setTeams(res.teams);
-        })
+    }, []);
+
+    // Fetch filter options (teams, members)
+    useEffect(() => {
+        if (user?.activeWorkspaceId) {
+            getWorkspaceMembers(user.activeWorkspaceId).then(res => {
+                if (res.members) setAllMembers(res.members as User[]);
+            });
+            getTeams(user.activeWorkspaceId).then(res => {
+                if (res.teams) setTeams(res.teams);
+            })
+        }
+    }, [user?.activeWorkspaceId]);
+
+    // Fetch analytics data when filters change
+    useEffect(() => {
+        if (user?.activeWorkspaceId) {
+            const filters = {
+                teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
+                agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
+            };
+            const dateRange = getDateRange(timeRange);
+            fetchPageData(user.activeWorkspaceId, filters, dateRange);
+        }
+    }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, timeRange, fetchPageData]);
+
+    // Reset agent filter when team changes
+    useEffect(() => {
+        setSelectedAgentId('all');
+    }, [selectedTeamId]);
+
+    const filteredMembers = useMemo(() => {
+        if (selectedTeamId === 'all') return allMembers;
+        // This logic is flawed because `team.members` is not populated in this context.
+        // It should rely on a separate query or a better data structure.
+        // Let's get the member IDs from the `team_members` table association if possible, or filter by a property.
+        // For now, we'll assume the members have a team_id property for filtering.
+        const selectedTeam = teams.find(t => t.id === selectedTeamId);
+        if (!selectedTeam) return [];
+
+        // We need to fetch team members properly. Let's assume `getWorkspaceMembers` returns team info.
+        return allMembers.filter(member => (member as any).team_id === selectedTeamId);
+
+    }, [allMembers, teams, selectedTeamId]);
+
+
+    if (!user) {
+        return (
+            <div className="flex items-center justify-center h-full bg-black">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
+        )
     }
-  }, [user?.activeWorkspaceId]);
 
-  // Fetch analytics data when filters change
-  useEffect(() => {
-    if (user?.activeWorkspaceId) {
-        const filters = {
-            teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
-            agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
-        };
-        const dateRange = getDateRange(timeRange);
-        fetchPageData(user.activeWorkspaceId, filters, dateRange);
-    }
-  }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, timeRange, fetchPageData]);
+    const conversationsByHour = analyticsData?.conversationsByHour || [];
 
-  // Reset agent filter when team changes
-  useEffect(() => {
-    setSelectedAgentId('all');
-  }, [selectedTeamId]);
+    const performanceToDisplay = selectedAgentId === 'all'
+        ? agentPerformance
+        : agentPerformance.filter(p => p.agent_id === selectedAgentId);
 
-  const filteredMembers = useMemo(() => {
-    if (selectedTeamId === 'all') return allMembers;
-    // This logic is flawed because `team.members` is not populated in this context.
-    // It should rely on a separate query or a better data structure.
-    // Let's get the member IDs from the `team_members` table association if possible, or filter by a property.
-    // For now, we'll assume the members have a team_id property for filtering.
-    const selectedTeam = teams.find(t => t.id === selectedTeamId);
-    if (!selectedTeam) return [];
-    
-    // We need to fetch team members properly. Let's assume `getWorkspaceMembers` returns team info.
-    return allMembers.filter(member => (member as any).team_id === selectedTeamId);
-    
-  }, [allMembers, teams, selectedTeamId]);
-
-
-  if (!user) {
     return (
-        <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-        </div>
-    )
-  }
-  
-  const conversationsByHour = analyticsData?.conversationsByHour || [];
+        <div className="relative flex flex-col flex-1 h-full bg-black overflow-hidden">
+            {/* Background Effects */}
+            <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+                <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+                <div className="absolute -left-[10%] top-[20%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[100px]" />
+                <div className="absolute -right-[10%] bottom-[20%] w-[40%] h-[40%] rounded-full bg-purple-500/10 blur-[100px]" />
+            </div>
 
-  const performanceToDisplay = selectedAgentId === 'all'
-    ? agentPerformance
-    : agentPerformance.filter(p => p.agent_id === selectedAgentId);
-
-  return (
-        <div className="flex flex-col flex-1 h-full">
-            <header className="p-4 border-b flex-shrink-0 bg-card flex items-center justify-between sticky top-0 z-10">
+            <header className="p-6 border-b border-white/10 flex-shrink-0 bg-black/20 backdrop-blur-xl flex items-center justify-between sticky top-0 z-10">
                 <div>
-                    <h1 className="text-2xl font-bold">Analytics</h1>
-                    <p className="text-muted-foreground">Métricas e insights para otimizar sua operação.</p>
+                    <h1 className="text-2xl font-bold text-white">Analytics</h1>
+                    <p className="text-white/50">Métricas e insights para otimizar sua operação.</p>
                 </div>
                 <div className='flex items-center gap-2'>
                     <Select value={timeRange} onValueChange={(value) => setTimeRange(value as TimeRange)}>
-                        <SelectTrigger className="w-[180px]">
-                            <Calendar className='mr-2 h-4 w-4' />
+                        <SelectTrigger className="w-[180px] bg-white/5 border-white/10 text-white">
+                            <Calendar className='mr-2 h-4 w-4 text-white/70' />
                             <SelectValue placeholder="Selecione o período" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-black border-white/10 text-white">
                             <SelectItem value="last_30_days">Últimos 30 dias</SelectItem>
                             <SelectItem value="last_7_days">Últimos 7 dias</SelectItem>
                             <SelectItem value="today">Hoje</SelectItem>
                             <SelectItem value="this_month">Este mês</SelectItem>
                         </SelectContent>
                     </Select>
-                     <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
-                        <SelectTrigger className="w-[220px]">
-                            <Users2 className='mr-2 h-4 w-4' />
+                    <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
+                        <SelectTrigger className="w-[220px] bg-white/5 border-white/10 text-white">
+                            <Users2 className='mr-2 h-4 w-4 text-white/70' />
                             <SelectValue placeholder="Filtrar por setor" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-black border-white/10 text-white">
                             <SelectItem value="all">Todos os Setores</SelectItem>
-                             {teams.map(team => (
+                            {teams.map(team => (
                                 <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
-                     <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={filteredMembers.length === 0 && selectedTeamId !== 'all'}>
-                        <SelectTrigger className="w-[220px]">
-                            <Filter className='mr-2 h-4 w-4' />
+                    <Select value={selectedAgentId} onValueChange={setSelectedAgentId} disabled={filteredMembers.length === 0 && selectedTeamId !== 'all'}>
+                        <SelectTrigger className="w-[220px] bg-white/5 border-white/10 text-white">
+                            <Filter className='mr-2 h-4 w-4 text-white/70' />
                             <SelectValue placeholder="Filtrar por atendente" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-black border-white/10 text-white">
                             <SelectItem value="all">Todos da Equipe</SelectItem>
-                             {filteredMembers.map(member => (
+                            {filteredMembers.map(member => (
                                 <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
-                    <Button><FileDown className="mr-2 h-4 w-4" /> Exportar</Button>
+                    <Button variant="outline" className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"><FileDown className="mr-2 h-4 w-4" /> Exportar</Button>
                 </div>
             </header>
 
-            <main className="flex-1 overflow-y-auto bg-muted/40 p-6 space-y-6">
-                
+            <main className="flex-1 overflow-y-auto p-6 space-y-6 z-10 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+
                 <section>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                         <StatCard loading={isPending} title="Total de Conversas" value={analyticsData?.totalConversations?.toLocaleString() || '0'} change="+15.2%" changeType="increase" icon={MessageSquare} />
@@ -310,67 +318,67 @@ export default function AnalyticsPage() {
                 </section>
 
                 <section className="grid md:grid-cols-3 gap-6">
-                    <Card className="col-span-2">
+                    <Card className="col-span-2 bg-black/40 border-white/10 backdrop-blur-md text-white">
                         <CardHeader>
-                            <CardTitle>Volume de Conversas por Hora</CardTitle>
-                            <CardDescription>Picos de atendimento durante o dia.</CardDescription>
+                            <CardTitle className="text-white">Volume de Conversas por Hora</CardTitle>
+                            <CardDescription className="text-white/50">Picos de atendimento durante o dia.</CardDescription>
                         </CardHeader>
                         <CardContent className="h-[300px]">
-                            {isPending ? <Skeleton className="h-full w-full" /> : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={conversationsByHour} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="hour" fontSize={12} tickLine={false} axisLine={false} />
-                                    <YAxis fontSize={12} tickLine={false} axisLine={false} />
-                                    <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} contentStyle={{backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)'}}/>
-                                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
+                            {isPending ? <Skeleton className="h-full w-full bg-white/10" /> : (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={conversationsByHour} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
+                                        <XAxis dataKey="hour" fontSize={12} tickLine={false} axisLine={false} stroke="rgba(255,255,255,0.5)" />
+                                        <YAxis fontSize={12} tickLine={false} axisLine={false} stroke="rgba(255,255,255,0.5)" />
+                                        <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ backgroundColor: '#000', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff' }} />
+                                        <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
                             )}
                         </CardContent>
                     </Card>
-                    <Card>
+                    <Card className="bg-black/40 border-white/10 backdrop-blur-md text-white">
                         <CardHeader>
-                            <CardTitle>Canais Mais Usados</CardTitle>
-                            <CardDescription>Distribuição do volume por canal de entrada.</CardDescription>
+                            <CardTitle className="text-white">Canais Mais Usados</CardTitle>
+                            <CardDescription className="text-white/50">Distribuição do volume por canal de entrada.</CardDescription>
                         </CardHeader>
                         <CardContent className="h-[300px]">
-                           {isPending ? <Skeleton className="h-full w-full" /> : (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={channelsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={60} labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                                        const radius = innerRadius + (outerRadius - innerRadius) * 1.2;
-                                        const x = cx + radius * Math.cos(-midAngle * Math.PI / 180);
-                                        const y = cy + radius * Math.sin(-midAngle * Math.PI / 180);
-                                        return (
-                                            <text x={x} y={y} fill="currentColor" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" className="text-xs font-semibold">
-                                            {`${(percent * 100).toFixed(0)}%`}
-                                            </text>
-                                        );
-                                    }}>
-                                        {channelsData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                                    </Pie>
-                                    <Legend iconType="circle" />
-                                </PieChart>
-                            </ResponsiveContainer>
-                           )}
+                            {isPending ? <Skeleton className="h-full w-full bg-white/10" /> : (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie data={channelsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={60} stroke="none" labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+                                            const radius = innerRadius + (outerRadius - innerRadius) * 1.2;
+                                            const x = cx + radius * Math.cos(-midAngle * Math.PI / 180);
+                                            const y = cy + radius * Math.sin(-midAngle * Math.PI / 180);
+                                            return (
+                                                <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" className="text-xs font-semibold">
+                                                    {`${(percent * 100).toFixed(0)}%`}
+                                                </text>
+                                            );
+                                        }}>
+                                            {channelsData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                                        </Pie>
+                                        <Legend iconType="circle" wrapperStyle={{ color: 'white' }} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            )}
                         </CardContent>
                     </Card>
                 </section>
-                
+
                 <section>
-                    <Card>
+                    <Card className="bg-black/40 border-white/10 backdrop-blur-md text-white">
                         <CardHeader>
-                            <CardTitle>
-                                {selectedAgentId !== 'all' 
+                            <CardTitle className="text-white">
+                                {selectedAgentId !== 'all'
                                     ? `Performance de: ${allMembers.find(m => m.id === selectedAgentId)?.name}`
                                     : `Performance dos Atendentes`
                                 }
                             </CardTitle>
-                            <CardDescription>
-                                {selectedAgentId !== 'all' 
+                            <CardDescription className="text-white/50">
+                                {selectedAgentId !== 'all'
                                     ? "Análise detalhada da performance individual."
-                                    : selectedTeamId === 'all' 
+                                    : selectedTeamId === 'all'
                                         ? "Ranking de performance da equipe de atendimento."
                                         : `Ranking da equipe: ${teams.find(t => t.id === selectedTeamId)?.name}`
                                 }
@@ -381,32 +389,32 @@ export default function AnalyticsPage() {
                         </CardContent>
                     </Card>
                 </section>
-                
-                 <div className="grid md:grid-cols-2 gap-6">
+
+                <div className="grid md:grid-cols-2 gap-6">
                     <section>
-                         <Card className='h-full'>
+                        <Card className='h-full bg-black/40 border-white/10 backdrop-blur-md text-white'>
                             <CardHeader>
-                                <CardTitle className='flex items-center gap-2'><Bot /> Eficiência do Piloto Automático</CardTitle>
-                                <CardDescription>Como a automação está impactando seu atendimento.</CardDescription>
+                                <CardTitle className='flex items-center gap-2 text-white'><Bot /> Eficiência do Piloto Automático</CardTitle>
+                                <CardDescription className="text-white/50">Como a automação está impactando seu atendimento.</CardDescription>
                             </CardHeader>
                             <CardContent className='space-y-4'>
-                                <p className="text-sm text-muted-foreground text-center pt-8">Dados de automação estarão disponíveis em breve.</p>
+                                <p className="text-sm text-white/30 text-center pt-8">Dados de automação estarão disponíveis em breve.</p>
                             </CardContent>
                         </Card>
                     </section>
                     <section>
-                         <Card className='h-full'>
+                        <Card className='h-full bg-black/40 border-white/10 backdrop-blur-md text-white'>
                             <CardHeader>
-                                <CardTitle className='flex items-center gap-2'><TrendingUp/> Conversões e Oportunidades</CardTitle>
-                                <CardDescription>O impacto das conversas nos seus resultados de negócio.</CardDescription>
+                                <CardTitle className='flex items-center gap-2 text-white'><TrendingUp /> Conversões e Oportunidades</CardTitle>
+                                <CardDescription className="text-white/50">O impacto das conversas nos seus resultados de negócio.</CardDescription>
                             </CardHeader>
-                             <CardContent className='space-y-4'>
-                                <p className="text-sm text-muted-foreground text-center pt-8">Métricas de conversão estarão disponíveis em breve.</p>
+                            <CardContent className='space-y-4'>
+                                <p className="text-sm text-white/30 text-center pt-8">Métricas de conversão estarão disponíveis em breve.</p>
                             </CardContent>
                         </Card>
                     </section>
                 </div>
             </main>
         </div>
-  );
+    );
 }
