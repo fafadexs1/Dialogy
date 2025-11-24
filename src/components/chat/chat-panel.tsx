@@ -42,7 +42,8 @@ import {
     MessageSquareQuote,
     Users,
     Globe,
-    Lock
+    Lock,
+    MapPin
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
@@ -235,6 +236,59 @@ function formatDuration(seconds: number): string {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+function LocationMessage({ message }: { message: Message }) {
+    const { latitude, longitude, address, locationName, mapUrl, thumbnail, locationDescription } = message.metadata || {};
+    const hasCoords = typeof latitude === 'number' && typeof longitude === 'number';
+    const resolvedMapUrl = mapUrl || (hasCoords ? `https://www.google.com/maps?q=${latitude},${longitude}` : undefined);
+    const hasLink = Boolean(resolvedMapUrl);
+    const linkHref = resolvedMapUrl || '#';
+    const title = locationName || address || message.content || 'Localização compartilhada';
+    const subtitle = address || locationDescription || (hasCoords ? `Coordenadas: ${latitude?.toFixed(5)}, ${longitude?.toFixed(5)}` : undefined);
+
+    return (
+        <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-blue-400/40 transition-all max-w-[320px] shadow-lg shadow-black/20">
+                {thumbnail ? (
+                    <div className="relative">
+                        <Image
+                            src={thumbnail}
+                            alt={title}
+                            width={320}
+                            height={180}
+                            className="w-full h-auto object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
+                        <div className="absolute bottom-3 left-3 flex items-center gap-2 text-white text-xs font-semibold">
+                            <MapPin className="h-4 w-4" />
+                            <span>Ver no mapa</span>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-600/40 to-indigo-600/40 text-white">
+                        <MapPin className="h-4 w-4" />
+                        <span className="text-xs font-semibold">Localização compartilhada</span>
+                    </div>
+                )}
+                <div className="p-3 space-y-1">
+                    <p className="text-sm font-semibold text-white flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-blue-300" />
+                        <span className="line-clamp-2">{title}</span>
+                    </p>
+                    {subtitle && <p className="text-xs text-white/70">{subtitle}</p>}
+                    {hasCoords && (
+                        <p className="text-[11px] text-white/50">
+                            {latitude?.toFixed(5)}, {longitude?.toFixed(5)}
+                        </p>
+                    )}
+                    {resolvedMapUrl && (
+                        <p className="text-[11px] text-blue-300 underline underline-offset-2">Abrir no Google Maps</p>
+                    )}
+                </div>
+            </div>
+        </a>
+    );
 }
 
 
@@ -928,6 +982,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     };
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
+        const isLocationMessage =
+            message.type === 'location' ||
+            (typeof message.metadata?.latitude === 'number' && typeof message.metadata?.longitude === 'number');
+
+        if (isLocationMessage) {
+            return <LocationMessage message={message} />;
+        }
+
         const isMediaType = message.type && message.type !== 'text' && message.type !== 'system';
         const hasMediaAttachment = Boolean(
             message.metadata?.mediaUrl ||

@@ -158,9 +158,22 @@ async function handleMessagesUpsert(payload: any) {
     let content = '';
     let dbMessageType: Message['type'] = 'text';
 
-    const messageDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
+    const locationDetails = message.locationMessage;
+    const mediaDetails = message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage || message.extendedTextMessage;
+    const messageDetails = mediaDetails || locationDetails;
 
-    content = message.conversation || messageDetails?.text || messageDetails?.caption || '';
+    const latitude = locationDetails?.degreesLatitude !== undefined ? Number(locationDetails.degreesLatitude) : undefined;
+    const longitude = locationDetails?.degreesLongitude !== undefined ? Number(locationDetails.degreesLongitude) : undefined;
+    const hasNumericCoords = Number.isFinite(latitude) && Number.isFinite(longitude);
+    const locationLabel = locationDetails
+        ? locationDetails.name ||
+        (locationDetails as any)?.address ||
+        (hasNumericCoords
+            ? `Localização: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+            : 'Localização enviada')
+        : '';
+
+    content = message.conversation || mediaDetails?.text || mediaDetails?.caption || locationLabel;
 
     // A URL da mídia está no nível superior do objeto `message`
     const mediaUrl = message.mediaUrl || null;
@@ -174,8 +187,10 @@ async function handleMessagesUpsert(payload: any) {
         console.log('[WEBHOOK_MSG_UPSERT] Raw Mime_type:', messageDetails.mime_type);
     }
 
-    if (messageType) {
-        switch (messageType) {
+    const effectiveMessageType = messageType || (locationDetails ? 'locationMessage' : undefined);
+
+    if (effectiveMessageType) {
+        switch (effectiveMessageType) {
             case 'audioMessage':
                 dbMessageType = 'audio';
                 break;
@@ -188,14 +203,17 @@ async function handleMessagesUpsert(payload: any) {
             case 'documentMessage':
                 dbMessageType = 'document';
                 break;
+            case 'locationMessage':
+                dbMessageType = 'location';
+                break;
             case 'conversation': case 'extendedTextMessage': break;
             default:
-                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${messageType}. Ignorando.`);
+                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${effectiveMessageType}. Ignorando.`);
                 return;
         }
     }
 
-    if (!content.trim() && !mediaUrl) {
+    if (!content.trim() && !mediaUrl && !locationDetails) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
         return;
     }
@@ -206,20 +224,56 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     // Construir o objeto metadata
-    let mimetype = messageDetails?.mimetype || messageDetails?.mime_type;
+    let mimetype = mediaDetails?.mimetype || mediaDetails?.mime_type;
 
-    if (!mimetype && messageType) {
-        if (messageType === 'imageMessage') mimetype = 'image/jpeg';
-        else if (messageType === 'videoMessage') mimetype = 'video/mp4';
-        else if (messageType === 'audioMessage') mimetype = 'audio/mp4';
+    if (!mimetype && effectiveMessageType) {
+        if (effectiveMessageType === 'imageMessage') mimetype = 'image/jpeg';
+        else if (effectiveMessageType === 'videoMessage') mimetype = 'video/mp4';
+        else if (effectiveMessageType === 'audioMessage') mimetype = 'audio/mp4';
     }
+
+    let locationThumbnail: string | undefined;
+    const rawLocationThumb = locationDetails?.jpegThumbnail;
+    if (rawLocationThumb) {
+        try {
+            if (typeof rawLocationThumb === 'string') {
+                locationThumbnail = rawLocationThumb.startsWith('data:') ? rawLocationThumb : `data:image/jpeg;base64,${rawLocationThumb}`;
+            } else if (Array.isArray(rawLocationThumb)) {
+                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(rawLocationThumb).toString('base64')}`;
+            } else {
+                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(Object.values(rawLocationThumb)).toString('base64')}`;
+            }
+        } catch (thumbErr) {
+            console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail de localização:', thumbErr);
+        }
+    }
+
+    const safeLatitude = hasNumericCoords ? latitude : undefined;
+    const safeLongitude = hasNumericCoords ? longitude : undefined;
+    const mapsUrl = hasNumericCoords
+        ? `https://www.google.com/maps?q=${latitude},${longitude}`
+        : undefined;
 
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl,
         mimetype: mimetype,
-        fileName: messageDetails?.fileName,
-        duration: messageDetails?.seconds
+        fileName: mediaDetails?.fileName,
+        duration: mediaDetails?.seconds,
+        thumbnail: (mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail,
     };
+
+    if (locationDetails) {
+        metadata = {
+            ...metadata,
+            latitude: safeLatitude,
+            longitude: safeLongitude,
+            address: locationDetails.name || (locationDetails as any)?.address,
+            locationName: locationDetails.name,
+            locationDescription: (locationDetails as any)?.description,
+            mapUrl: mapsUrl,
+            thumbnail: locationThumbnail || metadata.thumbnail,
+        };
+    }
 
     const contactPhone = contactJid.split('@')[0];
 

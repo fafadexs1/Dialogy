@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -177,10 +177,13 @@ interface LastMessagePreviewProps {
 }
 
 const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
+  const { latitude, longitude, address, locationName } = message.metadata || {};
+  const isLocation = typeof latitude === 'number' && typeof longitude === 'number' || message.type === 'location';
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
 
   const getIcon = () => {
     if (message.type === 'system') return null;
+    if (isLocation) return <MapPin className="h-4 w-4 flex-shrink-0" />;
     if (!isMedia) return null;
     const mimetype = message.metadata?.mimetype || '';
     if (mimetype.startsWith('image/')) return <ImageIcon className="h-4 w-4 flex-shrink-0" />;
@@ -192,6 +195,12 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   const getTextContent = () => {
     let text = '';
     if (message.type === 'system') text = message.content;
+    else if (isLocation) {
+      const coords = typeof latitude === 'number' && typeof longitude === 'number'
+        ? `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`
+        : null;
+      text = address || locationName || (coords ? `Localização: ${coords}` : 'Localização');
+    }
     else if (!isMedia) text = message.content;
     else if (message.content) text = message.content;
     else {

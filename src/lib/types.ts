@@ -123,6 +123,12 @@ export type MessageMetadata = {
   mimetype?: string;
   fileName?: string;
   thumbnail?: string; // Base64 encoded thumbnail
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+  locationName?: string;
+  mapUrl?: string;
+  locationDescription?: string;
   sentBy?: 'autopilot' | 'agent' | 'system_agent';
   duration?: number; // Duration in seconds for audio/video
   waveform?: number[]; // For audio visualization
@@ -133,7 +139,7 @@ export type Message = {
   id: string;
   sender?: MessageSender;
   content: string;
-  type: 'text' | 'system' | 'audio' | 'image' | 'video' | 'document';
+  type: 'text' | 'system' | 'audio' | 'image' | 'video' | 'document' | 'location';
   status: 'default' | 'deleted';
   metadata?: MessageMetadata;
   transcription: string | null;
