@@ -230,6 +230,14 @@ function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}
 
 import { MediaViewer } from './media-viewer';
 
+function formatDuration(seconds: number): string {
+    if (!seconds) return '0:00';
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+
 function MediaMessage({ message }: { message: Message }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 

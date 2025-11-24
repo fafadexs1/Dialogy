@@ -21,9 +21,13 @@ import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 
-// Base64 encoded, short, and browser-safe notification sound
-const NOTIFICATION_SOUND_DATA_URL = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gUmVhbGl0eSBTRlgà®µà®©à®¿à®©à¯';
+// Notification sounds served from public assets
+const SOUND_SOURCES = {
+  queue: '/sounds/new-message.mp3',
+  attending: '/sounds/message-incoming-02-199577.mp3',
+} as const;
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function LoadingSkeleton() {
   return (
@@ -67,6 +71,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
+  const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
+  const [debugCounter, setDebugCounter] = useState(0);
 
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
@@ -85,15 +91,23 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
 
   const selectedChatIdRef = useRef<string | null>(initialChatId);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
+    queue: null,
+    attending: null,
+  });
   const tabIdRef = useRef<string>('');
+  const audioUnlockRequestedRef = useRef(false);
+  const unreadCountsRef = useRef<Record<string, number>>({});
+  const unreadWatchInitializedRef = useRef(false);
 
   useEffect(() => {
     useInboxStore.getState().reset();
+    console.log('[NOTIFICATION] Layout mounted. Waiting for inbox data...');
   }, []);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     tabIdRef.current = window.crypto.randomUUID();
+    console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
 
   useEffect(() => {
@@ -104,6 +118,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       }
     });
 
+    console.log('[NOTIFICATION] Auth listener registered');
     return () => {
       data.subscription.unsubscribe();
     };
@@ -175,16 +190,126 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [chats, formatMessageDay, workspaceTimezone, initialUser]);
 
-  const playNotificationSound = useCallback(() => {
-    const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
-    if (isSoundEnabled && audioRef.current) {
-      audioRef.current.play().catch(e => console.error('Error playing notification sound:', e));
+  const unlockAudio = useCallback(async () => {
+    const refs = [audioRefs.current.queue, audioRefs.current.attending];
+    let unlocked = false;
+    for (const audio of refs) {
+      if (!audio) continue;
+      try {
+        audio.muted = true;
+        audio.currentTime = 0;
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        unlocked = true;
+      } catch (err) {
+        console.warn('[NOTIFICATION] Audio unlock failed for one source, still blocked by browser', err);
+      }
+    }
+    setNeedsAudioUnlock(!unlocked);
+    if (unlocked) {
+      console.log('[NOTIFICATION] Audio unlocked by user gesture');
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleGesture = () => {
+      unlockAudio();
+    };
+    window.addEventListener('pointerdown', handleGesture, { once: true });
+    window.addEventListener('keydown', handleGesture, { once: true });
+    window.addEventListener('touchstart', handleGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+      window.removeEventListener('touchstart', handleGesture);
+    };
+  }, [unlockAudio]);
+
+  useEffect(() => {
+    console.log('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
+  }, [needsAudioUnlock]);
+
+  const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
+    const isSoundEnabled = JSON.parse(localStorage.getItem('notificationSoundEnabled') || 'true');
+    const audio = audioRefs.current[kind];
+    const src = SOUND_SOURCES[kind];
+    console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
+    if (!isSoundEnabled) return;
+
+    const tryPlay = async () => {
+      if (!audio) return;
+      audio.muted = false;
+      audio.volume = 1;
+      audio.currentTime = 0;
+      await audio.play();
+      console.log('[NOTIFICATION] Sound played successfully (ref)', kind);
+    };
+
+    tryPlay().catch(async (e) => {
+      console.error('[NOTIFICATION] Error playing notification sound (ref):', e);
+      if (e?.name === 'NotAllowedError' && !audioUnlockRequestedRef.current) {
+        setNeedsAudioUnlock(true);
+        audioUnlockRequestedRef.current = true;
+      }
+      try {
+        console.log('[NOTIFICATION] Trying fallback Audio() playback');
+        const fallback = new Audio(src);
+        fallback.volume = 1;
+        await fallback.play();
+        console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
+      } catch (fallbackError) {
+        console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!unreadWatchInitializedRef.current) {
+      unreadCountsRef.current = Object.fromEntries(chats.map((c) => [c.id, c.unreadCount || 0]));
+      unreadWatchInitializedRef.current = true;
+      return;
+    }
+
+    chats.forEach((chat) => {
+      const prev = unreadCountsRef.current[chat.id] ?? 0;
+      const current = chat.unreadCount || 0;
+      if (current > prev) {
+        if (chat.status === 'gerais') {
+          console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
+          playNotificationSound('queue');
+        } else if (chat.status === 'atendimentos') {
+          console.log('[NOTIFICATION] Unread increased for attending chat', chat.id, 'from', prev, 'to', current);
+          playNotificationSound('attending');
+        }
+      }
+      unreadCountsRef.current[chat.id] = current;
+    });
+  }, [chats, playNotificationSound]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    (window as any).__playNotificationTest = (kind: keyof typeof SOUND_SOURCES = 'queue') => {
+      console.log('[NOTIFICATION] Manual test trigger', kind);
+      playNotificationSound(kind);
+    };
+    return () => {
+      delete (window as any).__playNotificationTest;
+    };
+  }, [playNotificationSound]);
 
   const handleRealtimeMessage = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
     const message = mapRealtimePayload(payload);
     if (!message) return;
+
+    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
+
+    const messageChat = chats.find((chat) => chat.id === message.chat_id);
+    const isQueueMessage = messageChat?.status === 'gerais';
+    const isAttendingMessage = messageChat?.status === 'atendimentos';
+
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
       removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab);
@@ -193,11 +318,19 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       if (message.chat_id !== selectedChatId) {
         incrementUnread(message.chat_id);
       }
-      if (document.visibilityState !== 'visible') {
-        playNotificationSound();
+
+      const shouldPlay = isQueueMessage || document.visibilityState !== 'visible' || message.chat_id !== selectedChatId;
+      console.log('[REALTIME] Should play?', shouldPlay, 'Visibility:', document.visibilityState, 'SelectedChat:', selectedChatId, 'MsgChat:', message.chat_id, 'QueueMsg:', isQueueMessage, 'AttendingMsg:', isAttendingMessage);
+
+      if (shouldPlay) {
+        if (isAttendingMessage) {
+          playNotificationSound('attending');
+        } else {
+          playNotificationSound('queue');
+        }
       }
     }
-  }, [appendMessagesToChat, incrementUnread, mapRealtimePayload, playNotificationSound, selectedChatId, removeMessagesForChat]);
+  }, [appendMessagesToChat, chats, incrementUnread, mapRealtimePayload, playNotificationSound, selectedChatId, removeMessagesForChat]);
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
     try {
@@ -319,84 +452,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [notifyPeers, runDeltaSync]);
 
   useEffect(() => {
-    if (initialUser) {
-      initializeInbox();
-    } else {
-      setIsLoading(false);
-    }
-  }, [initialUser, initializeInbox]);
-
-  useEffect(() => {
-    if (selectedChatId) {
-      selectedChatIdRef.current = selectedChatId;
-    }
-  }, [selectedChatId]);
-
-
-
-  const realtimeChannelRef = useRef<any>(null);
-  const subscribedChatRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-    if (!selectedChatId) return;
-
-    if (subscribedChatRef.current === selectedChatId && realtimeChannelRef.current) {
-      return;
-    }
-
-    const supabase = createClient();
-    const channelName = `realtime-messages-${selectedChatId}`;
-
-    if (realtimeChannelRef.current) {
-      console.info(`[REALTIME] Removing channel ${realtimeChannelRef.current.topic}`);
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
-    }
-
-    console.info(`[REALTIME] Subscribing to channel ${channelName}`);
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${selectedChatId}` }, handleRealtimeMessage)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${selectedChatId}` }, handleRealtimeMessage)
-      .subscribe((status) => {
-        console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
-      });
-
-    realtimeChannelRef.current = channel;
-    subscribedChatRef.current = selectedChatId;
-
-    return () => {
-      if (realtimeChannelRef.current?.topic === channelName) {
-        console.info(`[REALTIME] Removing channel ${channelName}`);
-        supabase.removeChannel(channel);
-        realtimeChannelRef.current = null;
-        subscribedChatRef.current = null;
-      }
-    };
-  }, [handleRealtimeMessage, initialUser?.activeWorkspaceId, selectedChatId]);
-
-  useEffect(() => {
-    const channel = new BroadcastChannel('chat-updates');
-    setBroadcastChannel(channel);
-
-    const handleMessage = (event: MessageEvent) => {
-      const { type, sourceTabId } = event.data || {};
-      if (sourceTabId === tabIdRef.current) return;
-      if (type === 'DELTA_SYNC') {
-        runDeltaSync();
-      }
-    };
-
-    channel.addEventListener('message', handleMessage);
-
-    return () => {
-      channel.removeEventListener('message', handleMessage);
-      channel.close();
-    };
-  }, [runDeltaSync]);
-
-  useEffect(() => {
     if (initialUser?.activeWorkspaceId) {
       getTags(initialUser.activeWorkspaceId).then(tagsResult => {
         if (!tagsResult.error && tagsResult.tags) {
@@ -465,6 +520,82 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
+  const realtimeChannelRef = useRef<any>(null);
+
+  // Ref to keep track of the latest handleRealtimeMessage without re-subscribing
+  const handleRealtimeMessageRef = useRef(handleRealtimeMessage);
+  useEffect(() => {
+    handleRealtimeMessageRef.current = handleRealtimeMessage;
+  }, [handleRealtimeMessage]);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    // We want a single subscription for the whole workspace to handle incoming messages for ALL chats
+    // This allows us to:
+    // 1. Play notifications for messages in other chats
+    // 2. Update unread counts for other chats
+    // 3. Update the message list if the chat is open
+
+    const channelName = `realtime-messages-workspace-${initialUser.activeWorkspaceId}`;
+
+    if (realtimeChannelRef.current && realtimeChannelRef.current.topic !== channelName) {
+      console.info(`[REALTIME] Removing old channel ${realtimeChannelRef.current.topic}`);
+      const supabase = createClient();
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
+
+    if (realtimeChannelRef.current) {
+      return; // Already subscribed to the correct channel
+    }
+
+    const supabase = createClient();
+    console.info(`[REALTIME] Subscribing to channel ${channelName}`);
+
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => handleRealtimeMessageRef.current(payload))
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => handleRealtimeMessageRef.current(payload))
+      .subscribe((status) => {
+        console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
+      });
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      if (realtimeChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up channel ${channelName}`);
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
+  }, [initialUser?.activeWorkspaceId]);
+
+  useEffect(() => {
+    if (initialUser) {
+      initializeInbox();
+    } else {
+      setIsLoading(false);
+    }
+  }, [initialUser, initializeInbox]);
+
+  useEffect(() => {
+    if (selectedChatId) {
+      selectedChatIdRef.current = selectedChatId;
+    }
+  }, [selectedChatId]);
+
   if (!initialUser) {
     return <LoadingSkeleton />;
   }
@@ -508,7 +639,25 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       </div>
 
       <div className="relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px]">
-        <audio ref={audioRef} src={NOTIFICATION_SOUND_DATA_URL} preload="auto" />
+        {needsAudioUnlock && (
+          <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
+            <span>Habilite o som de novas mensagens</span>
+            <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
+          </div>
+        )}
+        {IS_DEV && (
+          <div className="absolute top-4 left-4 z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
+            <span>Som</span>
+            <Button size="sm" variant="outline" onClick={() => { setDebugCounter((n) => n + 1); playNotificationSound('queue'); }}>
+              Fila ({debugCounter})
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setDebugCounter((n) => n + 1); playNotificationSound('attending'); }}>
+              Atend. ({debugCounter})
+            </Button>
+          </div>
+        )}
+        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
         <ChatList
           chats={chats}
           selectedChat={enrichedSelectedChat}
