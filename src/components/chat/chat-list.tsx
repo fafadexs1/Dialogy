@@ -269,21 +269,37 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
           <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
-        {!!chat.instance_name && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white border-2 border-black shadow-sm">
-                  <FaWhatsapp size={10} />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
-                <p>Canal: WhatsApp</p>
-                {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
+        {(() => {
+          const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
+          const platform = (lastMessage?.platform || lastMessage?.source_from_api || chat.instance_type || '').toLowerCase();
+          let icon = <FaWhatsapp size={10} />;
+          let bg = 'bg-green-500';
+          let label = 'WhatsApp';
+          if (platform === 'instagram') {
+            icon = <FaInstagram size={10} />;
+            bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
+            label = 'Instagram';
+          } else if (platform === 'messenger') {
+            icon = <FaFacebookMessenger size={10} />;
+            bg = 'bg-blue-500';
+            label = 'Messenger';
+          }
+          return (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full text-white border-2 border-black shadow-sm ${bg}`}>
+                    {icon}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
+                  <p>Canal: {label}</p>
+                  {chat.instance_name && <p>Inst?ncia: {chat.instance_name}</p>}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          );
+        })()}
       </div>
 
       <div className="flex-1 min-w-0">

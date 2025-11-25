@@ -13,6 +13,82 @@ import { sendImageMessage } from '@/services/whatsapp/send-image-message';
 import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
+import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
+import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
+import {
+    persistNormalizedMessage,
+    type MetaChannelRecord,
+} from '@/services/meta/meta-channel.service';
+import type { Chat, Contact } from '@/lib/types';
+
+type MetaSendContext = {
+    channel: MetaChannelRecord;
+    platform: 'instagram' | 'messenger';
+    externalUserId: string;
+    externalChannelId: string | null;
+    chat: Pick<Chat, 'id' | 'workspace_id' | 'status'>;
+    contact: Pick<Contact, 'id' | 'workspace_id' | 'name' | 'avatar_url'>;
+};
+
+async function resolveMetaSendContext(chatId: string, client: any): Promise<MetaSendContext | null> {
+    const res = await client.query(
+        `
+        SELECT 
+          mc.platform,
+          mc.external_thread_id,
+          mct.external_id as external_user_id,
+          ch.id as channel_id,
+          ch.workspace_id,
+          ch.type,
+          ch.external_page_id,
+          ch.ig_business_id,
+          ch.access_token,
+          ch.app_secret,
+          ch.verify_token,
+          ch.name as channel_name,
+          c.id as contact_id,
+          c.workspace_id as contact_workspace_id,
+          c.name as contact_name,
+          c.avatar_url as contact_avatar
+        FROM meta_conversations mc
+        JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
+        JOIN meta_channels ch ON ch.id = mc.channel_id
+        JOIN contacts c ON c.id = mct.contact_id
+        WHERE mc.chat_id = $1
+        LIMIT 1
+      `,
+        [chatId]
+    );
+
+    if (res.rowCount === 0) return null;
+    const row = res.rows[0];
+    const channel: MetaChannelRecord = {
+        id: row.channel_id,
+        workspace_id: row.workspace_id,
+        type: row.type,
+        external_page_id: row.external_page_id,
+        ig_business_id: row.ig_business_id,
+        access_token: row.access_token,
+        app_secret: row.app_secret,
+        verify_token: row.verify_token,
+        name: row.channel_name,
+        status: 'active',
+    };
+
+    return {
+        channel,
+        platform: row.platform,
+        externalUserId: row.external_user_id,
+        externalChannelId: row.external_page_id || row.ig_business_id,
+        chat: { id: chatId, workspace_id: row.workspace_id, status: 'atendimentos' as Chat['status'] },
+        contact: {
+            id: row.contact_id,
+            workspace_id: row.contact_workspace_id,
+            name: row.contact_name,
+            avatar_url: row.contact_avatar,
+        },
+    };
+}
 
 async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
     const instanceRes = await db.query(
@@ -50,6 +126,7 @@ async function internalSendMessage(
     try {
         await client.query('BEGIN');
 
+        // Carrega info básica do chat para atribuição de agente (independente do canal)
         const chatInfoRes = await client.query(`
             SELECT 
                 c.workspace_id, c.status, c.agent_id,
@@ -67,25 +144,64 @@ async function internalSendMessage(
         const chatInfo = chatInfoRes.rows[0];
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
 
-        const instanceName = instanceNameParam || lastInstanceName;
-
+        // Se for humano e chat em "gerais", atribui o agente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
         if (chatStatus === 'gerais' && !currentAgentId && isFromHumanAgent) {
-            console.log(`[SEND_MESSAGE_ACTION] Chat ${chatId} é 'gerais'. Atribuindo agente humano ${senderId}.`);
             await client.query(
                 "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
                 [senderId, chatId]
             );
         }
 
+        // Tenta contexto Meta (Instagram/Messenger)
+        const metaCtx = await resolveMetaSendContext(chatId, client);
+        if (metaCtx) {
+            const service =
+                metaCtx.platform === 'instagram'
+                    ? new InstagramMessagingService(metaCtx.channel)
+                    : new MessengerMessagingService(metaCtx.channel);
+
+            const apiResponse = await service.sendMessage({
+                recipientId: metaCtx.externalUserId,
+                type: 'text',
+                text: content,
+            });
+
+            await persistNormalizedMessage({
+                channel: metaCtx.channel,
+                chat: metaCtx.chat,
+                contact: metaCtx.contact,
+                message: {
+                    type: 'text',
+                    content,
+                    metadata,
+                },
+                platform: metaCtx.platform,
+                direction: 'outgoing',
+                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                externalSenderId: metaCtx.externalUserId,
+                externalChannelId: metaCtx.externalChannelId,
+                rawPayload: { request: { content }, response: apiResponse },
+                fromMe: true,
+                senderUserId: senderId,
+                senderSystemAgentId: metadata?.sentBy === 'system_agent' ? senderId : null,
+            });
+
+            await client.query('COMMIT');
+            return { success: true, apiResponse };
+        }
+
+        // Fluxo WhatsApp legado
+        const instanceName = instanceNameParam || lastInstanceName;
+
         if (!remoteJid || !instanceName) {
-            throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
+            throw new Error('Nao foi possivel encontrar o numero de destino ou a instancia para este chat.');
         }
 
         const apiConfig = await getApiConfigForInstance(instanceName);
 
         if (!apiConfig) {
-            throw new Error(`Configuração da API não encontrada para a instância ${instanceName}.`);
+            throw new Error('Configuracao da API nao encontrada para a instancia ' + instanceName + '.');
         }
 
         const apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
@@ -105,7 +221,7 @@ async function internalSendMessage(
             ]
         );
 
-        await client.query('COMMIT');
+await client.query('COMMIT');
 
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
@@ -265,6 +381,46 @@ export async function sendAgentMessageAction(
         return { success: false, error: 'Usuário não autenticado.' };
     }
 
+    // Tenta Meta primeiro (Instagram/Messenger)
+    const client = await db.connect();
+    try {
+        const metaCtx = await resolveMetaSendContext(chatId, client);
+        if (metaCtx) {
+            const service =
+                metaCtx.platform === 'instagram'
+                    ? new InstagramMessagingService(metaCtx.channel)
+                    : new MessengerMessagingService(metaCtx.channel);
+
+            const apiResponse = await service.sendMessage({
+                recipientId: metaCtx.externalUserId,
+                type: 'text',
+                text: content,
+            });
+
+            await persistNormalizedMessage({
+                channel: metaCtx.channel,
+                chat: metaCtx.chat,
+                contact: metaCtx.contact,
+                message: { type: 'text', content, metadata: {} },
+                platform: metaCtx.platform,
+                direction: 'outgoing',
+                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                externalSenderId: metaCtx.externalUserId,
+                externalChannelId: metaCtx.externalChannelId,
+                rawPayload: { request: { content }, response: apiResponse },
+                fromMe: true,
+                senderUserId: user.id,
+                senderSystemAgentId: null,
+            });
+            return { success: true };
+        }
+    } catch (err) {
+        // fallback para fluxo legado
+        console.error('[SEND_AGENT_MESSAGE][META_FALLBACK]', err);
+    } finally {
+        client.release();
+    }
+
     return internalSendMessage(chatId, content, user.id, tabId);
 }
 
@@ -332,14 +488,55 @@ export async function sendAutomatedMessageAction(
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
-    // Automated messages don't have a tabId
-    return internalSendMessage(chatId, content, agentId, null, { ...baseMetadata, ...(metadata ?? {}) }, instanceName);
+
+    // Meta first
+    const client = await db.connect();
+    try {
+        const metaCtx = await resolveMetaSendContext(chatId, client);
+        if (metaCtx) {
+            const service = metaCtx.platform === 'instagram'
+                ? new InstagramMessagingService(metaCtx.channel)
+                : new MessengerMessagingService(metaCtx.channel);
+
+            const apiResponse = await service.sendMessage({
+                recipientId: metaCtx.externalUserId,
+                type: 'text',
+                text: content,
+            });
+
+            await persistNormalizedMessage({
+                channel: metaCtx.channel,
+                chat: metaCtx.chat,
+                contact: metaCtx.contact,
+                message: { type: 'text', content, metadata: { ...baseMetadata, ...metadata } },
+                platform: metaCtx.platform,
+                direction: 'outgoing',
+                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                externalSenderId: metaCtx.externalUserId,
+                externalChannelId: metaCtx.externalChannelId,
+                rawPayload: { request: { content }, response: apiResponse },
+                fromMe: true,
+                senderUserId: agentId,
+                senderSystemAgentId: isSystemAgent ? agentId : null,
+            });
+            return { success: true, apiResponse };
+        }
+    } catch (err) {
+        console.error('[SEND_AUTOMATED_MESSAGE][META_FALLBACK]', err);
+    } finally {
+        client.release();
+    }
+
+    return internalSendMessage(
+        chatId,
+        content,
+        agentId,
+        null,
+        { ...baseMetadata, ...metadata },
+        instanceName
+    );
 }
 
-
-/**
- * Action for sending media from the UI (human agents).
- */
 export async function sendMediaAction(
     chatId: string,
     caption: string,
@@ -355,14 +552,58 @@ export async function sendMediaAction(
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
+        return { success: false, error: 'Usuario nao autenticado.' };
     }
+
+    // Meta first
+    const client = await db.connect();
+    try {
+        const metaCtx = await resolveMetaSendContext(chatId, client);
+        if (metaCtx) {
+            const service = metaCtx.platform === 'instagram'
+                ? new InstagramMessagingService(metaCtx.channel)
+                : new MessengerMessagingService(metaCtx.channel);
+
+            for (const file of mediaFiles) {
+                const apiResponse = await service.sendMessage({
+                    recipientId: metaCtx.externalUserId,
+                    type: file.mediatype === 'document' ? 'file' : file.mediatype,
+                    text: caption,
+                    mediaUrl: file.base64, // assume URL/base64 already handled upstream
+                });
+
+                await persistNormalizedMessage({
+                    channel: metaCtx.channel,
+                    chat: metaCtx.chat,
+                    contact: metaCtx.contact,
+                    message: {
+                        type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                        content: caption,
+                        metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                        mediaUrl: file.base64,
+                    },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    externalSenderId: metaCtx.externalUserId,
+                    externalChannelId: metaCtx.externalChannelId,
+                    rawPayload: { request: { caption, file }, response: apiResponse },
+                    fromMe: true,
+                    senderUserId: user.id,
+                    senderSystemAgentId: null,
+                });
+            }
+            return { success: true };
+        }
+    } catch (err) {
+        console.error('[SEND_MEDIA][META_FALLBACK]', err);
+    } finally {
+        client.release();
+    }
+
     return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId);
 }
 
-/**
- * Action for sending media from automated systems.
- */
 export async function sendAutomatedMediaAction(
     chatId: string,
     caption: string,
@@ -376,10 +617,54 @@ export async function sendAutomatedMediaAction(
     agentId: string,
     instanceName?: string,
 ): Promise<{ success: boolean; error?: string }> {
-    // Automated messages don't have a tabId
-    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, { sentBy: 'system_agent' }, instanceName);
-}
+    // Meta first
+    const client = await db.connect();
+    try {
+        const metaCtx = await resolveMetaSendContext(chatId, client);
+        if (metaCtx) {
+            const service = metaCtx.platform === 'instagram'
+                ? new InstagramMessagingService(metaCtx.channel)
+                : new MessengerMessagingService(metaCtx.channel);
 
+            for (const file of mediaFiles) {
+                const apiResponse = await service.sendMessage({
+                    recipientId: metaCtx.externalUserId,
+                    type: file.mediatype === 'document' ? 'file' : file.mediatype,
+                    text: caption,
+                    mediaUrl: file.base64,
+                });
+
+                await persistNormalizedMessage({
+                    channel: metaCtx.channel,
+                    chat: metaCtx.chat,
+                    contact: metaCtx.contact,
+                    message: {
+                        type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                        content: caption,
+                        metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                        mediaUrl: file.base64,
+                    },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    externalSenderId: metaCtx.externalUserId,
+                    externalChannelId: metaCtx.externalChannelId,
+                    rawPayload: { request: { caption, file }, response: apiResponse },
+                    fromMe: true,
+                    senderUserId: agentId,
+                    senderSystemAgentId: null,
+                });
+            }
+            return { success: true };
+        }
+    } catch (err) {
+        console.error('[SEND_AUTOMATED_MEDIA][META_FALLBACK]', err);
+    } finally {
+        client.release();
+    }
+
+    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, undefined, instanceName);
+}
 
 export async function startNewConversation(
     input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }

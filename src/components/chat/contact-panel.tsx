@@ -188,6 +188,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const { contact, agent } = chat;
 
     const instanceTypeDisplay = chat.instance_type === 'wa_cloud' ? 'Cloud API' : 'Baileys';
+    const externalId = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1]?.externalSenderId
+        || (chat as any)?.messages?.[(chat as any)?.messages?.length - 1]?.external_sender_id
+        || null;
 
     return (
         <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl h-full">
@@ -256,6 +259,14 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <Server className="h-4 w-4 text-purple-400" />
                                     </div>
                                     <span>{chat.instance_name} <span className="text-white/40 text-xs">({instanceTypeDisplay})</span></span>
+                                </div>
+                            )}
+                            {externalId && (
+                                <div className="flex items-center gap-3 text-white/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
+                                        <UserIcon className="h-4 w-4 text-blue-400" />
+                                    </div>
+                                    <span>ID externo: {externalId}</span>
                                 </div>
                             )}
                             {contact.address && (
