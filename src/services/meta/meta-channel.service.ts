@@ -168,16 +168,35 @@ async function ensureContact(
     profile?.username ||
     `Meta User ${externalId.slice(-6)}`;
 
-  const contactInsert = await db.query(
-    `
-      INSERT INTO contacts (id, workspace_id, name, avatar_url)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `,
-    [randomUUID(), channel.workspace_id, displayName, profile?.avatarUrl ?? null]
-  );
-
-  const contactRow: ContactRow = contactInsert.rows[0];
+  // Cria contato (sem phone_number_jid para evitar conflito com índice único)
+  let contactRow: ContactRow | null = null;
+  try {
+    const contactInsert = await db.query(
+      `
+        INSERT INTO contacts (id, workspace_id, name, avatar_url, phone_number_jid)
+        VALUES ($1, $2, $3, $4, NULL)
+        RETURNING *
+      `,
+      [randomUUID(), channel.workspace_id, displayName, profile?.avatarUrl ?? null]
+    );
+    contactRow = contactInsert.rows[0];
+  } catch (error: any) {
+    // Se já existe um contato com phone_number_jid vazio/null, reutiliza para não quebrar o fluxo
+    const fallback = await db.query(
+      `
+        SELECT * FROM contacts
+        WHERE workspace_id = $1 AND (phone_number_jid IS NULL OR phone_number_jid = '')
+        ORDER BY created_at ASC
+        LIMIT 1
+      `,
+      [channel.workspace_id]
+    );
+    if (fallback.rows[0]) {
+      contactRow = fallback.rows[0];
+    } else {
+      throw error;
+    }
+  }
 
   const metaInsert = await db.query(
     `
