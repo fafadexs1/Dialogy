@@ -99,6 +99,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const audioUnlockRequestedRef = useRef(false);
   const unreadCountsRef = useRef<Record<string, number>>({});
   const unreadWatchInitializedRef = useRef(false);
+  const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     useInboxStore.getState().reset();
@@ -323,28 +324,33 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     const messageChat = chats.find((chat) => chat.id === message.chat_id);
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
+    const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
 
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
       removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab);
     }
+
+    if (!messageChat && runDeltaSyncRef.current) {
+      runDeltaSyncRef.current();
+    }
+
     if (!message.from_me) {
-      if (message.chat_id !== selectedChatId) {
+      const shouldTrackUnread = message.chat_id !== selectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
+      if (shouldTrackUnread) {
         incrementUnread(message.chat_id);
       }
 
-      const shouldPlay = isQueueMessage || document.visibilityState !== 'visible' || message.chat_id !== selectedChatId;
-      console.log('[REALTIME] Should play?', shouldPlay, 'Visibility:', document.visibilityState, 'SelectedChat:', selectedChatId, 'MsgChat:', message.chat_id, 'QueueMsg:', isQueueMessage, 'AttendingMsg:', isAttendingMessage);
-
+      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== selectedChatId || isQueueMessage;
       if (shouldPlay) {
-        if (isAttendingMessage) {
-          playNotificationSound('attending');
-        } else {
+        if (isQueueMessage || !messageChat) {
           playNotificationSound('queue');
+        } else if (isOwnAttending) {
+          playNotificationSound('attending');
         }
       }
     }
-  }, [appendMessagesToChat, chats, incrementUnread, mapRealtimePayload, playNotificationSound, selectedChatId, removeMessagesForChat]);
+  }, [appendMessagesToChat, chats, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat, selectedChatId]);
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
     try {
@@ -454,6 +460,10 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       console.error('[SYNC_INBOX] Unexpected error:', error);
     }
   }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
+
+  useEffect(() => {
+    runDeltaSyncRef.current = runDeltaSync;
+  }, [runDeltaSync]);
 
   const notifyPeers = useCallback(() => {
     if (!broadcastChannel) return;

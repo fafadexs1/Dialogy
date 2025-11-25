@@ -1,9 +1,9 @@
-
-
 'use server';
 
 import { db } from '@/lib/db';
-import type { Message, Chat, Contact, User, SystemAgent } from '@/lib/types';
+import type { Message, Chat, Contact } from '@/lib/types';
+
+const WEBHOOK_TIMEOUT_MS = Number(process.env.WEBHOOK_TIMEOUT_MS ?? 8000);
 
 interface WebhookPayload {
     event: 'message.created';
@@ -62,79 +62,139 @@ async function getContactWithCustomFields(contactId: string): Promise<Contact | 
     return res.rows[0] || null;
 }
 
+async function logWebhookAttempt({
+    payload,
+    statusCode,
+    responseBody,
+    headers,
+}: {
+    payload: WebhookPayload;
+    statusCode: number | null;
+    responseBody: any;
+    headers?: Record<string, any>;
+}) {
+    try {
+        await db.query(
+            `INSERT INTO webhook_logs (source, direction, event, status_code, payload, headers, response_body)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+                payload.account.id || 'webhook_dispatch',
+                'outgoing',
+                payload.event,
+                statusCode,
+                payload,
+                headers || {},
+                responseBody || {}
+            ]
+        );
+    } catch (err) {
+        console.error('[WEBHOOK_DISPATCHER] Falha ao registrar webhook_logs', err);
+    }
+}
+
 export async function dispatchMessageToWebhooks(
-    chat: Chat, 
+    chat: Chat,
     message: Message,
     instanceName: string
 ) {
-    console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
-    
-    if (!chat.workspace_id) {
-        console.error(`[WEBHOOK_DISPATCHER] Erro crítico: O objeto 'chat' não contém 'workspace_id'. Abortando.`);
-        return;
-    }
+    try {
+        console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
 
-    const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
-    
-    if (agents.rowCount === 0) {
-        console.log(`[WEBHOOK_DISPATCHER] Nenhum agente ativo com webhook encontrado para o workspace ${chat.workspace_id}.`);
-        return;
-    }
+        if (!chat.workspace_id) {
+            console.error(`[WEBHOOK_DISPATCHER] Erro crítico: O objeto 'chat' não contém 'workspace_id'. Abortando.`);
+            return;
+        }
 
-    const workspaceName = await getWorkspaceName(chat.workspace_id);
-    const contactWithDetails = await getContactWithCustomFields(chat.contact.id);
+        const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
 
-    if (!contactWithDetails) {
-        console.error(`[WEBHOOK_DISPATCHER] Erro crítico: Não foi possível encontrar detalhes do contato ${chat.contact.id}. Abortando.`);
-        return;
-    }
+        if (agents.rowCount === 0) {
+            console.log(`[WEBHOOK_DISPATCHER] Nenhum agente ativo com webhook encontrado para o workspace ${chat.workspace_id}.`);
+            return;
+        }
 
+        const workspaceName = await getWorkspaceName(chat.workspace_id);
+        const contactWithDetails = await getContactWithCustomFields(chat.contact.id);
 
-    const payload: WebhookPayload = {
-        event: 'message.created',
-        account: {
-            id: chat.workspace_id,
-            name: workspaceName,
-        },
-        conversation: {
-            id: chat.id,
-            status: chat.status,
-            channel: 'WhatsApp', // Placeholder
-            instance_name: instanceName || 'N/A',
-            assigned_agent: {
-                id: chat.agent?.id,
-                name: chat.agent?.name,
+        if (!contactWithDetails) {
+            console.error(`[WEBHOOK_DISPATCHER] Erro crítico: Não foi possível encontrar detalhes do contato ${chat.contact.id}. Abortando.`);
+            return;
+        }
+
+        const payload: WebhookPayload = {
+            event: 'message.created',
+            account: {
+                id: chat.workspace_id,
+                name: workspaceName,
             },
-        },
-        contact: {
-            id: contactWithDetails.id,
-            name: contactWithDetails.name,
-            phone_number: contactWithDetails.phone_number_jid,
-            email: contactWithDetails.email,
-            avatar_url: contactWithDetails.avatar_url,
-            custom_fields: contactWithDetails.custom_fields || {},
-        },
-        message: {
-            id: message.id,
-            content: message.content,
-            type: message.type,
-            from_me: !!message.from_me,
-            created_at: message.createdAt,
-            metadata: message.metadata ?? {},
-        },
-    };
-
-    for (const agent of agents.rows) {
-        console.log(`[WEBHOOK_DISPATCHER] Enviando para o agente '${agent.name}' na URL: ${agent.webhook_url}`);
-        fetch(agent.webhook_url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Dialogy-Token': agent.token,
+            conversation: {
+                id: chat.id,
+                status: chat.status,
+                channel: 'WhatsApp', // Placeholder
+                instance_name: instanceName || 'N/A',
+                assigned_agent: {
+                    id: chat.agent?.id,
+                    name: chat.agent?.name,
+                },
             },
-            body: JSON.stringify(payload),
-        }).catch(error => {
-            console.error(`[WEBHOOK_DISPATCHER] Falha ao enviar webhook para '${agent.name}':`, error);
-        });
+            contact: {
+                id: contactWithDetails.id,
+                name: contactWithDetails.name,
+                phone_number: contactWithDetails.phone_number_jid,
+                email: contactWithDetails.email,
+                avatar_url: contactWithDetails.avatar_url,
+                custom_fields: contactWithDetails.custom_fields || {},
+            },
+            message: {
+                id: message.id,
+                content: message.content,
+                type: message.type,
+                from_me: !!message.from_me,
+                created_at: message.createdAt,
+                metadata: message.metadata ?? {},
+            },
+        };
+
+        const sendWebhook = async (agent: any) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+            try {
+                console.log(`[WEBHOOK_DISPATCHER] Enviando para o agente '${agent.name}' na URL: ${agent.webhook_url}`);
+                const response = await fetch(agent.webhook_url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Dialogy-Token': agent.token,
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal,
+                });
+                const responseText = await response.text().catch(() => null);
+                const parsedResponse = responseText ? (() => { try { return JSON.parse(responseText); } catch { return responseText; } })() : {};
+                await logWebhookAttempt({
+                    payload,
+                    statusCode: response.status,
+                    responseBody: parsedResponse,
+                    headers: { target: agent.webhook_url },
+                });
+                if (!response.ok) {
+                    console.error(`[WEBHOOK_DISPATCHER] Webhook respondeu com status ${response.status} para '${agent.name}'.`);
+                }
+            } catch (error: any) {
+                const reason = error?.name === 'AbortError' ? 'timeout' : (error?.message || 'erro desconhecido');
+                await logWebhookAttempt({
+                    payload,
+                    statusCode: null,
+                    responseBody: { error: reason, dropped: true },
+                    headers: { target: agent.webhook_url },
+                });
+                console.error(`[WEBHOOK_DISPATCHER] Falha ao enviar webhook para '${agent.name}':`, error);
+            } finally {
+                clearTimeout(timer);
+            }
+        };
+
+        await Promise.allSettled(agents.rows.map(sendWebhook));
+    } catch (error) {
+        console.error('[WEBHOOK_DISPATCHER] Falha inesperada ao despachar webhooks:', error);
     }
 }

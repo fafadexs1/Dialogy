@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { type Chat, type User, type Team, Contact as ContactType } from '@/lib/types';
+import { type Chat, type User, type Team, EvolutionInstance } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -16,10 +16,10 @@ import {
     Loader2,
     Users,
     Edit,
-    Tag,
     MapPin,
     Calendar,
-    Globe
+    Globe,
+    MessageSquarePlus
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -33,10 +33,16 @@ import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
 import { getWorkspaceUsers } from '@/actions/crm';
 import { transferChatAction } from '@/actions/chats';
+import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { AddContactForm } from '../crm/add-contact-form';
 import { cn } from '@/lib/utils';
+import { Label } from '../ui/label';
+import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -152,6 +158,117 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
     )
 }
 
+function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat, currentUser: User | null, onSuccess: () => void }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+    const [selectedInstance, setSelectedInstance] = useState('');
+    const [message, setMessage] = useState('Olá! Podemos retomar nossa conversa por aqui?');
+    const [isLoadingInstances, setIsLoadingInstances] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const normalizedPhone = (chat.contact.phone_number_jid || chat.contact.phone || '').replace('@s.whatsapp.net', '').replace(/\D/g, '');
+
+    useEffect(() => {
+        if (!isOpen || !currentUser?.activeWorkspaceId) return;
+        setIsLoadingInstances(true);
+        getEvolutionApiInstances(currentUser.activeWorkspaceId)
+            .then((data) => {
+                setInstances(data);
+                const fallbackInstance = chat.instance_name || data[0]?.instance_name || '';
+                setSelectedInstance((prev) => prev || fallbackInstance);
+            })
+            .finally(() => setIsLoadingInstances(false));
+    }, [isOpen, currentUser?.activeWorkspaceId, chat.instance_name]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentUser?.activeWorkspaceId) {
+            toast({ title: 'Sem workspace ativo', description: 'Selecione um workspace para reenviar a conversa.', variant: 'destructive' });
+            return;
+        }
+        if (!normalizedPhone) {
+            toast({ title: 'Contato sem número válido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
+            return;
+        }
+        if (!selectedInstance) {
+            toast({ title: 'Escolha uma instância', description: 'Selecione a instância de envio para continuar.', variant: 'destructive' });
+            return;
+        }
+
+        setIsSubmitting(true);
+        const result = await startNewConversation({
+            workspaceId: currentUser.activeWorkspaceId,
+            instanceName: selectedInstance,
+            phoneNumber: normalizedPhone,
+            message,
+            tabId: null
+        });
+
+        if (result.success) {
+            toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerá na sua lista.' });
+            setIsOpen(false);
+            onSuccess();
+        } else {
+            toast({ title: 'Falha ao iniciar', description: result.error, variant: 'destructive' });
+        }
+        setIsSubmitting(false);
+    };
+
+    return (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="bg-white/5 border-white/10 text-white hover:bg-white/10">
+                    <MessageSquarePlus className="mr-2 h-4 w-4" />
+                    Nova conversa
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg bg-black/90 border-white/10 text-white">
+                <DialogHeader>
+                    <DialogTitle>Reabrir atendimento</DialogTitle>
+                    <DialogDescription className="text-white/60">
+                        Inicie um novo tópico com este contato sem perder o histórico.
+                    </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                        <Label>Instância</Label>
+                        <Select value={selectedInstance} onValueChange={setSelectedInstance} disabled={isLoadingInstances || instances.length === 0}>
+                            <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                                <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instância'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {isLoadingInstances && <div className="p-3 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>}
+                                {!isLoadingInstances && instances.map((instance) => (
+                                    <SelectItem key={instance.id} value={instance.instance_name}>
+                                        {instance.display_name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Telefone</Label>
+                        <Input value={normalizedPhone} readOnly className="bg-white/5 border-white/10 text-white" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Mensagem inicial</Label>
+                        <Textarea value={message} onChange={(e) => setMessage(e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <DialogClose asChild>
+                            <Button variant="ghost">Cancelar</Button>
+                        </DialogClose>
+                        <Button type="submit" disabled={isSubmitting || !normalizedPhone} className="bg-blue-600 hover:bg-blue-500 text-white">
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Enviar
+                        </Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 
 export default function ContactPanel({ chat, currentUser, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -211,23 +328,28 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl h-full">
             <div className="flex h-16 items-center justify-between border-b border-white/10 px-6 flex-shrink-0">
                 <h3 className="font-semibold text-lg text-white">Detalhes</h3>
-                <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button variant="ghost" size="sm" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10">
-                            <Edit className="mr-2 h-4 w-4" />
-                            Editar
-                        </Button>
-                    </DialogTrigger>
-                    <AddContactForm
-                        isOpen={isEditModalOpen}
-                        setIsOpen={setIsEditModalOpen}
-                        contact={contact}
-                        onSave={onContactUpdate}
-                        workspaceId={chat.workspace_id}
-                        agents={agents}
-                        user={currentUser}
-                    />
-                </Dialog>
+                <div className="flex items-center gap-2">
+                    {chat.status === 'encerrados' && (
+                        <ResumeConversationDialog chat={chat} currentUser={currentUser} onSuccess={onContactUpdate} />
+                    )}
+                    <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="ghost" size="sm" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10">
+                                <Edit className="mr-2 h-4 w-4" />
+                                Editar
+                            </Button>
+                        </DialogTrigger>
+                        <AddContactForm
+                            isOpen={isEditModalOpen}
+                            setIsOpen={setIsEditModalOpen}
+                            contact={contact}
+                            onSave={onContactUpdate}
+                            workspaceId={chat.workspace_id}
+                            agents={agents}
+                            user={currentUser}
+                        />
+                    </Dialog>
+                </div>
             </div>
 
             <ScrollArea className="flex-1">

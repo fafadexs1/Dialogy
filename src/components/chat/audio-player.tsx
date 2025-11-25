@@ -181,7 +181,7 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
             </div>
             <div className="mt-1">
                 {transcription ? (
-                    <p className="text-xs italic text-muted-foreground p-2 rounded-md bg-secondary/50">{transcription}</p>
+                    <p className="text-xs italic text-foreground p-2 rounded-md bg-secondary/50 border border-white/10">{transcription}</p>
                 ) : isTranscribing ? (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 rounded-md bg-secondary/50">
                         <Loader2 className="h-4 w-4 animate-spin" />

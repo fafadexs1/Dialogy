@@ -351,7 +351,14 @@ function MediaMessage({ message }: { message: Message }) {
         }
 
         if (effectiveMimeType.startsWith('audio/')) {
-            return <AudioPlayer src={urlToUse} duration={duration} waveform={waveform} isFromMe={Boolean(message.from_me)} />;
+            return <AudioPlayer
+                src={urlToUse}
+                messageId={message.id}
+                initialTranscription={message.transcription}
+                duration={duration}
+                waveform={waveform}
+                isFromMe={Boolean(message.from_me)}
+            />;
         }
 
         // Default for documents or other files

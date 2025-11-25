@@ -656,6 +656,167 @@ export async function getChatMessagesWindow({
     }
 }
 
+export async function searchChatsAndContacts({
+    workspaceId,
+    query,
+    limit = 30,
+}: {
+    workspaceId: string;
+    query: string;
+    limit?: number;
+}): Promise<{
+    chats: Chat[];
+    contacts: Array<Contact & { chat_id: string | null; chat_status: Chat['status'] | null }>;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { chats: [], contacts: [], error: "Usuário não autenticado." };
+    }
+
+    const trimmedQuery = query?.trim();
+    if (!workspaceId || !trimmedQuery) {
+        return { chats: [], contacts: [] };
+    }
+
+    const likeQuery = `%${trimmedQuery.toLowerCase()}%`;
+    const likePhone = `%${trimmedQuery}%`;
+    const digitsOnly = trimmedQuery.replace(/\D/g, '');
+    const likeDigits = digitsOnly ? `%${digitsOnly}%` : null;
+
+    try {
+        const timezone = await getWorkspaceTimezone(workspaceId);
+        const chatRowsRes = await db.query(
+            `
+            WITH last_message_details AS (
+                SELECT DISTINCT ON (chat_id)
+                    id,
+                    chat_id,
+                    content,
+                    type,
+                    metadata,
+                    transcription,
+                    created_at,
+                    from_me,
+                    sender_user_id,
+                    sender_system_agent_id,
+                    instance_name,
+                    source_from_api,
+                    message_id_from_api,
+                    api_message_status,
+                    is_read,
+                    sent_by_tab
+                FROM messages
+                WHERE workspace_id = $1
+                ORDER BY chat_id, created_at DESC
+            )
+            SELECT 
+                c.id,
+                c.status,
+                c.workspace_id,
+                c.assigned_at,
+                c.tag,
+                c.color,
+                c.contact_id,
+                c.agent_id,
+                COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+                lmd.instance_name,
+                lmd.source_from_api AS source,
+                COALESCE((
+                    SELECT COUNT(*) FROM messages m
+                    WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
+                ), 0) AS unread_count,
+                t.name AS team_name,
+                eai.type AS instance_type,
+                cont.name AS contact_name,
+                cont.avatar_url AS contact_avatar_url,
+                cont.email AS contact_email,
+                cont.phone_number_jid AS contact_phone_number_jid,
+                cont.address AS contact_address,
+                lmd.id AS last_message_id,
+                lmd.content AS last_message_content,
+                lmd.type AS last_message_type,
+                lmd.metadata AS last_message_metadata,
+                lmd.transcription AS last_message_transcription,
+                lmd.created_at AS last_message_created_at,
+                lmd.from_me AS last_message_from_me,
+                lmd.sender_user_id AS last_message_sender_user_id,
+                lmd.sender_system_agent_id AS last_message_sender_system_agent_id,
+                lmd.instance_name AS last_message_instance_name,
+                lmd.source_from_api AS last_message_source_from_api,
+                lmd.message_id_from_api AS last_message_message_id_from_api,
+                lmd.api_message_status AS last_message_api_message_status,
+                lmd.is_read AS last_message_is_read,
+                lmd.sent_by_tab AS last_message_sent_by_tab
+            FROM chats c
+            LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+            LEFT JOIN contacts cont ON cont.id = c.contact_id
+            LEFT JOIN team_members tm ON c.agent_id = tm.user_id
+            LEFT JOIN teams t ON tm.team_id = t.id
+            LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
+            WHERE c.workspace_id = $1
+              AND (
+                LOWER(COALESCE(cont.name, '')) LIKE $2
+                OR LOWER(COALESCE(cont.email, '')) LIKE $2
+                OR COALESCE(cont.phone_number_jid, '') ILIKE $3
+                OR ($4 IS NOT NULL AND regexp_replace(COALESCE(cont.phone_number_jid, ''), '\\D', '', 'g') LIKE $4)
+              )
+            ORDER BY COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+            LIMIT $5
+            `,
+            [workspaceId, likeQuery, likePhone, likeDigits, Math.max(1, limit)]
+        );
+
+        const hydratedChats = await hydrateChats(chatRowsRes.rows as ChatRow[], timezone);
+
+        const contactsRes = await db.query(
+            `
+            WITH last_chat AS (
+                SELECT DISTINCT ON (contact_id)
+                    contact_id,
+                    id as chat_id,
+                    status
+                FROM chats
+                WHERE workspace_id = $1
+                ORDER BY contact_id, created_at DESC
+            )
+            SELECT 
+                c.*,
+                lc.chat_id,
+                lc.status AS chat_status
+            FROM contacts c
+            LEFT JOIN last_chat lc ON lc.contact_id = c.id
+            WHERE c.workspace_id = $1
+              AND (
+                LOWER(COALESCE(c.name, '')) LIKE $2
+                OR LOWER(COALESCE(c.email, '')) LIKE $2
+                OR COALESCE(c.phone_number_jid, '') ILIKE $3
+                OR ($4 IS NOT NULL AND regexp_replace(COALESCE(c.phone_number_jid, ''), '\\D', '', 'g') LIKE $4)
+              )
+            ORDER BY c.created_at DESC
+            LIMIT $5
+            `,
+            [workspaceId, likeQuery, likePhone, likeDigits, Math.max(1, limit)]
+        );
+
+        const contacts = contactsRes.rows.map((row: any) => ({
+            ...(row as Contact),
+            chat_id: row.chat_id || null,
+            chat_status: row.chat_status || null,
+        }));
+
+        return {
+            chats: hydratedChats.chats,
+            contacts,
+        };
+    } catch (error: any) {
+        console.error("[SEARCH_CHATS_CONTACTS] Error:", error);
+        return { chats: [], contacts: [], error: "Falha ao buscar resultados da pesquisa." };
+    }
+}
+
 type ChatRow = {
     id: string;
     status: Chat['status'];

@@ -346,11 +346,15 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           <div className="flex-1 min-w-0">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
           </div>
-          {chat.unreadCount && chat.unreadCount > 0 ? (
+          {(() => {
+            const unread = chat.unreadCount ?? 0;
+            if (unread <= 0) return null;
+            return (
             <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-gradient-to-r from-blue-600 to-purple-600 text-white border-0 shadow-md text-[10px]">
-              {chat.unreadCount}
+              {unread}
             </Badge>
-          ) : null}
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -550,6 +554,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onOpenChange={setIsSearchDialogOpen}
         searchQuery={searchQuery}
         chats={chats}
+        workspaceId={currentUser.activeWorkspaceId}
         onSelectChat={setSelectedChat}
       />
 
