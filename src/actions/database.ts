@@ -38,6 +38,18 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+DO $$ BEGIN
+    CREATE TYPE public.meta_channel_type_enum AS ENUM ('instagram', 'messenger');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE public.message_direction_enum AS ENUM ('incoming', 'outgoing');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 -- ============================================
 -- Tabelas independentes / catálogos
@@ -462,6 +474,12 @@ create table if not exists public.messages (
   metadata jsonb,
   transcription text,
   sent_by_tab text,
+  platform public.meta_channel_type_enum,
+  external_message_id text,
+  external_sender_id text,
+  external_channel_id text,
+  direction public.message_direction_enum,
+  media_url text,
   constraint messages_workspace_id_fkey
     foreign key (workspace_id) references public.workspaces(id) on delete cascade,
   constraint messages_chat_id_fkey
@@ -474,6 +492,95 @@ create table if not exists public.messages (
 create index if not exists idx_messages_workspace on public.messages(workspace_id);
 create index if not exists idx_messages_chat on public.messages(chat_id);
 create index if not exists idx_messages_created_at on public.messages(created_at);
+
+-- Garantir colunas opcionais novas em messages
+alter table if exists public.messages add column if not exists platform public.meta_channel_type_enum;
+alter table if exists public.messages add column if not exists external_message_id text;
+alter table if exists public.messages add column if not exists external_sender_id text;
+alter table if exists public.messages add column if not exists external_channel_id text;
+alter table if exists public.messages add column if not exists direction public.message_direction_enum;
+alter table if exists public.messages add column if not exists media_url text;
+
+-- Meta Channels (Instagram/Messenger)
+create table if not exists public.meta_channels (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  type public.meta_channel_type_enum not null,
+  external_page_id text,
+  ig_business_id text,
+  access_token text not null,
+  app_secret text,
+  verify_token text not null,
+  name text,
+  status text not null default 'active',
+  settings jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_channels_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade
+);
+create unique index if not exists uq_meta_channels_type_page on public.meta_channels(type, external_page_id);
+create unique index if not exists uq_meta_channels_type_igbiz on public.meta_channels(type, ig_business_id);
+create unique index if not exists uq_meta_channels_workspace_verify_token on public.meta_channels(workspace_id, verify_token);
+create index if not exists idx_meta_channels_workspace on public.meta_channels(workspace_id);
+
+create table if not exists public.meta_contacts (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null,
+  contact_id uuid not null,
+  external_id text not null,
+  username text,
+  name text,
+  profile_pic text,
+  last_seen_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_contacts_channel_id_fkey
+    foreign key (channel_id) references public.meta_channels(id) on delete cascade,
+  constraint meta_contacts_contact_id_fkey
+    foreign key (contact_id) references public.contacts(id) on delete cascade
+);
+create unique index if not exists uq_meta_contacts_channel_external on public.meta_contacts(channel_id, external_id);
+create index if not exists idx_meta_contacts_contact on public.meta_contacts(contact_id);
+
+create table if not exists public.meta_conversations (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null,
+  meta_contact_id uuid not null,
+  chat_id uuid not null,
+  external_thread_id text not null,
+  platform public.meta_channel_type_enum not null,
+  last_message_at timestamptz not null default timezone('utc', now()),
+  status text not null default 'open',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_conversations_channel_id_fkey
+    foreign key (channel_id) references public.meta_channels(id) on delete cascade,
+  constraint meta_conversations_meta_contact_id_fkey
+    foreign key (meta_contact_id) references public.meta_contacts(id) on delete cascade,
+  constraint meta_conversations_chat_id_fkey
+    foreign key (chat_id) references public.chats(id) on delete cascade
+);
+create unique index if not exists uq_meta_conversations_channel_thread on public.meta_conversations(channel_id, external_thread_id);
+create index if not exists idx_meta_conversations_channel on public.meta_conversations(channel_id);
+create index if not exists idx_meta_conversations_chat on public.meta_conversations(chat_id);
+
+create table if not exists public.webhook_logs (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid,
+  source text not null,
+  direction text not null default 'incoming',
+  event text,
+  status_code int,
+  payload jsonb,
+  headers jsonb,
+  response_body jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  constraint webhook_logs_channel_id_fkey
+    foreign key (channel_id) references public.meta_channels(id) on delete set null
+);
+create index if not exists idx_webhook_logs_channel on public.webhook_logs(channel_id);
+create index if not exists idx_webhook_logs_source on public.webhook_logs(source);
 
 -- Role <-> Permission
 create table if not exists public.role_permissions (
@@ -697,6 +804,9 @@ select public._create_updated_at_trigger('public.billing_info');
 select public._create_updated_at_trigger('public.autopilot_configs');
 select public._create_updated_at_trigger('public.instance_costs'); -- NEW
 select public._create_updated_at_trigger('public.plans'); -- NEW
+select public._create_updated_at_trigger('public.meta_channels'); -- NEW
+select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
+select public._create_updated_at_trigger('public.meta_conversations'); -- NEW
 
 drop function if exists public._create_updated_at_trigger(regclass);
 `;
@@ -744,9 +854,11 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Verificando e populando a tabela de integrações...');
      await client.query(`
         INSERT INTO app_integrations (id, name, description, icon_url, tag, tag_type, href, status) VALUES
-        ('evolution-api', 'Evolution API', 'Gerencie as instâncias de WhatsApp (não-oficial) para conectar seus números.', 'https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
-        ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avançados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),
-        ('stripe', 'Stripe', 'Integre pagamentos e cobranças diretamente nas suas conversas.', 'https://stripe.com/img/v3/home/twitter.png', 'Pagamentos', 'beta', '#', 'coming_soon')
+        ('evolution-api', 'Evolution API', 'Gerencie as inst?ncias de WhatsApp (n?o-oficial) para conectar seus n?meros.', 'https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
+        ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avan?ados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),
+        ('stripe', 'Stripe', 'Integre pagamentos e cobran?as diretamente nas suas conversas.', 'https://stripe.com/img/v3/home/twitter.png', 'Pagamentos', 'beta', '#', 'coming_soon'),
+        ('meta-instagram', 'Instagram Direct (Oficial)', 'Receba e envie mensagens do Instagram Direct com a API oficial do Meta.', 'https://static-00.iconduck.com/assets.00/instagram-icon-256x256-gxth2yqu.png', 'Instagram', 'primary', '/integrations/meta-instagram', 'active'),
+        ('meta-messenger', 'Facebook Messenger (Oficial)', 'Integra??o direta ao Messenger com Webhooks e Graph API.', 'https://static-00.iconduck.com/assets.00/messenger-icon-256x256-fjxn4yz0.png', 'Messenger', 'primary', '/integrations/meta-messenger', 'active')
         ON CONFLICT (id) DO NOTHING;
     `);
     console.log('[DB_SETUP] Integrações padrão garantidas.');

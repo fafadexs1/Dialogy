@@ -157,6 +157,12 @@ export type Message = {
   is_read?: boolean;
   sentByTab?: string | null;
   optimistic?: boolean;
+  platform?: 'instagram' | 'messenger' | string;
+  direction?: 'incoming' | 'outgoing';
+  externalMessageId?: string;
+  externalSenderId?: string;
+  externalChannelId?: string;
+  mediaUrl?: string;
 };
 
 export type Chat = {
@@ -258,6 +264,43 @@ export interface Integration {
   href: string;
   status: 'active' | 'coming_soon';
 }
+
+export type MetaChannel = {
+  id: string;
+  workspace_id: string;
+  type: 'instagram' | 'messenger';
+  external_page_id?: string | null;
+  ig_business_id?: string | null;
+  access_token?: string;
+  verify_token?: string;
+  app_secret?: string | null;
+  name?: string | null;
+  status?: string | null;
+  settings?: Record<string, any>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MetaContact = {
+  id: string;
+  channel_id: string;
+  contact_id: string;
+  external_id: string;
+  username?: string | null;
+  name?: string | null;
+  profile_pic?: string | null;
+};
+
+export type MetaConversation = {
+  id: string;
+  channel_id: string;
+  meta_contact_id: string;
+  chat_id: string;
+  external_thread_id: string;
+  platform: 'instagram' | 'messenger';
+  last_message_at?: string;
+  status?: string;
+};
 
 export type ActionType = 'reply' | 'webhook';
 

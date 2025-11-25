@@ -33,5 +33,25 @@ export const availableIntegrations: Integration[] = [
         tag_type: "beta",
         href: "#",
         status: 'coming_soon'
+    },
+    {
+        id: 'meta-instagram',
+        name: "Instagram Direct (Oficial)",
+        description: "Receba e envie mensagens do Instagram com webhooks e Graph API.",
+        icon_url: "https://static-00.iconduck.com/assets.00/instagram-icon-256x256-gxth2yqu.png",
+        tag: "Instagram",
+        tag_type: "primary",
+        href: "/integrations/meta-instagram",
+        status: 'active'
+    },
+    {
+        id: 'meta-messenger',
+        name: "Facebook Messenger (Oficial)",
+        description: "Atenda clientes do Messenger com webhooks oficiais e Graph API.",
+        icon_url: "https://static-00.iconduck.com/assets.00/messenger-icon-256x256-fjxn4yz0.png",
+        tag: "Messenger",
+        tag_type: "primary",
+        href: "/integrations/meta-messenger",
+        status: 'active'
     }
 ];

@@ -1,0 +1,140 @@
+import type { Message, MessageMetadata } from '@/lib/types';
+import {
+  MetaChannelRecord,
+  resolveMetaContext,
+  persistNormalizedMessage,
+  logWebhookEvent,
+} from './meta-channel.service';
+
+type MessagingEvent = {
+  sender?: { id: string; username?: string };
+  recipient?: { id: string };
+  timestamp?: number;
+  message?: {
+    mid?: string;
+    text?: string;
+    is_echo?: boolean;
+    attachments?: Array<{
+      type: string;
+      payload?: { url?: string; title?: string };
+    }>;
+  };
+};
+
+function normalizeInstagramMessage(event: MessagingEvent): {
+  type: Message['type'];
+  content: string | null;
+  mediaUrl: string | null;
+  metadata: MessageMetadata;
+} {
+  const msg = event.message;
+  if (!msg) {
+    return { type: 'text', content: null, mediaUrl: null, metadata: {} };
+  }
+
+  let type: Message['type'] = 'text';
+  let content: string | null = msg.text || null;
+  let mediaUrl: string | null = null;
+  const metadata: MessageMetadata = {
+    sentBy: msg.is_echo ? 'agent' : 'autopilot',
+  };
+
+  const attachment = msg.attachments?.[0];
+  if (attachment) {
+    mediaUrl = attachment.payload?.url || null;
+    metadata.mediaUrl = mediaUrl || undefined;
+
+    switch (attachment.type) {
+      case 'image':
+        type = 'image';
+        content = content || '[imagem]';
+        break;
+      case 'video':
+        type = 'video';
+        content = content || '[video]';
+        break;
+      case 'audio':
+        type = 'audio';
+        content = content || '[audio]';
+        break;
+      case 'file':
+      case 'document':
+        type = 'document';
+        content = content || '[arquivo]';
+        break;
+      default:
+        type = 'document';
+        content = content || `[${attachment.type}]`;
+        break;
+    }
+  }
+
+  return { type, content, mediaUrl, metadata };
+}
+
+export async function handleInstagramWebhook(channel: MetaChannelRecord, payload: any) {
+  const entries = payload?.entry || [];
+
+  for (const entry of entries) {
+    const messaging: MessagingEvent[] = entry.messaging || [];
+    for (const event of messaging) {
+      if (!event.message) {
+        await logWebhookEvent({
+          channelId: channel.id,
+          source: 'meta-instagram',
+          event: 'ignored',
+          payload: event,
+        });
+        continue;
+      }
+
+      const isEcho = event.message.is_echo === true;
+      const externalUserId = isEcho ? event.recipient?.id : event.sender?.id;
+      if (!externalUserId) {
+        await logWebhookEvent({
+          channelId: channel.id,
+          source: 'meta-instagram',
+          event: 'missing-user',
+          payload: event,
+        });
+        continue;
+      }
+
+      const threadKey = externalUserId;
+      const profile = {
+        name: undefined,
+        username: event.sender?.username,
+        avatarUrl: undefined,
+      };
+
+      const { contact, chat } = await resolveMetaContext({
+        channel,
+        externalUserId,
+        profile,
+        platform: 'instagram',
+        threadKey,
+      });
+
+      const normalized = normalizeInstagramMessage(event);
+
+      await persistNormalizedMessage({
+        channel,
+        chat,
+        contact,
+        message: {
+          type: normalized.type,
+          content: normalized.content,
+          metadata: normalized.metadata,
+          mediaUrl: normalized.mediaUrl,
+        },
+        platform: 'instagram',
+        direction: isEcho ? 'outgoing' : 'incoming',
+        externalMessageId: event.message?.mid,
+        externalSenderId: event.sender?.id || null,
+        externalChannelId: channel.ig_business_id || channel.external_page_id || null,
+        rawPayload: event,
+        fromMe: isEcho,
+      });
+    }
+  }
+}

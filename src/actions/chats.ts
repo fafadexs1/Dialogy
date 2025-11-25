@@ -703,6 +703,12 @@ type MessageRow = {
     api_message_status: string | null;
     is_read: boolean | null;
     sent_by_tab?: string | null;
+    platform?: 'instagram' | 'messenger' | null;
+    external_message_id?: string | null;
+    external_sender_id?: string | null;
+    external_channel_id?: string | null;
+    direction?: 'incoming' | 'outgoing' | null;
+    media_url?: string | null;
     contact_id?: string | null;
     contact_name?: string | null;
     contact_avatar_url?: string | null;
@@ -1195,6 +1201,13 @@ function mapMessageFromRow(
         from_me: row.from_me,
         is_read: row.is_read ?? undefined,
         sentByTab: row.sent_by_tab || undefined,
+        platform: (row.platform as any) || undefined,
+        direction: (row.direction as any) || undefined,
+        externalMessageId: row.external_message_id || undefined,
+        externalSenderId: row.external_sender_id || undefined,
+        externalChannelId: row.external_channel_id || undefined,
+        mediaUrl: row.media_url || undefined,
+        optimistic: false,
     };
 }
 
