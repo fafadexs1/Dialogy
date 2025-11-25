@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
-import { FaWhatsapp } from 'react-icons/fa6';
+import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 import { TagSelectionDialog } from './tag-selection-dialog';
 import {
