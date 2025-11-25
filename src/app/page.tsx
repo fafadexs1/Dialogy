@@ -407,8 +407,8 @@ export default function DialogyLanding() {
           <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/40">
             <p>© {new Date().getFullYear()} Dialogy Inc. Todos os direitos reservados.</p>
             <div className="flex gap-6">
-              <Link href="#" className="hover:text-white transition-colors">Política de Privacidade</Link>
-              <Link href="#" className="hover:text-white transition-colors">Termos de Serviço</Link>
+              <Link href="/privacy" className="hover:text-white transition-colors">Política de Privacidade</Link>
+              <Link href="/terms" className="hover:text-white transition-colors">Termos de Serviço</Link>
             </div>
           </div>
         </Section>

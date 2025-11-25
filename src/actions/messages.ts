@@ -31,6 +31,17 @@ type MetaSendContext = {
     lastIncomingSender?: string | null;
 };
 
+function formatMetaSendError(err: any): string {
+    const message = err instanceof Error ? err.message : String(err);
+    const lowered = message?.toLowerCase?.() || '';
+
+    if (lowered.includes('does not have the capability')) {
+        return 'A Meta retornou (#3) \"Application does not have the capability to make this API call\". Habilite o recurso Instagram Messaging no app, garanta as permissões instagram_manage_messages/pages_manage_metadata e refaça a conexão com um token válido da página/conta comercial.';
+    }
+
+    return message || 'Falha ao enviar mensagem para o canal Meta.';
+}
+
 async function resolveMetaSendContext(chatId: string, client: any): Promise<MetaSendContext | null> {
     const res = await client.query(
         `
@@ -158,39 +169,45 @@ async function internalSendMessage(
         // Tenta contexto Meta (Instagram/Messenger)
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
-            const service =
-                metaCtx.platform === 'instagram'
-                    ? new InstagramMessagingService(metaCtx.channel)
-                    : new MessengerMessagingService(metaCtx.channel);
+            try {
+                const service =
+                    metaCtx.platform === 'instagram'
+                        ? new InstagramMessagingService(metaCtx.channel)
+                        : new MessengerMessagingService(metaCtx.channel);
 
-            const apiResponse = await service.sendMessage({
-                recipientId: metaCtx.externalUserId,
-                type: 'text',
-                text: content,
-            });
-
-            await persistNormalizedMessage({
-                channel: metaCtx.channel,
-                chat: metaCtx.chat,
-                contact: metaCtx.contact,
-                message: {
+                const apiResponse = await service.sendMessage({
+                    recipientId: metaCtx.externalUserId,
                     type: 'text',
-                    content,
-                    metadata,
-                },
-                platform: metaCtx.platform,
-                direction: 'outgoing',
-                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                externalSenderId: metaCtx.externalUserId,
-                externalChannelId: metaCtx.externalChannelId,
-                rawPayload: { request: { content }, response: apiResponse },
-                fromMe: true,
-                senderUserId: senderId,
-                senderSystemAgentId: metadata?.sentBy === 'system_agent' ? senderId : null,
-            });
+                    text: content,
+                });
 
-            await client.query('COMMIT');
-            return { success: true, apiResponse };
+                await persistNormalizedMessage({
+                    channel: metaCtx.channel,
+                    chat: metaCtx.chat,
+                    contact: metaCtx.contact,
+                    message: {
+                        type: 'text',
+                        content,
+                        metadata,
+                    },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    externalSenderId: metaCtx.externalUserId,
+                    externalChannelId: metaCtx.externalChannelId,
+                    rawPayload: { request: { content }, response: apiResponse },
+                    fromMe: true,
+                    senderUserId: senderId,
+                    senderSystemAgentId: metadata?.sentBy === 'system_agent' ? senderId : null,
+                });
+
+                await client.query('COMMIT');
+                return { success: true, apiResponse };
+            } catch (metaErr) {
+                await client.query('ROLLBACK');
+                console.error('[SEND_MESSAGE_ACTION][META]', metaErr);
+                return { success: false, error: formatMetaSendError(metaErr) };
+            }
         }
 
         // Fluxo WhatsApp legado
@@ -388,37 +405,41 @@ export async function sendAgentMessageAction(
     try {
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
-            const service =
-                metaCtx.platform === 'instagram'
-                    ? new InstagramMessagingService(metaCtx.channel)
-                    : new MessengerMessagingService(metaCtx.channel);
+            try {
+                const service =
+                    metaCtx.platform === 'instagram'
+                        ? new InstagramMessagingService(metaCtx.channel)
+                        : new MessengerMessagingService(metaCtx.channel);
 
-            const apiResponse = await service.sendMessage({
-                recipientId: metaCtx.externalUserId,
-                type: 'text',
-                text: content,
-            });
+                const apiResponse = await service.sendMessage({
+                    recipientId: metaCtx.externalUserId,
+                    type: 'text',
+                    text: content,
+                });
 
-            await persistNormalizedMessage({
-                channel: metaCtx.channel,
-                chat: metaCtx.chat,
-                contact: metaCtx.contact,
-                message: { type: 'text', content, metadata: {} },
-                platform: metaCtx.platform,
-                direction: 'outgoing',
-                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                externalSenderId: metaCtx.externalUserId,
-                externalChannelId: metaCtx.externalChannelId,
-                rawPayload: { request: { content }, response: apiResponse },
-                fromMe: true,
-                senderUserId: user.id,
-                senderSystemAgentId: null,
-            });
-            return { success: true };
+                await persistNormalizedMessage({
+                    channel: metaCtx.channel,
+                    chat: metaCtx.chat,
+                    contact: metaCtx.contact,
+                    message: { type: 'text', content, metadata: {} },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    externalSenderId: metaCtx.externalUserId,
+                    externalChannelId: metaCtx.externalChannelId,
+                    rawPayload: { request: { content }, response: apiResponse },
+                    fromMe: true,
+                    senderUserId: user.id,
+                    senderSystemAgentId: null,
+                });
+                return { success: true };
+            } catch (metaErr) {
+                console.error('[SEND_AGENT_MESSAGE][META]', metaErr);
+                return { success: false, error: formatMetaSendError(metaErr) };
+            }
         }
     } catch (err) {
-        // fallback para fluxo legado
-        console.error('[SEND_AGENT_MESSAGE][META_FALLBACK]', err);
+        console.error('[SEND_AGENT_MESSAGE][META_CTX]', err);
     } finally {
         client.release();
     }
@@ -496,32 +517,37 @@ export async function sendAutomatedMessageAction(
     try {
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
-            const service = metaCtx.platform === 'instagram'
-                ? new InstagramMessagingService(metaCtx.channel)
-                : new MessengerMessagingService(metaCtx.channel);
+            try {
+                const service = metaCtx.platform === 'instagram'
+                    ? new InstagramMessagingService(metaCtx.channel)
+                    : new MessengerMessagingService(metaCtx.channel);
 
-            const apiResponse = await service.sendMessage({
-                recipientId: metaCtx.externalUserId,
-                type: 'text',
-                text: content,
-            });
+                const apiResponse = await service.sendMessage({
+                    recipientId: metaCtx.externalUserId,
+                    type: 'text',
+                    text: content,
+                });
 
-            await persistNormalizedMessage({
-                channel: metaCtx.channel,
-                chat: metaCtx.chat,
-                contact: metaCtx.contact,
-                message: { type: 'text', content, metadata: { ...baseMetadata, ...metadata } },
-                platform: metaCtx.platform,
-                direction: 'outgoing',
-                externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                externalSenderId: metaCtx.externalUserId,
-                externalChannelId: metaCtx.externalChannelId,
-                rawPayload: { request: { content }, response: apiResponse },
-                fromMe: true,
-                senderUserId: agentId,
-                senderSystemAgentId: isSystemAgent ? agentId : null,
-            });
-            return { success: true, apiResponse };
+                await persistNormalizedMessage({
+                    channel: metaCtx.channel,
+                    chat: metaCtx.chat,
+                    contact: metaCtx.contact,
+                    message: { type: 'text', content, metadata: { ...baseMetadata, ...metadata } },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    externalSenderId: metaCtx.externalUserId,
+                    externalChannelId: metaCtx.externalChannelId,
+                    rawPayload: { request: { content }, response: apiResponse },
+                    fromMe: true,
+                    senderUserId: agentId,
+                    senderSystemAgentId: isSystemAgent ? agentId : null,
+                });
+                return { success: true, apiResponse };
+            } catch (metaErr) {
+                console.error('[SEND_AUTOMATED_MESSAGE][META]', metaErr);
+                return { success: false, error: formatMetaSendError(metaErr) };
+            }
         }
     } catch (err) {
         console.error('[SEND_AUTOMATED_MESSAGE][META_FALLBACK]', err);
@@ -562,40 +588,45 @@ export async function sendMediaAction(
     try {
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
-            const service = metaCtx.platform === 'instagram'
-                ? new InstagramMessagingService(metaCtx.channel)
-                : new MessengerMessagingService(metaCtx.channel);
+            try {
+                const service = metaCtx.platform === 'instagram'
+                    ? new InstagramMessagingService(metaCtx.channel)
+                    : new MessengerMessagingService(metaCtx.channel);
 
-            for (const file of mediaFiles) {
-                const apiResponse = await service.sendMessage({
-                    recipientId: metaCtx.externalUserId,
-                    type: file.mediatype === 'document' ? 'file' : file.mediatype,
-                    text: caption,
-                    mediaUrl: file.base64, // assume URL/base64 already handled upstream
-                });
+                for (const file of mediaFiles) {
+                    const apiResponse = await service.sendMessage({
+                        recipientId: metaCtx.externalUserId,
+                        type: file.mediatype === 'document' ? 'file' : file.mediatype,
+                        text: caption,
+                        mediaUrl: file.base64, // assume URL/base64 already handled upstream
+                    });
 
-                await persistNormalizedMessage({
-                    channel: metaCtx.channel,
-                    chat: metaCtx.chat,
-                    contact: metaCtx.contact,
-                    message: {
-                        type: file.mediatype === 'document' ? 'document' : file.mediatype,
-                        content: caption,
-                        metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
-                        mediaUrl: file.base64,
-                    },
-                    platform: metaCtx.platform,
-                    direction: 'outgoing',
-                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                    externalSenderId: metaCtx.externalUserId,
-                    externalChannelId: metaCtx.externalChannelId,
-                    rawPayload: { request: { caption, file }, response: apiResponse },
-                    fromMe: true,
-                    senderUserId: user.id,
-                    senderSystemAgentId: null,
-                });
+                    await persistNormalizedMessage({
+                        channel: metaCtx.channel,
+                        chat: metaCtx.chat,
+                        contact: metaCtx.contact,
+                        message: {
+                            type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                            content: caption,
+                            metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                            mediaUrl: file.base64,
+                        },
+                        platform: metaCtx.platform,
+                        direction: 'outgoing',
+                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                        externalSenderId: metaCtx.externalUserId,
+                        externalChannelId: metaCtx.externalChannelId,
+                        rawPayload: { request: { caption, file }, response: apiResponse },
+                        fromMe: true,
+                        senderUserId: user.id,
+                        senderSystemAgentId: null,
+                    });
+                }
+                return { success: true };
+            } catch (metaErr) {
+                console.error('[SEND_MEDIA][META]', metaErr);
+                return { success: false, error: formatMetaSendError(metaErr) };
             }
-            return { success: true };
         }
     } catch (err) {
         console.error('[SEND_MEDIA][META_FALLBACK]', err);
