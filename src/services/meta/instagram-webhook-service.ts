@@ -72,6 +72,27 @@ function normalizeInstagramMessage(event: MessagingEvent): {
   return { type, content, mediaUrl, metadata };
 }
 
+async function fetchInstagramProfile(
+  accessToken: string,
+  senderId: string
+): Promise<{ username?: string; name?: string; profile_pic?: string } | null> {
+  const url = `https://graph.facebook.com/v20.0/${senderId}?fields=username,name,profile_pic&access_token=${encodeURIComponent(
+    accessToken
+  )}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return {
+      username: json?.username || undefined,
+      name: json?.name || undefined,
+      profile_pic: json?.profile_pic || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function handleInstagramWebhook(channel: MetaChannelRecord, payload: any) {
   const entries = payload?.entry || [];
 
@@ -101,10 +122,11 @@ export async function handleInstagramWebhook(channel: MetaChannelRecord, payload
       }
 
       const threadKey = externalUserId;
+      const fetchedProfile = await fetchInstagramProfile(channel.access_token, externalUserId);
       const profile = {
-        name: undefined,
-        username: event.sender?.username,
-        avatarUrl: undefined,
+        name: fetchedProfile?.name,
+        username: fetchedProfile?.username ?? event.sender?.username,
+        avatarUrl: fetchedProfile?.profile_pic,
       };
 
       const { contact, chat } = await resolveMetaContext({
