@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -213,7 +213,7 @@ function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}
         .replace(/(\s|^)\*(.*?)\*(\s|$)/g, '$1<b>$2</b>$3') // Bold
         .replace(/(\s|^)_(.*?)_(\s|$)/g, '$1<i>$2</i>$3') // Italic
         .replace(/(\s|^)~(.*?)~(\s|$)/g, '$1<s>$2</s>$3') // Strikethrough
-        .replace(/```(.*?)```/gs, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
+        .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
 
     // Finally, replace URLs with anchor tags
     processedText = processedText.replace(urlRegex, (url) => {
@@ -439,6 +439,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const [isInternalNote, setIsInternalNote] = useState(false);
     const autopilotSwitchTouchedRef = useRef(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
+    const canLoadOlderRef = useRef(canLoadOlder);
+    const [allContactMessages, setAllContactMessages] = useState<Message[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -453,12 +456,12 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
     const isFetchingHistoryRef = useRef(false);
+    const previousScrollHeightRef = useRef(0);
+    const previousFirstMessageIdRef = useRef<string | null>(null);
     const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
     const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
 
-    const [allContactMessages, setAllContactMessages] = useState<Message[]>([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
 
     const { toast } = useToast();
@@ -508,6 +511,28 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         }
     }, [autopilotConfig, chat?.id]);
 
+    const tryLoadOlder = useCallback(() => {
+        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
+        if (!viewport) return;
+        if (!canLoadOlderRef.current || isFetchingHistoryRef.current || showFullHistory) return;
+        const { scrollTop } = viewport;
+
+        if (scrollTop >= 120) return;
+
+        isFetchingHistoryRef.current = true;
+        setIsLoadingOlderMessages(true);
+        Promise.resolve(onLoadOlderMessages?.())
+            .catch((error) => console.error('[CHAT_PANEL] Failed to load older messages', error))
+            .finally(() => {
+                isFetchingHistoryRef.current = false;
+                setIsLoadingOlderMessages(false);
+                // Se ainda no topo e ainda há histórico, continue puxando.
+                if (viewport.scrollTop < 120 && canLoadOlderRef.current) {
+                    requestAnimationFrame(tryLoadOlder);
+                }
+            });
+    }, [onLoadOlderMessages, showFullHistory]);
+
     useEffect(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
         if (!viewport) return;
@@ -516,22 +541,22 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             const { scrollTop, scrollHeight, clientHeight } = viewport;
             const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100;
             userScrolledUpRef.current = isScrolledUp;
-
-            if (scrollTop < 120 && canLoadOlder && !isFetchingHistoryRef.current) {
-                isFetchingHistoryRef.current = true;
-                setIsLoadingOlderMessages(true);
-                Promise.resolve(onLoadOlderMessages?.())
-                    .catch((error) => console.error('[CHAT_PANEL] Failed to load older messages', error))
-                    .finally(() => {
-                        isFetchingHistoryRef.current = false;
-                        setIsLoadingOlderMessages(false);
-                    });
+            if (scrollTop < 120) {
+                tryLoadOlder();
             }
         };
 
         viewport.addEventListener('scroll', handleScroll);
         return () => viewport.removeEventListener('scroll', handleScroll);
-    }, [canLoadOlder, onLoadOlderMessages]);
+    }, [tryLoadOlder]);
+
+
+    // Se há histórico anterior, tenta carregar imediatamente (útil quando há poucas mensagens na tela).
+    useEffect(() => {
+        if (canLoadOlderRef.current) {
+            requestAnimationFrame(tryLoadOlder);
+        }
+    }, [tryLoadOlder, showFullHistory]);
 
     useEffect(() => {
         setAllContactMessages([]);
@@ -543,14 +568,12 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             getContactMessages({
                 contactId: chat.contact.id,
                 workspaceId: currentUser.activeWorkspaceId,
-                limit: 500
+                limit: 1000
             })
                 .then(res => {
-                    if (res.messages) {
-                        setAllContactMessages(res.messages);
-                    }
+                    if (res.messages) setAllContactMessages(res.messages);
                 })
-                .catch(err => console.error("Failed to load history", err))
+                .catch(err => console.error('[CHAT_PANEL] Failed to load full history', err))
                 .finally(() => setIsLoadingHistory(false));
         }
     }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId]);
@@ -562,11 +585,27 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         return chat?.messages || [];
     }, [showFullHistory, allContactMessages, chat?.messages]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
-        if (viewport && !userScrolledUpRef.current) {
+        if (!viewport) return;
+
+        const currentScrollHeight = viewport.scrollHeight;
+        const previousScrollHeight = previousScrollHeightRef.current;
+        const addedHeight = currentScrollHeight - previousScrollHeight;
+        const currentFirstMessageId = messagesToRender[0]?.id;
+        const previousFirstMessageId = previousFirstMessageIdRef.current;
+
+        if (previousFirstMessageId && currentFirstMessageId !== previousFirstMessageId && addedHeight > 0) {
+            // Se o primeiro ID mudou e a altura aumentou, assumimos que mensagens antigas foram carregadas (prepend)
+            // Mantemos a posição visual ajustando o scrollTop
+            viewport.scrollTop += addedHeight;
+        } else if (!userScrolledUpRef.current) {
+            // Comportamento padrão: rolar para o final se o usuário não subiu a tela
             viewport.scrollTop = viewport.scrollHeight;
         }
+
+        previousScrollHeightRef.current = currentScrollHeight;
+        previousFirstMessageIdRef.current = currentFirstMessageId || null;
     }, [messagesToRender]);
 
     const runAiAgent = useCallback(async () => {
@@ -1213,17 +1252,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10" onClick={() => setShowFullHistory(!showFullHistory)}>
-                                    <History className={cn("h-5 w-5", showFullHistory ? "text-blue-400" : "")} />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>{showFullHistory ? 'Mostrar apenas a conversa atual' : 'Mostrar histórico completo'}</p>
-                            </TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                            <TooltipTrigger asChild>
                                 <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10">
                                     <Phone className="h-4 w-4" />
                                 </Button>
@@ -1276,11 +1304,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                         {isLoadingOlderMessages && canLoadOlder && (
                             <div className="flex justify-center py-4 text-white/50 text-xs">
                                 <Loader2 className="h-4 w-4 animate-spin" />
-                            </div>
-                        )}
-                        {isLoadingHistory && (
-                            <div className="flex justify-center py-4 text-white/50 text-xs">
-                                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando histórico completo...
                             </div>
                         )}
                         {messagesToRender.map(renderMessageWithSeparator)}

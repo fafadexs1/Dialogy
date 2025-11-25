@@ -368,7 +368,7 @@ export async function closeChatAction(
     } finally {
         client.release();
     }
-}export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
+} export async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -684,7 +684,7 @@ export async function searchChatsAndContacts({
     const likeQuery = `%${trimmedQuery.toLowerCase()}%`;
     const likePhone = `%${trimmedQuery}%`;
     const digitsOnly = trimmedQuery.replace(/\D/g, '');
-    const likeDigits = digitsOnly ? `%${digitsOnly}%` : null;
+    const likeDigits = digitsOnly ? `%${digitsOnly}%` : '';
 
     try {
         const timezone = await getWorkspaceTimezone(workspaceId);
@@ -761,7 +761,7 @@ export async function searchChatsAndContacts({
                 LOWER(COALESCE(cont.name, '')) LIKE $2
                 OR LOWER(COALESCE(cont.email, '')) LIKE $2
                 OR COALESCE(cont.phone_number_jid, '') ILIKE $3
-                OR ($4 IS NOT NULL AND regexp_replace(COALESCE(cont.phone_number_jid, ''), '\\D', '', 'g') LIKE $4)
+                OR (length($4::text) > 0 AND regexp_replace(COALESCE(cont.phone_number_jid, ''), '\\D', '', 'g') LIKE $4::text)
               )
             ORDER BY COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
             LIMIT $5
@@ -793,7 +793,7 @@ export async function searchChatsAndContacts({
                 LOWER(COALESCE(c.name, '')) LIKE $2
                 OR LOWER(COALESCE(c.email, '')) LIKE $2
                 OR COALESCE(c.phone_number_jid, '') ILIKE $3
-                OR ($4 IS NOT NULL AND regexp_replace(COALESCE(c.phone_number_jid, ''), '\\D', '', 'g') LIKE $4)
+                OR (length($4::text) > 0 AND regexp_replace(COALESCE(c.phone_number_jid, ''), '\\D', '', 'g') LIKE $4::text)
               )
             ORDER BY c.created_at DESC
             LIMIT $5
@@ -1225,8 +1225,12 @@ async function fetchMessagesWindow({
         beforeClause = 'AND m.created_at < $3';
     }
 
+    // Modified query to fetch messages for the contact associated with the chat
     const { rows } = await db.query(
         `
+        WITH target_chat AS (
+            SELECT contact_id, workspace_id FROM chats WHERE id = $1
+        )
         SELECT 
             m.*,
             c.workspace_id AS workspace_id,
@@ -1239,7 +1243,8 @@ async function fetchMessagesWindow({
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE m.chat_id = $1
+        JOIN target_chat tc ON c.contact_id = tc.contact_id AND c.workspace_id = tc.workspace_id
+        WHERE 1=1
         ${beforeClause}
         ORDER BY m.created_at DESC
         LIMIT $2

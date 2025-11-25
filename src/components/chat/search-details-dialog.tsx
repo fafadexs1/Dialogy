@@ -73,6 +73,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
 
     const contactPoolIds = new Set(mergedChats.map(chat => chat.contact.id));
     const contactsWithoutChat = crmContacts.filter(contact => !contactPoolIds.has(contact.id));
+    const contactHighlight = crmContacts[0] || mergedChats.find(c => c.contact)?.contact;
 
     const messageMatches = useMemo(() => {
         if (!searchQuery.trim()) return [];
@@ -104,7 +105,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-3xl max-h-[82vh] flex flex-col bg-zinc-950 border-white/10 text-white p-0 gap-0 overflow-hidden">
+            <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col bg-zinc-950 border-white/10 text-white p-0 gap-0 overflow-hidden">
                 <DialogHeader className="p-6 pb-3 border-b border-white/10">
                     <DialogTitle className="text-xl font-semibold flex items-center gap-2">
                         <Sparkles className="h-4 w-4 text-blue-400" />
@@ -128,8 +129,30 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                     )}
                 </div>
 
-                <ScrollArea className="flex-1 min-h-0 p-6">
-                    <div className="space-y-8">
+                <ScrollArea className="flex-1 min-h-0 max-h-[70vh] p-6 overflow-y-auto">
+                    <div className="space-y-8 pb-6 pr-1">
+                        {contactHighlight && (
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <UserIcon className="h-4 w-4" />
+                                    Contato
+                                </div>
+                                <div className="rounded-xl border border-white/5 bg-white/5 p-4 flex items-center gap-3">
+                                    <Avatar className="h-10 w-10 border border-white/10">
+                                        <AvatarImage src={contactHighlight.avatar_url} />
+                                        <AvatarFallback className="bg-zinc-800">{contactHighlight.name?.charAt(0) || '?'}</AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-semibold text-white truncate">{contactHighlight.name}</p>
+                                        <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                            <Phone className="h-3 w-3" />
+                                            {contactHighlight.phone_number_jid || contactHighlight.email || 'Sem contato'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {remoteChats.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">

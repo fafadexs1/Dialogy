@@ -163,13 +163,26 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [selectedInstance, setSelectedInstance] = useState('');
     const [message, setMessage] = useState('Olá! Podemos retomar nossa conversa por aqui?');
+    const [phone, setPhone] = useState('');
     const [isLoadingInstances, setIsLoadingInstances] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const normalizedPhone = (chat.contact.phone_number_jid || chat.contact.phone || '').replace('@s.whatsapp.net', '').replace(/\D/g, '');
+    const derivePhone = () => {
+        const candidate =
+            chat.contact.phone_number_jid ||
+            chat.contact.phone ||
+            (chat as any)?.contact?.phone ||
+            '';
+        const lastMessage = (chat as any)?.messages?.[(chat as any).messages?.length - 1];
+        const externalId = lastMessage?.externalSenderId || lastMessage?.external_sender_id || '';
+        const raw = candidate || externalId;
+        return raw.replace('@s.whatsapp.net', '').replace(/\D/g, '');
+    };
 
     useEffect(() => {
         if (!isOpen || !currentUser?.activeWorkspaceId) return;
+        const initialPhone = derivePhone();
+        if (initialPhone) setPhone(initialPhone);
         setIsLoadingInstances(true);
         getEvolutionApiInstances(currentUser.activeWorkspaceId)
             .then((data) => {
@@ -186,7 +199,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
             toast({ title: 'Sem workspace ativo', description: 'Selecione um workspace para reenviar a conversa.', variant: 'destructive' });
             return;
         }
-        if (!normalizedPhone) {
+        if (!phone) {
             toast({ title: 'Contato sem número válido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
             return;
         }
@@ -199,7 +212,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
         const result = await startNewConversation({
             workspaceId: currentUser.activeWorkspaceId,
             instanceName: selectedInstance,
-            phoneNumber: normalizedPhone,
+            phoneNumber: phone,
             message,
             tabId: null
         });
@@ -248,7 +261,12 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                     </div>
                     <div className="space-y-2">
                         <Label>Telefone</Label>
-                        <Input value={normalizedPhone} readOnly className="bg-white/5 border-white/10 text-white" />
+                        <Input
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            placeholder="5511999999999"
+                            className="bg-white/5 border-white/10 text-white"
+                        />
                     </div>
                     <div className="space-y-2">
                         <Label>Mensagem inicial</Label>
@@ -258,7 +276,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                         <DialogClose asChild>
                             <Button variant="ghost">Cancelar</Button>
                         </DialogClose>
-                        <Button type="submit" disabled={isSubmitting || !normalizedPhone} className="bg-blue-600 hover:bg-blue-500 text-white">
+                        <Button type="submit" disabled={isSubmitting || !phone} className="bg-blue-600 hover:bg-blue-500 text-white">
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Enviar
                         </Button>
@@ -286,7 +304,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     if (!chat) {
         return (
             <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl">
-                <div className="flex h-16 items-center border-b border-white/10 px-6">
+                <div className="flex h-16 items-center border-b border-white/10 px-4 xl:px-6">
                     <h3 className="font-semibold text-white">Informações do Contato</h3>
                 </div>
                 <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
@@ -325,9 +343,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         || null;
 
     return (
-        <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl h-full">
-            <div className="flex h-16 items-center justify-between border-b border-white/10 px-6 flex-shrink-0">
-                <h3 className="font-semibold text-lg text-white">Detalhes</h3>
+        <div className="hidden lg:flex lg:flex-col lg:w-[clamp(320px,25vw,420px)] lg:min-w-[320px] lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl h-full">
+            <div className="flex h-16 items-center justify-between border-b border-white/10 px-4 xl:px-6 flex-shrink-0">
+                <h3 className="font-semibold text-base xl:text-lg text-white">Detalhes</h3>
                 <div className="flex items-center gap-2">
                     {chat.status === 'encerrados' && (
                         <ResumeConversationDialog chat={chat} currentUser={currentUser} onSuccess={onContactUpdate} />
@@ -353,14 +371,14 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             </div>
 
             <ScrollArea className="flex-1">
-                <div className="p-6 space-y-6">
+                <div className="p-4 xl:p-6 space-y-6">
                     <div className="flex flex-col items-center text-center">
                         <Avatar className="h-24 w-24 shrink-0 border-2 border-white/10 ring-4 ring-white/5 shadow-xl">
                             <AvatarImage src={contact.avatar_url} alt={contact.name} data-ai-hint="person" />
                             <AvatarFallback className="text-3xl bg-gradient-to-br from-blue-600 to-violet-600 text-white">{contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="mt-4 space-y-1">
-                            <h2 className="font-bold text-xl text-white">{contact.name}</h2>
+                            <h2 className="font-bold text-lg xl:text-xl text-white">{contact.name}</h2>
                             {chat.tag && chat.color && (
                                 <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent shadow-sm">
                                     {chat.tag}

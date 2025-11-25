@@ -20,6 +20,7 @@ import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
+import ReactDOM from 'react-dom';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -28,6 +29,79 @@ const SOUND_SOURCES = {
 } as const;
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 const IS_DEV = process.env.NODE_ENV !== 'production';
+
+function DraggableSoundTester({
+  debugCounter,
+  onPlay,
+}: {
+  debugCounter: number;
+  onPlay: (kind: keyof typeof SOUND_SOURCES) => void;
+}) {
+  const [pos, setPos] = React.useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 16, y: 16 };
+    const saved = localStorage.getItem('soundTesterPos');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed;
+        }
+      } catch { /* ignore */ }
+    }
+    return { x: 16, y: 16 };
+  });
+
+  const dragData = React.useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const savePos = (next: { x: number; y: number }) => {
+    setPos(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soundTesterPos', JSON.stringify(next));
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragData.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: pos.x,
+      originY: pos.y,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    const dx = e.clientX - dragData.current.startX;
+    const dy = e.clientY - dragData.current.startY;
+    savePos({ x: Math.max(8, dragData.current.originX + dx), y: Math.max(8, dragData.current.originY + dy) });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    dragData.current = null;
+  };
+
+  return ReactDOM.createPortal(
+    <div
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md cursor-move"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <span>Som</span>
+      <Button size="sm" variant="outline" onClick={() => onPlay('queue')}>
+        Fila ({debugCounter})
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => onPlay('attending')}>
+        Atend. ({debugCounter})
+      </Button>
+    </div>,
+    document.body
+  );
+}
 
 function LoadingSkeleton() {
   return (
@@ -100,6 +174,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const unreadCountsRef = useRef<Record<string, number>>({});
   const unreadWatchInitializedRef = useRef(false);
   const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
+  const initialBuildIdRef = useRef<string>('');
+  const buildMismatchTriggeredRef = useRef(false);
 
   useEffect(() => {
     useInboxStore.getState().reset();
@@ -615,6 +691,45 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [initialUser, initializeInbox]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!initialBuildIdRef.current) {
+      initialBuildIdRef.current = (window as any).__NEXT_DATA__?.buildId || 'dev';
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const checkBuild = async () => {
+      if (cancelled || buildMismatchTriggeredRef.current) return;
+      try {
+        const res = await fetch('/api/build-id', { signal: controller.signal, cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.buildId && data.buildId !== initialBuildIdRef.current) {
+          buildMismatchTriggeredRef.current = true;
+          console.warn('[BUILD_ID] Mismatch detected. Reloading to refresh assets.', {
+            current: initialBuildIdRef.current,
+            server: data.buildId
+          });
+          window.location.reload();
+        }
+      } catch (err) {
+        // Ignore network errors; will retry on next interval.
+        console.debug('[BUILD_ID] Check failed', err);
+      }
+    };
+
+    checkBuild();
+    const interval = setInterval(checkBuild, 60000);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     if (selectedChatId) {
       selectedChatIdRef.current = selectedChatId;
     }
@@ -670,15 +785,10 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           </div>
         )}
         {IS_DEV && (
-          <div className="absolute top-4 left-4 z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
-            <span>Som</span>
-            <Button size="sm" variant="outline" onClick={() => { setDebugCounter((n) => n + 1); playNotificationSound('queue'); }}>
-              Fila ({debugCounter})
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => { setDebugCounter((n) => n + 1); playNotificationSound('attending'); }}>
-              Atend. ({debugCounter})
-            </Button>
-          </div>
+          <DraggableSoundTester
+            debugCounter={debugCounter}
+            onPlay={(kind) => setDebugCounter((n) => n + 1) || playNotificationSound(kind)}
+          />
         )}
         <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
         <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />

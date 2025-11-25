@@ -446,11 +446,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   }, [activeTab, getBaseChatsForTab, filterChatByControls]);
 
   return (
-    <div className="flex h-full w-[380px] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl min-h-0">
+    <div className="flex h-full w-[clamp(320px,24vw,400px)] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl min-h-0 lg:w-[clamp(330px,26vw,420px)]">
       {/* Header */}
-      <div className="p-4 flex-shrink-0 border-b border-white/10 space-y-4">
+      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-white/10 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-white tracking-tight">Conversas</h2>
+          <h2 className="text-lg md:text-xl font-bold text-white tracking-tight">Conversas</h2>
           <div className="flex items-center gap-2">
             <Popover>
               <PopoverTrigger asChild>
@@ -589,7 +589,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </div>
 
       {/* Tabs */}
-      <div className="p-3 flex-shrink-0 border-b border-white/10">
+      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-white/10">
         <div className="flex items-center bg-black/40 rounded-lg p-1 border border-white/5">
           {TABS.map((tab) => {
             const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
