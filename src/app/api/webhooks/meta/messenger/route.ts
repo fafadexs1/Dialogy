@@ -1,5 +1,3 @@
-'use server';
-
 import { NextRequest, NextResponse } from 'next/server';
 import { handleMessengerWebhook } from '@/services/meta/messenger-webhook-service';
 import {

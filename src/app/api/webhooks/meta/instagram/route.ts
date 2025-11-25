@@ -1,5 +1,3 @@
-'use server';
-
 import { NextRequest, NextResponse } from 'next/server';
 import { handleInstagramWebhook } from '@/services/meta/instagram-webhook-service';
 import {
