@@ -226,7 +226,19 @@ async function ensureConversation(
 ): Promise<{ chat: ChatRow; conversation: MetaConversationRecord }> {
   const existing = await db.query(
     `
-      SELECT mc.*, ch.*
+      SELECT 
+        mc.id AS conversation_id,
+        mc.channel_id,
+        mc.meta_contact_id,
+        mc.chat_id AS conversation_chat_id,
+        mc.external_thread_id,
+        mc.platform AS conversation_platform,
+        mc.status AS conversation_status,
+        ch.id AS chat_id,
+        ch.workspace_id,
+        ch.status AS chat_status,
+        ch.contact_id,
+        ch.agent_id
       FROM meta_conversations mc
       JOIN chats ch ON ch.id = mc.chat_id
       WHERE mc.channel_id = $1 AND mc.external_thread_id = $2
@@ -236,22 +248,68 @@ async function ensureConversation(
   );
 
   if (existing.rows[0]) {
+    const row = existing.rows[0];
+
+    // Se a conversa anterior foi encerrada, criamos um novo chat e
+    // reusamos o mesmo meta_conversation para que um novo atendimento seja aberto.
+    if (row.chat_status === 'encerrados' || row.conversation_status === 'closed') {
+      const newChatInsert = await db.query(
+        `
+          INSERT INTO chats (id, workspace_id, contact_id, status)
+          VALUES ($1, $2, $3, 'gerais')
+          RETURNING *
+        `,
+        [randomUUID(), channel.workspace_id, metaContact.contact_id]
+      );
+
+      const newChatRow = newChatInsert.rows[0];
+
+      await db.query(
+        `
+          UPDATE meta_conversations
+          SET chat_id = $1, status = 'open', updated_at = timezone('utc', now())
+          WHERE id = $2
+        `,
+        [newChatRow.id, row.conversation_id]
+      );
+
+      const conversation: MetaConversationRecord = {
+        id: row.conversation_id,
+        channel_id: row.channel_id,
+        meta_contact_id: row.meta_contact_id,
+        chat_id: newChatRow.id,
+        external_thread_id: row.external_thread_id,
+        platform: row.conversation_platform,
+      };
+
+      const chat: ChatRow = {
+        id: newChatRow.id,
+        workspace_id: newChatRow.workspace_id,
+        status: newChatRow.status,
+        contact_id: newChatRow.contact_id,
+        agent_id: newChatRow.agent_id,
+        agent: undefined,
+      };
+
+      return { chat, conversation };
+    }
+
     const chat: ChatRow = {
-      id: existing.rows[0].chat_id,
-      workspace_id: existing.rows[0].workspace_id,
-      status: existing.rows[0].status,
-      contact_id: existing.rows[0].contact_id,
-      agent_id: existing.rows[0].agent_id,
+      id: row.chat_id,
+      workspace_id: row.workspace_id,
+      status: row.chat_status,
+      contact_id: row.contact_id,
+      agent_id: row.agent_id,
       agent: undefined,
     };
 
     const conversation: MetaConversationRecord = {
-      id: existing.rows[0].id,
-      channel_id: existing.rows[0].channel_id,
-      meta_contact_id: existing.rows[0].meta_contact_id,
-      chat_id: existing.rows[0].chat_id,
-      external_thread_id: existing.rows[0].external_thread_id,
-      platform: existing.rows[0].platform,
+      id: row.conversation_id,
+      channel_id: row.channel_id,
+      meta_contact_id: row.meta_contact_id,
+      chat_id: row.chat_id,
+      external_thread_id: row.external_thread_id,
+      platform: row.conversation_platform,
     };
 
     return { chat, conversation };

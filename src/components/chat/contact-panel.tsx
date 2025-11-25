@@ -187,9 +187,24 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     const { contact, agent } = chat;
 
-    const instanceTypeDisplay = chat.instance_type === 'wa_cloud' ? 'Cloud API' : 'Baileys';
-    const externalId = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1]?.externalSenderId
-        || (chat as any)?.messages?.[(chat as any)?.messages?.length - 1]?.external_sender_id
+    const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
+    const platform = (
+        lastMessage?.platform ||
+        lastMessage?.source_from_api ||
+        chat.source ||
+        chat.instance_type ||
+        ''
+    ).toString().toLowerCase();
+    const instanceTypeDisplay =
+        platform === 'instagram'
+            ? 'Instagram'
+            : platform === 'messenger'
+                ? 'Messenger'
+                : (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud')
+                    ? 'Cloud API'
+                    : 'Baileys';
+    const externalId = lastMessage?.externalSenderId
+        || lastMessage?.external_sender_id
         || null;
 
     return (

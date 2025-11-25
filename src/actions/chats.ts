@@ -320,6 +320,14 @@ export async function closeChatAction(
             ]
         );
 
+        // Marca a conversa Meta associada (se existir) como encerrada para que novas mensagens abram um novo chat.
+        await client.query(
+            `UPDATE meta_conversations 
+             SET status = 'closed', updated_at = timezone('utc', now()) 
+             WHERE chat_id = $1`,
+            [chatId]
+        );
+
         const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
 
         await client.query(`
