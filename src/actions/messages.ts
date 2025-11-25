@@ -28,6 +28,7 @@ type MetaSendContext = {
     externalChannelId: string | null;
     chat: Pick<Chat, 'id' | 'workspace_id' | 'status'>;
     contact: Pick<Contact, 'id' | 'workspace_id' | 'name' | 'avatar_url'>;
+    lastIncomingSender?: string | null;
 };
 
 async function resolveMetaSendContext(chatId: string, client: any): Promise<MetaSendContext | null> {
@@ -37,6 +38,7 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
           mc.platform,
           mc.external_thread_id,
           mct.external_id as external_user_id,
+          (SELECT m.external_sender_id FROM messages m WHERE m.chat_id = mc.chat_id AND m.external_sender_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_external_sender_id,
           ch.id as channel_id,
           ch.workspace_id,
           ch.type,
@@ -78,7 +80,7 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
     return {
         channel,
         platform: row.platform,
-        externalUserId: row.external_user_id,
+        externalUserId: row.external_user_id || row.last_external_sender_id,
         externalChannelId: row.external_page_id || row.ig_business_id,
         chat: { id: chatId, workspace_id: row.workspace_id, status: 'atendimentos' as Chat['status'] },
         contact: {
