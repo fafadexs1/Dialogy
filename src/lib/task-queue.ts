@@ -61,13 +61,18 @@ declare global {
   var __evolutionWebhookQueue: TaskQueue | undefined;
 }
 
-const defaultConcurrency = Number(process.env.EVOLUTION_WEBHOOK_CONCURRENCY ?? 100);
+const parsedConcurrency = Number(process.env.EVOLUTION_WEBHOOK_CONCURRENCY);
+// If the env is missing or invalid (e.g. empty string), fall back to a safe default
+const queueConcurrency = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0
+  ? parsedConcurrency
+  : 10;
 
 const evolutionQueue =
-  globalThis.__evolutionWebhookQueue ?? new TaskQueue(Math.max(defaultConcurrency, 1));
+  globalThis.__evolutionWebhookQueue ?? new TaskQueue(queueConcurrency);
 
 if (!globalThis.__evolutionWebhookQueue) {
   globalThis.__evolutionWebhookQueue = evolutionQueue;
+  console.log(`[TASK_QUEUE] Evolution webhook queue initialized with concurrency ${queueConcurrency}`);
 }
 
 export const evolutionWebhookQueue = evolutionQueue;

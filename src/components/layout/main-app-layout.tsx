@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
+import { BuildVersionWatcher } from '@/components/layout/build-version-watcher';
 import type { User } from '@/lib/types';
 import React, { useEffect, useState } from 'react';
 
@@ -32,6 +33,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
         shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'flex'
       )}
     >
+      <BuildVersionWatcher />
       {shouldShowSidebar && (
         <aside className="w-auto shrink-0 bg-background">
           <Sidebar user={user} />
