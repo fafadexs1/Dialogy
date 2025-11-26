@@ -7,8 +7,8 @@ import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
 
 interface TransferPayload {
-  teamId?: string;
-  agentId?: string;
+    teamId?: string;
+    agentId?: string;
 }
 
 async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promise<boolean> {
@@ -81,13 +81,13 @@ export async function POST(
     { params }: { params: { chatId: string } }
 ) {
     const { chatId } = params;
-    
+
     // Authenticate the system agent and validate it has access to this chat.
     const authResult = await authenticateAndValidate(request, chatId);
     if (authResult.error || !authResult.agent) {
         return NextResponse.json({ error: authResult.error }, { status: authResult.status });
     }
-    
+
     try {
         const body: TransferPayload = await request.json();
         const { teamId, agentId } = body;
@@ -120,11 +120,11 @@ export async function POST(
         // For now, we'll call a modified version or assume it can be mocked.
         // Let's assume for this implementation that we can call it directly and the session will be handled
         // by the underlying framework in a testable way, or we refactor it.
-        
+
         // For this implementation, we will assume we can directly call the action's logic.
         // The original action is in `src/actions/chats.ts`. We will call it.
         // We will need to adjust `transferChatAction` to accept an optional session.
-        
+
         // Let's create a temporary, slightly modified version of the action here for API usage.
         // This is not ideal, but avoids refactoring a shared server action.
         const result = await transferChatAction({
@@ -135,7 +135,8 @@ export async function POST(
             user: {
                 id: authResult.agent.id,
                 name: authResult.agent.name,
-            }
+            },
+            isSystemAgent: true
         });
 
 

@@ -63,7 +63,7 @@ export async function assignChatToSelfAction(chatId: string): Promise<{ success:
 export async function transferChatAction(
     input: { chatId: string; teamId?: string; agentId?: string },
     // Optional parameter to accept a session-like object from an API call
-    prefetchedSession?: { user: { id: string, name: string, email?: string | null } }
+    prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
 
@@ -81,6 +81,7 @@ export async function transferChatAction(
     }
     const currentAgentId = sessionToUse.user.id;
     const currentAgentName = sessionToUse.user.name;
+    const isSystemAgent = sessionToUse.isSystemAgent || false;
 
     const { chatId, teamId, agentId } = input;
 
@@ -219,7 +220,7 @@ export async function transferChatAction(
         if (transferTemplate) {
             const appliedTemplate = transferTemplate.replace(/{{\s*dest\s*}}/gi, transferTargetName || 'novo atendente');
             try {
-                await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, false, lastInstanceName || undefined, {
+                await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, isSystemAgent, lastInstanceName || undefined, {
                     event: 'transfer_notice',
                     to_agent_id: finalAgentId,
                     to_team_id: teamId,
@@ -228,7 +229,7 @@ export async function transferChatAction(
                     template_applied: true,
                 });
             } catch (templateErr) {
-                console.error('[TRANSFER_CHAT] Falha ao enviar mensagem de transfer�ncia:', templateErr);
+                console.error('[TRANSFER_CHAT] Falha ao enviar mensagem de transferncia:', templateErr);
             }
         }
         // revalidatePath('/', 'layout'); // Removed to prevent page refresh
