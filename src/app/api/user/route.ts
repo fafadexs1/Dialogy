@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const { data: { user: authUser } } = await supabase.auth.getUser();
 
     if (!authUser) {
-        console.log('[API /user] Erro: Usuário não autenticado.');
+        console.log(`[API /user] Erro: Usuário não autenticado. UA: ${request.headers.get('user-agent')} | IP: ${request.headers.get('x-forwarded-for')}`);
         return NextResponse.json({ error: 'User not authenticated' }, { status: 401 });
     }
     const userId = authUser.id;
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     try {
         console.log(`[API /user] Buscando usuário no DB...`);
         const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
-        
+
         if (userRes.rowCount === 0) {
             console.log(`[API /user] Usuário com ID ${userId} não encontrado no DB public.users.`);
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -44,16 +44,16 @@ export async function GET(request: Request) {
             WHERE uwr.user_id = $1
         `, [userId]);
 
-        const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({ 
-            id: r.id, 
-            name: r.name, 
+        const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({
+            id: r.id,
+            name: r.name,
             avatar: r.avatar_url || '',
             timezone: r.timezone || undefined,
             closeMessageTemplate: r.close_message_template || '',
             transferTeamMessageTemplate: r.transfer_team_message_template || '',
             isOwner: !!r.is_owner,
         }));
-        console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w=>w.name));
+        console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w => w.name));
 
         const user: User = {
             id: dbUser.id,
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
         };
-        
+
         console.log('[API /user] Retornando objeto de usuário completo:', user);
         return NextResponse.json(user);
 
@@ -75,4 +75,4 @@ export async function GET(request: Request) {
     }
 }
 
-    
+

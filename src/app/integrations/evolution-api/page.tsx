@@ -52,7 +52,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value, type } = e.target;
         const checked = (e.target as HTMLInputElement).checked;
-        
+
         if (name.startsWith('proxy.')) {
             const proxyField = name.split('.')[1];
             setFormData(prev => ({
@@ -63,13 +63,13 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 } as any
             }));
         } else {
-             setFormData(prev => ({
+            setFormData(prev => ({
                 ...prev,
                 [name]: type === 'checkbox' ? checked : value
             }));
         }
     };
-    
+
     const handleSelectChange = (name: string, value: string | boolean) => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
@@ -77,14 +77,14 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
-        
+
         const payload: EvolutionInstanceCreationPayload = {
             ...formData,
             displayName: formData.displayName!,
             integration: formData.integration as any,
             qrcode: formData.integration === 'WHATSAPP-BAILEYS',
         };
-        
+
         const result = await createEvolutionApiInstance(payload, workspaceId);
         setIsSubmitting(false);
 
@@ -95,7 +95,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
             toast({ title: 'Erro ao Criar Instância', description: result.error, variant: 'destructive' });
         }
     };
-    
+
     const isBaileys = formData.integration === 'WHATSAPP-BAILEYS';
     const totalSteps = isBaileys ? 3 : 2;
 
@@ -119,7 +119,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
 
         if (step === 2 && !isBaileys) { // Validation for Cloud API step
             if (!formData.number?.trim() || !formData.businessId?.trim() || !formData.token?.trim()) {
-                 toast({
+                toast({
                     title: "Campos Obrigatórios",
                     description: "Todos os campos da Meta Business API são obrigatórios.",
                     variant: "destructive",
@@ -127,17 +127,17 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 return;
             }
         }
-        
+
         setStep(s => Math.min(s + 1, totalSteps));
     };
-    
+
     const prevStep = () => setStep(s => Math.max(s - 1, 1));
-    
+
     return (
         <form onSubmit={handleSubmit}>
             <DialogHeader>
                 <DialogTitle>Criar Nova Instância</DialogTitle>
-                 <div className="flex items-center justify-center pt-2">
+                <div className="flex items-center justify-center pt-2">
                     {STEPS.map((s, index) => (
                         <React.Fragment key={s.id}>
                             <div className="flex flex-col items-center">
@@ -156,54 +156,54 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     ))}
                 </div>
             </DialogHeader>
-            
-            <ScrollArea className="h-[60vh]">
-            <div className="py-4 px-1 space-y-6">
-                {step === 1 && (
-                     <Card>
-                        <CardHeader>
-                            <CardTitle className="text-base">Configurações Essenciais</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                             <div className="space-y-2">
-                                <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
-                                <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required value={formData.displayName} onChange={handleInputChange} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="integrationType">Tipo de Conexão</Label>
-                                <Select name="integration" value={formData.integration} onValueChange={(value) => { setFormData(prev => ({...prev, integration: value})); }}>
-                                    <SelectTrigger><SelectValue/></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
-                                        <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
 
-                {step === 2 && isBaileys && (
-                    <Card>
-                        <CardHeader><CardTitle className="text-base">Detalhes da Conexão (Baileys)</CardTitle></CardHeader>
-                        <CardContent className='space-y-4'>
-                            <div className="space-y-2">
-                                <Label htmlFor="number">Número de Telefone (Opcional, com DDI)</Label>
-                                <Input id="number" name="number" placeholder="Ex: 5511999998888" value={formData.number || ''} onChange={handleInputChange} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="baileysToken">Token da Instância (Opcional)</Label>
-                                <Input id="baileysToken" name="token" placeholder="Token para segurança da instância" value={formData.token || ''} onChange={handleInputChange}/>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-                 {step === 2 && !isBaileys && (
+            <ScrollArea className="h-[60vh]">
+                <div className="py-4 px-1 space-y-6">
+                    {step === 1 && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Configurações Essenciais</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="displayName">Apelido da Instância (Obrigatório)</Label>
+                                    <Input id="displayName" name="displayName" placeholder="Ex: Vendas, Suporte Principal" required value={formData.displayName} onChange={handleInputChange} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="integrationType">Tipo de Conexão</Label>
+                                    <Select name="integration" value={formData.integration} onValueChange={(value) => { setFormData(prev => ({ ...prev, integration: value as "WHATSAPP-BAILEYS" | "WHATSAPP-BUSINESS" })); }}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
+                                            <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {step === 2 && isBaileys && (
+                        <Card>
+                            <CardHeader><CardTitle className="text-base">Detalhes da Conexão (Baileys)</CardTitle></CardHeader>
+                            <CardContent className='space-y-4'>
+                                <div className="space-y-2">
+                                    <Label htmlFor="number">Número de Telefone (Opcional, com DDI)</Label>
+                                    <Input id="number" name="number" placeholder="Ex: 5511999998888" value={formData.number || ''} onChange={handleInputChange} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="baileysToken">Token da Instância (Opcional)</Label>
+                                    <Input id="baileysToken" name="token" placeholder="Token para segurança da instância" value={formData.token || ''} onChange={handleInputChange} />
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+                    {step === 2 && !isBaileys && (
                         <Card>
                             <CardHeader>
                                 <CardTitle className="text-base">Configurações da Meta Business API</CardTitle>
                             </CardHeader>
-                             <CardContent className="space-y-4">
+                            <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
                                     <Input id="numberId" name="number" placeholder="ID do número no seu App da Meta" required value={formData.number || ''} onChange={handleInputChange} />
@@ -214,15 +214,15 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="token">Token de Acesso Permanente</Label>
-                                    <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required value={formData.token || ''} onChange={handleInputChange}/>
+                                    <Input id="token" name="token" type="password" placeholder="Seu token permanente da API da Meta" required value={formData.token || ''} onChange={handleInputChange} />
                                 </div>
                             </CardContent>
                         </Card>
-                 )}
+                    )}
 
-                 {step === 3 && isBaileys && (
-                     <div className="space-y-4">
-                         <Accordion type="multiple" className="w-full space-y-4" defaultValue={['general-settings']}>
+                    {step === 3 && isBaileys && (
+                        <div className="space-y-4">
+                            <Accordion type="multiple" className="w-full space-y-4" defaultValue={['general-settings']}>
                                 <Card>
                                     <CardHeader className="p-4">
                                         <AccordionItem value="general-settings" className="border-b-0">
@@ -249,7 +249,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                     </CardHeader>
                                 </Card>
                                 <Card>
-                                     <CardHeader className="p-4">
+                                    <CardHeader className="p-4">
                                         <AccordionItem value="behavior-settings" className="border-b-0">
                                             <AccordionTrigger className="p-0 text-base">Comportamento da Instância</AccordionTrigger>
                                             <AccordionContent className="space-y-4 pt-4">
@@ -260,7 +260,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                                 {formData.rejectCall && (
                                                     <div className="space-y-2 pl-6 animate-in fade-in-50">
                                                         <Label htmlFor="msgCall">Mensagem ao rejeitar chamada</Label>
-                                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." value={formData.msgCall || ''} onChange={handleInputChange}/>
+                                                        <Input id="msgCall" name="msgCall" placeholder="Não podemos atender chamadas neste número." value={formData.msgCall || ''} onChange={handleInputChange} />
                                                     </div>
                                                 )}
                                                 <div className="flex items-center space-x-2">
@@ -272,7 +272,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                     </CardHeader>
                                 </Card>
                                 <Card>
-                                     <CardHeader className="p-4">
+                                    <CardHeader className="p-4">
                                         <AccordionItem value="proxy" className="border-b-0">
                                             <AccordionTrigger className="p-0 text-base">Configurações de Proxy</AccordionTrigger>
                                             <AccordionContent className="space-y-4 pt-4">
@@ -283,38 +283,38 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                                 {useProxy && (
                                                     <div className="grid grid-cols-2 gap-4 animate-in fade-in-50">
                                                         <div className="col-span-2 space-y-2">
-                                                             <Label htmlFor="proxy.host">Host do Proxy</Label>
-                                                             <Input id="proxy.host" name="proxy.host" placeholder="127.0.0.1" value={formData.proxy?.host || ''} onChange={handleInputChange} />
+                                                            <Label htmlFor="proxy.host">Host do Proxy</Label>
+                                                            <Input id="proxy.host" name="proxy.host" placeholder="127.0.0.1" value={formData.proxy?.host || ''} onChange={handleInputChange} />
                                                         </div>
                                                         <div className="space-y-2">
-                                                             <Label htmlFor="proxy.port">Porta</Label>
-                                                             <Input id="proxy.port" name="proxy.port" type="number" placeholder="8080" value={formData.proxy?.port || ''} onChange={handleInputChange} />
+                                                            <Label htmlFor="proxy.port">Porta</Label>
+                                                            <Input id="proxy.port" name="proxy.port" type="number" placeholder="8080" value={formData.proxy?.port || ''} onChange={handleInputChange} />
                                                         </div>
-                                                         <div className="space-y-2">
-                                                             <Label htmlFor="proxy.protocol">Protocolo</Label>
-                                                             <Input id="proxy.protocol" name="proxy.protocol" placeholder="http" value={formData.proxy?.protocol || ''} onChange={handleInputChange} />
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxy.protocol">Protocolo</Label>
+                                                            <Input id="proxy.protocol" name="proxy.protocol" placeholder="http" value={formData.proxy?.protocol || ''} onChange={handleInputChange} />
                                                         </div>
-                                                         <div className="space-y-2">
-                                                             <Label htmlFor="proxy.username">Usuário (Opcional)</Label>
-                                                             <Input id="proxy.username" name="proxy.username" value={formData.proxy?.username || ''} onChange={handleInputChange} />
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxy.username">Usuário (Opcional)</Label>
+                                                            <Input id="proxy.username" name="proxy.username" value={formData.proxy?.username || ''} onChange={handleInputChange} />
                                                         </div>
-                                                         <div className="space-y-2">
-                                                             <Label htmlFor="proxy.password">Senha (Opcional)</Label>
-                                                             <Input id="proxy.password" name="proxy.password" type="password" value={formData.proxy?.password || ''} onChange={handleInputChange} />
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="proxy.password">Senha (Opcional)</Label>
+                                                            <Input id="proxy.password" name="proxy.password" type="password" value={formData.proxy?.password || ''} onChange={handleInputChange} />
                                                         </div>
                                                     </div>
                                                 )}
                                             </AccordionContent>
                                         </AccordionItem>
-                                     </CardHeader>
+                                    </CardHeader>
                                 </Card>
                             </Accordion>
-                     </div>
-                 )}
+                        </div>
+                    )}
 
-            </div>
-            </ScrollArea>
-             <DialogFooter className="pt-4">
+                </div>
+            </ScrollArea >
+            <DialogFooter className="pt-4">
                 {step > 1 && (
                     <Button type="button" variant="ghost" onClick={prevStep}>
                         <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
@@ -332,7 +332,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     </Button>
                 )}
             </DialogFooter>
-        </form>
+        </form >
     )
 }
 
@@ -351,7 +351,7 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
                 if (result) {
                     setSettings(result);
                 } else {
-                    toast({ title: 'Erro ao buscar configurações', description: 'Não foi possível carregar as configurações atuais da instância.', variant: 'destructive'});
+                    toast({ title: 'Erro ao buscar configurações', description: 'Não foi possível carregar as configurações atuais da instância.', variant: 'destructive' });
                     setIsOpen(false);
                 }
                 setLoadingSettings(false);
@@ -359,12 +359,12 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
         };
         fetchSettings();
     }, [isOpen, instance.instance_name, toast]);
-    
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
         const formData = new FormData(e.currentTarget);
-        
+
         const newSettings: EvolutionInstanceSettings = {
             rejectCall: formData.get('rejectCall') === 'on',
             msgCall: formData.get('msgCall') as string,
@@ -390,10 +390,10 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <DropdownMenuItem onSelect={(e) => e.preventDefault()}><Settings className="mr-2"/>Configurações</DropdownMenuItem>
+                <DropdownMenuItem onSelect={(e) => e.preventDefault()}><Settings className="mr-2" />Configurações</DropdownMenuItem>
             </DialogTrigger>
             <DialogContent>
-                 <form onSubmit={handleSubmit}>
+                <form onSubmit={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Editar Configurações</DialogTitle>
                         <DialogDescription>Ajuste as configurações para a instância <span className='font-bold'>{instance.display_name}</span>.</DialogDescription>
@@ -408,7 +408,7 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
                                 <Switch id="rejectCall" name="rejectCall" defaultChecked={settings.rejectCall} />
                                 <Label htmlFor="rejectCall">Rejeitar chamadas</Label>
                             </div>
-                             <div className="space-y-2">
+                            <div className="space-y-2">
                                 <Label htmlFor="msgCall">Mensagem ao rejeitar</Label>
                                 <Input id="msgCall" name="msgCall" defaultValue={settings.msgCall} />
                             </div>
@@ -420,18 +420,18 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
                                 <Switch id="alwaysOnline" name="alwaysOnline" defaultChecked={settings.alwaysOnline} />
                                 <Label htmlFor="alwaysOnline">Sempre online</Label>
                             </div>
-                             <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2">
                                 <Switch id="readMessages" name="readMessages" defaultChecked={settings.readMessages} />
                                 <Label htmlFor="readMessages">Marcar como lido</Label>
                             </div>
                         </div>
                     ) : null}
                     <DialogFooter>
-                         <DialogClose asChild><Button type="button" variant="ghost">Cancelar</Button></DialogClose>
-                         <Button type="submit" disabled={isSubmitting || loadingSettings}>
+                        <DialogClose asChild><Button type="button" variant="ghost">Cancelar</Button></DialogClose>
+                        <Button type="submit" disabled={isSubmitting || loadingSettings}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                             <Save className="mr-2 h-4 w-4" /> Salvar
-                         </Button>
+                            <Save className="mr-2 h-4 w-4" /> Salvar
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>
@@ -441,37 +441,55 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
 
 function InstanceCard({ instance: initialInstance, onMutate, user }: { instance: Omit<EvolutionInstance, 'status' | 'qrCode'>, onMutate: () => void, user: User }) {
     const { toast } = useToast();
-    const [instance, setInstance] = useState<EvolutionInstance>({...initialInstance, status: 'disconnected' });
+    const [instance, setInstance] = useState<EvolutionInstance>({ ...initialInstance, status: 'disconnected' });
     const [isToggling, setIsToggling] = useState(false);
 
+    const [errorCount, setErrorCount] = useState(0);
+
     const checkStatus = useCallback(async () => {
-        const result = await checkInstanceStatus(instance.instance_name);
-        setInstance(prev => ({ ...prev, ...result }));
+        try {
+            const result = await checkInstanceStatus(instance.instance_name);
+            setInstance(prev => ({ ...prev, ...result }));
+            setErrorCount(0);
+        } catch (error) {
+            console.error("[InstanceCard] Polling error:", error);
+            setErrorCount(prev => prev + 1);
+        }
     }, [instance.instance_name]);
 
     useEffect(() => {
         let intervalId: NodeJS.Timeout;
+
+        if (errorCount > 5) {
+            console.warn("[InstanceCard] Too many errors, stopping polling.");
+            toast({
+                title: "Erro de Conexão",
+                description: "Falha ao atualizar status. Recarregue a página.",
+                variant: "destructive"
+            });
+            return;
+        }
 
         const setupPolling = (currentStatus: EvolutionInstance['status']) => {
             if (intervalId) clearInterval(intervalId); // Clear previous interval
             const intervalTime = currentStatus === 'pending' ? 2000 : 15000;
             intervalId = setInterval(checkStatus, intervalTime);
         };
-        
+
         checkStatus(); // Initial check
         setupPolling(instance.status);
 
         return () => clearInterval(intervalId);
-    }, [checkStatus, instance.status]);
+    }, [checkStatus, instance.status, errorCount, toast]);
 
 
     const handleConnect = async () => {
         setIsToggling(true);
         const result = await connectInstance(instance.instance_name);
-        setInstance(prev => ({...prev, ...result }));
+        setInstance(prev => ({ ...prev, ...result }));
         setIsToggling(false);
     }
-    
+
     const handleDisconnect = async () => {
         setIsToggling(true);
         await disconnectInstance(instance.instance_name);
@@ -482,46 +500,46 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
     const handleDelete = async () => {
         const result = await deleteEvolutionApiInstance(instance.id);
         if (result.error) {
-            toast({ title: 'Erro ao deletar', description: result.error, variant: 'destructive'});
+            toast({ title: 'Erro ao deletar', description: result.error, variant: 'destructive' });
         } else {
-            toast({ title: 'Instância Deletada!', description: `A instância ${instance.display_name} foi removida.`});
+            toast({ title: 'Instância Deletada!', description: `A instância ${instance.display_name} foi removida.` });
             onMutate();
         }
     }
-    
+
     const handleRestart = async () => {
-        toast({ title: 'Reiniciando...', description: `A instância ${instance.display_name} está sendo reiniciada.`});
+        toast({ title: 'Reiniciando...', description: `A instância ${instance.display_name} está sendo reiniciada.` });
         const result = await restartInstance(instance.instance_name);
-        if(result.error) {
-            toast({ title: 'Erro ao reiniciar', description: result.error, variant: 'destructive'});
+        if (result.error) {
+            toast({ title: 'Erro ao reiniciar', description: result.error, variant: 'destructive' });
         } else {
-            toast({ title: 'Instância Reiniciada', description: 'Aguarde alguns instantes para a reconexão.'});
+            toast({ title: 'Instância Reiniciada', description: 'Aguarde alguns instantes para a reconexão.' });
             setTimeout(checkStatus, 3000);
         }
     }
-    
+
     return (
         <Card>
             <CardHeader>
                 <div className="flex justify-between items-start">
                     <div>
                         <CardTitle className="flex items-center gap-2">
-                            {instance.status === 'connected' ? <Wifi className="text-green-500"/> : instance.status === 'pending' ? <Loader2 className="animate-spin text-yellow-500" /> : <WifiOff className="text-red-500"/>}
+                            {instance.status === 'connected' ? <Wifi className="text-green-500" /> : instance.status === 'pending' ? <Loader2 className="animate-spin text-yellow-500" /> : <WifiOff className="text-red-500" />}
                             {instance.display_name}
                         </CardTitle>
                         <CardDescription>{instance.type === 'wa_cloud' ? 'Cloud API' : 'Baileys'} • {instance.instance_name}</CardDescription>
                     </div>
                     <AlertDialog>
-                         <DropdownMenu>
+                        <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon"><MoreVertical/></Button>
+                                <Button variant="ghost" size="icon"><MoreVertical /></Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent>
                                 {instance.type === 'baileys' && <EditInstanceDialog instance={instance} onSave={onMutate} />}
                                 <DropdownMenuSeparator />
                                 <AlertDialogTrigger asChild>
                                     <DropdownMenuItem className="w-full justify-start text-destructive hover:text-destructive" onSelect={(e) => e.preventDefault()}>
-                                        <Trash2 className="mr-2"/>Excluir
+                                        <Trash2 className="mr-2" />Excluir
                                     </DropdownMenuItem>
                                 </AlertDialogTrigger>
                             </DropdownMenuContent>
@@ -547,29 +565,29 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                     </div>
                 ) : (
                     <div className='text-sm text-muted-foreground text-center p-4'>
-                       {instance.status === 'connected' ? 'Conectado e pronto para uso.' : 'A instância está desconectada.'}
+                        {instance.status === 'connected' ? 'Conectado e pronto para uso.' : 'A instância está desconectada.'}
                     </div>
                 )}
             </CardContent>
             <CardFooter className="gap-2">
                 {instance.status === 'connected' ? (
-                     <Button variant="destructive" onClick={handleDisconnect} disabled={isToggling} className="w-full">
-                        {isToggling ? <Loader2 className="animate-spin mr-2"/> : <PowerOff className="mr-2"/>} Desconectar
+                    <Button variant="destructive" onClick={handleDisconnect} disabled={isToggling} className="w-full">
+                        {isToggling ? <Loader2 className="animate-spin mr-2" /> : <PowerOff className="mr-2" />} Desconectar
                     </Button>
                 ) : (
                     <Button variant="default" onClick={handleConnect} disabled={isToggling} className="w-full">
-                        {isToggling ? <Loader2 className="animate-spin mr-2"/> : <Power className="mr-2"/>} Conectar
+                        {isToggling ? <Loader2 className="animate-spin mr-2" /> : <Power className="mr-2" />} Conectar
                     </Button>
                 )}
-                 {instance.status === 'connected' ? (
-                     <Button variant="outline" onClick={handleRestart}>
-                        <RefreshCw/>
+                {instance.status === 'connected' ? (
+                    <Button variant="outline" onClick={handleRestart}>
+                        <RefreshCw />
                     </Button>
-                 ) : (
+                ) : (
                     <Button variant="outline" onClick={checkStatus} disabled={instance.status === 'pending'}>
-                        <QrCode/>
+                        <QrCode />
                     </Button>
-                 )}
+                )}
             </CardFooter>
         </Card>
     )
@@ -605,7 +623,7 @@ export default function EvolutionApiPage() {
             fetchData();
         }
     }, [user, fetchData]);
-    
+
     const handleSuccess = (qrCode?: string) => {
         setIsModalOpen(false);
         if (qrCode) {
@@ -617,7 +635,7 @@ export default function EvolutionApiPage() {
     if (!user) {
         return <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
-    
+
     const cloudApiInstances = instances.filter(i => i.type === 'wa_cloud');
 
     return (
@@ -658,9 +676,9 @@ export default function EvolutionApiPage() {
                         {instances.map(instance => <InstanceCard key={instance.id} instance={instance} onMutate={fetchData} user={user} />)}
                     </div>
                 )}
-                
+
                 {cloudApiInstances.length > 0 && user.activeWorkspaceId && (
-                     <TemplateManager instances={cloudApiInstances} />
+                    <TemplateManager instances={cloudApiInstances} />
                 )}
 
             </main>

@@ -580,17 +580,34 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
     let timeoutId: NodeJS.Timeout;
     let isPolling = true;
+    let errorCount = 0;
 
     const poll = async () => {
       if (!isPolling) return;
 
       // Only poll if the tab is visible to save resources/bandwidth
       if (document.visibilityState === 'visible') {
-        await runDeltaSync();
+        try {
+          await runDeltaSync();
+          errorCount = 0; // Reset error count on success
+        } catch (error: any) {
+          console.error('[POLLING] Error in delta sync:', error);
+          errorCount++;
+
+          // If we hit too many errors, slow down significantly or stop
+          if (errorCount > 5) {
+            console.warn('[POLLING] Too many errors, slowing down polling.');
+            // Wait 10 seconds before next try if we are having issues
+            timeoutId = setTimeout(poll, 10000);
+            return;
+          }
+        }
       }
 
       if (isPolling) {
-        timeoutId = setTimeout(poll, 1000);
+        // Default interval 1s, but if we have a few errors, back off slightly
+        const interval = errorCount > 0 ? 2000 : 1000;
+        timeoutId = setTimeout(poll, interval);
       }
     };
 
