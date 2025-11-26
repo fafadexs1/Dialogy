@@ -22,6 +22,7 @@ import {
     Sun,
     Moon,
     Monitor,
+    HelpCircle,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -58,6 +59,7 @@ const mainNavItems = [
     { href: '/campaigns', icon: Send, label: 'Campanhas' },
     { href: '/analytics', icon: BarChart2, label: 'Analytics' },
     { href: '/integrations', icon: Puzzle, label: 'Integrações' },
+    { href: '/support', icon: HelpCircle, label: 'Suporte' },
 ];
 
 const teamNavItems = [
