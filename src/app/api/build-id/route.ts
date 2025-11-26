@@ -1,9 +1,6 @@
-'use server';
-
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 const buildId =
   process.env.NEXT_BUILD_ID ||
