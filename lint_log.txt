@@ -6,3 +6,4 @@ Next.js config loaded with experimental.serverActions.bodySizeLimit: 100mb
 ? How would you like to configure ESLint? https://nextjs.org/docs/app/api-reference/config/eslint
 [?25lÔØ»  Strict (recommended)
    Base
+   Cancel

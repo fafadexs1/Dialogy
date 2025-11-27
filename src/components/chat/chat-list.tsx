@@ -48,7 +48,19 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     if (isOpen && workspaceId) {
       setIsLoading(true);
       getEvolutionApiInstances(workspaceId)
-        .then(setInstances)
+        .then((res) => {
+          if (res.error) {
+            toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
+            setInstances([]);
+            return;
+          }
+          setInstances(res.instances || []);
+        })
+        .catch((error) => {
+          console.error('[CHAT_LIST] Falha ao buscar inst\u00e2ncias', error);
+          toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+          setInstances([]);
+        })
         .finally(() => setIsLoading(false));
     }
   }, [isOpen, workspaceId]);

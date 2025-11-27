@@ -40,7 +40,11 @@ export async function updateSession(request: NextRequest) {
   )
 
   // IMPORTANTE: Este comando atualiza a sessão se ela tiver expirado.
-  await supabase.auth.getSession()
+  // Usamos getSession() em vez de getUser() para evitar chamadas excessivas ao Auth Server.
+  // getSession() usa o token local se válido.
+  if (supabase && supabase.auth) {
+    await supabase.auth.getSession()
+  }
 
   return response
 }

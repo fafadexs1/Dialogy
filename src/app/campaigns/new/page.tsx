@@ -1,40 +1,48 @@
+'use client';
 
-'use server';
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import type { User } from '@/lib/types';
+import NewCampaignPageClient from '@/components/campaigns/new-campaign-page';
+import { Loader2 } from 'lucide-react';
 
-import React from "react";
-import { createClient } from "@/lib/supabase/server";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import type { User } from "@/lib/types";
-import NewCampaignPageClient from "@/components/campaigns/new-campaign-page";
+export default function NewCampaignPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-async function fetchUser(userId: string): Promise<User | null> {
-    // This is a simplified fetch, you might have a more complex one in your actions
-    const supabase = await createClient();
-    const { data: user, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-    if (error || !user) return null;
-    return {
-        id: user.id,
-        name: user.full_name,
-        email: user.email,
-        avatar: user.avatar_url,
-        activeWorkspaceId: user.last_active_workspace_id,
-    } as User;
-}
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch('/api/user', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data);
+        } else {
+          router.replace('/login');
+        }
+      } catch (error) {
+        console.error('[NEW_CAMPAIGN_PAGE] Failed to load user', error);
+        router.replace('/login');
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-export default async function NewCampaignPage() {
-    const supabase = await createClient();
-    const { data: { user: authUser } } = await supabase.auth.getUser();
+    fetchUser();
+  }, [router]);
 
-    if (!authUser) {
-        redirect('/login');
-    }
+  if (isLoading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
 
-    const user = await fetchUser(authUser.id);
+  if (!user) {
+    return null;
+  }
 
-    return <NewCampaignPageClient user={user} />;
+  return <NewCampaignPageClient user={user} />;
 }

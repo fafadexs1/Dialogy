@@ -594,6 +594,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 }
 
 export default function EvolutionApiPage() {
+    const { toast } = useToast();
     const [user, setUser] = useState<User | null>(null);
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [loading, setLoading] = useState(true);
@@ -603,10 +604,21 @@ export default function EvolutionApiPage() {
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
-        const data = await getEvolutionApiInstances(user.activeWorkspaceId);
-        setInstances(data);
+        try {
+            const result = await getEvolutionApiInstances(user.activeWorkspaceId);
+            if (result.error) {
+                toast({ title: 'Erro ao carregar inst\u00e2ncias', description: result.error, variant: 'destructive' });
+                setInstances([]);
+            } else {
+                setInstances(result.instances || []);
+            }
+        } catch (error) {
+            console.error('[EVO_PAGE] Falha ao buscar inst\u00e2ncias', error);
+            toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias deste workspace.', variant: 'destructive' });
+            setInstances([]);
+        }
         setLoading(false);
-    }, [user?.activeWorkspaceId]);
+    }, [toast, user?.activeWorkspaceId]);
 
     useEffect(() => {
         const fetchUser = async () => {

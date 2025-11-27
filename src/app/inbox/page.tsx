@@ -51,7 +51,8 @@ async function getUserData(userId: string): Promise<User | null> {
 
 export default async function InboxRootPage() {
   const supabase = await createClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const authUser = session?.user;
 
   if (!authUser) {
     return redirect('/login');

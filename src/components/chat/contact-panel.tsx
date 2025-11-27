@@ -185,10 +185,23 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
         if (initialPhone) setPhone(initialPhone);
         setIsLoadingInstances(true);
         getEvolutionApiInstances(currentUser.activeWorkspaceId)
-            .then((data) => {
-                setInstances(data);
-                const fallbackInstance = chat.instance_name || data[0]?.instance_name || '';
+            .then((res) => {
+                if (res.error) {
+                    toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
+                    setInstances([]);
+                    setSelectedInstance('');
+                    return;
+                }
+                const loaded = res.instances || [];
+                setInstances(loaded);
+                const fallbackInstance = chat.instance_name || loaded[0]?.instance_name || '';
                 setSelectedInstance((prev) => prev || fallbackInstance);
+            })
+            .catch((error) => {
+                console.error('[CONTACT_PANEL] Falha ao buscar inst\u00e2ncias', error);
+                toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+                setInstances([]);
+                setSelectedInstance('');
             })
             .finally(() => setIsLoadingInstances(false));
     }, [isOpen, currentUser?.activeWorkspaceId, chat.instance_name]);

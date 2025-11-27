@@ -10,14 +10,14 @@ import type { User, Workspace } from '@/lib/types';
 
 // Helper to fetch user data and workspaces in a single query
 async function getUserData(userId: string): Promise<User | null> {
-    if (!userId) return null;
-    try {
-        const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
-        if (userRes.rowCount === 0) return null;
-        
-        const dbUser = userRes.rows[0];
-        
-        const workspacesRes = await db.query(`
+  if (!userId) return null;
+  try {
+    const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (userRes.rowCount === 0) return null;
+
+    const dbUser = userRes.rows[0];
+
+    const workspacesRes = await db.query(`
             SELECT w.id, w.name, w.avatar_url, r.name as role_name, (w.owner_id = $1) AS is_owner
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
@@ -25,28 +25,28 @@ async function getUserData(userId: string): Promise<User | null> {
             WHERE uwr.user_id = $1
         `, [userId]);
 
-        const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            avatar: r.avatar_url || '',
-            roleName: r.role_name,
-            isOwner: r.is_owner,
-        }));
-        
-        return {
-            id: dbUser.id,
-            name: dbUser.full_name,
-            firstName: dbUser.full_name.split(' ')[0] || '',
-            lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
-            avatar: dbUser.avatar_url || undefined,
-            email: dbUser.email,
-            workspaces,
-            activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
-        };
-    } catch (error) {
-        console.error("[HOME_PAGE] Error fetching user data:", error);
-        return null;
-    }
+    const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      avatar: r.avatar_url || '',
+      roleName: r.role_name,
+      isOwner: r.is_owner,
+    }));
+
+    return {
+      id: dbUser.id,
+      name: dbUser.full_name,
+      firstName: dbUser.full_name.split(' ')[0] || '',
+      lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
+      avatar: dbUser.avatar_url || undefined,
+      email: dbUser.email,
+      workspaces,
+      activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
+    };
+  } catch (error) {
+    console.error("[HOME_PAGE] Error fetching user data:", error);
+    return null;
+  }
 }
 
 interface InboxPageProps {
@@ -56,7 +56,8 @@ interface InboxPageProps {
 export default async function InboxPage({ params }: InboxPageProps) {
   const { chatId } = await params;
   const supabase = await createClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const authUser = session?.user;
 
   if (!authUser) {
     return redirect('/login');
@@ -74,10 +75,10 @@ export default async function InboxPage({ params }: InboxPageProps) {
   if (!user.activeWorkspaceId) {
     return <WorkspaceOnboarding user={user} />;
   }
-  
+
   // Otherwise, show the main chat interface.
   // We pass the chatId from the URL to the layout component.
   return (
-      <CustomerChatLayout initialUser={user} chatId={chatId || null} />
+    <CustomerChatLayout initialUser={user} chatId={chatId || null} />
   )
 }

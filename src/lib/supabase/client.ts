@@ -1,6 +1,6 @@
 
 
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Declare a global variable to hold the client.
@@ -14,7 +14,7 @@ let client: SupabaseClient | undefined;
 export function createClient(): SupabaseClient {
   if (!client) {
     // If the client doesn't exist, create it.
-    client = createSupabaseClient(
+    client = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );

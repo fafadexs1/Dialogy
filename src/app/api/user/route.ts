@@ -64,6 +64,7 @@ export async function GET(request: Request) {
             email: dbUser.email,
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
+            is_superadmin: dbUser.is_superadmin,
         };
 
         console.log('[API /user] Retornando objeto de usuário completo:', user);

@@ -44,10 +44,17 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
             const a = document.createElement('a');
             a.href = url;
             a.download = fileName || (type === 'image' ? 'image.png' : 'video.mp4');
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
+            let appended = false;
+            try {
+                document.body.appendChild(a);
+                appended = true;
+                a.click();
+            } finally {
+                window.URL.revokeObjectURL(url);
+                if (appended && a.parentNode) {
+                    a.parentNode.removeChild(a);
+                }
+            }
         } catch (error) {
             console.error('Error downloading media:', error);
         }

@@ -460,6 +460,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [loadChatMessages]);
 
   const handleSetSelectedChat = useCallback((chat: Chat) => {
+    if (selectedChatIdRef.current === chat.id) return; // Prevent duplicate navigation
     selectedChatIdRef.current = chat.id;
     setSelectedChatId(chat.id);
     setShowFullHistory(false);

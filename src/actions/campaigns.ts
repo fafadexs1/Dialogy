@@ -63,7 +63,7 @@ export async function createCampaign(
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaign: null, error: "Usuário não autenticado." };
-    
+
     if (!workspaceId || !instanceName || !message || contactIdentifiers.length === 0) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
     }
@@ -84,7 +84,7 @@ export async function createCampaign(
         const crmContactIds = contactIdentifiers
             .filter(c => c.id.startsWith('crm-'))
             .map(c => c.id.replace('crm-', ''));
-            
+
         const csvContactsData = contactIdentifiers
             .filter(c => c.id.startsWith('csv-'));
 
@@ -94,11 +94,11 @@ export async function createCampaign(
         if (crmContactIds.length > 0) {
             allContactIdsForCampaign.push(...crmContactIds);
         }
-        
+
         // Handle CSV contacts: find existing by JID or create new ones
         for (const csvContact of csvContactsData) {
             if (!csvContact.phone_number_jid) continue; // Skip if no number
-            
+
             let contactId;
             const existingContactRes = await client.query(
                 `SELECT id FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2`,
@@ -119,7 +119,7 @@ export async function createCampaign(
 
         // Remove duplicates and add to recipients table
         const uniqueContactIds = [...new Set(allContactIdsForCampaign)];
-        if(uniqueContactIds.length > 0) {
+        if (uniqueContactIds.length > 0) {
             const recipientValues = uniqueContactIds.map(contactId => `('${newCampaign.id}', '${contactId}')`).join(',');
             await client.query(
                 `INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES ${recipientValues}`
@@ -128,11 +128,11 @@ export async function createCampaign(
 
 
         await client.query('COMMIT');
-        
+
         // Now, start sending process and wait for it to complete.
         // We do this in the background to not block the UI response
         startCampaignSending(newCampaign.id);
-        
+
         revalidatePath('/campaigns');
 
         return { campaign: newCampaign };
@@ -150,7 +150,7 @@ async function startCampaignSending(campaignId: string) {
     const client = await db.connect();
     try {
         console.log(`[CAMPAIGN_WORKER] Iniciando envio para a campanha ${campaignId}`);
-        
+
         await client.query("UPDATE campaigns SET status = 'sending', started_at = NOW() WHERE id = $1", [campaignId]);
 
         const recipientsRes = await client.query(
@@ -161,15 +161,15 @@ async function startCampaignSending(campaignId: string) {
              WHERE cr.campaign_id = $1 AND cr.status = 'pending'`,
             [campaignId]
         );
-        
+
         const recipients = recipientsRes.rows;
         console.log(`[CAMPAIGN_WORKER] Encontrados ${recipients.length} destinatários pendentes.`);
-        
+
         let hasFailures = false;
         for (const recipient of recipients) {
             let messageStatus: 'sent' | 'failed' = 'sent';
             let errorMessage: string | null = null;
-            
+
             try {
                 // Find or create a chat for the contact to send the message
                 let chatRes = await client.query(
@@ -187,16 +187,16 @@ async function startCampaignSending(campaignId: string) {
                     );
                     chatId = newChatRes.rows[0].id;
                 }
-                
+
                 // Personalize message
                 const personalizedMessage = recipient.message.replace(/{{nome}}/gi, recipient.contact_name);
 
                 // Use a generic system agent ID for now. This could be improved.
-                const systemAgentId = '00000000-0000-0000-0000-000000000000'; 
+                const systemAgentId = '00000000-0000-0000-0000-000000000000';
                 const result = await sendAutomatedMessageAction(chatId, personalizedMessage, systemAgentId, true, recipient.instance_name);
-                
-                // Check for the presence of the `key` object in the API response as a success indicator.
-                if (!result.success || !result.apiResponse?.key?.id) {
+
+                // Check for success. We trust the result.success which is based on HTTP 2xx from the API.
+                if (!result.success) {
                     throw new Error(result.error || 'Falha na resposta da API ao enviar a mensagem.');
                 }
 
@@ -212,22 +212,22 @@ async function startCampaignSending(campaignId: string) {
                 `UPDATE campaign_recipients SET status = $1, error_message = $2, sent_at = CASE WHEN $1 = 'sent' THEN NOW() ELSE NULL END WHERE id = $3`,
                 [messageStatus, errorMessage, recipient.recipient_id]
             );
-            
+
             // Revalidate path after each send to provide real-time feedback
             revalidatePath('/campaigns');
-            
+
             // Add a small delay to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
-        
+
         const finalStatus = hasFailures ? 'failed' : 'completed';
         await client.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $2", [finalStatus, campaignId]);
         revalidatePath('/campaigns');
         console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída com status: ${finalStatus}.`);
 
     } catch (error) {
-         console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
-         await client.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
+        console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
+        await client.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
     } finally {
         client.release();
     }
@@ -252,14 +252,14 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
         if (!await hasPermission(user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
             return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
         }
-        
+
         await client.query('BEGIN');
         // Delete recipients first due to foreign key constraint
         await client.query('DELETE FROM campaign_recipients WHERE campaign_id = $1', [campaignId]);
         // Then delete the campaign
         await client.query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
         await client.query('COMMIT');
-        
+
         revalidatePath('/campaigns');
         return { success: true };
 
@@ -294,7 +294,7 @@ export async function deleteCampaigns(campaignIds: string[]): Promise<{ success:
         await client.query('DELETE FROM campaign_recipients WHERE campaign_id = ANY($1::uuid[])', [campaignIds]);
         await client.query('DELETE FROM campaigns WHERE id = ANY($1::uuid[])', [campaignIds]);
         await client.query('COMMIT');
-        
+
         revalidatePath('/campaigns');
         return { success: true };
     } catch (error) {

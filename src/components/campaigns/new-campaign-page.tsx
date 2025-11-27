@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
@@ -13,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // ---------------------------------------------------------
 // Constantes e utilitários
 // ---------------------------------------------------------
-const PLACEHOLDER = "{{nome}}"; 
+const PLACEHOLDER = "{{nome}}";
 
 function applyPlaceholder(msg: string, value: string) {
   if (!msg) return "";
@@ -83,7 +82,7 @@ const Icon = {
     </svg>
   ),
   Loader2: (props: any) => (
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
   )
 };
 
@@ -181,32 +180,52 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [query, setQuery] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const maxChars = 1000;
-  
+
   // Data states
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
   const [csvContacts, setCsvContacts] = useState<ContactType[]>([]);
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
-  
+
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const [selectedCrmIds, setSelectedCrmIds] = useState(() => new Set());
-  
+
   // Fetch initial data
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
 
     setLoadingCrm(true);
-    getContacts(user.activeWorkspaceId).then(res => {
+    getContacts(user.activeWorkspaceId)
+      .then(res => {
         setCrmContacts(res.contacts || []);
-    }).finally(() => setLoadingCrm(false));
+        if (res.error) {
+          toast({ title: 'Erro ao carregar contatos', description: res.error, variant: 'destructive' });
+        }
+      })
+      .catch((error) => {
+        console.error('[NEW_CAMPAIGN] Falha ao buscar contatos', error);
+        toast({ title: 'Erro ao carregar contatos', description: 'N\u00e3o foi poss\u00edvel buscar os contatos do workspace.', variant: 'destructive' });
+      })
+      .finally(() => setLoadingCrm(false));
 
     setLoadingInstances(true);
-    getEvolutionApiInstances(user.activeWorkspaceId).then(res => {
-        setInstances(res || []);
-    }).finally(() => setLoadingInstances(false));
+    getEvolutionApiInstances(user.activeWorkspaceId)
+      .then(res => {
+        if (res.error) {
+          toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
+          setInstances([]);
+          return;
+        }
+        setInstances(res.instances || []);
+      })
+      .catch((error) => {
+        console.error('[NEW_CAMPAIGN] Falha ao buscar inst\u00e2ncias', error);
+        toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+      })
+      .finally(() => setLoadingInstances(false));
 
   }, [user?.activeWorkspaceId]);
 
@@ -251,24 +270,24 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
   async function handleSendCampaign() {
     if (!user?.activeWorkspaceId || !instanceName || !message || selectedCount === 0) {
-        toast({ title: 'Dados Incompletos', description: 'Preencha a mensagem, selecione uma instância e pelo menos um contato.', variant: 'destructive'});
-        return;
+      toast({ title: 'Dados Incompletos', description: 'Preencha a mensagem, selecione uma instância e pelo menos um contato.', variant: 'destructive' });
+      return;
     };
     setIsSubmitting(true);
-    
+
     const selectedFromCrm = crmContacts
       .filter((c) => selectedCrmIds.has(c.id))
       .map((c) => ({ id: `crm-${c.id}`, name: c.name, phone_number_jid: c.phone_number_jid }));
 
-    const allContactsToSend = [...selectedFromCrm, ...csvContacts.map(c => ({...c, id: `csv-${c.id}`}))];
-    
+    const allContactsToSend = [...selectedFromCrm, ...csvContacts.map(c => ({ ...c, id: `csv-${c.id}` }))];
+
     const result = await createCampaign(user.activeWorkspaceId, instanceName, message, allContactsToSend);
-    
+
     if (result.error) {
-        toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
+      toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
     } else {
-        toast({ title: 'Campanha criada e em andamento!', description: 'O envio foi iniciado em segundo plano. Você será redirecionado.' });
-        router.push('/campaigns');
+      toast({ title: 'Campanha criada e em andamento!', description: 'O envio foi iniciado em segundo plano. Você será redirecionado.' });
+      router.push('/campaigns');
     }
     setIsSubmitting(false);
   }
@@ -276,90 +295,94 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const remaining = maxChars - message.length;
   const remainingClass = remaining < 0 ? "text-red-600" : remaining < 50 ? "text-amber-600" : "text-muted-foreground";
 
+  // Se não houver usuário, mostramos loading, mas isso não deve acontecer devido ao redirect no server component
+  // No entanto, para evitar erro de hooks, NÃO retornamos antes dos hooks.
+  // Os hooks já foram chamados acima.
+
   if (!user) {
     return (
-        <div className="flex items-center justify-center h-full">
-            <Icon.Loader2 className="h-8 w-8 animate-spin text-primary"/>
-        </div>
+      <div className="flex items-center justify-center h-full">
+        <Icon.Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     )
   }
 
   return (
-        <div className="flex flex-col min-h-dvh bg-gradient-to-b from-background to-muted/50">
-        {/* Header com gradiente e stepper */}
-        <header className="border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="mx-auto max-w-6xl px-4 sm:px-6 py-5 flex items-center justify-between">
-            <div>
-                <h1 className="text-2xl font-bold tracking-tight">Nova Campanha</h1>
-                <p className="text-sm text-muted-foreground">Defina a mensagem e o público em um único lugar.</p>
-            </div>
-            <ol className="hidden sm:flex items-center gap-2 text-sm">
-                <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs">1</span><span>Mensagem</span></li>
-                <span className="h-px w-8 bg-border" />
-                <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">2</span><span>Público</span></li>
-                <span className="h-px w-8 bg-border" />
-                <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">3</span><span>Revisão</span></li>
-            </ol>
-            </div>
-        </header>
+    <div className="flex flex-col min-h-dvh bg-gradient-to-b from-background to-muted/50">
+      {/* Header com gradiente e stepper */}
+      <header className="border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-5 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Nova Campanha</h1>
+            <p className="text-sm text-muted-foreground">Defina a mensagem e o público em um único lugar.</p>
+          </div>
+          <ol className="hidden sm:flex items-center gap-2 text-sm">
+            <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs">1</span><span>Mensagem</span></li>
+            <span className="h-px w-8 bg-border" />
+            <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">2</span><span>Público</span></li>
+            <span className="h-px w-8 bg-border" />
+            <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">3</span><span>Revisão</span></li>
+          </ol>
+        </div>
+      </header>
 
-        {/* Conteúdo */}
-        <main className="flex-1 px-4 sm:px-6 py-6">
-            <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Coluna esquerda (form) */}
-            <div className="lg:col-span-2 space-y-6">
-                {/* Seção 1: Mensagem e Instância */}
-                <Card>
-                <CardHeader>
-                    <h3 className="text-2xl font-semibold leading-none tracking-tight">1. Mensagem e Instância</h3>
-                    <p className="text-sm text-muted-foreground">Escreva a mensagem que será enviada e selecione a instância do WhatsApp.</p>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-2">
-                    <label htmlFor="message" className="text-sm font-medium leading-none">Mensagem da Campanha</label>
-                    <Textarea
-                        id="message"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        placeholder={`Digite sua mensagem aqui... Use ${PLACEHOLDER} para personalizar com o nome do contato.`}
-                    />
-                    <div className="flex items-center justify-between text-xs">
-                        <p className="text-muted-foreground">A variável <code className="rounded bg-muted px-1">{PLACEHOLDER}</code> será substituída.</p>
-                        <span className={cx("tabular-nums", remainingClass)}>{remaining}</span>
-                    </div>
-                     <div className="flex flex-wrap gap-2 pt-2">
-                        {TEMPLATES.map((t) => (
-                        <Button key={t.id} type="button" variant="secondary" onClick={() => setMessage(t.text)}>
-                            <Icon.Sparkles className="h-4 w-4" /> {t.label}
-                        </Button>
+      {/* Conteúdo */}
+      <main className="flex-1 px-4 sm:px-6 py-6">
+        <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Coluna esquerda (form) */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Seção 1: Mensagem e Instância */}
+            <Card>
+              <CardHeader>
+                <h3 className="text-2xl font-semibold leading-none tracking-tight">1. Mensagem e Instância</h3>
+                <p className="text-sm text-muted-foreground">Escreva a mensagem que será enviada e selecione a instância do WhatsApp.</p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <label htmlFor="message" className="text-sm font-medium leading-none">Mensagem da Campanha</label>
+                  <Textarea
+                    id="message"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder={`Digite sua mensagem aqui... Use ${PLACEHOLDER} para personalizar com o nome do contato.`}
+                  />
+                  <div className="flex items-center justify-between text-xs">
+                    <p className="text-muted-foreground">A variável <code className="rounded bg-muted px-1">{PLACEHOLDER}</code> será substituída.</p>
+                    <span className={cx("tabular-nums", remainingClass)}>{remaining}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {TEMPLATES.map((t) => (
+                      <Button key={t.id} type="button" variant="secondary" onClick={() => setMessage(t.text)}>
+                        <Icon.Sparkles className="h-4 w-4" /> {t.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2 mt-6">
+                  <label htmlFor="instance" className="text-sm font-medium leading-none">Instância de Envio</label>
+                  <Select onValueChange={setInstanceName} value={instanceName || undefined}>
+                    <SelectTrigger id="instance">
+                      <SelectValue placeholder="Selecione a instância do WhatsApp" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadingInstances ? <div className="p-4 text-center text-sm">Carregando...</div> :
+                        instances.map((opt) => (
+                          <SelectItem key={opt.id} value={opt.instance_name}>{opt.display_name || opt.instance_name}</SelectItem>
                         ))}
-                    </div>
-                    </div>
-                    <div className="space-y-2 mt-6">
-                        <label htmlFor="instance" className="text-sm font-medium leading-none">Instância de Envio</label>
-                        <Select onValueChange={setInstanceName} value={instanceName || undefined}>
-                             <SelectTrigger id="instance">
-                                <SelectValue placeholder="Selecione a instância do WhatsApp" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {loadingInstances ? <div className="p-4 text-center text-sm">Carregando...</div> :
-                                instances.map((opt) => (
-                                    <SelectItem key={opt.id} value={opt.name}>{opt.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </CardContent>
-                </Card>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
 
-                {/* Seção 2: Público */}
-                <Card>
-                <CardHeader>
-                    <h3 className="text-2xl font-semibold leading-none tracking-tight">2. Público</h3>
-                    <p className="text-sm text-muted-foreground">Selecione os contatos que receberão esta campanha.</p>
-                </CardHeader>
-                <CardContent>
-                   <div className="w-full">
+            {/* Seção 2: Público */}
+            <Card>
+              <CardHeader>
+                <h3 className="text-2xl font-semibold leading-none tracking-tight">2. Público</h3>
+                <p className="text-sm text-muted-foreground">Selecione os contatos que receberão esta campanha.</p>
+              </CardHeader>
+              <CardContent>
+                <div className="w-full">
                   <div role="tablist" aria-orientation="horizontal" className="grid w-full grid-cols-2 h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
                     <button
                       role="tab"
@@ -387,61 +410,61 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
                   {tab === "crm" && (
                     <div className="mt-4 space-y-3">
-                        <div className="relative">
-                            <Icon.Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                aria-label="Buscar contato"
-                                placeholder="Buscar contato..."
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="pl-8"
-                            />
-                        </div>
-                        <div className="flex items-center gap-3 p-2 border-b">
-                            <input
-                            id="select-all"
-                            type="checkbox"
-                            checked={selectedCrmIds.size === filteredCrmContacts.length && filteredCrmContacts.length > 0}
-                            onChange={toggleSelectAll}
-                            className="h-4 w-4 rounded border-primary"
-                            />
-                            <label htmlFor="select-all" className="text-sm font-medium">Selecionar todos</label>
-                            <div className="ml-auto text-xs text-muted-foreground">{filteredCrmContacts.length} contato(s) exibido(s)</div>
-                        </div>
+                      <div className="relative">
+                        <Icon.Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          aria-label="Buscar contato"
+                          placeholder="Buscar contato..."
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                          className="pl-8"
+                        />
+                      </div>
+                      <div className="flex items-center gap-3 p-2 border-b">
+                        <input
+                          id="select-all"
+                          type="checkbox"
+                          checked={selectedCrmIds.size === filteredCrmContacts.length && filteredCrmContacts.length > 0}
+                          onChange={toggleSelectAll}
+                          className="h-4 w-4 rounded border-primary"
+                        />
+                        <label htmlFor="select-all" className="text-sm font-medium">Selecionar todos</label>
+                        <div className="ml-auto text-xs text-muted-foreground">{filteredCrmContacts.length} contato(s) exibido(s)</div>
+                      </div>
 
-                        <div className="relative overflow-hidden h-64 rounded-md border">
-                            <div className="h-full w-full overflow-y-auto">
-                            {loadingCrm ? <div className="flex h-full items-center justify-center"><Icon.Loader2 className="h-6 w-6 animate-spin"/></div> :
+                      <div className="relative overflow-hidden h-64 rounded-md border">
+                        <div className="h-full w-full overflow-y-auto">
+                          {loadingCrm ? <div className="flex h-full items-center justify-center"><Icon.Loader2 className="h-6 w-6 animate-spin" /></div> :
                             filteredCrmContacts.length === 0 ? (
-                                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Nenhum contato encontrado.</div>
+                              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Nenhum contato encontrado.</div>
                             ) : (
-                                <ul className="divide-y">
+                              <ul className="divide-y">
                                 {filteredCrmContacts.map((c) => (
-                                    <li key={c.id} className="flex items-center gap-3 p-2 hover:bg-accent/60">
+                                  <li key={c.id} className="flex items-center gap-3 p-2 hover:bg-accent/60">
                                     <input
-                                        type="checkbox"
-                                        checked={selectedCrmIds.has(c.id)}
-                                        onChange={() => toggleSelect(c.id)}
-                                        className="h-4 w-4 rounded border-primary"
-                                        aria-label={`Selecionar ${c.name}`}
+                                      type="checkbox"
+                                      checked={selectedCrmIds.has(c.id)}
+                                      onChange={() => toggleSelect(c.id)}
+                                      className="h-4 w-4 rounded border-primary"
+                                      aria-label={`Selecionar ${c.name}`}
                                     />
                                     <Avatar name={c.name} />
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium truncate">{c.name}</p>
-                                        <p className="text-xs text-muted-foreground truncate">{c.phone_number_jid}</p>
+                                      <p className="text-sm font-medium truncate">{c.name}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{c.phone_number_jid}</p>
                                     </div>
                                     {selectedCrmIds.has(c.id) && <Icon.Check className="h-4 w-4 text-primary" />}
-                                    </li>
+                                  </li>
                                 ))}
-                                </ul>
+                              </ul>
                             )}
-                            </div>
                         </div>
+                      </div>
                     </div>
                   )}
 
                   {tab === "csv" && (
-                     <div className="mt-4">
+                    <div className="mt-4">
                       <div
                         onDragOver={(e) => {
                           e.preventDefault();
@@ -462,60 +485,60 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <input type="file" accept=".csv" className="absolute opacity-0 inset-0 cursor-pointer" />
                       </div>
                       <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
-                       {csvContacts.length > 0 && 
-                            <div className="mt-2 text-xs text-green-600 font-medium">{csvContacts.length} contatos importados do arquivo.</div>
-                        }
+                      {csvContacts.length > 0 &&
+                        <div className="mt-2 text-xs text-green-600 font-medium">{csvContacts.length} contatos importados do arquivo.</div>
+                      }
                     </div>
                   )}
                 </div>
-                </CardContent>
-                </Card>
-            </div>
+              </CardContent>
+            </Card>
+          </div>
 
-            {/* Coluna direita (pré-visualização) */}
-            <div className="lg:col-span-1">
-                <Card className="sticky top-6">
-                <CardHeader>
-                    <h3 className="text-xl font-semibold">Pré-visualização</h3>
-                    <p className="text-sm text-muted-foreground">Veja como a mensagem aparece no WhatsApp.</p>
-                </CardHeader>
-                <CardContent>
-                    <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
-                    <div className="flex items-center gap-3 pb-3 border-b">
-                        <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">WA</div>
-                        <div>
-                        <p className="text-sm font-semibold">{instanceName || "Instância"}</p>
-                        <p className="text-xs text-muted-foreground">online agora</p>
-                        </div>
+          {/* Coluna direita (pré-visualização) */}
+          <div className="lg:col-span-1">
+            <Card className="sticky top-6">
+              <CardHeader>
+                <h3 className="text-xl font-semibold">Pré-visualização</h3>
+                <p className="text-sm text-muted-foreground">Veja como a mensagem aparece no WhatsApp.</p>
+              </CardHeader>
+              <CardContent>
+                <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
+                  <div className="flex items-center gap-3 pb-3 border-b">
+                    <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">WA</div>
+                    <div>
+                      <p className="text-sm font-semibold">{instanceName || "Instância"}</p>
+                      <p className="text-xs text-muted-foreground">online agora</p>
                     </div>
-                    <div className="mt-3 space-y-2">
-                        <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                        {message ? applyPlaceholder(message, "Maria") : "Sua mensagem aparecerá aqui..."}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">Prévia com {PLACEHOLDER} → "Maria"</p>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
+                      {message ? applyPlaceholder(message, "Maria") : "Sua mensagem aparecerá aqui..."}
                     </div>
-                    </div>
-                </CardContent>
-                </Card>
-            </div>
-            </div>
-        </main>
+                    <p className="text-[10px] text-muted-foreground">Prévia com {PLACEHOLDER} → "Maria"</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </main>
 
-        {/* Footer fixo */}
-        <div className="sticky bottom-0 z-10">
-            <div className="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-            <div className="rounded-xl border bg-background/80 backdrop-blur p-4 shadow-lg flex items-center justify-between">
-                <Button variant="secondary" onClick={() => router.push('/campaigns')}>
-                    <Icon.ArrowLeft /> Cancelar
-                </Button>
-                <div className="text-center font-semibold text-primary">{selectedCount} destinatário(s)</div>
-                <Button disabled={!canProceed || isSubmitting} onClick={handleSendCampaign}>
-                {isSubmitting ? <Icon.Loader2 className="animate-spin" /> : <Icon.Send />}
-                {isSubmitting ? 'Enviando...' : 'Revisar e Enviar Campanha'}
-                </Button>
-            </div>
-            </div>
+      {/* Footer fixo */}
+      <div className="sticky bottom-0 z-10">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
+          <div className="rounded-xl border bg-background/80 backdrop-blur p-4 shadow-lg flex items-center justify-between">
+            <Button variant="secondary" onClick={() => router.push('/campaigns')}>
+              <Icon.ArrowLeft /> Cancelar
+            </Button>
+            <div className="text-center font-semibold text-primary">{selectedCount} destinatário(s)</div>
+            <Button disabled={!canProceed || isSubmitting} onClick={handleSendCampaign}>
+              {isSubmitting ? <Icon.Loader2 className="animate-spin" /> : <Icon.Send />}
+              {isSubmitting ? 'Enviando...' : 'Revisar e Enviar Campanha'}
+            </Button>
+          </div>
         </div>
-        </div>
-  )
+      </div>
+    </div>
+  );
 }
