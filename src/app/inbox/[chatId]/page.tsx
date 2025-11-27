@@ -28,7 +28,7 @@ async function getUserData(userId: string): Promise<User | null> {
     const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({
       id: r.id,
       name: r.name,
-      avatar: r.avatar_url || '',
+      avatar: r.avatar_url || undefined,
       roleName: r.role_name,
       isOwner: r.is_owner,
     }));

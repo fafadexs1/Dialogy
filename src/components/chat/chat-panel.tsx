@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
+import { formatInTimeZone } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -101,8 +103,11 @@ interface ChatPanelProps {
     showFullHistory: boolean;
     setShowFullHistory: (show: boolean) => void;
     tabId: string;
+    tabId: string;
     onLoadOlderMessages: () => Promise<void> | void;
     canLoadOlder: boolean;
+    workspaceTimezone: string;
+    onToggleContactPanel: () => void;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
@@ -240,6 +245,7 @@ function formatDuration(seconds: number): string {
 
 function LocationMessage({ message }: { message: Message }) {
     const { latitude, longitude, address, locationName, mapUrl, thumbnail, locationDescription } = message.metadata || {};
+    const thumbnailSrc = typeof thumbnail === 'string' && thumbnail.length > 0 ? thumbnail : undefined;
     const hasCoords = typeof latitude === 'number' && typeof longitude === 'number';
     const resolvedMapUrl = mapUrl || (hasCoords ? `https://www.google.com/maps?q=${latitude},${longitude}` : undefined);
     const hasLink = Boolean(resolvedMapUrl);
@@ -250,10 +256,10 @@ function LocationMessage({ message }: { message: Message }) {
     return (
         <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-blue-400/40 transition-all max-w-[320px] shadow-lg shadow-black/20">
-                {thumbnail ? (
+                {thumbnailSrc ? (
                     <div className="relative">
                         <Image
-                            src={thumbnail}
+                            src={thumbnailSrc}
                             alt={title}
                             width={320}
                             height={180}
@@ -303,7 +309,8 @@ function MediaMessage({ message }: { message: Message }) {
         else if (message.type === 'audio') effectiveMimeType = 'audio/mp4';
     }
 
-    let urlToUse = mediaUrl || thumbnail;
+    const validUrl = (url: any) => typeof url === 'string' && url.length > 0 ? url : undefined;
+    let urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
     // Fix: Do not override urlToUse with thumbnail for videos, as MediaViewer needs the actual video URL
     // if (effectiveMimeType.startsWith('video/') && thumbnail) {
     //     urlToUse = thumbnail;
@@ -431,7 +438,7 @@ function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void
     );
 }
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder }: ChatPanelProps) {
+export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel }: ChatPanelProps) {
 
     const [newMessage, setNewMessage] = useState('');
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
@@ -1121,7 +1128,20 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     )}
                                     {isDeleted ? (
                                         <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Mensagem apagada</span>
-                                    ) : renderMessageContent(message, isFromMe)}
+                                    ) : (
+                                        <TooltipProvider>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <div className="cursor-default">
+                                                        {renderMessageContent(message, isFromMe)}
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="bg-black/90 border-white/10 text-white text-xs">
+                                                    {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </TooltipProvider>
+                                    )}
                                 </div>
                                 {!isDeleted && (
                                     <div className="flex-shrink-0 self-start">
@@ -1259,15 +1279,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
                         </Tooltip>
 
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10">
-                                    <Video className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Videochamada (Em breve)</p></TooltipContent>
-                        </Tooltip>
-
                         <div className="w-px h-6 bg-white/10 mx-1" />
 
                         {isChatOpen && isChatAssignedToMe && (
@@ -1277,8 +1288,31 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 reasons={closeReasons}
                                 isOpen={isCloseDialogOpen}
                                 onOpenChange={setIsCloseDialogOpen}
+                                trigger={
+                                    <Button variant="ghost" size="icon" className="text-white/50 hover:text-red-400 hover:bg-red-500/10">
+                                        <XCircle className="h-4 w-4" />
+                                    </Button>
+                                }
                             />
                         )}
+
+                        <div className="w-px h-6 bg-white/10 mx-1" />
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    onClick={() => {
+                                        onToggleContactPanel();
+                                    }}
+                                >
+                                    <ArrowRightLeft className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
+                        </Tooltip>
 
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -1332,7 +1366,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     {mediaFiles.length > 0 && (
                         <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
                     )}
-                    {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (
+                    {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
                         <SmartReplies
                             customerMessage={lastCustomerMessage?.content || ''}
                             chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}

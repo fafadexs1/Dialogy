@@ -247,7 +247,7 @@ export default function CustomerList({ user }: { user: User }) {
                                         <TableCell>
                                             <div className="flex items-center gap-3">
                                                 <Avatar className="h-8 w-8 border border-white/10">
-                                                    <AvatarImage src={customer.avatar_url} alt={customer.name} />
+                                                    <AvatarImage src={customer.avatar_url || undefined} alt={customer.name} />
                                                     <AvatarFallback className="bg-white/10 text-white">{customer.name.charAt(0)}</AvatarFallback>
                                                 </Avatar>
                                                 <div>

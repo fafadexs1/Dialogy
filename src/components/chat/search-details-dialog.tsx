@@ -139,7 +139,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                 </div>
                                 <div className="rounded-xl border border-white/5 bg-white/5 p-4 flex items-center gap-3">
                                     <Avatar className="h-10 w-10 border border-white/10">
-                                        <AvatarImage src={contactHighlight.avatar_url} />
+                                        <AvatarImage src={contactHighlight.avatar_url || undefined} />
                                         <AvatarFallback className="bg-zinc-800">{contactHighlight.name?.charAt(0) || '?'}</AvatarFallback>
                                     </Avatar>
                                     <div className="min-w-0 flex-1">

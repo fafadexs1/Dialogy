@@ -271,7 +271,7 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                                                     <div className="flex items-start justify-between gap-2">
                                                                         <div className="flex items-center gap-2 overflow-hidden">
                                                                             <Avatar className="h-6 w-6 shrink-0">
-                                                                                <AvatarImage src={contact.avatar_url} />
+                                                                                <AvatarImage src={contact.avatar_url || undefined} />
                                                                                 <AvatarFallback className="text-[10px]">{contact.name.charAt(0)}</AvatarFallback>
                                                                             </Avatar>
                                                                             <span className="font-medium text-sm truncate">{contact.name}</span>

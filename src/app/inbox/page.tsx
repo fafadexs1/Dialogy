@@ -61,9 +61,11 @@ export default async function InboxRootPage() {
   const user = await getUserData(authUser.id);
 
   if (!user) {
-    // This case might happen if the user record in public.users is not yet created
-    // or if there's a DB error. Redirecting to login is a safe fallback.
-    return redirect('/login');
+    // If the user exists in Auth but not in DB, we must avoid an infinite loop with /login
+    // /login redirects to /inbox if authenticated.
+    // So we must sign out or redirect to a page that handles this state.
+    // For now, we redirect to login with a clear error that the login page can respect.
+    return redirect('/login?error=account_not_found');
   }
 
   // If the user has no active workspace, show the onboarding flow.

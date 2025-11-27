@@ -12,31 +12,31 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+    DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-  DialogDescription,
-  DialogClose
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+    DialogFooter,
+    DialogDescription,
+    DialogClose
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -59,14 +59,14 @@ function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { me
     const { toast } = useToast();
 
     useEffect(() => {
-        if(state.success) {
-            toast({ title: "Função Atualizada!", description: `A função de ${member.name} foi alterada.`});
+        if (state.success) {
+            toast({ title: "Função Atualizada!", description: `A função de ${member.name} foi alterada.` });
             setIsOpen(false);
             onMutate();
         } else if (state.error) {
-            toast({ title: "Erro ao Atualizar", description: state.error, variant: 'destructive'});
+            toast({ title: "Erro ao Atualizar", description: state.error, variant: 'destructive' });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state]);
 
     return (
@@ -77,7 +77,7 @@ function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { me
                     <DialogTitle>Editar Função de {member.name}</DialogTitle>
                     <DialogDescription>Selecione a nova função para este membro.</DialogDescription>
                 </DialogHeader>
-                 <form action={formAction}>
+                <form action={formAction}>
                     <input type="hidden" name="memberId" value={member.id} />
                     <input type="hidden" name="workspaceId" value={workspaceId} />
                     <div className="py-4">
@@ -108,14 +108,14 @@ function SubmitButton() {
     return (
         <Button type="submit" disabled={pending}>
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4"/> Salvar
+            <Save className="mr-2 h-4 w-4" /> Salvar
         </Button>
     )
 }
 
 function MemberActions({ member, workspaceId, roles, onMutate }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void }) {
     const { toast } = useToast();
-    
+
     const handleRemoveMember = async () => {
         const result = await removeMemberAction(member.id, workspaceId);
         if (result.error) {
@@ -125,7 +125,7 @@ function MemberActions({ member, workspaceId, roles, onMutate }: { member: Works
             onMutate();
         }
     };
-    
+
     return (
         <AlertDialog>
             <DropdownMenu>
@@ -182,11 +182,11 @@ export default function ManageMembersPage() {
     useEffect(() => {
         const fetchUser = async () => {
             const res = await fetch('/api/user');
-            if(res.ok) {
+            if (res.ok) {
                 setUser(await res.json());
             } else {
-                 setLoading(false);
-                 setError("Falha ao carregar dados do usuário.");
+                setLoading(false);
+                setError("Falha ao carregar dados do usuário.");
             }
         };
         fetchUser();
@@ -228,11 +228,11 @@ export default function ManageMembersPage() {
     if (loading || !user) {
         return (
             <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         );
     }
-    
+
     const activeWorkspace = user?.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
     return (
@@ -251,7 +251,7 @@ export default function ManageMembersPage() {
                     </CardHeader>
                     <CardContent>
                         {error ? (
-                             <div className="text-center py-10 text-destructive">
+                            <div className="text-center py-10 text-destructive">
                                 <AlertCircle className="mx-auto h-12 w-12" />
                                 <h2 className="mt-4 text-xl font-bold">Falha ao carregar membros</h2>
                                 <p className="text-muted-foreground">{error}</p>
@@ -276,7 +276,7 @@ export default function ManageMembersPage() {
                                             <TableCell>
                                                 <div className="flex items-center gap-3">
                                                     <Avatar>
-                                                        <AvatarImage src={member.avatar} alt={member.name} />
+                                                        <AvatarImage src={member.avatar || undefined} alt={member.name} />
                                                         <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
                                                     </Avatar>
                                                     <div>
@@ -299,9 +299,9 @@ export default function ManageMembersPage() {
                                             <TableCell>
                                                 <Badge variant="outline">{member.role}</Badge>
                                             </TableCell>
-                                             <TableCell>
+                                            <TableCell>
                                                 <Badge variant="secondary" className="flex items-center gap-1.5 w-fit">
-                                                    <Users className="h-3 w-3"/>
+                                                    <Users className="h-3 w-3" />
                                                     {member.team}
                                                 </Badge>
                                             </TableCell>
@@ -310,14 +310,14 @@ export default function ManageMembersPage() {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-1 font-medium text-muted-foreground">
-                                                  <DollarSign className="h-4 w-4 text-green-500" />
-                                                  <span>
-                                                    {(member.autopilotUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                  </span>
+                                                    <DollarSign className="h-4 w-4 text-green-500" />
+                                                    <span>
+                                                        {(member.autopilotUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    </span>
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-right">
-                                               {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={() => fetchData(activeWorkspace.id)} />}
+                                                {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={() => fetchData(activeWorkspace.id)} />}
                                             </TableCell>
                                         </TableRow>
                                     ))}

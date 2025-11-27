@@ -133,6 +133,16 @@ export type MessageMetadata = {
   duration?: number; // Duration in seconds for audio/video
   waveform?: number[]; // For audio visualization
   isInternalNote?: boolean;
+  event?: string;
+  from_agent_id?: string;
+  to_agent_id?: string;
+  to_team_id?: string;
+  to_name?: string;
+  closed_by?: string;
+  reason_tag_id?: string | null;
+  notes?: string | null;
+  authored_by?: string;
+  template_applied?: boolean;
 }
 
 export type Message = {

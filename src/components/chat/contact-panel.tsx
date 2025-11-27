@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { type Chat, type User, type Team, EvolutionInstance } from '@/lib/types';
+import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -19,7 +19,10 @@ import {
     MapPin,
     Calendar,
     Globe,
-    MessageSquarePlus
+    Calendar,
+    Globe,
+    MessageSquarePlus,
+    BarChart3
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -31,13 +34,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
-import { getWorkspaceUsers } from '@/actions/crm';
+import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { transferChatAction } from '@/actions/chats';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { AddContactForm } from '../crm/add-contact-form';
+import { ContactStatisticsDialog } from '../crm/contact-statistics-dialog';
 import { cn } from '@/lib/utils';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
@@ -303,12 +307,17 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
 
 export default function ContactPanel({ chat, currentUser, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isStatsOpen, setIsStatsOpen] = useState(false);
     const [agents, setAgents] = useState<User[]>([]);
+    const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
 
     useEffect(() => {
         if (currentUser?.activeWorkspaceId) {
             getWorkspaceUsers(currentUser.activeWorkspaceId).then(res => {
                 if (!res.error) setAgents(res.users || []);
+            });
+            getCustomFieldDefinitions(currentUser.activeWorkspaceId).then(res => {
+                if (!res.error) setCustomFields(res.fields || []);
             });
         }
     }, [currentUser?.activeWorkspaceId]);
@@ -387,7 +396,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 <div className="p-4 xl:p-6 space-y-6">
                     <div className="flex flex-col items-center text-center">
                         <Avatar className="h-24 w-24 shrink-0 border-2 border-white/10 ring-4 ring-white/5 shadow-xl">
-                            <AvatarImage src={contact.avatar_url} alt={contact.name} data-ai-hint="person" />
+                            <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} data-ai-hint="person" />
                             <AvatarFallback className="text-3xl bg-gradient-to-br from-blue-600 to-violet-600 text-white">{contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="mt-4 space-y-1">
@@ -450,6 +459,42 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                     <Separator className="bg-white/10" />
 
+                    {customFields.length > 0 && (
+                        <>
+                            <div className="space-y-4">
+                                <h4 className="font-medium text-white/70 text-sm uppercase tracking-wider">Informações Adicionais</h4>
+                                <div className="space-y-3 text-sm">
+                                    {customFields.map(field => {
+                                        const value = contact.custom_fields?.[field.id];
+                                        if (!value) return null;
+
+                                        let displayValue = value;
+                                        if (field.type === 'select') {
+                                            const option = field.options?.find(opt => opt.value === value);
+                                            displayValue = option ? option.label : value;
+                                        }
+
+                                        return (
+                                            <div key={field.id} className="flex flex-col gap-1 text-white/80 group">
+                                                <span className="text-xs text-white/50">{field.label}</span>
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
+                                                        <Briefcase className="h-4 w-4 text-yellow-400" />
+                                                    </div>
+                                                    <span className="truncate">{displayValue}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {customFields.every(f => !contact.custom_fields?.[f.id]) && (
+                                        <p className="text-white/30 italic text-xs">Nenhuma informação adicional preenchida.</p>
+                                    )}
+                                </div>
+                            </div>
+                            <Separator className="bg-white/10" />
+                        </>
+                    )}
+
                     <div className="space-y-4">
                         <div className="flex justify-between items-center">
                             <h4 className="font-medium text-white/70 flex items-center gap-2 text-sm uppercase tracking-wider">
@@ -461,7 +506,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             {agent && agent.id !== 'unknown' ? (
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-10 w-10 border border-white/10">
-                                        <AvatarImage src={agent.avatar} alt={agent.name} />
+                                        <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
                                         <AvatarFallback className="bg-zinc-800 text-white">{agent.name.charAt(0)}</AvatarFallback>
                                     </Avatar>
                                     <div className="flex-1 min-w-0">
@@ -484,15 +529,18 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     <div className="space-y-4">
                         <h4 className="font-medium text-white/70 text-sm uppercase tracking-wider mb-2">CRM & Tarefas</h4>
 
-                        <Card className="bg-white/5 border-white/10 shadow-none hover:bg-white/10 transition-colors cursor-pointer group">
+                        <Card
+                            className="bg-white/5 border-white/10 shadow-none hover:bg-white/10 transition-colors cursor-pointer group"
+                            onClick={() => setIsStatsOpen(true)}
+                        >
                             <CardContent className="p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
-                                        <Briefcase className="h-4 w-4" />
+                                        <BarChart3 className="h-4 w-4" />
                                     </div>
-                                    <span className="font-medium text-white">Negócios</span>
+                                    <span className="font-medium text-white">Estatísticas</span>
                                 </div>
-                                <Badge variant="secondary" className="bg-white/10 text-white group-hover:bg-white/20">0</Badge>
+                                <Badge variant="secondary" className="bg-white/10 text-white group-hover:bg-white/20">Ver</Badge>
                             </CardContent>
                         </Card>
 
@@ -518,6 +566,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     </Link>
                 </div>
             </ScrollArea>
+            <ContactStatisticsDialog
+                isOpen={isStatsOpen}
+                setIsOpen={setIsStatsOpen}
+                contactId={contact.id}
+                contactName={contact.name}
+            />
         </div>
     );
 }

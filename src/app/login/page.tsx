@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/server';
 interface LoginPageProps {
   searchParams: Promise<{
     registered?: string;
+    error?: string;
+    next?: string;
   }>;
 }
 
@@ -16,11 +18,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (user) {
+  const resolvedSearchParams = await searchParams;
+
+  // Prevent redirect loop: Only redirect if there is NO error
+  if (user && !resolvedSearchParams?.error) {
     redirect('/inbox');
   }
-
-  const resolvedSearchParams = await searchParams;
   const isRegistered = resolvedSearchParams?.registered === 'true';
 
   return (

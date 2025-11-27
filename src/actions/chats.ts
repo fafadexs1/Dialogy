@@ -750,7 +750,14 @@ export async function searchChatsAndContacts({
                 lmd.message_id_from_api AS last_message_message_id_from_api,
                 lmd.api_message_status AS last_message_api_message_status,
                 lmd.is_read AS last_message_is_read,
-                lmd.sent_by_tab AS last_message_sent_by_tab
+                lmd.is_read AS last_message_is_read,
+                lmd.sent_by_tab AS last_message_sent_by_tab,
+                (
+                    SELECT json_object_agg(cfd.id, cfv.value)
+                    FROM contact_custom_field_values cfv
+                    JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+                    WHERE cfv.contact_id = c.contact_id
+                ) AS contact_custom_fields
             FROM chats c
             LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
             LEFT JOIN contacts cont ON cont.id = c.contact_id
@@ -806,6 +813,7 @@ export async function searchChatsAndContacts({
             ...(row as Contact),
             chat_id: row.chat_id || null,
             chat_status: row.chat_status || null,
+            custom_fields: row.contact_custom_fields || undefined,
         }));
 
         return {
@@ -853,6 +861,7 @@ type ChatRow = {
     last_message_api_message_status: string | null;
     last_message_is_read: boolean | null;
     last_message_sent_by_tab: string | null;
+    contact_custom_fields: Record<string, any> | null;
 };
 
 type MessageRow = {
@@ -982,8 +991,15 @@ async function fetchChats({
             lmd.source_from_api AS last_message_source_from_api,
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
+            lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
-            lmd.sent_by_tab AS last_message_sent_by_tab
+            lmd.sent_by_tab AS last_message_sent_by_tab,
+            (
+                SELECT json_object_agg(cfd.id, cfv.value)
+                FROM contact_custom_field_values cfv
+                JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+                WHERE cfv.contact_id = c.contact_id
+            ) AS contact_custom_fields
         FROM merged_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
@@ -1065,7 +1081,14 @@ async function fetchChatsDelta({
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
-            lmd.sent_by_tab AS last_message_sent_by_tab
+            lmd.is_read AS last_message_is_read,
+            lmd.sent_by_tab AS last_message_sent_by_tab,
+            (
+                SELECT json_object_agg(cfd.id, cfv.value)
+                FROM contact_custom_field_values cfv
+                JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+                WHERE cfv.contact_id = c.contact_id
+            ) AS contact_custom_fields
         FROM chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
@@ -1199,6 +1222,7 @@ function buildContactFromRow(row: ChatRow): Contact | undefined {
         email: row.contact_email || undefined,
         phone_number_jid: row.contact_phone_number_jid || undefined,
         address: row.contact_address || undefined,
+        custom_fields: row.contact_custom_fields || undefined,
     };
 }
 

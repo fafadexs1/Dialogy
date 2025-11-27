@@ -43,6 +43,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('55');
 
   useEffect(() => {
     if (isOpen && workspaceId) {
@@ -72,7 +73,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     const result = await startNewConversation({
       workspaceId,
       instanceName: formData.get('instanceName') as string,
-      phoneNumber: formData.get('phoneNumber') as string,
+      phoneNumber: phoneNumber,
       message: formData.get('message') as string,
       tabId: null
     });
@@ -81,6 +82,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
       toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
       setIsOpen(false);
       onActionSuccess();
+      setPhoneNumber('55'); // Reset to default
     } else {
       toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
     }
@@ -96,27 +98,27 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Iniciar Nova Conversa</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="text-white">Iniciar Nova Conversa</DialogTitle>
+          <DialogDescription className="text-white/60">
             Envie uma mensagem para um novo número para iniciar um atendimento.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-2 pb-4">
             <div className="space-y-2">
-              <Label htmlFor="instanceName">Instância de Envio</Label>
+              <Label htmlFor="instanceName" className="text-white/80">Instância de Envio</Label>
               <Select name="instanceName" required>
-                <SelectTrigger id="instanceName">
+                <SelectTrigger id="instanceName" className="bg-white/5 border-white/10 text-white">
                   <SelectValue placeholder="Selecione a instância..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-zinc-900 border-white/10 text-white">
                   {isLoading ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">Carregando...</div>
+                    <div className="p-4 text-center text-sm text-white/50">Carregando...</div>
                   ) : (
                     instances.map((instance) => (
-                      <SelectItem key={instance.id} value={instance.instance_name}>
+                      <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-white/10 focus:text-white">
                         {instance.display_name}
                       </SelectItem>
                     ))
@@ -125,24 +127,38 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber">Número do WhatsApp (JID)</Label>
-              <Input id="phoneNumber" name="phoneNumber" placeholder="5511999998888" required />
-              <p className="text-xs text-muted-foreground">
+              <Label htmlFor="phoneNumber" className="text-white/80">Número do WhatsApp (JID)</Label>
+              <Input
+                id="phoneNumber"
+                name="phoneNumber"
+                placeholder="5511999998888"
+                required
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+              />
+              <p className="text-xs text-white/40">
                 Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="message">Mensagem</Label>
-              <Textarea id="message" name="message" placeholder="Olá! Gostaria de falar sobre..." required />
+              <Label htmlFor="message" className="text-white/80">Mensagem</Label>
+              <Textarea
+                id="message"
+                name="message"
+                placeholder="Olá! Gostaria de falar sobre..."
+                required
+                className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
+              />
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline">
+              <Button type="button" variant="ghost" className="text-white/70 hover:text-white hover:bg-white/10">
                 Cancelar
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-500 text-white">
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Enviar Mensagem
             </Button>
@@ -278,7 +294,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
       <div className="relative flex-shrink-0">
         <Avatar className="h-10 w-10 border border-white/10">
-          <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
+          <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
           <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
         {(() => {
@@ -362,9 +378,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             const unread = chat.unreadCount ?? 0;
             if (unread <= 0) return null;
             return (
-            <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-gradient-to-r from-blue-600 to-purple-600 text-white border-0 shadow-md text-[10px]">
-              {unread}
-            </Badge>
+              <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-gradient-to-r from-blue-600 to-purple-600 text-white border-0 shadow-md text-[10px]">
+                {unread}
+              </Badge>
             );
           })()}
         </div>

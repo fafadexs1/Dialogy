@@ -11,7 +11,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     const res = await db.query(`
         SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 
@@ -21,7 +21,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
     if (!user) return { contacts: null, error: "Usuário não autenticado." };
 
     if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
-         return { contacts: null, error: "Acesso não autorizado." };
+        return { contacts: null, error: "Acesso não autorizado." };
     }
 
     try {
@@ -55,7 +55,7 @@ export async function getContacts(workspaceId: string): Promise<{ contacts: Cont
             ...row,
             owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
         }));
-        
+
         return { contacts };
     } catch (error) {
         console.error("[GET_CONTACTS] Error:", error);
@@ -70,7 +70,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 
     const workspaceId = formData.get('workspaceId') as string;
     if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
-         return { success: false, error: "Você não tem permissão para editar contatos." };
+        return { success: false, error: "Você não tem permissão para editar contatos." };
     }
 
     const id = formData.get('id') as string | null;
@@ -78,7 +78,7 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
     if (ownerId === 'unassigned') {
         ownerId = ''; // Set to empty string to be saved as NULL
     }
-    
+
     const data = {
         name: formData.get('name') as string,
         email: formData.get('email') as string || null,
@@ -87,9 +87,9 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
         owner_id: ownerId || null,
         avatar_url: formData.get('avatar_url') as string || null,
     };
-    
+
     const tagIds = formData.getAll('tags') as string[];
-    
+
     const customFields: Record<string, string> = {};
     for (const [key, value] of formData.entries()) {
         if (key.startsWith('custom_field_')) {
@@ -102,11 +102,11 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
     const client = await db.connect();
     try {
         await client.query('BEGIN');
-        
+
         let contactId = id;
-        
+
         if (id) { // Update
-             await client.query(
+            await client.query(
                 `UPDATE contacts 
                  SET name = $1, email = $2, phone_number_jid = $3, address = $4, owner_id = $5, avatar_url = $6
                  WHERE id = $7 AND workspace_id = $8`,
@@ -125,15 +125,15 @@ export async function saveContactAction(prevState: any, formData: FormData): Pro
 
         // Update tags
         await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
-        if(tagIds.length > 0 && tagIds[0]) {
+        if (tagIds.length > 0 && tagIds[0]) {
             const tagValues = tagIds.map(tagId => `('${contactId}', '${tagId}')`).join(',');
             await client.query(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ${tagValues}`);
         }
-        
+
         // Update custom fields
         await client.query('DELETE FROM contact_custom_field_values WHERE contact_id = $1', [contactId]);
         for (const [fieldId, value] of Object.entries(customFields)) {
-             if (value) { // Only save if there's a value
+            if (value) { // Only save if there's a value
                 await client.query(
                     'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
                     [contactId, fieldId, value]
@@ -159,33 +159,33 @@ export async function deleteContactAction(contactId: string): Promise<{ success:
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
-    
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
         const contactRes = await client.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
-        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
+        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado." };
         const { workspace_id } = contactRes.rows[0];
 
         if (!await hasPermission(user.id, workspace_id, 'crm:delete')) {
             await client.query('ROLLBACK');
             return { success: false, error: "Você não tem permissão para excluir contatos." };
         }
-        
+
         await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM activities WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM contact_custom_field_values WHERE contact_id = $1', [contactId]);
         await client.query('DELETE FROM contacts WHERE id = $1', [contactId]);
-        
+
         await client.query('COMMIT');
         revalidatePath('/crm');
         return { success: true };
-    } catch(error) {
+    } catch (error) {
         await client.query('ROLLBACK');
         console.error("[DELETE_CONTACT] Error:", error);
         return { success: false, error: "Falha ao excluir o contato." };
     } finally {
-      client.release();
+        client.release();
     }
 }
 
@@ -206,9 +206,9 @@ export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null
 }
 
 export async function createTag(
-    workspaceId: string, 
-    label: string, 
-    color: string, 
+    workspaceId: string,
+    label: string,
+    color: string,
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
@@ -219,7 +219,7 @@ export async function createTag(
     if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
         return { success: false, error: "Você não tem permissão para criar etiquetas." };
     }
-    
+
     const value = label.trim().toLowerCase().replace(/\s+/g, '_');
 
     try {
@@ -237,9 +237,9 @@ export async function createTag(
 
 
 export async function updateTag(
-    tagId: string, 
-    label: string, 
-    color: string, 
+    tagId: string,
+    label: string,
+    color: string,
     isCloseReason: boolean
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
@@ -254,7 +254,7 @@ export async function updateTag(
         if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para editar etiquetas." };
         }
-        
+
         const value = label.trim().toLowerCase().replace(/\s+/g, '_');
 
         await db.query(
@@ -329,7 +329,7 @@ export async function createCustomFieldDefinition(
     if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
         return { success: false, error: "Você não tem permissão para criar campos." };
     }
-    
+
     try {
         await db.query(
             'INSERT INTO custom_field_definitions (workspace_id, label, type, placeholder, options) VALUES ($1, $2, $3, $4, $5)',
@@ -401,7 +401,7 @@ export async function addActivityAction(
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const contactId = formData.get('contactId') as string;
-    
+
     // Tratamento especial para o formulário de tentativa de contato
     const outcome = formData.get('outcome') as string;
     let notes = formData.get('notes') as string;
@@ -421,20 +421,20 @@ export async function addActivityAction(
         date: new Date().toISOString(),
         user_id: user.id,
     };
-    
-    if(!contactId || !activity.type || !activity.notes) {
-        return { success: false, error: "Dados da atividade incompletos."}
+
+    if (!contactId || !activity.type || !activity.notes) {
+        return { success: false, error: "Dados da atividade incompletos." }
     }
 
     try {
         const contactRes = await db.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
-        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado."};
+        if (contactRes.rowCount === 0) return { success: false, error: "Contato não encontrado." };
         const { workspace_id } = contactRes.rows[0];
 
         if (!await hasPermission(user.id, workspace_id, 'crm:edit')) {
             return { success: false, error: "Você não tem permissão para adicionar atividades." };
         }
-        
+
         await db.query(
             'INSERT INTO activities (contact_id, user_id, type, notes, date) VALUES ($1, $2, $3, $4, $5)',
             [activity.contact_id, activity.user_id, activity.type, activity.notes, activity.date]
@@ -446,5 +446,101 @@ export async function addActivityAction(
     } catch (error) {
         console.error("[ADD_ACTIVITY] Error:", error);
         return { success: false, error: "Falha ao registrar atividade." };
+    }
+}
+
+export async function getContactStatistics(contactId: string): Promise<{
+    stats: {
+        totalChats: number;
+        totalNotes: number;
+        lastContactDate: string | null;
+        closeReasons: { tag: string; color: string; count: number }[];
+        activities: Activity[];
+    } | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { stats: null, error: "Usuário não autenticado." };
+
+    const client = await db.connect();
+    try {
+        const contactRes = await client.query('SELECT workspace_id FROM contacts WHERE id = $1', [contactId]);
+        if (contactRes.rowCount === 0) return { stats: null, error: "Contato não encontrado." };
+        const { workspace_id } = contactRes.rows[0];
+
+        if (!await hasPermission(user.id, workspace_id, 'crm:view')) {
+            return { stats: null, error: "Acesso não autorizado." };
+        }
+
+        // 1. Total Chats & Last Contact
+        const chatsRes = await client.query(`
+            SELECT 
+                COUNT(*) as total,
+                MAX(created_at) as last_contact
+            FROM chats 
+            WHERE contact_id = $1
+        `, [contactId]);
+
+        const totalChats = parseInt(chatsRes.rows[0].total || '0');
+        const lastContactDate = chatsRes.rows[0].last_contact;
+
+        // 2. Close Reasons Distribution
+        const reasonsRes = await client.query(`
+            SELECT 
+                t.label as tag,
+                t.color,
+                COUNT(*) as count
+            FROM chats c
+            JOIN tags t ON c.close_reason_tag_id = t.id
+            WHERE c.contact_id = $1 AND c.status = 'encerrados'
+            GROUP BY t.label, t.color
+            ORDER BY count DESC
+        `, [contactId]);
+
+        const closeReasons = reasonsRes.rows.map(r => ({
+            tag: r.tag,
+            color: r.color,
+            count: parseInt(r.count)
+        }));
+
+        // 3. Activities (Notes)
+        const activitiesRes = await client.query(`
+            SELECT 
+                a.*,
+                u.full_name as user_name,
+                u.avatar_url as user_avatar
+            FROM activities a
+            JOIN users u ON a.user_id = u.id
+            WHERE a.contact_id = $1
+            ORDER BY a.date DESC
+        `, [contactId]);
+
+        const activities: Activity[] = activitiesRes.rows.map(row => ({
+            id: row.id,
+            contact_id: row.contact_id,
+            type: row.type,
+            date: row.date,
+            notes: row.notes,
+            user_id: row.user_id,
+            user_name: row.user_name, // Adding these to the type locally for display
+            user_avatar: row.user_avatar
+        } as any));
+
+        return {
+            stats: {
+                totalChats,
+                totalNotes: activities.length,
+                lastContactDate,
+                closeReasons,
+                activities
+            }
+        };
+
+    } catch (error) {
+        console.error("[GET_CONTACT_STATS] Error:", error);
+        return { stats: null, error: "Falha ao buscar estatísticas." };
+    } finally {
+        client.release();
     }
 }

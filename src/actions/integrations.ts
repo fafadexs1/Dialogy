@@ -15,7 +15,25 @@ async function checkSuperAdmin(userId: string): Promise<boolean> {
 export async function getIntegrations(): Promise<{ integrations: Integration[] | null; error?: string }> {
     try {
         const result = await db.query('SELECT * FROM app_integrations ORDER BY name');
-        return { integrations: result.rows };
+        const integrations = result.rows;
+
+        // Inject Gemini integration if not present
+        if (!integrations.find((i: Integration) => i.tag === 'Gemini')) {
+            integrations.push({
+                id: 'gemini-integration',
+                name: 'Google Gemini',
+                description: 'Configure sua própria chave de API e escolha o modelo do Gemini para as Respostas Inteligentes.',
+                icon_url: 'https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg',
+                href: '/integrations/gemini',
+                status: 'active',
+                tag: 'Gemini',
+                tag_type: 'primary',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            } as Integration);
+        }
+
+        return { integrations };
     } catch (error: any) {
         console.error('[GET_INTEGRATIONS_ACTION]', error);
         return { integrations: null, error: 'Falha ao buscar integrações do banco de dados.' };
@@ -29,7 +47,7 @@ export async function updateIntegration(data: Integration): Promise<{ success: b
     if (!user || !await checkSuperAdmin(user.id)) {
         return { success: false, error: "Acesso não autorizado." };
     }
-    
+
     try {
         await db.query(
             `UPDATE app_integrations 
@@ -40,7 +58,7 @@ export async function updateIntegration(data: Integration): Promise<{ success: b
         revalidatePath('/integrations');
         revalidatePath('/superadmin/plans');
         return { success: true };
-    } catch(error: any) {
+    } catch (error: any) {
         console.error('[UPDATE_INTEGRATION_ACTION]', error);
         return { success: false, error: 'Falha ao atualizar a integração.' };
     }

@@ -147,6 +147,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [debugCounter, setDebugCounter] = useState(0);
+  const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
 
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
@@ -372,8 +373,11 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
           playNotificationSound('queue');
         } else if (chat.status === 'atendimentos') {
-          console.log('[NOTIFICATION] Unread increased for attending chat', chat.id, 'from', prev, 'to', current);
-          playNotificationSound('attending');
+          // Only play attending sound if the chat belongs to the current user
+          if (chat.agent?.id === initialUser?.id) {
+            console.log('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
+            playNotificationSound('attending');
+          }
         }
       }
       unreadCountsRef.current[chat.id] = current;
@@ -828,13 +832,17 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           tabId={tabIdRef.current}
           onLoadOlderMessages={loadOlderMessages}
           canLoadOlder={hasMoreHistory}
+          workspaceTimezone={workspaceTimezone}
+          onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
         />
-        <ContactPanel
-          chat={enrichedSelectedChat}
-          currentUser={initialUser}
-          onTransferSuccess={handleDataMutation}
-          onContactUpdate={handleDataMutation}
-        />
+        {isContactPanelOpen && (
+          <ContactPanel
+            chat={enrichedSelectedChat}
+            currentUser={initialUser}
+            onTransferSuccess={handleDataMutation}
+            onContactUpdate={handleDataMutation}
+          />
+        )}
       </div>
     </div>
   );

@@ -133,7 +133,7 @@ export default function TicketDetailPage({ params }: { params: { ticketId: strin
                                 <Avatar className="h-8 w-8 mt-1">
                                     {msg.sender === 'user' ? (
                                         <>
-                                            <AvatarImage src="" />
+                                            <AvatarImage src={undefined} />
                                             <AvatarFallback className="bg-blue-600 text-white">VC</AvatarFallback>
                                         </>
                                     ) : (
@@ -155,8 +155,8 @@ export default function TicketDetailPage({ params }: { params: { ticketId: strin
                                     </div>
                                     <div
                                         className={`p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === 'user'
-                                                ? 'bg-blue-600 text-white rounded-tr-none'
-                                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-tl-none'
+                                            ? 'bg-blue-600 text-white rounded-tr-none'
+                                            : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-tl-none'
                                             }`}
                                     >
                                         {msg.content}
