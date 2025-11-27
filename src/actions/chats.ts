@@ -542,7 +542,11 @@ export async function syncInboxData({
     error?: string;
 }> {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    // OPTIMIZATION: Use getSession() instead of getUser() for this high-frequency polling action.
+    // getUser() hits the DB/Auth server every time, while getSession() validates the JWT locally/lighter.
+    // Since middleware already refreshes the session, this is safe and much faster.
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user || !workspaceId) {
         return {
@@ -551,7 +555,22 @@ export async function syncInboxData({
             deltaMessages: [],
             lastSyncChats,
             lastSyncMessage: lastSyncMessages ?? null,
-            error: "Usu�rio ou workspace n�o encontrado.",
+            error: "Usuário ou workspace não encontrado.",
+        };
+    }
+
+    // SECURITY: Since we are using getSession() (which might be spoofed if not verified) 
+    // AND we are using a direct DB connection that bypasses RLS,
+    // we MUST explicitly verify that the user belongs to this workspace.
+    const isMember = await hasPermission(user.id, workspaceId, 'read');
+    if (!isMember) {
+        return {
+            deltaChats: [],
+            updatedContacts: [],
+            deltaMessages: [],
+            lastSyncChats,
+            lastSyncMessage: lastSyncMessages ?? null,
+            error: "Acesso negado ao workspace.",
         };
     }
 
@@ -626,7 +645,7 @@ export async function getChatMessagesWindow({
             lastSyncMessage: null,
             oldestMessageDate: null,
             hasMoreHistory: false,
-            error: "Usu�rio n�o autenticado.",
+            error: "Usuário não autenticado.",
         };
     }
 
@@ -638,7 +657,7 @@ export async function getChatMessagesWindow({
                 lastSyncMessage: null,
                 oldestMessageDate: null,
                 hasMoreHistory: false,
-                error: "Chat n�o encontrado.",
+                error: "Chat não encontrado.",
             };
         }
         const workspaceId = workspaceRes.rows[0].workspace_id as string;
