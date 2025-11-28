@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
+import { ensureServerHeartbeat } from '@/lib/observability/logger';
 
 import { getCurrentUser } from '@/actions/user';
 
@@ -12,6 +13,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  ensureServerHeartbeat();
   const user = await getCurrentUser();
 
   return (
