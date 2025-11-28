@@ -30,7 +30,7 @@ const nextConfig = {
     ],
     domains: ['localhost'],
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, dev }) => {
     // Evita que modulos nativos sejam empacotados para o cliente.
     if (!isServer) {
       config.resolve.fallback = {
@@ -39,6 +39,15 @@ const nextConfig = {
         fs: false,
       };
     }
+
+    // Fix for OneDrive/Windows file locking issues and "Big strings" warning
+    // Using memory cache avoids writing to the synced folder during dev
+    if (dev) {
+      config.cache = {
+        type: 'memory',
+      };
+    }
+
     return config;
   },
   async headers() {

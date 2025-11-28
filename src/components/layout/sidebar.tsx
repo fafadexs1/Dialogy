@@ -215,6 +215,17 @@ export function Sidebar({ user }: SidebarProps) {
                                         </DropdownMenuItem>
                                     </Link>
                                 ))}
+                                {user.is_superadmin && (
+                                    <>
+                                        <DropdownMenuSeparator className="bg-white/10" />
+                                        <Link href="/team/logs">
+                                            <DropdownMenuItem className="focus:bg-white/10 focus:text-white cursor-pointer">
+                                                <Monitor className="mr-2 h-4 w-4 text-blue-400" />
+                                                <span>Logs do Sistema</span>
+                                            </DropdownMenuItem>
+                                        </Link>
+                                    </>
+                                )}
                             </DropdownMenuContent>
                         </DropdownMenu>
 

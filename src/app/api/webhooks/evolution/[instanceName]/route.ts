@@ -35,6 +35,10 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
     return instanceRes.rows[0];
 }
 
+import { logAction } from '@/lib/observability/logger';
+
+// ... imports
+
 export async function POST(
     request: Request,
     { params }: { params: { instanceName: string } }
@@ -60,6 +64,32 @@ export async function POST(
         console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
         return NextResponse.json({ error: 'Event not found' }, { status: 400 });
     }
+
+    // Resolve workspace_id for logging
+    let workspaceId: string | null = null;
+    try {
+        const instanceRes = await db.query(
+            'SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1',
+            [instanceNameFromUrl]
+        );
+        workspaceId = instanceRes.rows[0]?.workspace_id || null;
+    } catch (err) {
+        console.error('[WEBHOOK] Failed to resolve workspace_id for logging', err);
+    }
+
+    // Log the incoming webhook event
+    await logAction({
+        action: 'webhook_received',
+        workspaceId,
+        payload: {
+            event,
+            instance: instanceNameFromUrl,
+            data_summary: payload.data ? 'Data present' : 'No data',
+            // We can log the full payload if needed, but it might be large. 
+            // For now, let's log the full payload as requested by the user.
+            full_payload: payload
+        }
+    });
 
     const jobId = randomUUID();
     const statsBefore = evolutionWebhookQueue.stats;
@@ -115,6 +145,9 @@ async function handleMessagesUpdate(payload: any) {
     const { keyId, status } = data;
 
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
+    if (status === 'READ' || status === 'PLAYED') {
+        console.log(`[WEBHOOK_MSG_VIEWED] Mensagem ${keyId} foi visualizada/reproduzida pelo contato.`);
+    }
 
     try {
         await db.query(
@@ -154,6 +187,9 @@ async function handleMessagesUpsert(payload: any) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
         return;
     }
+
+    // Log payload for incoming messages as requested
+    console.log('[WEBHOOK_MSG_UPSERT] Incoming Message Payload:', JSON.stringify(payload, null, 2));
 
     let content = '';
     let dbMessageType: Message['type'] = 'text';

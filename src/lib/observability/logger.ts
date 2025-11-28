@@ -1,4 +1,3 @@
-'use server';
 import 'server-only';
 
 import { supabaseAdmin } from '@/lib/supabase';
@@ -113,6 +112,8 @@ export function withDebug<T extends (...args: any[]) => any>(
 let heartbeatStarted = false;
 
 export function ensureServerHeartbeat() {
+  // Heartbeat disabled to reduce log noise
+  /*
   if (heartbeatStarted || typeof globalThis === 'undefined') {
     return;
   }
@@ -144,4 +145,5 @@ export function ensureServerHeartbeat() {
       console.error('[HEARTBEAT_LOGGER] heartbeat failed', err);
     });
   }, HEARTBEAT_INTERVAL_MS);
+  */
 }

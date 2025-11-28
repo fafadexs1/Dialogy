@@ -1,5 +1,4 @@
 
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -19,6 +18,7 @@ import {
     persistNormalizedMessage,
     type MetaChannelRecord,
 } from '@/services/meta/meta-channel.service';
+import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
 
 type MetaSendContext = {
@@ -26,7 +26,7 @@ type MetaSendContext = {
     platform: 'instagram' | 'messenger';
     externalUserId: string;
     externalChannelId: string | null;
-    chat: Pick<Chat, 'id' | 'workspace_id' | 'status'>;
+    chat: Pick<Chat, 'id' | 'workspace_id' | 'status'> & { contact_id: string };
     contact: Pick<Contact, 'id' | 'workspace_id' | 'name' | 'avatar_url'>;
     lastIncomingSender?: string | null;
 };
@@ -93,7 +93,7 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
         platform: row.platform,
         externalUserId: row.external_user_id || row.last_external_sender_id,
         externalChannelId: row.external_page_id || row.ig_business_id,
-        chat: { id: chatId, workspace_id: row.workspace_id, status: 'atendimentos' as Chat['status'] },
+        chat: { id: chatId, workspace_id: row.workspace_id, status: 'atendimentos' as Chat['status'], contact_id: row.contact_id },
         contact: {
             id: row.contact_id,
             workspace_id: row.contact_workspace_id,
@@ -240,7 +240,7 @@ async function internalSendMessage(
             ]
         );
 
-await client.query('COMMIT');
+        await client.query('COMMIT');
 
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
@@ -389,115 +389,127 @@ async function internalSendMedia(
 /**
  * Action specifically for sending messages from the UI (human agents).
  */
-export async function sendAgentMessageAction(
-    chatId: string,
-    content: string,
-    tabId: string | null
-): Promise<{ success: boolean; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
-
-    // Tenta Meta primeiro (Instagram/Messenger)
-    const client = await db.connect();
-    try {
-        const metaCtx = await resolveMetaSendContext(chatId, client);
-        if (metaCtx) {
-            try {
-                const service =
-                    metaCtx.platform === 'instagram'
-                        ? new InstagramMessagingService(metaCtx.channel)
-                        : new MessengerMessagingService(metaCtx.channel);
-
-                const apiResponse = await service.sendMessage({
-                    recipientId: metaCtx.externalUserId,
-                    type: 'text',
-                    text: content,
-                });
-
-                await persistNormalizedMessage({
-                    channel: metaCtx.channel,
-                    chat: metaCtx.chat,
-                    contact: metaCtx.contact,
-                    message: { type: 'text', content, metadata: {} },
-                    platform: metaCtx.platform,
-                    direction: 'outgoing',
-                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                    externalSenderId: metaCtx.externalUserId,
-                    externalChannelId: metaCtx.externalChannelId,
-                    rawPayload: { request: { content }, response: apiResponse },
-                    fromMe: true,
-                    senderUserId: user.id,
-                    senderSystemAgentId: null,
-                });
-                return { success: true };
-            } catch (metaErr) {
-                console.error('[SEND_AGENT_MESSAGE][META]', metaErr);
-                return { success: false, error: formatMetaSendError(metaErr) };
-            }
+export const sendAgentMessageAction = withDebug(
+    'send_agent_message',
+    async function sendAgentMessageAction(
+        chatId: string,
+        content: string,
+        tabId: string | null
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Usuário não autenticado.' };
         }
-    } catch (err) {
-        console.error('[SEND_AGENT_MESSAGE][META_CTX]', err);
-    } finally {
-        client.release();
-    }
 
-    return internalSendMessage(chatId, content, user.id, tabId);
-}
+        // Tenta Meta primeiro (Instagram/Messenger)
+        const client = await db.connect();
+        try {
+            const metaCtx = await resolveMetaSendContext(chatId, client);
+            if (metaCtx) {
+                try {
+                    const service =
+                        metaCtx.platform === 'instagram'
+                            ? new InstagramMessagingService(metaCtx.channel)
+                            : new MessengerMessagingService(metaCtx.channel);
+
+                    const apiResponse = await service.sendMessage({
+                        recipientId: metaCtx.externalUserId,
+                        type: 'text',
+                        text: content,
+                    });
+
+                    await persistNormalizedMessage({
+                        channel: metaCtx.channel,
+                        chat: metaCtx.chat,
+                        contact: metaCtx.contact,
+                        message: { type: 'text', content, metadata: {} },
+                        platform: metaCtx.platform,
+                        direction: 'outgoing',
+                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                        externalSenderId: metaCtx.externalUserId,
+                        externalChannelId: metaCtx.externalChannelId,
+                        rawPayload: { request: { content }, response: apiResponse },
+                        fromMe: true,
+                        senderUserId: user.id,
+                        senderSystemAgentId: null,
+                    });
+                    return { success: true };
+                } catch (metaErr) {
+                    console.error('[SEND_AGENT_MESSAGE][META]', metaErr);
+                    return { success: false, error: formatMetaSendError(metaErr) };
+                }
+            }
+        } catch (err) {
+            console.error('[SEND_AGENT_MESSAGE][META_CTX]', err);
+        } finally {
+            client.release();
+        }
+
+        return internalSendMessage(chatId, content, user.id, tabId);
+    },
+    {
+        contextResolver: (chatId, content) => ({ payload: { chatId, content } })
+    }
+);
 
 /**
  * Action specifically for sending internal notes.
  * These messages are NOT sent to WhatsApp.
  */
-export async function sendInternalNoteAction(
-    chatId: string,
-    content: string,
-    tabId: string | null
-): Promise<{ success: boolean; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
+export const sendInternalNoteAction = withDebug(
+    'send_internal_note',
+    async function sendInternalNoteAction(
+        chatId: string,
+        content: string,
+        tabId: string | null
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Usuário não autenticado.' };
+        }
 
-    const client = await db.connect();
-    try {
-        await client.query('BEGIN');
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
 
-        const chatInfoRes = await client.query(`
+            const chatInfoRes = await client.query(`
             SELECT workspace_id FROM chats WHERE id = $1
         `, [chatId]);
 
-        if (chatInfoRes.rowCount === 0) {
-            throw new Error('Chat não encontrado.');
-        }
+            if (chatInfoRes.rowCount === 0) {
+                throw new Error('Chat não encontrado.');
+            }
 
-        const { workspace_id: workspaceId } = chatInfoRes.rows[0];
+            const { workspace_id: workspaceId } = chatInfoRes.rows[0];
 
-        await client.query(
-            `INSERT INTO messages (
+            await client.query(
+                `INSERT INTO messages (
                 workspace_id, chat_id, type, content, from_me, 
                 api_message_status, metadata, is_read, sender_user_id, sent_by_tab
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [
-                workspaceId, chatId, 'text', content, true,
-                'internal', { isInternalNote: true }, true, user.id, tabId
-            ]
-        );
+                [
+                    workspaceId, chatId, 'text', content, true,
+                    'internal', { isInternalNote: true }, true, user.id, tabId
+                ]
+            );
 
-        await client.query('COMMIT');
-        return { success: true };
+            await client.query('COMMIT');
+            return { success: true };
 
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('[SEND_INTERNAL_NOTE] Erro:', error);
-        return { success: false, error: 'Falha ao salvar nota interna.' };
-    } finally {
-        client.release();
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[SEND_INTERNAL_NOTE] Erro:', error);
+            return { success: false, error: 'Falha ao salvar nota interna.' };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (chatId, content) => ({ payload: { chatId, content } })
     }
-}
+);
 
 /**
  * Action for sending automated messages.
@@ -565,77 +577,90 @@ export async function sendAutomatedMessageAction(
     );
 }
 
-export async function sendMediaAction(
-    chatId: string,
-    caption: string,
-    mediaFiles: {
-        base64: string;
-        mimetype: string;
-        filename: string;
-        mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string;
-    }[],
-    tabId: string | null
-): Promise<{ success: boolean; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return { success: false, error: 'Usuario nao autenticado.' };
-    }
-
-    // Meta first
-    const client = await db.connect();
-    try {
-        const metaCtx = await resolveMetaSendContext(chatId, client);
-        if (metaCtx) {
-            try {
-                const service = metaCtx.platform === 'instagram'
-                    ? new InstagramMessagingService(metaCtx.channel)
-                    : new MessengerMessagingService(metaCtx.channel);
-
-                for (const file of mediaFiles) {
-                    const apiResponse = await service.sendMessage({
-                        recipientId: metaCtx.externalUserId,
-                        type: file.mediatype === 'document' ? 'file' : file.mediatype,
-                        text: caption,
-                        mediaUrl: file.base64, // assume URL/base64 already handled upstream
-                    });
-
-                    await persistNormalizedMessage({
-                        channel: metaCtx.channel,
-                        chat: metaCtx.chat,
-                        contact: metaCtx.contact,
-                        message: {
-                            type: file.mediatype === 'document' ? 'document' : file.mediatype,
-                            content: caption,
-                            metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
-                            mediaUrl: file.base64,
-                        },
-                        platform: metaCtx.platform,
-                        direction: 'outgoing',
-                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                        externalSenderId: metaCtx.externalUserId,
-                        externalChannelId: metaCtx.externalChannelId,
-                        rawPayload: { request: { caption, file }, response: apiResponse },
-                        fromMe: true,
-                        senderUserId: user.id,
-                        senderSystemAgentId: null,
-                    });
-                }
-                return { success: true };
-            } catch (metaErr) {
-                console.error('[SEND_MEDIA][META]', metaErr);
-                return { success: false, error: formatMetaSendError(metaErr) };
-            }
+export const sendMediaAction = withDebug(
+    'send_media',
+    async function sendMediaAction(
+        chatId: string,
+        caption: string,
+        mediaFiles: {
+            base64: string;
+            mimetype: string;
+            filename: string;
+            mediatype: 'image' | 'video' | 'document' | 'audio';
+            thumbnail?: string;
+        }[],
+        tabId: string | null
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Usuario nao autenticado.' };
         }
-    } catch (err) {
-        console.error('[SEND_MEDIA][META_FALLBACK]', err);
-    } finally {
-        client.release();
-    }
 
-    return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId);
-}
+        // Meta first
+        const client = await db.connect();
+        try {
+            const metaCtx = await resolveMetaSendContext(chatId, client);
+            if (metaCtx) {
+                try {
+                    const service = metaCtx.platform === 'instagram'
+                        ? new InstagramMessagingService(metaCtx.channel)
+                        : new MessengerMessagingService(metaCtx.channel);
+
+                    for (const file of mediaFiles) {
+                        const apiResponse = await service.sendMessage({
+                            recipientId: metaCtx.externalUserId,
+                            type: file.mediatype === 'document' ? 'file' : file.mediatype,
+                            text: caption,
+                            mediaUrl: file.base64, // assume URL/base64 already handled upstream
+                        });
+
+                        await persistNormalizedMessage({
+                            channel: metaCtx.channel,
+                            chat: metaCtx.chat,
+                            contact: metaCtx.contact,
+                            message: {
+                                type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                                content: caption,
+                                metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                                mediaUrl: file.base64,
+                            },
+                            platform: metaCtx.platform,
+                            direction: 'outgoing',
+                            externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                            externalSenderId: metaCtx.externalUserId,
+                            externalChannelId: metaCtx.externalChannelId,
+                            rawPayload: { request: { caption, file }, response: apiResponse },
+                            fromMe: true,
+                            senderUserId: user.id,
+                            senderSystemAgentId: null,
+                        });
+                    }
+                    return { success: true };
+                } catch (metaErr) {
+                    console.error('[SEND_MEDIA][META]', metaErr);
+                    return { success: false, error: formatMetaSendError(metaErr) };
+                }
+            }
+        } catch (err) {
+            console.error('[SEND_MEDIA][META_FALLBACK]', err);
+        } finally {
+            client.release();
+        }
+
+        return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId);
+    },
+    {
+        contextResolver: (chatId, caption, mediaFiles) => ({
+            payload: {
+                chatId,
+                caption,
+                fileCount: mediaFiles?.length,
+                types: mediaFiles?.map(f => f.mediatype)
+            }
+        })
+    }
+);
 
 export async function sendAutomatedMediaAction(
     chatId: string,
@@ -699,100 +724,112 @@ export async function sendAutomatedMediaAction(
     return internalSendMedia(chatId, caption, mediaFiles, agentId, null, undefined, instanceName);
 }
 
-export async function startNewConversation(
-    input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }
-): Promise<{ success: boolean, error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+export const startNewConversation = withDebug(
+    'start_conversation',
+    async function startNewConversation(
+        input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }
+    ): Promise<{ success: boolean, error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
-    const senderId = user.id;
+        if (!user) {
+            return { success: false, error: 'Usuário não autenticado.' };
+        }
+        const senderId = user.id;
 
-    const { workspaceId, instanceName, phoneNumber, message, tabId } = input;
-    if (!workspaceId || !instanceName || !phoneNumber || !message) {
-        return { success: false, error: 'Todos os campos são obrigatórios.' };
-    }
-
-    const client = await db.connect();
-    try {
-        await client.query('BEGIN');
-
-        const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
-
-        // 1. Find or create the contact
-        let contactRes = await client.query(
-            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-            [workspaceId, fullJid]
-        );
-        let contactId;
-        if (contactRes.rowCount === 0) {
-            const newContactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
-                [workspaceId, phoneNumber, fullJid]
-            );
-            contactId = newContactRes.rows[0].id;
-        } else {
-            contactId = contactRes.rows[0].id;
+        const { workspaceId, instanceName, phoneNumber, message, tabId } = input;
+        if (!workspaceId || !instanceName || !phoneNumber || !message) {
+            return { success: false, error: 'Todos os campos são obrigatórios.' };
         }
 
-        // 2. Find or create the chat
-        let chatRes = await client.query(
-            `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
-            [workspaceId, contactId]
-        );
-        let chatId;
-        if (chatRes.rowCount > 0) {
-            chatId = chatRes.rows[0].id;
-        } else {
-            const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
-                [workspaceId, contactId, senderId]
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+
+            // 1. Find or create the contact
+            let contactRes = await client.query(
+                'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+                [workspaceId, fullJid]
             );
-            chatId = newChatRes.rows[0].id;
+            let contactId;
+            if (contactRes.rowCount === 0) {
+                const newContactRes = await client.query(
+                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
+                    [workspaceId, phoneNumber, fullJid]
+                );
+                contactId = newContactRes.rows[0].id;
+            } else {
+                contactId = contactRes.rows[0].id;
+            }
+
+            // 2. Find or create the chat
+            let chatRes = await client.query(
+                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
+                [workspaceId, contactId]
+            );
+            let chatId;
+            if (chatRes.rowCount && chatRes.rowCount > 0) {
+                chatId = chatRes.rows[0].id;
+            } else {
+                const newChatRes = await client.query(
+                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
+                    [workspaceId, contactId, senderId]
+                );
+                chatId = newChatRes.rows[0].id;
+            }
+
+            await client.query('COMMIT');
+
+            // 3. Send the message using the existing internal action
+            // We pass the instanceName directly to ensure it's used.
+            const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName);
+
+            if (sendResult.success) {
+                return { success: true };
+            } else {
+                return { success: false, error: sendResult.error };
+            }
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[START_NEW_CONVERSATION_ACTION] Erro:', error);
+            const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
+            return { success: false, error: `Falha ao iniciar conversa: ${errorMessage}` };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({ payload: { workspaceId: input.workspaceId, phoneNumber: input.phoneNumber } })
+    }
+);
+
+export const saveTranscriptionAction = withDebug(
+    'save_transcription',
+    async function saveTranscriptionAction(messageId: string, transcription: string): Promise<{ success: boolean; error?: string }> {
+        if (!messageId || !transcription) {
+            return { success: false, error: "ID da mensagem e transcrição são obrigatórios." };
         }
 
-        await client.query('COMMIT');
-
-        // 3. Send the message using the existing internal action
-        // We pass the instanceName directly to ensure it's used.
-        const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName);
-
-        if (sendResult.success) {
+        try {
+            const result = await db.query(
+                'UPDATE messages SET transcription = $1 WHERE id = $2',
+                [transcription, messageId]
+            );
+            if (result.rowCount === 0) {
+                return { success: false, error: "Mensagem não encontrada." };
+            }
+            // No longer needed with realtime
+            // revalidatePath('/', 'layout');
             return { success: true };
-        } else {
-            return { success: false, error: sendResult.error };
+        } catch (error: any) {
+            console.error("Erro ao salvar transcrição:", error);
+            return { success: false, error: "Falha no servidor ao salvar a transcrição." };
         }
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('[START_NEW_CONVERSATION_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
-        return { success: false, error: `Falha ao iniciar conversa: ${errorMessage}` };
-    } finally {
-        client.release();
+    },
+    {
+        contextResolver: (messageId) => ({ payload: { messageId } })
     }
-}
-
-export async function saveTranscriptionAction(messageId: string, transcription: string): Promise<{ success: boolean; error?: string }> {
-    if (!messageId || !transcription) {
-        return { success: false, error: "ID da mensagem e transcrição são obrigatórios." };
-    }
-
-    try {
-        const result = await db.query(
-            'UPDATE messages SET transcription = $1 WHERE id = $2',
-            [transcription, messageId]
-        );
-        if (result.rowCount === 0) {
-            return { success: false, error: "Mensagem não encontrada." };
-        }
-        // No longer needed with realtime
-        // revalidatePath('/', 'layout');
-        return { success: true };
-    } catch (error: any) {
-        console.error("Erro ao salvar transcrição:", error);
-        return { success: false, error: "Falha no servidor ao salvar a transcrição." };
-    }
-}
+);
