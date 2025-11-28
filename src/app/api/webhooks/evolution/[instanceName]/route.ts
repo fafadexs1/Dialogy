@@ -205,7 +205,7 @@ async function handleMessagesUpsert(payload: any) {
         ? locationDetails.name ||
         (locationDetails as any)?.address ||
         (hasNumericCoords
-            ? `Localização: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+            ? `Localização: ${latitude!.toFixed(5)}, ${longitude!.toFixed(5)}`
             : 'Localização enviada')
         : '';
 
@@ -277,7 +277,7 @@ async function handleMessagesUpsert(payload: any) {
             } else if (Array.isArray(rawLocationThumb)) {
                 locationThumbnail = `data:image/jpeg;base64,${Buffer.from(rawLocationThumb).toString('base64')}`;
             } else {
-                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(Object.values(rawLocationThumb)).toString('base64')}`;
+                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(Object.values(rawLocationThumb) as any[]).toString('base64')}`;
             }
         } catch (thumbErr) {
             console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail de localização:', thumbErr);
@@ -330,7 +330,7 @@ async function handleMessagesUpsert(payload: any) {
             'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
         );
 
-        if (contactRes.rowCount === 0) {
+        if ((contactRes.rowCount ?? 0) === 0) {
             console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)

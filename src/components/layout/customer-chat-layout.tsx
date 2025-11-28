@@ -809,7 +809,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         {IS_DEV && (
           <DraggableSoundTester
             debugCounter={debugCounter}
-            onPlay={(kind) => setDebugCounter((n) => n + 1) || playNotificationSound(kind)}
+            onPlay={(kind) => { setDebugCounter((n) => n + 1); playNotificationSound(kind); }}
           />
         )}
         <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />

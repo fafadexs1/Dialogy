@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server';
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
     const res = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
 }
 
 
@@ -27,18 +27,18 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         return { config: null, rules: null, agents: null, error: "Usuário não autenticado." };
     }
     const userId = user.id;
-    
+
     if (!await isWorkspaceMember(userId, workspaceId)) {
         return { config: null, rules: null, agents: null, error: "Acesso não autorizado." };
     }
 
     try {
         const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2 ORDER BY created_at', [workspaceId, userId]);
-        
+
         if (configRes.rowCount === 0) {
             return { config: null, rules: [], agents: [] };
         }
-        
+
         const agents = configRes.rows.map((row: any) => {
             const documentsRaw = row.knowledge_base_documents;
             const normalizedDocs: KnowledgeBaseDocument[] =
@@ -67,7 +67,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         }
 
         const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name', [selectedConfig.id]);
-        
+
         const rules = rulesRes.rows.map(r => ({
             ...r,
             action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action
@@ -77,7 +77,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
 
     } catch (error) {
         console.error(`[GET_AUTOPILOT_CONFIG] Erro ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);
-        return { config: null, rules: null, agents: null, error: 'Falha ao buscar configurações do banco de dados.'};
+        return { config: null, rules: null, agents: null, error: 'Falha ao buscar configurações do banco de dados.' };
     }
 }
 
@@ -98,7 +98,7 @@ export async function saveAutopilotConfig(
     if (!workspaceId) {
         return { success: false, error: 'ID de Workspace é obrigatório.' };
     }
-    
+
     if (!await isWorkspaceMember(userId, workspaceId)) {
         return { success: false, error: "Você não tem permissão para editar as configurações." };
     }
@@ -107,7 +107,7 @@ export async function saveAutopilotConfig(
     if (!configId) {
         return { success: false, error: 'Crie ou selecione um agente antes de salvar.' };
     }
-    
+
     try {
         const fieldsToUpdate: { [key: string]: any } = {};
         const setClauses: string[] = [];
@@ -151,7 +151,7 @@ export async function saveAutopilotConfig(
             setClauses.push(`default_fallback_reply = $${valueIndex++}`);
             values.push(formData.get('defaultFallbackReply') || null);
         }
-        
+
         if (setClauses.length === 0) {
             return { success: true }; // Nothing to update
         }
@@ -161,13 +161,13 @@ export async function saveAutopilotConfig(
             SET ${setClauses.join(', ')}, updated_at = NOW()
             WHERE workspace_id = $1 AND user_id = $2 AND id = $3
         `;
-        
+
         const result = await db.query(updateQuery, [workspaceId, userId, configId, ...values]);
-        
+
         if (result.rowCount === 0) {
             return { success: false, error: 'Agente não encontrado ou nenhuma alteração foi feita.' };
         }
-        
+
         revalidatePath('/autopilot');
         return { success: true };
 
@@ -232,7 +232,7 @@ export async function setPrimaryAutopilotAgent(agentId: string): Promise<{ succe
 }
 
 export async function saveAutopilotRule(
-    configId: string, 
+    configId: string,
     rule: Omit<NexusFlowInstance, 'enabled'>
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
@@ -243,7 +243,7 @@ export async function saveAutopilotRule(
         if (!configId || !rule.name || !rule.trigger || !rule.action) {
             return { success: false, error: 'Dados da regra incompletos.' };
         }
-        
+
         const actionJson = JSON.stringify(rule.action);
 
         if (rule.id) {
@@ -261,7 +261,7 @@ export async function saveAutopilotRule(
                 [configId, rule.name, rule.trigger, actionJson]
             );
         }
-        
+
         revalidatePath('/autopilot');
         return { success: true };
 
@@ -291,7 +291,7 @@ export async function toggleAutopilotRule(ruleId: string, enabled: boolean): Pro
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Não autenticado' };
-    
+
     try {
         await db.query('UPDATE autopilot_rules SET enabled = $1 WHERE id = $2', [enabled, ruleId]);
         revalidatePath('/autopilot');
@@ -333,10 +333,10 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { logs: null, error: "Usuário não autenticado." };
-    
+
     // We can assume if the user is fetching logs, they have access to the config.
     // A more robust check would verify ownership of the configId.
-    
+
     try {
         const res = await db.query(
             `SELECT flow_name, rule_name, model_name, total_tokens, created_at
@@ -352,5 +352,5 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
         return { logs: null, error: "Falha ao buscar o histórico de uso." };
     }
 }
-    
-    
+
+

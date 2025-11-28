@@ -103,7 +103,6 @@ interface ChatPanelProps {
     showFullHistory: boolean;
     setShowFullHistory: (show: boolean) => void;
     tabId: string;
-    tabId: string;
     onLoadOlderMessages: () => Promise<void> | void;
     canLoadOlder: boolean;
     workspaceTimezone: string;
@@ -1288,11 +1287,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 reasons={closeReasons}
                                 isOpen={isCloseDialogOpen}
                                 onOpenChange={setIsCloseDialogOpen}
-                                trigger={
-                                    <Button variant="ghost" size="icon" className="text-white/50 hover:text-red-400 hover:bg-red-500/10">
-                                        <XCircle className="h-4 w-4" />
-                                    </Button>
-                                }
                             />
                         )}
 

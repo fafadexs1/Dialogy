@@ -29,7 +29,7 @@ async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promis
             [teamId, workspaceId]
         );
 
-        return onlineAgentRes.rowCount > 0;
+        return (onlineAgentRes.rowCount ?? 0) > 0;
     } catch (error) {
         console.error('[AGENT_CHAT_TRANSFER_API] Erro ao validar agentes online da equipe:', error);
         return false;

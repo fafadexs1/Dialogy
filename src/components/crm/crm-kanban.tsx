@@ -186,7 +186,7 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                     // but we updated UI. This might revert on refresh.
                     // Ideally, we should create the tag if it doesn't exist.
                     // Let's skip auto-creation for now to avoid side effects and just warn.
-                    toast({ title: "Aviso", description: `Tag para fase '${destColumn.title}' não encontrada. Crie uma tag com valor '${newStageId}'.`, variant: "warning" });
+                    toast({ title: "Aviso", description: `Tag para fase '${destColumn.title}' não encontrada. Crie uma tag com valor '${newStageId}'.`, variant: "destructive" });
                     return;
                 }
 

@@ -13,7 +13,7 @@ async function getUserData(userId: string): Promise<User | null> {
   if (!userId) return null;
   try {
     const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
-    if (userRes.rowCount === 0) return null;
+    if ((userRes.rowCount ?? 0) === 0) return null;
 
     const dbUser = userRes.rows[0];
 

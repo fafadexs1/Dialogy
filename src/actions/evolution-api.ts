@@ -117,7 +117,7 @@ export async function createEvolutionApiInstance(
         );
 
         let newInstanceNumber = 1;
-        if (lastInstanceRes.rowCount > 0) {
+        if ((lastInstanceRes.rowCount ?? 0) > 0) {
             const lastInstanceName = lastInstanceRes.rows[0].instance_name;
             const lastNumber = parseInt(lastInstanceName.replace('zap', ''), 10);
             if (!isNaN(lastNumber)) {
@@ -128,37 +128,22 @@ export async function createEvolutionApiInstance(
         payload.instanceName = instanceName;
 
         // 3. Preparar o payload para a API da Evolution
+        // 3. Preparar o payload para a API da Evolution
         const webhookBaseUrl = process.env.NEXTAUTH_URL;
         if (!webhookBaseUrl) {
             throw new Error('A variável de ambiente NEXTAUTH_URL não está definida.');
         }
 
         const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
-        payload.webhook = {
-            ...payload.webhook,
-            url: webhookUrlForInstance,
-            enabled: true,
-        };
 
-        // Default events if none are provided
-        if (!payload.webhook.events || payload.webhook.events.length === 0) {
-            payload.webhook.events = [
-                'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'CONNECTION_UPDATE',
-                'MESSAGES_SET', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_DELETE',
-                'CONTACTS_SET', 'CONTACTS_UPSERT', 'CONTACTS_UPDATE',
-                'CHATS_SET', 'CHATS_UPSERT', 'CHATS_UPDATE', 'CHATS_DELETE',
-                'PRESENCE_UPDATE', 'GROUPS_UPSERT', 'GROUPS_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'
-            ];
-        }
-
-
-        // Remove campos vazios ou nulos do payload para não enviar para a API
-        Object.keys(payload).forEach(key => {
+        // Clean up payload
+        Object.keys(payload).forEach((key) => {
             const typedKey = key as keyof EvolutionInstanceCreationPayload;
             if (payload[typedKey] === undefined || payload[typedKey] === null || payload[typedKey] === '') {
                 delete payload[typedKey];
             }
-            if (typeof payload[typedKey] === 'object' && payload[typedKey] !== null && Object.keys(payload[typedKey]!).length === 0) {
+            // Use type assertion for object check to avoid TS errors
+            if (typeof payload[typedKey] === 'object' && payload[typedKey] !== null && Object.keys(payload[typedKey] as object).length === 0) {
                 delete payload[typedKey];
             }
         });

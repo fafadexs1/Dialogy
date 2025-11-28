@@ -582,7 +582,7 @@ export default function TeamPage() {
 
       if (membersData.error) throw new Error(membersData.error);
       // Cast to User[], as WorkspaceMember is a subset
-      setAllMembers(membersData.members as User[] || []);
+      setAllMembers(membersData.members as unknown as User[] || []);
 
       if (rolesData.error) throw new Error(rolesData.error);
       setRoles(rolesData.roles || []);

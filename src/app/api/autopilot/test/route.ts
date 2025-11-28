@@ -20,7 +20,7 @@ async function ensureMembership(userId: string, workspaceId: string): Promise<bo
     'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1',
     [userId, workspaceId],
   );
-  return res.rowCount > 0;
+  return (res.rowCount ?? 0) > 0;
 }
 
 export async function POST(request: Request) {

@@ -107,7 +107,7 @@ export async function dispatchMessageToWebhooks(
 
         const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
 
-        if (agents.rowCount === 0) {
+        if ((agents.rowCount ?? 0) === 0) {
             console.log(`[WEBHOOK_DISPATCHER] Nenhum agente ativo com webhook encontrado para o workspace ${chat.workspace_id}.`);
             return;
         }

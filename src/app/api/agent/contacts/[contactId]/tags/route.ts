@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 
 interface TagsPayload {
-  tagIds: string[];
+    tagIds: string[];
 }
 
 /**
@@ -50,7 +50,7 @@ export async function POST(
     { params }: { params: { contactId: string } }
 ) {
     const { contactId } = params;
-    
+
     const authResult = await authenticateAndValidate(request, contactId);
     if (authResult.error) {
         return NextResponse.json({ error: authResult.error }, { status: authResult.status });
@@ -64,10 +64,10 @@ export async function POST(
         if (!Array.isArray(tagIds) || tagIds.length === 0) {
             return NextResponse.json({ error: 'tagIds must be a non-empty array.' }, { status: 400 });
         }
-        
+
         // Check if all tags exist and belong to the same workspace
         const tagsRes = await db.query('SELECT id FROM tags WHERE id = ANY($1::uuid[]) AND workspace_id = $2', [tagIds, agent.workspace_id]);
-        if (tagsRes.rowCount !== tagIds.length) {
+        if ((tagsRes.rowCount ?? 0) !== tagIds.length) {
             return NextResponse.json({ error: 'One or more tags not found or do not belong to this workspace.' }, { status: 400 });
         }
 

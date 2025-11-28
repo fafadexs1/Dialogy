@@ -17,7 +17,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     // For now, let's assume if they are part of the workspace, they can manage campaigns.
     // Replace with a real permission like 'campaigns:manage' later.
     const memberCheck = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
-    return memberCheck.rowCount > 0;
+    return (memberCheck.rowCount ?? 0) > 0;
 }
 
 
@@ -105,7 +105,7 @@ export async function createCampaign(
                 [workspaceId, csvContact.phone_number_jid]
             );
 
-            if (existingContactRes.rowCount > 0) {
+            if ((existingContactRes.rowCount ?? 0) > 0) {
                 contactId = existingContactRes.rows[0].id;
             } else {
                 const newContactRes = await client.query(
@@ -178,7 +178,7 @@ async function startCampaignSending(campaignId: string) {
                 );
 
                 let chatId;
-                if (chatRes.rowCount > 0) {
+                if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
                 } else {
                     const newChatRes = await client.query(

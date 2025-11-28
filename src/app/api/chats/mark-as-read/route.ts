@@ -63,7 +63,7 @@ export async function POST(request: Request) {
                 [chatId]
             );
 
-            if (chatInfoRes.rowCount > 0) {
+            if ((chatInfoRes.rowCount ?? 0) > 0) {
                 const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
                 const messagesToMarkForApi = unreadMessages
                     .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))

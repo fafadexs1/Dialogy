@@ -19,8 +19,6 @@ import {
     MapPin,
     Calendar,
     Globe,
-    Calendar,
-    Globe,
     MessageSquarePlus,
     BarChart3
 } from 'lucide-react';
