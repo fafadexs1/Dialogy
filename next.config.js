@@ -2,6 +2,7 @@ require('dotenv').config();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   serverExternalPackages: ['genkit', '@genkit-ai/core', 'handlebars'],
   experimental: {
     serverActions: {
