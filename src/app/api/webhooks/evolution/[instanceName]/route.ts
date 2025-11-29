@@ -41,9 +41,9 @@ import { logAction } from '@/lib/observability/logger';
 
 export async function POST(
     request: Request,
-    { params }: { params: Promise<{ instanceName: string }> }
+    { params }: { params: { instanceName: string } }
 ) {
-    const { instanceName: instanceNameFromUrl } = await params;
+    const instanceNameFromUrl = params.instanceName;
     let payload: any;
 
     try {
@@ -380,9 +380,6 @@ async function handleMessagesUpsert(payload: any) {
 
         savedChat = chat;
         savedMessage = messageResult.rows[0];
-        if (savedMessage && savedChat) {
-            console.log(`[WEBHOOK_MSG_UPSERT] Mensagem inserida no DB com sucesso. ID: ${savedMessage.id}, ChatID: ${savedChat.id}, WorkspaceID: ${workspaceId}`);
-        }
 
     } catch (error) {
         await client.query('ROLLBACK');

@@ -4,20 +4,104 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
-import { type Chat, User, Tag } from '@/lib/types';
-import { getInitialChatsData, getChatMessagesWindow } from '@/actions/chats';
+import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
+import { getTags } from '@/actions/crm';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
-import { RealtimeProvider } from '../providers/realtime-provider';
+import ReactDOM from 'react-dom';
 
+// Notification sounds served from public assets
+const SOUND_SOURCES = {
+  queue: '/sounds/new-message.mp3',
+  attending: '/sounds/message-incoming-02-199577.mp3',
+} as const;
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+function DraggableSoundTester({
+  debugCounter,
+  onPlay,
+}: {
+  debugCounter: number;
+  onPlay: (kind: keyof typeof SOUND_SOURCES) => void;
+}) {
+  const [pos, setPos] = React.useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 16, y: 16 };
+    const saved = localStorage.getItem('soundTesterPos');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed;
+        }
+      } catch { /* ignore */ }
+    }
+    return { x: 16, y: 16 };
+  });
+
+  const dragData = React.useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const savePos = (next: { x: number; y: number }) => {
+    setPos(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soundTesterPos', JSON.stringify(next));
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragData.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: pos.x,
+      originY: pos.y,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    const dx = e.clientX - dragData.current.startX;
+    const dy = e.clientY - dragData.current.startY;
+    savePos({ x: Math.max(8, dragData.current.originX + dx), y: Math.max(8, dragData.current.originY + dy) });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    dragData.current = null;
+  };
+
+  return ReactDOM.createPortal(
+    <div
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md cursor-move"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <span>Som</span>
+      <Button size="sm" variant="outline" onClick={() => onPlay('queue')}>
+        Fila ({debugCounter})
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => onPlay('attending')}>
+        Atend. ({debugCounter})
+      </Button>
+    </div>,
+    document.body
+  );
+}
 
 function LoadingSkeleton() {
   return (
@@ -27,17 +111,31 @@ function LoadingSkeleton() {
         <Skeleton className="h-10 w-full bg-white/5" />
         <Skeleton className="h-10 w-full bg-white/5" />
         <div className="space-y-2 mt-4">
-          <Skeleton className="h-24 w-full bg-white/5" />
-        </div>
-        <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
           <Skeleton className="h-16 w-full bg-white/5" />
-          <Skeleton className="h-24 w-full bg-white/5" />
-          <Skeleton className="h-32 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-white/5" />
         </div>
+      </div>
+      <div className="flex-1 flex flex-col min-w-0 bg-transparent">
+        <Skeleton className="h-16 w-full bg-white/5" />
+        <div className="flex-1 p-6 space-y-4">
+          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+          <Skeleton className="h-10 w-1/2 bg-white/5" />
+          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+        </div>
+        <Skeleton className="h-24 w-full bg-white/5" />
+      </div>
+      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+        <Skeleton className="h-16 w-full bg-white/5" />
+        <Skeleton className="h-24 w-full bg-white/5" />
+        <Skeleton className="h-32 w-full bg-white/5" />
       </div>
     </div>
   );
 }
+
+
 
 export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
   const router = useRouter();
@@ -45,7 +143,10 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
+  const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
+  const [debugCounter, setDebugCounter] = useState(0);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
 
   const chats = useInboxStore((state) => state.chats);
@@ -55,13 +156,25 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
   const setInitialData = useInboxStore((state) => state.setInitialData);
   const setSelectedChatId = useInboxStore((state) => state.setSelectedChatId);
+  const upsertChats = useInboxStore((state) => state.upsertChats);
   const setMessagesForChat = useInboxStore((state) => state.setMessagesForChat);
+  const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
   const prependMessagesToChat = useInboxStore((state) => state.prependMessagesToChat);
   const updateChatContact = useInboxStore((state) => state.updateChatContact);
   const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
+  const incrementUnread = useInboxStore((state) => state.incrementUnread);
+  const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
 
   const selectedChatIdRef = useRef<string | null>(initialChatId);
+  const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
+    queue: null,
+    attending: null,
+  });
   const tabIdRef = useRef<string>('');
+  const audioUnlockRequestedRef = useRef(false);
+  const unreadCountsRef = useRef<Record<string, number>>({});
+  const unreadWatchInitializedRef = useRef(false);
+  const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
 
@@ -71,16 +184,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, []);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
-    // Safe UUID generation with fallback
-    if (typeof window.crypto?.randomUUID === 'function') {
-      tabIdRef.current = window.crypto.randomUUID();
-    } else {
-      tabIdRef.current = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-      });
-    }
+    tabIdRef.current = window.crypto.randomUUID();
+    console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
 
   useEffect(() => {
@@ -105,6 +210,227 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const currentChatMessages = selectedChatId ? messagesByChat[selectedChatId] || [] : [];
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
+
+  const formatMessageDay = useCallback((date: Date) => {
+    const zonedDate = toZonedTime(date, workspaceTimezone);
+    if (isToday(zonedDate)) return 'Hoje';
+    if (isYesterday(zonedDate)) return 'Ontem';
+    return formatDate(zonedDate, 'dd/MM/yyyy', { locale: ptBR });
+  }, [workspaceTimezone]);
+
+  const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {
+    const data = payload.new as any;
+    if (!data) return null;
+    try {
+      const createdAt = new Date(data.created_at);
+      const timestamp = formatInTimeZone(createdAt, workspaceTimezone, 'HH:mm', { locale: ptBR });
+      const formattedDate = formatMessageDay(createdAt);
+      let metadata;
+      if (data.metadata) {
+        metadata = typeof data.metadata === 'object' ? data.metadata : JSON.parse(data.metadata);
+      }
+      const chat = chats.find((c) => c.id === data.chat_id);
+      let sender = undefined;
+      if (data.from_me) {
+        if (chat?.agent) {
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url, type: 'user' } as const;
+        } else if (initialUser) {
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url, type: 'user' } as const;
+        }
+      } else if (chat?.contact) {
+        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url, type: 'contact' } as const;
+      }
+      return {
+        id: data.id,
+        chat_id: data.chat_id,
+        workspace_id: data.workspace_id,
+        content: data.content || '',
+        type: data.type,
+        status: data.content === 'Mensagem apagada' ? 'deleted' : 'default',
+        metadata,
+        transcription: data.transcription,
+        timestamp,
+        createdAt: createdAt.toISOString(),
+        updatedAt: data.updated_at ? new Date(data.updated_at).toISOString() : createdAt.toISOString(),
+        formattedDate,
+        sender,
+        instance_name: data.instance_name,
+        source_from_api: data.source_from_api,
+        api_message_status: data.api_message_status,
+        message_id_from_api: data.message_id_from_api,
+        from_me: data.from_me,
+        is_read: data.is_read,
+        sentByTab: data.sent_by_tab ?? null,
+      };
+    } catch (error) {
+      console.error('[REALTIME] Failed to parse payload', error);
+      return null;
+    }
+  }, [chats, formatMessageDay, workspaceTimezone, initialUser]);
+
+  const unlockAudio = useCallback(async () => {
+    const refs = [audioRefs.current.queue, audioRefs.current.attending];
+    let unlocked = false;
+    for (const audio of refs) {
+      if (!audio) continue;
+      try {
+        audio.muted = true;
+        audio.currentTime = 0;
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        unlocked = true;
+      } catch (err) {
+        console.warn('[NOTIFICATION] Audio unlock failed for one source, still blocked by browser', err);
+      }
+    }
+    setNeedsAudioUnlock(!unlocked);
+    if (unlocked) {
+      console.log('[NOTIFICATION] Audio unlocked by user gesture');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleGesture = () => {
+      unlockAudio();
+    };
+    window.addEventListener('pointerdown', handleGesture, { once: true });
+    window.addEventListener('keydown', handleGesture, { once: true });
+    window.addEventListener('touchstart', handleGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+      window.removeEventListener('touchstart', handleGesture);
+    };
+  }, [unlockAudio]);
+
+  useEffect(() => {
+    console.log('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
+  }, [needsAudioUnlock]);
+
+  const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
+    const readFlag = (key: string, fallback = true): boolean => {
+      const stored = localStorage.getItem(key);
+      if (stored === null) return fallback;
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return fallback;
+      }
+    };
+
+    const isGlobalEnabled = readFlag('notificationSoundEnabled', true);
+    const isQueueEnabled = readFlag('notificationSoundQueueEnabled', true);
+    const isAttendingEnabled = readFlag('notificationSoundAttendingEnabled', true);
+    const isSoundEnabled = isGlobalEnabled && (kind === 'queue' ? isQueueEnabled : isAttendingEnabled);
+
+    const audio = audioRefs.current[kind];
+    const src = SOUND_SOURCES[kind];
+    console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
+    if (!isSoundEnabled) return;
+
+    const tryPlay = async () => {
+      if (!audio) return;
+      audio.muted = false;
+      audio.volume = 1;
+      audio.currentTime = 0;
+      await audio.play();
+      console.log('[NOTIFICATION] Sound played successfully (ref)', kind);
+    };
+
+    tryPlay().catch(async (e) => {
+      console.error('[NOTIFICATION] Error playing notification sound (ref):', e);
+      if (e?.name === 'NotAllowedError' && !audioUnlockRequestedRef.current) {
+        setNeedsAudioUnlock(true);
+        audioUnlockRequestedRef.current = true;
+      }
+      try {
+        console.log('[NOTIFICATION] Trying fallback Audio() playback');
+        const fallback = new Audio(src);
+        fallback.volume = 1;
+        await fallback.play();
+        console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
+      } catch (fallbackError) {
+        console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!unreadWatchInitializedRef.current) {
+      unreadCountsRef.current = Object.fromEntries(chats.map((c) => [c.id, c.unreadCount || 0]));
+      unreadWatchInitializedRef.current = true;
+      return;
+    }
+
+    chats.forEach((chat) => {
+      const prev = unreadCountsRef.current[chat.id] ?? 0;
+      const current = chat.unreadCount || 0;
+      if (current > prev) {
+        if (chat.status === 'gerais') {
+          console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
+          playNotificationSound('queue');
+        } else if (chat.status === 'atendimentos') {
+          // Only play attending sound if the chat belongs to the current user
+          if (chat.agent?.id === initialUser?.id) {
+            console.log('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
+            playNotificationSound('attending');
+          }
+        }
+      }
+      unreadCountsRef.current[chat.id] = current;
+    });
+  }, [chats, playNotificationSound]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    (window as any).__playNotificationTest = (kind: keyof typeof SOUND_SOURCES = 'queue') => {
+      console.log('[NOTIFICATION] Manual test trigger', kind);
+      playNotificationSound(kind);
+    };
+    return () => {
+      delete (window as any).__playNotificationTest;
+    };
+  }, [playNotificationSound]);
+
+  const handleRealtimeMessage = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
+    const message = mapRealtimePayload(payload);
+    if (!message) return;
+
+    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
+
+    const messageChat = chats.find((chat) => chat.id === message.chat_id);
+    const isQueueMessage = messageChat?.status === 'gerais';
+    const isAttendingMessage = messageChat?.status === 'atendimentos';
+    const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+
+    appendMessagesToChat(message.chat_id, [message], message.updatedAt);
+    if (message.sentByTab && message.sentByTab === tabIdRef.current) {
+      removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab);
+    }
+
+    if (!messageChat && runDeltaSyncRef.current) {
+      runDeltaSyncRef.current();
+    }
+
+    if (!message.from_me) {
+      const shouldTrackUnread = message.chat_id !== selectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
+      if (shouldTrackUnread) {
+        incrementUnread(message.chat_id);
+      }
+
+      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== selectedChatId || isQueueMessage;
+      if (shouldPlay) {
+        if (isQueueMessage || !messageChat) {
+          playNotificationSound('queue');
+        } else if (isOwnAttending) {
+          playNotificationSound('attending');
+        }
+      }
+    }
+  }, [appendMessagesToChat, chats, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat, selectedChatId]);
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
     try {
@@ -186,7 +512,119 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath]);
 
-  // Mark as read logic
+  const runDeltaSync = useCallback(async () => {
+    if (!initialUser?.activeWorkspaceId) return;
+    const snapshot = useInboxStore.getState();
+    try {
+      const result = await syncInboxData({
+        workspaceId: initialUser.activeWorkspaceId,
+        lastSyncChats: snapshot.lastSyncChats,
+        chatId: snapshot.selectedChatId,
+        lastSyncMessages: snapshot.selectedChatId ? snapshot.lastSyncMessages[snapshot.selectedChatId] ?? null : null,
+      });
+      if (result.error) {
+        console.error('[SYNC_INBOX] Error:', result.error);
+        return;
+      }
+
+      // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
+      React.startTransition(() => {
+        upsertChats(result.deltaChats, result.lastSyncChats);
+        if (result.updatedContacts.length) {
+          result.updatedContacts.forEach((contact) => updateChatContact(contact));
+        }
+        if (result.deltaMessages.length && snapshot.selectedChatId) {
+          appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
+        }
+      });
+    } catch (error) {
+      console.error('[SYNC_INBOX] Unexpected error:', error);
+    }
+  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
+
+  useEffect(() => {
+    runDeltaSyncRef.current = runDeltaSync;
+  }, [runDeltaSync]);
+
+  const notifyPeers = useCallback(() => {
+    if (!broadcastChannel) return;
+    broadcastChannel.postMessage({ type: 'DELTA_SYNC', sourceTabId: tabIdRef.current });
+  }, [broadcastChannel]);
+
+  const handleDataMutation = useCallback(async () => {
+    await runDeltaSync();
+    notifyPeers();
+  }, [notifyPeers, runDeltaSync]);
+
+  useEffect(() => {
+    if (initialUser?.activeWorkspaceId) {
+      getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+        if (!tagsResult.error && tagsResult.tags) {
+          setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
+        }
+      });
+    }
+  }, [initialUser?.activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runDeltaSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
+  // Polling mechanism
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    let timeoutId: NodeJS.Timeout;
+    let isPolling = true;
+    let errorCount = 0;
+
+    const poll = async () => {
+      if (!isPolling) return;
+
+      // Only poll if the tab is visible to save resources/bandwidth
+      if (document.visibilityState === 'visible') {
+        try {
+          await runDeltaSync();
+          errorCount = 0; // Reset error count on success
+        } catch (error: any) {
+          console.error('[POLLING] Error in delta sync:', error);
+          errorCount++;
+
+          // If we hit too many errors, slow down significantly or stop
+          if (errorCount > 5) {
+            console.warn('[POLLING] Too many errors, slowing down polling.');
+            // Wait 10 seconds before next try if we are having issues
+            timeoutId = setTimeout(poll, 10000);
+            return;
+          }
+        }
+      }
+
+      if (isPolling) {
+        // Default interval 1s, but if we have a few errors, back off slightly
+        const interval = errorCount > 0 ? 2000 : 1000;
+        timeoutId = setTimeout(poll, interval);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    return () => {
+      isPolling = false;
+      clearTimeout(timeoutId);
+    };
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
   useEffect(() => {
     if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
     const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
@@ -204,6 +642,68 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
+  const realtimeChannelRef = useRef<any>(null);
+
+  // Ref to keep track of the latest handleRealtimeMessage without re-subscribing
+  const handleRealtimeMessageRef = useRef(handleRealtimeMessage);
+  useEffect(() => {
+    handleRealtimeMessageRef.current = handleRealtimeMessage;
+  }, [handleRealtimeMessage]);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    // We want a single subscription for the whole workspace to handle incoming messages for ALL chats
+    // This allows us to:
+    // 1. Play notifications for messages in other chats
+    // 2. Update unread counts for other chats
+    // 3. Update the message list if the chat is open
+
+    const channelName = `realtime-messages-workspace-${initialUser.activeWorkspaceId}`;
+
+    if (realtimeChannelRef.current && realtimeChannelRef.current.topic !== channelName) {
+      console.info(`[REALTIME] Removing old channel ${realtimeChannelRef.current.topic}`);
+      const supabase = createClient();
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
+
+    if (realtimeChannelRef.current) {
+      return; // Already subscribed to the correct channel
+    }
+
+    const supabase = createClient();
+    console.info(`[REALTIME] Subscribing to channel ${channelName}`);
+
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => handleRealtimeMessageRef.current(payload))
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => handleRealtimeMessageRef.current(payload))
+      .subscribe((status) => {
+        console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
+      });
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      if (realtimeChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up channel ${channelName}`);
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
+  }, [initialUser?.activeWorkspaceId]);
+
   useEffect(() => {
     if (initialUser) {
       initializeInbox();
@@ -212,7 +712,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [initialUser, initializeInbox]);
 
-  // Build mismatch check (kept as requested implicitly by not being part of polling removal)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!initialBuildIdRef.current) {
@@ -237,6 +736,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           window.location.reload();
         }
       } catch (err) {
+        // Ignore network errors; will retry on next interval.
         console.debug('[BUILD_ID] Check failed', err);
       }
     };
@@ -256,10 +756,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       selectedChatIdRef.current = selectedChatId;
     }
   }, [selectedChatId]);
-
-  const handleDataMutation = useCallback(() => {
-    console.log('[Layout] Data mutation occurred');
-  }, []);
 
   if (!initialUser) {
     return <LoadingSkeleton />;
@@ -285,7 +781,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           </Button>
         </Alert>
       </div>
-    );
+    )
   }
 
   const enrichedSelectedChat = selectedChat ? {
@@ -304,14 +800,20 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       </div>
 
       <div className="relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px]">
-        {initialUser.activeWorkspaceId && (
-          <RealtimeProvider
-            workspaceId={initialUser.activeWorkspaceId}
-            userId={initialUser.id}
-            workspaceTimezone={workspaceTimezone}
+        {needsAudioUnlock && (
+          <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
+            <span>Habilite o som de novas mensagens</span>
+            <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
+          </div>
+        )}
+        {IS_DEV && (
+          <DraggableSoundTester
+            debugCounter={debugCounter}
+            onPlay={(kind) => { setDebugCounter((n) => n + 1); playNotificationSound(kind); }}
           />
         )}
-
+        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
         <ChatList
           chats={chats}
           selectedChat={enrichedSelectedChat}

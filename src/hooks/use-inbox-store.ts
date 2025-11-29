@@ -31,8 +31,6 @@ type InboxState = {
   markChatAsRead: (chatId: string) => void;
   incrementUnread: (chatId: string) => void;
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
-  updateMessageStatus: (messageId: string, status: string) => void;
-  updateChatAssignment: (chatId: string, agentId: string | null, status?: Chat['status']) => void;
   reset: () => void;
 };
 
@@ -153,10 +151,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const chats = state.chats.map((chat) =>
         chat.id === chatId
           ? {
-            ...chat,
-            messages: latest ? [latest] : chat.messages,
-            updatedAt: latest?.createdAt || chat.updatedAt,
-          }
+              ...chat,
+              messages: latest ? [latest] : chat.messages,
+              updatedAt: latest?.createdAt || chat.updatedAt,
+            }
           : chat
       );
       return {
@@ -218,48 +216,6 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         },
       };
     });
-  },
-  updateMessageStatus: (messageId, status) => {
-    set((state) => {
-      const updates: MessagesRecord = {};
-      let updated = false;
-
-      // We need to find which chat contains this message. 
-      // Since we don't have a reverse map, we iterate. 
-      // Optimization: If we had chatId in the payload, it would be faster.
-      // Assuming payload might not have chatId, we search.
-      // Realtime payload for message_status usually has message_id.
-
-      for (const [chatId, messages] of Object.entries(state.messagesByChat)) {
-        const messageIndex = messages.findIndex((m) => m.id === messageId || m.message_id_from_api === messageId);
-        if (messageIndex !== -1) {
-          const newMessages = [...messages];
-          newMessages[messageIndex] = { ...newMessages[messageIndex], api_message_status: status, is_read: status === 'READ' || status === 'PLAYED' ? true : newMessages[messageIndex].is_read };
-          updates[chatId] = newMessages;
-          updated = true;
-          break; // Found it
-        }
-      }
-
-      if (!updated) return {};
-
-      return {
-        messagesByChat: { ...state.messagesByChat, ...updates },
-      };
-    });
-  },
-  updateChatAssignment: (chatId, agentId, status) => {
-    set((state) => ({
-      chats: state.chats.map((chat) =>
-        chat.id === chatId
-          ? {
-            ...chat,
-            agent: agentId ? { ...chat.agent, id: agentId } as any : undefined,
-            status: status || chat.status
-          }
-          : chat
-      ),
-    }));
   },
   reset: () =>
     set({
