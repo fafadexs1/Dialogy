@@ -25,6 +25,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 const daysOrder = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 const DEFAULT_BUSINESS_HOURS = {
@@ -529,7 +530,7 @@ function CreateTeamContent({ workspaceId, roles, onAddTeam, onCancel }: { worksp
 
 
 export default function TeamPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const user = useCurrentUser();
   const [teams, setTeams] = useState<Team[]>([]);
   const [allMembers, setAllMembers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -539,22 +540,6 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await fetch('/api/user');
-        if (res.ok) {
-          setUser(await res.json());
-        } else {
-          setLoading(false);
-        }
-      } catch (e) {
-        setLoading(false);
-      }
-    };
-    fetchUser();
-  }, []);
 
   const fetchData = React.useCallback(async () => {
     if (!user?.activeWorkspaceId) return;

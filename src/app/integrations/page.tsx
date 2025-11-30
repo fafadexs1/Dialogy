@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 function EditIntegrationDialog({ integration, onSave }: { integration: Integration, onSave: () => void }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -62,7 +63,7 @@ function EditIntegrationDialog({ integration, onSave }: { integration: Integrati
                             <Label htmlFor="icon_url">URL do Ícone</Label>
                             <Input id="icon_url" name="icon_url" value={formData.icon_url} onChange={handleInputChange} />
                         </div>
-                         <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="tag">Tag</Label>
                                 <Input id="tag" name="tag" value={formData.tag} onChange={handleInputChange} />
@@ -70,7 +71,7 @@ function EditIntegrationDialog({ integration, onSave }: { integration: Integrati
                             <div className="space-y-2">
                                 <Label htmlFor="tag_type">Tipo da Tag</Label>
                                 <Select name="tag_type" value={formData.tag_type} onValueChange={(val) => handleSelectChange('tag_type', val)}>
-                                    <SelectTrigger><SelectValue/></SelectTrigger>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="primary">Primária</SelectItem>
                                         <SelectItem value="secondary">Secundária</SelectItem>
@@ -83,8 +84,8 @@ function EditIntegrationDialog({ integration, onSave }: { integration: Integrati
                     <DialogFooter>
                         <DialogClose asChild><Button variant="ghost">Cancelar</Button></DialogClose>
                         <Button type="submit" disabled={isSubmitting}>
-                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
-                            <Save className="mr-2 h-4 w-4"/>
+                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            <Save className="mr-2 h-4 w-4" />
                             Salvar Alterações
                         </Button>
                     </DialogFooter>
@@ -95,29 +96,22 @@ function EditIntegrationDialog({ integration, onSave }: { integration: Integrati
 }
 
 export default function IntegrationsPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
     const [integrations, setIntegrations] = useState<Integration[]>([]);
     const [loading, setLoading] = useState(true);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [userRes, integrationsRes] = await Promise.all([
-                fetch('/api/user'),
-                getIntegrations()
-            ]);
-
-            if (userRes.ok) {
-                setUser(await userRes.json());
-            }
+            const integrationsRes = await getIntegrations();
 
             if (integrationsRes.integrations) {
                 setIntegrations(integrationsRes.integrations);
             } else {
-                toast({ title: 'Erro de Rede', description: 'Não foi possível carregar as integrações.', variant: 'destructive'});
+                toast({ title: 'Erro de Rede', description: 'Não foi possível carregar as configurações.', variant: 'destructive' });
             }
         } catch (error: any) {
-             toast({ title: 'Erro de Rede', description: 'Não foi possível se conectar ao servidor.', variant: 'destructive'});
+            toast({ title: 'Erro de Rede', description: 'Não foi possível se conectar ao servidor.', variant: 'destructive' });
         } finally {
             setLoading(false);
         }
@@ -128,10 +122,10 @@ export default function IntegrationsPage() {
     }, [fetchData]);
 
     if (loading || !user) {
-         return (
-              <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-              </div>
+        return (
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
         )
     }
 
@@ -153,9 +147,9 @@ export default function IntegrationsPage() {
                     </Card>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                        {integrations.map(integration => 
-                            <IntegrationCard 
-                                key={integration.id} 
+                        {integrations.map(integration =>
+                            <IntegrationCard
+                                key={integration.id}
                                 integration={integration}
                                 isSuperAdmin={user.is_superadmin}
                                 onEditSuccess={fetchData}

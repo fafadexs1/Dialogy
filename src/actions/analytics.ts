@@ -104,7 +104,8 @@ export async function getAnalyticsData(
         );
         const newContacts = parseInt(newContactsRes.rows[0].count, 10);
 
-        // Avg First Response Time (first agent message after first customer message)
+        // Avg Response Time (Message based)
+        // Calculate the time difference between a customer message (from_me = false) and the NEXT agent message (from_me = true)
         const avgParams: (string | number | null)[] = [workspaceId, dateRange.from, dateRange.to];
         let avgAgentFilter = '';
         let avgTeamFilter = '';
@@ -119,15 +120,24 @@ export async function getAnalyticsData(
         }
 
         const avgResponseQuery = `
+            WITH MessageDiffs AS (
+                SELECT
+                    m.chat_id,
+                    m.created_at,
+                    m.from_me,
+                    LEAD(m.created_at) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_created_at,
+                    LEAD(m.from_me) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_from_me
+                FROM messages m
+                JOIN chats c ON m.chat_id = c.id
+                WHERE c.workspace_id = $1
+                  AND m.created_at BETWEEN $2 AND $3
+                  ${avgAgentFilter}
+                  ${avgTeamFilter}
+            )
             SELECT
-                EXTRACT(EPOCH FROM AVG(c.closed_at - c.assigned_at)) AS avg_seconds
-            FROM chats c
-            WHERE c.workspace_id = $1
-              AND c.created_at BETWEEN $2 AND $3
-              AND c.closed_at IS NOT NULL
-              AND c.assigned_at IS NOT NULL
-              ${avgAgentFilter}
-              ${avgTeamFilter}
+                EXTRACT(EPOCH FROM AVG(next_created_at - created_at)) as avg_seconds
+            FROM MessageDiffs
+            WHERE from_me = false AND next_from_me = true
         `;
 
         const avgFirstResponseTimeRes = await db.query(avgResponseQuery, avgParams);
@@ -196,27 +206,54 @@ export async function getAgentPerformance(
             params.push(filters.teamId);
         }
 
+        // Complex query to get agent performance including message-based response time
+        // We need to join users -> chats -> messages
         const query = `
-            WITH chats_filtered AS (
-                SELECT c.*
+            WITH AgentStats AS (
+                SELECT
+                    c.agent_id,
+                    COUNT(DISTINCT c.id) as total_chats,
+                    COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'encerrados') as resolved_chats
                 FROM chats c
                 WHERE c.workspace_id = $1
                   AND c.created_at BETWEEN $2 AND $3
+                  AND c.agent_id IS NOT NULL
+                GROUP BY c.agent_id
+            ),
+            MessageResponseTimes AS (
+                SELECT
+                    sub.agent_id,
+                    AVG(EXTRACT(EPOCH FROM (next_created_at - created_at))) as avg_response_seconds
+                FROM (
+                    SELECT
+                        m.chat_id,
+                        c.agent_id,
+                        m.created_at,
+                        m.from_me,
+                        LEAD(m.created_at) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_created_at,
+                        LEAD(m.from_me) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_from_me
+                    FROM messages m
+                    JOIN chats c ON m.chat_id = c.id
+                    WHERE c.workspace_id = $1
+                      AND m.created_at BETWEEN $2 AND $3
+                      AND c.agent_id IS NOT NULL
+                ) sub
+                WHERE from_me = false AND next_from_me = true
+                GROUP BY sub.agent_id
             )
             SELECT
                 u.id AS agent_id,
                 u.full_name AS agent_name,
                 u.avatar_url,
-                COUNT(cf.id) AS total_chats,
-                COUNT(cf.id) FILTER (WHERE cf.status = 'encerrados') AS resolved_chats,
-                AVG(EXTRACT(EPOCH FROM (cf.closed_at - cf.assigned_at))) FILTER (WHERE cf.closed_at IS NOT NULL AND cf.assigned_at IS NOT NULL) AS avg_response_seconds
+                COALESCE(ast.total_chats, 0) as total_chats,
+                COALESCE(ast.resolved_chats, 0) as resolved_chats,
+                mrt.avg_response_seconds
             FROM users u
-            LEFT JOIN chats_filtered cf ON u.id = cf.agent_id
+            LEFT JOIN AgentStats ast ON u.id = ast.agent_id
+            LEFT JOIN MessageResponseTimes mrt ON u.id = mrt.agent_id
             ${teamJoin}
-            WHERE cf.id IS NOT NULL
+            WHERE (ast.total_chats > 0 OR mrt.avg_response_seconds IS NOT NULL)
             ${teamWhere}
-            GROUP BY u.id
-            HAVING COUNT(cf.id) > 0
             ORDER BY total_chats DESC;
         `;
 
@@ -226,7 +263,7 @@ export async function getAgentPerformance(
             const avgSeconds = parseFloat(row.avg_response_seconds);
             const formattedAvg = !Number.isNaN(avgSeconds)
                 ? `${Math.floor(avgSeconds / 60)}m ${Math.floor(avgSeconds % 60)}s`
-                : null;
+                : '0m 0s';
             return {
                 agent_id: row.agent_id,
                 agent_name: row.agent_name,

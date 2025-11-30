@@ -16,6 +16,7 @@ interface AudioPlayerProps {
     duration?: number;
     waveform?: number[];
     isFromMe?: boolean;
+    workspaceId: string;
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -25,7 +26,7 @@ const formatTime = (timeInSeconds: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe }: AudioPlayerProps) {
+export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe, workspaceId }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
@@ -81,7 +82,7 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
         }
         setIsTranscribing(true);
         try {
-            const result = await transcribeAudio({ audioUrl: src });
+            const result = await transcribeAudio({ audioUrl: src, workspaceId });
             if (result.transcription) {
                 setTranscription(result.transcription);
                 // Save to DB in the background if messageId exists

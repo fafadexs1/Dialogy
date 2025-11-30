@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { MetaChannel, User } from '@/lib/types';
 import { createMetaChannel, listMetaChannels, deleteMetaChannel } from '@/actions/meta-channels';
 import { Loader2, Trash2, Link2, RefreshCw, Wand2 } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 function useOrigin() {
   return useMemo(() => {
@@ -21,7 +22,7 @@ function useOrigin() {
 export default function MetaInstagramIntegrationPage() {
   const { toast } = useToast();
   const origin = useOrigin();
-  const [user, setUser] = useState<User | null>(null);
+  const user = useCurrentUser();
   const [channels, setChannels] = useState<MetaChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,14 +35,6 @@ export default function MetaInstagramIntegrationPage() {
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/instagram`;
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const res = await fetch('/api/user');
-      if (res.ok) setUser(await res.json());
-    };
-    fetchUser();
-  }, []);
 
   // Gera um verify_token único por canal/workspace (boa prática)
   const generateVerifyToken = () => {

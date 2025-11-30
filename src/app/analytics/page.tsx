@@ -48,6 +48,7 @@ import { getTeams } from '@/actions/teams';
 import type { AnalyticsData, AgentPerformance, Team } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 type TimeRange = 'last_30_days' | 'last_7_days' | 'today' | 'this_month';
 
@@ -140,7 +141,7 @@ const channelsData = [
 
 // Página Principal de Analytics
 export default function AnalyticsPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
     const [isPending, startTransition] = useTransition();
     const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
     const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
@@ -151,16 +152,6 @@ export default function AnalyticsPage() {
     const [timeRange, setTimeRange] = useState<TimeRange>('last_30_days');
     const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
     const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
-
-    useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                setUser(await res.json());
-            }
-        };
-        fetchUser();
-    }, []);
 
     const getDateRange = (range: TimeRange): { from: string, to: string } => {
         const now = new Date();

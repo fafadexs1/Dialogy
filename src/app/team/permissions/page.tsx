@@ -17,36 +17,37 @@ import { Label } from '@/components/ui/label';
 import { useFormStatus } from 'react-dom';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 // --- Dialog Forms ---
-function RoleFormButton({isEditing}: {isEditing: boolean}) {
+function RoleFormButton({ isEditing }: { isEditing: boolean }) {
     const { pending } = useFormStatus();
     return (
         <Button type="submit" disabled={pending}>
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4"/> 
+            <Save className="mr-2 h-4 w-4" />
             {isEditing ? 'Salvar Alterações' : 'Salvar Papel'}
         </Button>
     )
 }
 
-function RoleForm({ 
-    workspaceId, 
-    onSuccess, 
+function RoleForm({
+    workspaceId,
+    onSuccess,
     initialData,
     action,
-}: { 
-    workspaceId: string, 
+}: {
+    workspaceId: string,
     onSuccess: () => void,
     initialData?: Role | null,
     action: (prevState: any, formData: FormData) => Promise<{ success: boolean; error?: string; }>
@@ -92,13 +93,13 @@ function RoleForm({
 
 // --- Permissions Matrix Component ---
 
-function PermissionsMatrix({ 
-    initialRoles, 
+function PermissionsMatrix({
+    initialRoles,
     initialPermissions,
     workspaceId,
     onMutate
-}: { 
-    initialRoles: Role[], 
+}: {
+    initialRoles: Role[],
     initialPermissions: Permission[],
     workspaceId: string,
     onMutate: () => void;
@@ -128,10 +129,10 @@ function PermissionsMatrix({
             onMutate(); // Re-fetch to revert optimistic update
         }
     };
-    
+
     const handleDeleteRole = async (roleId: string) => {
         const result = await deleteRoleAction(roleId, workspaceId);
-         if (result.error) {
+        if (result.error) {
             toast({ title: "Erro ao Remover", description: result.error, variant: "destructive" });
         } else {
             toast({ title: "Sucesso!", description: "Papel removido com sucesso." });
@@ -139,7 +140,7 @@ function PermissionsMatrix({
         }
     }
 
-const permissionCategories = initialPermissions.reduce((acc, p) => {
+    const permissionCategories = initialPermissions.reduce((acc, p) => {
         if (!acc[p.category]) acc[p.category] = [];
         acc[p.category].push(p);
         return acc;
@@ -158,48 +159,48 @@ const permissionCategories = initialPermissions.reduce((acc, p) => {
                             <thead className="bg-muted/50">
                                 <tr className="[&_th]:h-12 [&_th]:px-4 [&_th]:text-left [&_th]:align-middle [&_th]:font-medium [&_th]:text-muted-foreground">
                                     <th className="sticky left-0 bg-muted/50 z-10 min-w-48">Permissão</th>
-                        {localRoles.map(role => (
+                                    {localRoles.map(role => (
                                         <th key={role.id} className="text-center min-w-48">
                                             <div className='flex items-center justify-center gap-2'>
                                                 {role.name}
                                                 {role.name !== 'Administrador' && (
-                                                <Dialog>
-                                                     <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="h-7 w-7"><Settings className="h-4 w-4"/></Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent>
-                                                            <DialogTrigger asChild>
-                                                                <DropdownMenuItem><Edit className="mr-2 h-4 w-4"/>Editar Papel</DropdownMenuItem>
-                                                            </DialogTrigger>
-                                                             <AlertDialog>
-                                                                <AlertDialogTrigger asChild>
-                                                                     <DropdownMenuItem className="text-destructive" onSelect={(e) => e.preventDefault()}>
-                                                                        <Trash2 className="mr-2 h-4 w-4"/>Remover Papel
-                                                                    </DropdownMenuItem>
-                                                                </AlertDialogTrigger>
-                                                                <AlertDialogContent>
-                                                                    <AlertDialogHeader>
-                                                                        <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                                                                        <AlertDialogDescription>
-                                                                            Esta ação não pode ser desfeita. Isso removerá permanentemente o papel "{role.name}".
-                                                                        </AlertDialogDescription>
-                                                                    </AlertDialogHeader>
-                                                                    <AlertDialogFooter>
-                                                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                                                        <AlertDialogAction onClick={() => handleDeleteRole(role.id)}>Remover</AlertDialogAction>
-                                                                    </AlertDialogFooter>
-                                                                </AlertDialogContent>
-                                                            </AlertDialog>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                    <DialogContent>
-                                                        <DialogHeader>
-                                                            <DialogTitle>Editar Papel: {role.name}</DialogTitle>
-                                                        </DialogHeader>
-                                                        <RoleForm workspaceId={workspaceId} onSuccess={onMutate} initialData={role} action={updateRoleAction} />
-                                                    </DialogContent>
-                                                </Dialog>
+                                                    <Dialog>
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <Button variant="ghost" size="icon" className="h-7 w-7"><Settings className="h-4 w-4" /></Button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent>
+                                                                <DialogTrigger asChild>
+                                                                    <DropdownMenuItem><Edit className="mr-2 h-4 w-4" />Editar Papel</DropdownMenuItem>
+                                                                </DialogTrigger>
+                                                                <AlertDialog>
+                                                                    <AlertDialogTrigger asChild>
+                                                                        <DropdownMenuItem className="text-destructive" onSelect={(e) => e.preventDefault()}>
+                                                                            <Trash2 className="mr-2 h-4 w-4" />Remover Papel
+                                                                        </DropdownMenuItem>
+                                                                    </AlertDialogTrigger>
+                                                                    <AlertDialogContent>
+                                                                        <AlertDialogHeader>
+                                                                            <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
+                                                                            <AlertDialogDescription>
+                                                                                Esta ação não pode ser desfeita. Isso removerá permanentemente o papel "{role.name}".
+                                                                            </AlertDialogDescription>
+                                                                        </AlertDialogHeader>
+                                                                        <AlertDialogFooter>
+                                                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                                                            <AlertDialogAction onClick={() => handleDeleteRole(role.id)}>Remover</AlertDialogAction>
+                                                                        </AlertDialogFooter>
+                                                                    </AlertDialogContent>
+                                                                </AlertDialog>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                        <DialogContent>
+                                                            <DialogHeader>
+                                                                <DialogTitle>Editar Papel: {role.name}</DialogTitle>
+                                                            </DialogHeader>
+                                                            <RoleForm workspaceId={workspaceId} onSuccess={onMutate} initialData={role} action={updateRoleAction} />
+                                                        </DialogContent>
+                                                    </Dialog>
                                                 )}
                                             </div>
                                         </th>
@@ -220,7 +221,7 @@ const permissionCategories = initialPermissions.reduce((acc, p) => {
                                                     <div className="font-medium">{permission.description}</div>
                                                     <div className="text-xs text-muted-foreground font-mono">{permission.id}</div>
                                                 </td>
-                            {localRoles.map(role => (
+                                                {localRoles.map(role => (
                                                     <td key={`${role.id}-${permission.id}`} className="text-center">
                                                         <Checkbox
                                                             checked={role.permissions.some(p => p.id === permission.id)}
@@ -246,7 +247,7 @@ const permissionCategories = initialPermissions.reduce((acc, p) => {
 
 // --- Main Page Component ---
 export default function PermissionsPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
     const [roles, setRoles] = useState<Role[]>([]);
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [loading, setLoading] = useState(true);
@@ -255,16 +256,10 @@ export default function PermissionsPage() {
     const [workspaceId, setWorkspaceId] = useState<string | undefined>();
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                const userData = await res.json();
-                setUser(userData);
-                setWorkspaceId(userData.activeWorkspaceId);
-            }
-        };
-        fetchUser();
-    }, []);
+        if (user) {
+            setWorkspaceId(user.activeWorkspaceId);
+        }
+    }, [user]);
 
     const fetchData = React.useCallback(async () => {
         if (!workspaceId) return;
@@ -294,7 +289,7 @@ export default function PermissionsPage() {
             fetchData();
         }
     }, [workspaceId, fetchData]);
-    
+
     const handleSuccess = () => {
         setIsCreateModalOpen(false);
         fetchData();
@@ -303,11 +298,11 @@ export default function PermissionsPage() {
     if (loading || !user) {
         return (
             <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         );
     }
-    
+
     return (
         <div className="flex flex-col flex-1 h-full">
             <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
@@ -315,9 +310,9 @@ export default function PermissionsPage() {
                     <h1 className="text-2xl font-bold flex items-center gap-2"><Fingerprint /> Papéis & Permissões</h1>
                     <p className="text-muted-foreground">Defina papéis e controle o que cada membro pode acessar e fazer no workspace.</p>
                 </div>
-                 <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+                <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
                     <DialogTrigger asChild>
-                       <Button>
+                        <Button>
                             <PlusCircle className="mr-2 h-4 w-4" />
                             Criar Novo Papel
                         </Button>
@@ -329,9 +324,9 @@ export default function PermissionsPage() {
                                 Defina um nome e descrição para o novo papel. Você poderá atribuir permissões na tela seguinte.
                             </DialogDescription>
                         </DialogHeader>
-                        {workspaceId && <RoleForm 
+                        {workspaceId && <RoleForm
                             workspaceId={workspaceId}
-                            onSuccess={handleSuccess} 
+                            onSuccess={handleSuccess}
                             action={createRoleAction}
                         />}
                     </DialogContent>
@@ -346,14 +341,14 @@ export default function PermissionsPage() {
                         <Button onClick={fetchData} className="mt-4">Tentar Novamente</Button>
                     </div>
                 ) : roles.length > 0 && permissions.length > 0 && workspaceId ? (
-                    <PermissionsMatrix 
-                        initialRoles={roles} 
-                        initialPermissions={permissions} 
+                    <PermissionsMatrix
+                        initialRoles={roles}
+                        initialPermissions={permissions}
                         workspaceId={workspaceId}
                         onMutate={fetchData}
                     />
                 ) : (
-                     <div className="text-center py-20">
+                    <div className="text-center py-20">
                         <h2 className="text-xl font-medium text-muted-foreground">Nenhum dado de permissão encontrado.</h2>
                         <p className="text-muted-foreground">Isso pode acontecer se o workspace não foi configurado corretamente.</p>
                     </div>

@@ -25,9 +25,9 @@ export const login = withDebug(
       return { success: false, message: 'Credenciais invalidas. Verifique seu e-mail e senha.' };
     }
 
-    if (redirectTo && redirectTo.startsWith('/')) {
-      return redirect(redirectTo);
-    }
+    // if (redirectTo && redirectTo.startsWith('/')) {
+    //   return redirect(redirectTo);
+    // }
     return redirect('/inbox');
   },
   {

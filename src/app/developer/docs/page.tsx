@@ -43,6 +43,13 @@ export default function DocsPage() {
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Contatos</Link>
                         </div>
                     </div>
+                    <div>
+                        <h3 className="text-sm font-semibold text-white/40 uppercase tracking-wider mb-4">Plataforma</h3>
+                        <div className="space-y-1">
+                            <Link href="/developer/docs/architecture" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Arquitetura</Link>
+                            <Link href="/developer/docs/load-balancing" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Balanceamento de Carga</Link>
+                        </div>
+                    </div>
                 </aside>
 
                 {/* Main Content */}

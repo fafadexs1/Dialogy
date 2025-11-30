@@ -43,6 +43,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 import { useFormStatus } from 'react-dom';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 function CopyButton({ textToCopy }: { textToCopy: string }) {
     const { toast } = useToast();
@@ -172,25 +173,12 @@ function MemberActions({ member, workspaceId, roles, onMutate }: { member: Works
 
 
 export default function ManageMembersPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const { toast } = useToast();
-
-    useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                setUser(await res.json());
-            } else {
-                setLoading(false);
-                setError("Falha ao carregar dados do usuário.");
-            }
-        };
-        fetchUser();
-    }, []);
 
     const fetchData = React.useCallback(async (workspaceId: string) => {
         if (!workspaceId) return;

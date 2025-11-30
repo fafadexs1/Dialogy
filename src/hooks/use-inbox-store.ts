@@ -13,6 +13,7 @@ type InboxState = {
   lastSyncMessages: TimestampRecord;
   oldestMessageDateByChat: TimestampRecord;
   hasMoreHistoryByChat: BooleanRecord;
+  hasMoreChats: boolean;
   setInitialData: (payload: {
     chats: Chat[];
     selectedChatId: string | null;
@@ -21,9 +22,12 @@ type InboxState = {
     lastSyncMessageForSelected: string | null;
     oldestMessageDate: string | null;
     hasMoreHistory: boolean;
+    hasMoreChats: boolean;
   }) => void;
   setSelectedChatId: (chatId: string | null) => void;
   upsertChats: (chats: Chat[], lastSyncChats?: string | null) => void;
+  appendChats: (chats: Chat[]) => void;
+  setHasMoreChats: (hasMore: boolean) => void;
   updateChatContact: (contact: Contact) => void;
   setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, hasMoreHistory?: boolean) => void;
   appendMessagesToChat: (chatId: string, messages: Message[], lastSync?: string | null) => void;
@@ -42,6 +46,7 @@ const baseState = {
   lastSyncMessages: {} as TimestampRecord,
   oldestMessageDateByChat: {} as TimestampRecord,
   hasMoreHistoryByChat: {} as BooleanRecord,
+  hasMoreChats: false,
 };
 
 const getChatSortValue = (chat: Chat): number => {
@@ -65,6 +70,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     lastSyncMessageForSelected,
     oldestMessageDate,
     hasMoreHistory,
+    hasMoreChats,
   }) => {
     set({
       chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
@@ -74,6 +80,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       lastSyncMessages: selectedChatId ? { [selectedChatId]: lastSyncMessageForSelected ?? null } : {},
       oldestMessageDateByChat: selectedChatId ? { [selectedChatId]: oldestMessageDate ?? null } : {},
       hasMoreHistoryByChat: selectedChatId ? { [selectedChatId]: hasMoreHistory } : {},
+      hasMoreChats,
     });
   },
   setSelectedChatId: (chatId) => set({ selectedChatId: chatId }),
@@ -110,6 +117,23 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       };
     });
   },
+  appendChats: (incomingChats) => {
+    if (!incomingChats.length) return;
+    set((state) => {
+      const chatMap = new Map<string, Chat>();
+      state.chats.forEach((chat) => chatMap.set(chat.id, chat));
+      incomingChats.forEach((chat) => {
+        if (!chatMap.has(chat.id)) {
+          chatMap.set(chat.id, chat);
+        }
+      });
+      const nextChats = Array.from(chatMap.values()).sort(
+        (a, b) => getChatSortValue(b) - getChatSortValue(a)
+      );
+      return { chats: nextChats };
+    });
+  },
+  setHasMoreChats: (hasMore) => set({ hasMoreChats: hasMore }),
   updateChatContact: (contact) => {
     set((state) => ({
       chats: state.chats.map((chat) =>
@@ -151,10 +175,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const chats = state.chats.map((chat) =>
         chat.id === chatId
           ? {
-              ...chat,
-              messages: latest ? [latest] : chat.messages,
-              updatedAt: latest?.createdAt || chat.updatedAt,
-            }
+            ...chat,
+            messages: latest ? [latest] : chat.messages,
+            updatedAt: latest?.createdAt || chat.updatedAt,
+          }
           : chat
       );
       return {

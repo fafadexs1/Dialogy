@@ -9,25 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Mail, UserPlus, Send } from 'lucide-react';
 import type { User } from '@/lib/types';
 import { useEffect, useState } from 'react';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 
 export default function InviteMemberPage() {
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
 
-    useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                setUser(await res.json());
-            }
-        };
-        fetchUser();
-    }, []);
-    
     if (!user) {
         return (
             <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
@@ -52,7 +43,7 @@ export default function InviteMemberPage() {
                                 <Input id="email" type="email" placeholder="nome@empresa.com" className="pl-10" />
                             </div>
                         </div>
-                         <div className="space-y-2">
+                        <div className="space-y-2">
                             <Label htmlFor="role">Função (Role)</Label>
                             <Select defaultValue="membro">
                                 <SelectTrigger id="role">

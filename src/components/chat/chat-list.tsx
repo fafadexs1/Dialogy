@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -397,6 +397,13 @@ interface ChatListProps {
   onUpdate: () => void;
 }
 
+import { useInboxStore } from '@/hooks/use-inbox-store';
+import { loadMoreChatsAction, getInitialChatsData } from '@/actions/chats';
+
+// ... existing imports ...
+
+// ... existing components ...
+
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
   const onlineAgents = usePresence();
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
@@ -406,6 +413,52 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
+
+  const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
+  const appendChats = useInboxStore((state) => state.appendChats);
+  const setInitialData = useInboxStore((state) => state.setInitialData);
+  const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
+
+  const isFirstRun = React.useRef(true);
+  const selectedChatIdRef = React.useRef(selectedChat?.id);
+
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChat?.id;
+  }, [selectedChat?.id]);
+
+  useEffect(() => {
+    if (isFirstRun.current) {
+      isFirstRun.current = false;
+      return;
+    }
+
+    const fetchFilteredChats = async () => {
+      if (!currentUser.activeWorkspaceId) return;
+      setIsFiltering(true);
+      try {
+        const data = await getInitialChatsData({
+          workspaceId: currentUser.activeWorkspaceId,
+          selectedChatId: selectedChatIdRef.current || null,
+          ownership: ownershipFilter
+        });
+
+        if (data.error) {
+          toast({ title: 'Erro ao filtrar', description: data.error, variant: 'destructive' });
+        } else {
+          setInitialData(data);
+        }
+      } catch (err) {
+        console.error(err);
+        toast({ title: 'Erro ao filtrar', description: 'Falha ao buscar conversas.', variant: 'destructive' });
+      } finally {
+        setIsFiltering(false);
+      }
+    };
+
+    fetchFilteredChats();
+  }, [ownershipFilter, currentUser.activeWorkspaceId, setInitialData]);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -448,6 +501,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         statusFilter === 'all' ||
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
 
+      // Client-side ownership filter is now redundant if server filters correctly, 
+      // but we keep it for safety or if mixed data is present.
+      // Actually, if we fetch 'everyone', we might want to filter 'mine' on client?
+      // No, if we fetch 'everyone', we want to see everyone.
+      // If we fetch 'mine', we want to see mine.
+      // So this filter should match the server state.
+
       const matchesOwner =
         ownershipFilter === 'everyone' ||
         chat.agent?.id === currentUser.id ||
@@ -472,6 +532,39 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const filteredChats = useMemo(() => {
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls]);
+
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !currentUser.activeWorkspaceId) return;
+    setIsLoadingMore(true);
+
+    let oldestDate: string | null = null;
+    if (chats.length > 0) {
+      const dates = chats.map(c => c.updatedAt ? new Date(c.updatedAt).getTime() : 0).filter(t => t > 0);
+      if (dates.length > 0) {
+        const minDate = Math.min(...dates);
+        oldestDate = new Date(minDate).toISOString();
+      }
+    }
+
+    if (!oldestDate) {
+      setIsLoadingMore(false);
+      return;
+    }
+
+    const result = await loadMoreChatsAction({
+      workspaceId: currentUser.activeWorkspaceId,
+      limit: 20,
+      before: oldestDate,
+      ownership: ownershipFilter
+    });
+
+    if (result.chats) {
+      appendChats(result.chats);
+      setHasMoreChats(result.hasMoreChats);
+    }
+
+    setIsLoadingMore(false);
+  };
 
   return (
     <div className="flex h-full w-[clamp(320px,24vw,400px)] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl min-h-0 lg:w-[clamp(330px,26vw,420px)]">
@@ -655,16 +748,36 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       <ScrollArea className="flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <div className="space-y-1 p-2">
           {filteredChats.length > 0 ? (
-            filteredChats.map((chat) => (
-              <ChatListItem
-                key={chat.id}
-                chat={chat}
-                isSelected={selectedChat?.id === chat.id}
-                onSelect={setSelectedChat}
-                onUpdate={onUpdate}
-                currentUser={currentUser}
-              />
-            ))
+            <>
+              {filteredChats.map((chat) => (
+                <ChatListItem
+                  key={chat.id}
+                  chat={chat}
+                  isSelected={selectedChat?.id === chat.id}
+                  onSelect={setSelectedChat}
+                  onUpdate={onUpdate}
+                  currentUser={currentUser}
+                />
+              ))}
+              {hasMoreChats && activeTab === 'encerrados' && (
+                <div className="p-2 flex justify-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleLoadMore}
+                    disabled={isLoadingMore}
+                    className="text-muted-foreground hover:text-white"
+                  >
+                    {isLoadingMore ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Carregar mais conversas
+                  </Button>
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
               {activeTab === 'atendimentos' ? (
@@ -692,11 +805,30 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       />
                     </div>
                   )}
+
                 </>
               ) : (
                 <>
                   <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
                   <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
+                  {hasMoreChats && activeTab === 'encerrados' && (
+                    <div className="pt-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleLoadMore}
+                        disabled={isLoadingMore}
+                        className="text-muted-foreground hover:text-white"
+                      >
+                        {isLoadingMore ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Carregar mais conversas
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
             </div>

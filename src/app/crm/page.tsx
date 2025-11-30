@@ -9,22 +9,13 @@ import { useEffect, useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getContacts, getTags } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 export default function CrmPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const user = useCurrentUser();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const res = await fetch('/api/user');
-      if (res.ok) {
-        setUser(await res.json());
-      }
-    };
-    fetchUser();
-  }, []);
 
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;

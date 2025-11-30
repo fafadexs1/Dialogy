@@ -297,7 +297,7 @@ function LocationMessage({ message }: { message: Message }) {
 }
 
 
-function MediaMessage({ message }: { message: Message }) {
+function MediaMessage({ message, workspaceId }: { message: Message, workspaceId: string }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
     // Fallback for mimetype using message.type if available
@@ -364,6 +364,7 @@ function MediaMessage({ message }: { message: Message }) {
                 duration={duration}
                 waveform={waveform}
                 isFromMe={Boolean(message.from_me)}
+                workspaceId={workspaceId}
             />;
         }
 
@@ -1051,7 +1052,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         );
 
         if (isMediaType || hasMediaAttachment) {
-            return <MediaMessage message={message} />;
+            return <MediaMessage message={message} workspaceId={currentUser.activeWorkspaceId || ''} />;
         }
 
         if (!message.content?.trim()) {
@@ -1360,7 +1361,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     {mediaFiles.length > 0 && (
                         <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
                     )}
-                    {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
+                    {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
                         <SmartReplies
                             customerMessage={lastCustomerMessage?.content || ''}
                             chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
@@ -1370,7 +1371,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 if (contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
                             }}
                         />
-                    )}
+                    )} */}
                     <div className="space-y-4">
                         <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                             <input type="hidden" name="chatId" value={chat.id} />

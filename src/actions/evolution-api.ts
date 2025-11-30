@@ -136,6 +136,46 @@ export async function createEvolutionApiInstance(
 
         const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
 
+        // Ensure webhook object exists and set the URL
+        if (!payload.webhook) {
+            payload.webhook = {};
+        }
+        payload.webhook.url = webhookUrlForInstance;
+        payload.webhook.events = [
+            "APPLICATION_STARTUP",
+            "QRCODE_UPDATED",
+            "MESSAGES_SET",
+            "MESSAGES_UPSERT",
+            "MESSAGES_EDITED",
+            "MESSAGES_UPDATE",
+            "MESSAGES_DELETE",
+            "SEND_MESSAGE",
+            "SEND_MESSAGE_UPDATE",
+            "CONTACTS_SET",
+            "CONTACTS_UPSERT",
+            "CONTACTS_UPDATE",
+            "PRESENCE_UPDATE",
+            "CHATS_SET",
+            "CHATS_UPSERT",
+            "CHATS_UPDATE",
+            "CHATS_DELETE",
+            "GROUPS_UPSERT",
+            "GROUP_UPDATE",
+            "GROUP_PARTICIPANTS_UPDATE",
+            "CONNECTION_UPDATE",
+            "LABELS_EDIT",
+            "LABELS_ASSOCIATION",
+            "CALL",
+            "TYPEBOT_START",
+            "TYPEBOT_CHANGE_STATUS",
+            "REMOVE_INSTANCE",
+            "LOGOUT_INSTANCE",
+            "INSTANCE_CREATE",
+            "INSTANCE_DELETE",
+            "STATUS_INSTANCE"
+        ];
+        payload.webhook.byEvents = false;
+
         // Clean up payload
         Object.keys(payload).forEach((key) => {
             const typedKey = key as keyof EvolutionInstanceCreationPayload;

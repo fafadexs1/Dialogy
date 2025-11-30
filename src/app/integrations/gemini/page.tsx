@@ -12,6 +12,7 @@ import { Loader2, Save, ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { getAutopilotConfig, saveAutopilotConfig, createAutopilotAgent } from '@/actions/autopilot';
 import type { AutopilotConfig } from '@/lib/types';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 const GEMINI_MODELS = [
     { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash (Experimental)' },
@@ -22,6 +23,7 @@ const GEMINI_MODELS = [
 ];
 
 export default function GeminiIntegrationPage() {
+    const user = useCurrentUser();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [config, setConfig] = useState<AutopilotConfig | null>(null);
@@ -31,15 +33,9 @@ export default function GeminiIntegrationPage() {
 
     useEffect(() => {
         async function loadConfig() {
+            if (!user?.activeWorkspaceId) return;
+
             try {
-                const userRes = await fetch('/api/user');
-                if (!userRes.ok) throw new Error('Falha ao carregar usuário');
-                const user = await userRes.json();
-
-                if (!user.activeWorkspaceId) {
-                    throw new Error('Nenhum workspace ativo encontrado.');
-                }
-
                 const res = await getAutopilotConfig(user.activeWorkspaceId);
 
                 if (res.config) {
@@ -75,7 +71,7 @@ export default function GeminiIntegrationPage() {
         }
 
         loadConfig();
-    }, []);
+    }, [user?.activeWorkspaceId]);
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();

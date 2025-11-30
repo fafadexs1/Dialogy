@@ -7,23 +7,30 @@ import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
 import { BuildVersionWatcher } from '@/components/layout/build-version-watcher';
 import type { User } from '@/lib/types';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
+  const user = useCurrentUser();
 
-  useEffect(() => {
-    // We only fetch the user if they are not on a public-facing page
-    if (!['/login', '/register', '/setup', '/'].includes(pathname)) {
-      fetch('/api/user')
-        .then(res => res.ok ? res.json() : null)
-        .then(setUser);
-    }
-  }, [pathname]);
+  const noSidebarPrefixes = [
+    '/login',
+    '/register',
+    '/setup',
+    '/creators',
+    '/developer',
+    '/forgot-password',
+    '/reset-password',
+    '/join',
+    '/privacy',
+    '/terms',
+    '/support'
+  ];
 
-  const noSidebarRoutes = ['/login', '/register', '/setup', '/'];
-  const shouldShowSidebar = user && !noSidebarRoutes.includes(pathname);
+  const isRoot = pathname === '/';
+  const isNoSidebarRoute = noSidebarPrefixes.some(prefix => pathname.startsWith(prefix));
+  const shouldShowSidebar = user && !isRoot && !isNoSidebarRoute;
   const transitionKey = pathname.split('?')[0];
 
   return (

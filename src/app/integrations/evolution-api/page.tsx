@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
@@ -472,7 +473,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 
         const setupPolling = (currentStatus: EvolutionInstance['status']) => {
             if (intervalId) clearInterval(intervalId); // Clear previous interval
-            const intervalTime = currentStatus === 'pending' ? 2000 : 15000;
+            const intervalTime = currentStatus === 'pending' ? 3000 : 15000;
             intervalId = setInterval(checkStatus, intervalTime);
         };
 
@@ -595,7 +596,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
 
 export default function EvolutionApiPage() {
     const { toast } = useToast();
-    const [user, setUser] = useState<User | null>(null);
+    const user = useCurrentUser();
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -619,16 +620,6 @@ export default function EvolutionApiPage() {
         }
         setLoading(false);
     }, [toast, user?.activeWorkspaceId]);
-
-    useEffect(() => {
-        const fetchUser = async () => {
-            const res = await fetch('/api/user');
-            if (res.ok) {
-                setUser(await res.json());
-            }
-        };
-        fetchUser();
-    }, []);
 
     useEffect(() => {
         if (user) {

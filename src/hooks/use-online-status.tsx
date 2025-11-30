@@ -5,11 +5,18 @@
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
 import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
+import { usePathname } from 'next/navigation';
 
-const PresenceContext = createContext<OnlineAgent[]>([]);
+const PresenceContext = createContext<{ onlineAgents: OnlineAgent[], currentUser: User | null }>({ onlineAgents: [], currentUser: null });
 
 export const usePresence = () => {
-  return useContext(PresenceContext);
+  const { onlineAgents } = useContext(PresenceContext);
+  return onlineAgents;
+};
+
+export const useCurrentUser = () => {
+  const { currentUser } = useContext(PresenceContext);
+  return currentUser;
 };
 
 export const PresenceProvider = ({ children, initialUser = null }: { children: ReactNode, initialUser?: User | null }) => {
@@ -54,6 +61,28 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     fetchUser();
   }, [initialUser]);
 
+  const pathname = usePathname();
+  const isPublicPage = ['/login', '/register', '/setup', '/', '/creators'].includes(pathname);
+
+  // Re-fetch user if we are on a private page and don't have a user yet.
+  // This handles client-side navigation from login -> inbox.
+  useEffect(() => {
+    if (!isPublicPage && !localUser && !initialUser) {
+      const fetchUser = async () => {
+        try {
+          const res = await fetch('/api/user');
+          if (res.ok) {
+            const userData = await res.json();
+            setLocalUser(userData);
+          }
+        } catch (error) {
+          console.error("PresenceProvider: Failed to fetch user on route change.", error);
+        }
+      };
+      fetchUser();
+    }
+  }, [pathname, isPublicPage, localUser, initialUser]);
+
   const refreshOnlineAgents = useCallback(async () => {
     if (!localUser?.activeWorkspaceId) return;
     try {
@@ -65,16 +94,28 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     }
   }, [localUser?.activeWorkspaceId]);
 
-  useEffect(() => {
-    // Polling effect: Refresh online agents every 1 second
-    if (!localUser?.activeWorkspaceId) return;
 
-    const intervalId = setInterval(() => {
-      refreshOnlineAgents();
+
+  useEffect(() => {
+    // Polling effect: Refresh online agents every 3 seconds
+    // Only poll if we have a workspace AND we are not on a public page
+    if (!localUser?.activeWorkspaceId || isPublicPage) return;
+
+    // Wait for interface to load (1s), then do a smart refresh, then start polling (3s or 60s)
+    let intervalId: NodeJS.Timeout;
+    const isDeveloper = pathname.startsWith('/developer');
+    const pollInterval = isDeveloper ? 60000 : 3000;
+
+    const initialTimer = setTimeout(() => {
+      refreshOnlineAgents(); // Smart refresh after load
+      intervalId = setInterval(refreshOnlineAgents, pollInterval);
     }, 1000);
 
-    return () => clearInterval(intervalId);
-  }, [refreshOnlineAgents, localUser?.activeWorkspaceId]);
+    return () => {
+      clearTimeout(initialTimer);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname]);
 
   useEffect(() => {
     // This effect establishes the real-time presence connection via Database (user_workspace_presence).
@@ -82,11 +123,10 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     const supabase = createClient();
 
-    // Initial fetch
-    refreshOnlineAgents();
-
-    // Set self as online immediately
-    void updateServerPresence(true);
+    // Set self as online immediately and then refresh list
+    updateServerPresence(true).then(() => {
+      refreshOnlineAgents();
+    });
 
     const channel = supabase.channel(`db-presence-${localUser.activeWorkspaceId}`)
       .on(
@@ -133,7 +173,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
 
   return (
-    <PresenceContext.Provider value={onlineAgents}>
+    <PresenceContext.Provider value={{ onlineAgents, currentUser: localUser }}>
       {children}
     </PresenceContext.Provider>
   );

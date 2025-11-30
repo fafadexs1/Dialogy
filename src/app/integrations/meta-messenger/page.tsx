@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { MetaChannel, User } from '@/lib/types';
 import { createMetaChannel, listMetaChannels, deleteMetaChannel } from '@/actions/meta-channels';
 import { Loader2, Trash2, Link2, RefreshCw, Wand2 } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 function useOrigin() {
   return useMemo(() => (typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || ''), []);
@@ -18,7 +19,7 @@ function useOrigin() {
 export default function MetaMessengerIntegrationPage() {
   const { toast } = useToast();
   const origin = useOrigin();
-  const [user, setUser] = useState<User | null>(null);
+  const user = useCurrentUser();
   const [channels, setChannels] = useState<MetaChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,14 +32,6 @@ export default function MetaMessengerIntegrationPage() {
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/messenger`;
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const res = await fetch('/api/user');
-      if (res.ok) setUser(await res.json());
-    };
-    fetchUser();
-  }, []);
 
   // Gera verify_token aleatório por canal/workspace
   const generateVerifyToken = () => {
