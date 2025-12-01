@@ -1187,7 +1187,7 @@ async function fetchChatsDelta({
         LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
         WHERE c.workspace_id = $1
-          AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) > $2
+          AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         [workspaceId, since]
@@ -1423,7 +1423,7 @@ async function fetchMessageDeltas({
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE m.chat_id = $1 AND m.created_at > $2
+        WHERE m.chat_id = $1 AND m.created_at >= $2
         ORDER BY m.created_at ASC
         `,
         [chatId, since]
