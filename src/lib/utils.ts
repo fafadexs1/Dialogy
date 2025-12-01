@@ -4,3 +4,39 @@ import { twMerge } from "tailwind-merge"
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+export function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}): string {
+  if (!text) return '';
+
+  // URL regex to find links
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const { isOutgoing } = options;
+
+  // First, escape HTML to prevent XSS from other content
+  let processedText = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  // Then, apply rich text formatting for whatsapp-style markdown
+  // Note: Lookbehind support varies, so we use a more compatible approach
+  processedText = processedText
+    .replace(/(\s|^)\*(.*?)\*(\s|$)/g, '$1<b>$2</b>$3') // Bold
+    .replace(/(\s|^)_(.*?)_(\s|$)/g, '$1<i>$2</i>$3') // Italic
+    .replace(/(\s|^)~(.*?)~(\s|$)/g, '$1<s>$2</s>$3') // Strikethrough
+    .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
+
+  // Finally, replace URLs with anchor tags
+  processedText = processedText.replace(urlRegex, (url) => {
+    // The URL is already escaped, so we can safely use it.
+    // We need to decode it for the href attribute but keep the display version escaped.
+    const decodedUrl = url.replace(/&amp;/g, "&");
+    const outgoingClasses = 'text-white/90 underline decoration-white/60 hover:decoration-white';
+    const incomingClasses = 'text-blue-400 hover:text-blue-300 underline';
+    return `<a href="${decodedUrl}" target="_blank" rel="noopener noreferrer" class="${isOutgoing ? outgoingClasses : incomingClasses}">${url}</a>`;
+  });
+
+  return processedText.replace(/\n/g, '<br />'); // Handle line breaks
+}

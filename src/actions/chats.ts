@@ -44,7 +44,7 @@ export const assignChatToSelfAction = withDebug(
             // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
             // regardless of whether agent_id was previously filled.
             const result = await db.query(
-                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND status = 'gerais'",
+                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND status = 'gerais' RETURNING workspace_id",
                 [currentAgentId, chatId]
             );
 
@@ -52,6 +52,18 @@ export const assignChatToSelfAction = withDebug(
                 // This can happen if another agent took the chat milliseconds before, or if the chat is not in 'gerais' status.
                 return { success: false, error: "Este atendimento não está mais na fila geral ou já foi assumido." };
             }
+
+            const workspaceId = result.rows[0].workspace_id;
+
+            // Insert system message indicating attendance started
+            const agentName = user.user_metadata?.full_name || user.email || 'Agente';
+            await db.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, 
+                    sender_user_id, created_at, is_read
+                ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
+                [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, currentAgentId]
+            );
 
             console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
             // revalidatePath('/', 'layout'); // Removed to prevent page refresh
@@ -533,6 +545,7 @@ async function fetchChats({
     includeChatId,
     before,
     ownership = 'mine',
+    statuses,
 }: {
     workspaceId: string;
     userId: string;
@@ -540,6 +553,7 @@ async function fetchChats({
     includeChatId: string | null;
     before?: string | null;
     ownership?: 'mine' | 'everyone';
+    statuses?: Chat['status'][];
 }): Promise<ChatRow[]> {
     const params: any[] = [workspaceId, limit];
     let queryIndex = 3;
@@ -547,19 +561,23 @@ async function fetchChats({
     let beforeClause = '';
     if (before) {
         params.push(before);
-        beforeClause = `AND COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) < $${queryIndex}`;
+        beforeClause = `AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) < $${queryIndex}`;
         queryIndex++;
     }
 
     let ownershipClause = '';
     if (ownership === 'mine') {
         params.push(userId);
-        // Only filter 'encerrados' by agent_id. 
-        // 'gerais' and 'atendimentos' are always fetched (client-side filtering handles visibility if needed)
-        // This ensures "Fila" and "Atendendo" tabs behave as before (showing all or client-filtered),
-        // while "Encerrados" is server-filtered to handle large volumes.
         ownershipClause = `AND (c.status != 'encerrados' OR c.agent_id = $${queryIndex})`;
         queryIndex++;
+    }
+
+    let statusClause = "AND (c.status IN ('gerais', 'atendimentos') OR c.status = 'encerrados')";
+    if (statuses && statuses.length > 0) {
+        const statusPlaceholders = statuses.map((_, i) => `$${queryIndex + i}`).join(', ');
+        statusClause = `AND c.status IN (${statusPlaceholders})`;
+        params.push(...statuses);
+        queryIndex += statuses.length;
     }
 
     let includeChatClause = '';
@@ -603,10 +621,10 @@ async function fetchChats({
             FROM chats c
             LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
             WHERE c.workspace_id = $1
-              AND (c.status IN ('gerais', 'atendimentos') OR c.status = 'encerrados')
+              ${statusClause}
               ${ownershipClause}
               ${beforeClause}
-            ORDER BY COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+            ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
             LIMIT $2
         )
         ${includeChatClause}
@@ -623,7 +641,7 @@ async function fetchChats({
             c.color,
             c.contact_id,
             c.agent_id,
-            COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+            GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
             lmd.source_from_api AS source,
             COALESCE((
@@ -650,7 +668,6 @@ async function fetchChats({
             lmd.source_from_api AS last_message_source_from_api,
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
-            lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
             (
@@ -665,7 +682,7 @@ async function fetchChats({
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
-        ORDER BY COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+        ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         params
     );
@@ -703,18 +720,46 @@ export const getInitialChatsData = withDebug(
 
         try {
             const timezone = await getWorkspaceTimezone(workspaceId);
-            const limit = 20;
 
-            const chatRows = await fetchChats({
+            // 1. Fetch Active Chats (Gerais + Atendimentos) - High limit to show all
+            const activeChatsLimit = 1000;
+            const activeChatsPromise = fetchChats({
                 workspaceId,
                 userId: user.id,
-                limit,
+                limit: activeChatsLimit,
                 includeChatId: selectedChatId,
                 ownership,
+                statuses: ['gerais', 'atendimentos']
             });
 
-            const { chats, lastSyncChats } = await hydrateChats(chatRows, timezone);
-            const hasMoreChats = chatRows.length === limit;
+            // 2. Fetch Closed Chats (Encerrados) - Standard pagination limit
+            const closedChatsLimit = 20;
+            const closedChatsPromise = fetchChats({
+                workspaceId,
+                userId: user.id,
+                limit: closedChatsLimit,
+                includeChatId: null,
+                ownership,
+                statuses: ['encerrados']
+            });
+
+            const [activeChatRows, closedChatRows] = await Promise.all([activeChatsPromise, closedChatsPromise]);
+
+            const allChatRows = [...activeChatRows, ...closedChatRows];
+
+            // Deduplicate if necessary
+            const uniqueChatRows = Array.from(new Map(allChatRows.map(c => [c.id, c])).values());
+
+            // Sort combined result
+            uniqueChatRows.sort((a, b) => {
+                const timeA = new Date(a.chat_activity_at || 0).getTime();
+                const timeB = new Date(b.chat_activity_at || 0).getTime();
+                return timeB - timeA;
+            });
+
+            const { chats, lastSyncChats } = await hydrateChats(uniqueChatRows, timezone);
+
+            const hasMoreChats = closedChatRows.length === closedChatsLimit;
 
             let messages: Message[] = [];
             let lastSyncMessageForSelected: string | null = null;
@@ -825,10 +870,11 @@ export const syncInboxData = withDebug(
             let deltaMessages: Message[] = [];
             let newLastSyncMessage = lastSyncMessages;
 
-            if (chatId && lastSyncMessages) {
+            if (chatId) {
+                const since = lastSyncMessages || '1970-01-01T00:00:00.000Z';
                 const { messages, lastSyncMessage } = await fetchMessageDeltas({
                     chatId,
-                    since: lastSyncMessages,
+                    since,
                     timezone,
                 });
                 deltaMessages = messages;
@@ -1045,6 +1091,7 @@ export async function loadMoreChatsAction({
             includeChatId: null,
             before,
             ownership,
+            statuses: ['encerrados'] // Load more only for closed chats
         });
 
         const hydrated = await hydrateChats(chatRows, timezone);
@@ -1097,7 +1144,7 @@ async function fetchChatsDelta({
             c.color,
             c.contact_id,
             c.agent_id,
-            COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+            GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
             lmd.source_from_api AS source,
             COALESCE((
@@ -1140,8 +1187,8 @@ async function fetchChatsDelta({
         LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
         WHERE c.workspace_id = $1
-          AND COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) > $2
-        ORDER BY COALESCE(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+          AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) > $2
+        ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         [workspaceId, since]
     );
@@ -1238,6 +1285,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             workspace_id: row.workspace_id,
             contact: contact as Contact,
             agent,
+            agentId: row.agent_id || undefined,
             messages: lastMessage ? [lastMessage] : [],
             updatedAt: row.chat_activity_at || undefined,
             source: row.source || undefined,

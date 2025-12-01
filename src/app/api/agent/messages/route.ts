@@ -17,6 +17,7 @@ interface AgentMessagePayload {
   phoneNumber?: string; // JID format, e.g., 5511999998888@s.whatsapp.net
   content?: string; // Caption for media, or content for text
   media?: MediaFilePayload[];
+  instance?: string; // Specific instance name (e.g., "zap1")
 }
 
 /**
@@ -68,7 +69,6 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
   }
 }
 
-
 export async function POST(request: Request) {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     }
 
     const body: AgentMessagePayload = await request.json();
-    let { chatId, phoneNumber, content = '', media } = body;
+    let { chatId, phoneNumber, content = '', media, instance } = body;
 
     if (!chatId && !phoneNumber) {
       return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
@@ -112,11 +112,11 @@ export async function POST(request: Request) {
 
     // If media is present, send it. Content will be used as caption.
     if (media && media.length > 0) {
-      result = await sendAutomatedMediaAction(chatId, content, media, agent.id);
+      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance);
     }
     // Otherwise, send a text message.
     else {
-      result = await sendAutomatedMessageAction(chatId, content, agent.id, true);
+      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance);
     }
 
 
