@@ -971,3 +971,59 @@ export const saveTranscriptionAction = withDebug(
         contextResolver: (messageId) => ({ payload: { messageId } })
     }
 );
+
+export const forwardMessageAction = withDebug(
+    'forward_message',
+    async function forwardMessageAction(
+        originalMessage: Message,
+        targetChatId: string,
+        tabId: string | null
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Usuário não autenticado.' };
+        }
+
+        // Determine content and type based on original message
+        let content = originalMessage.content;
+        const metadata = originalMessage.metadata || {};
+
+        // If it's a media message, we need to ensure we have the URL
+        if (originalMessage.type !== 'text' && originalMessage.type !== 'system' && originalMessage.type !== 'location') {
+            const mediaUrl = metadata.mediaUrl || metadata.thumbnail; // Fallback to thumbnail if mediaUrl missing (unlikely for valid media)
+
+            if (!mediaUrl) {
+                return { success: false, error: 'Mídia original não encontrada para encaminhamento.' };
+            }
+
+            return sendMediaAction(
+                targetChatId,
+                content || '', // Caption
+                [{
+                    base64: mediaUrl, // Passing URL as base64/url field
+                    mimetype: metadata.mimetype || 'application/octet-stream',
+                    filename: metadata.fileName || 'arquivo',
+                    mediatype: originalMessage.type as any,
+                    thumbnail: metadata.thumbnail
+                }],
+                tabId
+            );
+        }
+
+        if (originalMessage.type === 'location') {
+            return internalSendMessage(
+                targetChatId,
+                content || 'Localização',
+                user.id,
+                tabId,
+                metadata
+            );
+        }
+
+        return internalSendMessage(targetChatId, content, user.id, tabId, metadata);
+    },
+    {
+        contextResolver: (msg, targetId) => ({ payload: { originalMessageId: msg.id, targetChatId: targetId } })
+    }
+);

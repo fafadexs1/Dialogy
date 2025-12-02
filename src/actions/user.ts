@@ -133,7 +133,9 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     return { success: true, error: null };
 }
 
-export async function getCurrentUser(): Promise<User | null> {
+import { cache } from 'react';
+
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<User | null> {
     const supabase = await createClient();
     const { data: { user: authUser } } = await supabase.auth.getUser();
 
@@ -177,4 +179,4 @@ export async function getCurrentUser(): Promise<User | null> {
         console.error('[GET_CURRENT_USER] Error fetching user:', error);
         return null;
     }
-}
+});

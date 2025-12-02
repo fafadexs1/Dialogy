@@ -36,6 +36,7 @@ type InboxState = {
   incrementUnread: (chatId: string) => void;
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
   markMessagesAsReadByRecipient: (chatId: string, upToDate: string) => void;
+  updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
   reset: () => void;
 };
 
@@ -279,6 +280,20 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         messagesByChat: {
           ...state.messagesByChat,
           [chatId]: updated,
+        },
+      };
+    });
+  },
+  updateMessage: (chatId, messageId, updates) => {
+    set((state) => {
+      const currentMessages = state.messagesByChat[chatId] || [];
+      const updatedMessages = currentMessages.map((msg) =>
+        msg.id === messageId ? { ...msg, ...updates } : msg
+      );
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: updatedMessages,
         },
       };
     });

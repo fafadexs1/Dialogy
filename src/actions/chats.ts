@@ -911,23 +911,24 @@ export const searchChatsAndContacts = withDebug(
     async function searchChatsAndContacts(
         workspaceId: string,
         query: string
-    ): Promise<{ chats: Chat[]; contacts: Contact[]; error?: string }> {
+    ): Promise<{ chats: Chat[]; contacts: Contact[]; messages: Message[]; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
 
         if (!user) {
-            return { chats: [], contacts: [], error: "Usuário não autenticado." };
+            return { chats: [], contacts: [], messages: [], error: "Usuário não autenticado." };
         }
 
         if (!query || query.trim().length < 2) {
-            return { chats: [], contacts: [] };
+            return { chats: [], contacts: [], messages: [] };
         }
 
         try {
             const timezone = await getWorkspaceTimezone(workspaceId);
             const searchTerm = `%${query.trim()}%`;
 
-            // Search in Chats (by contact name, phone, or message content)
+            // 1. Search in Chats (MATCHING CONTACT INFO ONLY)
+            // We removed 'OR m.content ILIKE $2' to avoid random chats appearing without context
             const chatRows = await db.query(
                 `
                 SELECT DISTINCT ON (c.id)
@@ -963,13 +964,11 @@ export const searchChatsAndContacts = withDebug(
                 LEFT JOIN contacts cont ON c.contact_id = cont.id
                 LEFT JOIN team_members tm ON c.agent_id = tm.user_id
                 LEFT JOIN teams t ON tm.team_id = t.id
-                LEFT JOIN messages m ON c.id = m.chat_id
                 WHERE c.workspace_id = $1
                   AND (
                       cont.name ILIKE $2
                       OR cont.phone_number_jid ILIKE $2
                       OR cont.email ILIKE $2
-                      OR m.content ILIKE $2
                   )
                 ORDER BY c.id, c.created_at DESC
                 LIMIT 20
@@ -977,9 +976,6 @@ export const searchChatsAndContacts = withDebug(
                 [workspaceId, searchTerm]
             );
 
-            // Map Chat Rows manually since the structure is slightly different or use hydrate logic
-            // For simplicity, we'll map manually here or reuse a simplified hydrate
-            // Let's reuse a simplified mapping
             const chats: Chat[] = chatRows.rows.map((row: any) => {
                 const lastMsg = row.last_message_json;
                 return {
@@ -1002,13 +998,13 @@ export const searchChatsAndContacts = withDebug(
                         lastName: '',
                         avatar_url: '',
                         email: ''
-                    } : undefined, // Simplified
+                    } : undefined,
                     messages: lastMsg ? [{
                         id: lastMsg.id,
                         content: lastMsg.content,
                         type: lastMsg.type,
                         createdAt: lastMsg.created_at,
-                        from_me: false, // assumption for search result preview
+                        from_me: false,
                         timestamp: formatInTimeZone(new Date(lastMsg.created_at), 'HH:mm', { locale: ptBR, timeZone: timezone }),
                         formattedDate: formatMessageDate(new Date(lastMsg.created_at), timezone),
                         chat_id: row.id,
@@ -1016,7 +1012,7 @@ export const searchChatsAndContacts = withDebug(
                         status: 'default',
                         sender: undefined
                     } as Message] : [],
-                    updatedAt: row.chat_created_at, // fallback
+                    updatedAt: row.chat_created_at,
                     unreadCount: 0,
                     tag: row.tag,
                     color: row.color,
@@ -1025,7 +1021,7 @@ export const searchChatsAndContacts = withDebug(
             });
 
 
-            // Search in Contacts (standalone)
+            // 2. Search in Contacts (standalone)
             const contactRows = await db.query(
                 `
                 SELECT *
@@ -1052,15 +1048,104 @@ export const searchChatsAndContacts = withDebug(
                 custom_fields: row.custom_fields
             }));
 
-            return { chats, contacts };
+            // 3. Search in Messages (Content Match)
+            const messageRows = await db.query(
+                `
+                SELECT 
+                    m.*,
+                    c.workspace_id AS workspace_id,
+                    cont.id AS contact_id,
+                    cont.name AS contact_name,
+                    cont.avatar_url AS contact_avatar_url,
+                    cont.email AS contact_email,
+                    cont.phone_number_jid AS contact_phone_number_jid,
+                    cont.address AS contact_address
+                FROM messages m
+                JOIN chats c ON c.id = m.chat_id
+                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                WHERE c.workspace_id = $1
+                  AND m.content ILIKE $2
+                ORDER BY m.created_at DESC
+                LIMIT 20
+                `,
+                [workspaceId, searchTerm]
+            );
+
+            const senderIds = [...new Set(messageRows.rows.map((row: any) => row.sender_user_id).filter(Boolean))];
+            const systemAgentIds = [...new Set(messageRows.rows.map((row: any) => row.sender_system_agent_id).filter(Boolean))];
+
+            const [agentsMap, systemAgentsMap] = await Promise.all([
+                fetchAgentsMap(senderIds as string[]),
+                fetchSystemAgentsMap(systemAgentIds as string[]),
+            ]);
+
+            const messages: Message[] = messageRows.rows.map((row: any) => {
+                const contact = row.contact_id ? {
+                    id: row.contact_id,
+                    workspace_id: row.workspace_id,
+                    name: row.contact_name || 'Contato',
+                    avatar_url: row.contact_avatar_url,
+                    email: row.contact_email,
+                    phone_number_jid: row.contact_phone_number_jid,
+                    address: row.contact_address,
+                } : undefined;
+
+                return mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap);
+            });
+
+            return { chats, contacts, messages };
 
         } catch (error: any) {
             console.error("[SEARCH_CHATS] Error:", error);
-            return { chats: [], contacts: [], error: `Erro na busca: ${error.message}` };
+            return { chats: [], contacts: [], messages: [], error: `Erro na busca: ${error.message}` };
         }
     },
     {
-        contextResolver: (workspaceId, query) => ({ payload: { workspaceId, query } })
+        contextResolver: (workspaceId, query) => ({ payload: { workspaceId, query } }),
+        timeoutMs: 20000 // Increase timeout to 20s for complex search
+    }
+);
+
+export const getOrCreateChatAction = withDebug(
+    'get_or_create_chat',
+    async function getOrCreateChatAction(
+        workspaceId: string,
+        contactId: string
+    ): Promise<{ chatId?: string; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { error: "Usuário não autenticado." };
+        }
+
+        try {
+            // Check for existing chat
+            const existingChat = await db.query(
+                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
+                [workspaceId, contactId]
+            );
+
+            if (existingChat.rowCount && existingChat.rowCount > 0) {
+                return { chatId: existingChat.rows[0].id };
+            }
+
+            // Create new chat
+            const newChat = await db.query(
+                `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'gerais', $3, NOW()) RETURNING id`,
+                [workspaceId, contactId, user.id]
+            );
+
+            return { chatId: newChat.rows[0].id };
+
+        } catch (error: any) {
+            console.error("[GET_OR_CREATE_CHAT] Error:", error);
+            return { error: `Erro ao abrir conversa: ${error.message}` };
+        }
+    },
+    {
+        contextResolver: (workspaceId, contactId) => ({ payload: { workspaceId, contactId } }),
+        timeoutMs: 15000 // Increase timeout to 15s
     }
 );
 

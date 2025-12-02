@@ -1,5 +1,3 @@
-'use client';
-
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -10,8 +8,10 @@ import { MessageSquare, User as UserIcon, Phone, Calendar, Loader2, Sparkles, Ar
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
 import { useInboxStore } from '@/hooks/use-inbox-store';
-import { searchChatsAndContacts } from '@/actions/chats';
+import { searchChatsAndContacts, getOrCreateChatAction } from '@/actions/chats';
 import type { Chat, Contact, Message } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 
 interface SearchDetailsDialogProps {
     isOpen: boolean;
@@ -25,29 +25,35 @@ interface SearchDetailsDialogProps {
 export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, workspaceId, onSelectChat }: SearchDetailsDialogProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [remoteChats, setRemoteChats] = useState<Chat[]>([]);
-    const [crmContacts, setCrmContacts] = useState<Array<Contact & { chat_id: string | null, chat_status: Chat['status'] | null }>>([]);
+    const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
+    const [crmContacts, setCrmContacts] = useState<Contact[]>([]);
     const [error, setError] = useState<string | null>(null);
     const upsertChats = useInboxStore((state) => state.upsertChats);
+    const router = useRouter();
+    const { toast } = useToast();
 
     useEffect(() => {
         let active = true;
 
         if (!isOpen || !workspaceId || !searchQuery.trim()) {
             setRemoteChats([]);
+            setRemoteMessages([]);
             setCrmContacts([]);
             setError(null);
             return;
         }
 
         setIsLoading(true);
-        searchChatsAndContacts({ workspaceId, query: searchQuery, limit: 25 }).then((res) => {
+        searchChatsAndContacts({ workspaceId, query: searchQuery }).then((res) => {
             if (!active) return;
             if (res.error) {
                 setError(res.error);
                 setRemoteChats([]);
+                setRemoteMessages([]);
                 setCrmContacts([]);
             } else {
                 setRemoteChats(res.chats || []);
+                setRemoteMessages(res.messages || []);
                 setCrmContacts(res.contacts || []);
                 setError(null);
             }
@@ -55,6 +61,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
             if (!active) return;
             setError('Falha ao buscar resultados');
             setRemoteChats([]);
+            setRemoteMessages([]);
             setCrmContacts([]);
         }).finally(() => {
             if (active) setIsLoading(false);
@@ -63,45 +70,53 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         return () => { active = false; };
     }, [isOpen, workspaceId, searchQuery]);
 
-    const mergedChats = useMemo(() => {
-        const map = new Map<string, Chat>();
-        [...remoteChats, ...chats].forEach(chat => {
-            map.set(chat.id, chat);
-        });
-        return Array.from(map.values());
-    }, [remoteChats, chats]);
-
-    const contactPoolIds = new Set(mergedChats.map(chat => chat.contact.id));
-    const contactsWithoutChat = crmContacts.filter(contact => !contactPoolIds.has(contact.id));
-    const contactHighlight = crmContacts[0] || mergedChats.find(c => c.contact)?.contact;
-
-    const messageMatches = useMemo(() => {
-        if (!searchQuery.trim()) return [];
-        const query = searchQuery.toLowerCase();
-        const matches: { chat: Chat; message: Message }[] = [];
-
-        mergedChats.forEach(chat => {
-            if (!chat.messages?.length) return;
-            chat.messages.forEach(message => {
-                const content = (message.content || '');
-                const lowerContent = content.toLowerCase();
-                if (lowerContent.includes('atendimento encerrado por')) return;
-                if (lowerContent.includes(query)) {
-                    matches.push({ chat, message });
-                }
-            });
-        });
-
-        return matches.sort((a, b) => new Date(b.message.createdAt).getTime() - new Date(a.message.createdAt).getTime());
-    }, [searchQuery, mergedChats]);
-
-    const handleSelect = (chat: Chat) => {
+    const handleSelectChat = (chat: Chat) => {
         upsertChats([chat]);
         onSelectChat(chat);
         onOpenChange(false);
     };
 
-    const hasResults = remoteChats.length > 0 || contactsWithoutChat.length > 0 || messageMatches.length > 0;
+    const handleContactClick = async (contact: Contact) => {
+        if (!workspaceId) return;
+
+        // Check if we already have a chat for this contact in the list
+        const existingChat = chats.find(c => c.contact.id === contact.id) || remoteChats.find(c => c.contact.id === contact.id);
+        if (existingChat) {
+            handleSelectChat(existingChat);
+            return;
+        }
+
+        // If not, fetch or create
+        try {
+            const result = await getOrCreateChatAction(workspaceId, contact.id);
+            if (result.chatId) {
+                // We need to construct a minimal chat object to select it immediately
+                // Or just navigate to it. Since we use `onSelectChat` which expects a Chat object,
+                // we might need to fetch the full chat or just rely on the ID if we were using routing only.
+                // But `onSelectChat` updates the store.
+                // Let's try to construct a temporary chat object or fetch it.
+                // For speed, let's construct it.
+                const newChat: Chat = {
+                    id: result.chatId,
+                    status: 'gerais', // Default for new
+                    workspace_id: workspaceId,
+                    contact: contact,
+                    messages: [],
+                    unreadCount: 0,
+                    updatedAt: new Date().toISOString(),
+                };
+                handleSelectChat(newChat);
+                // Also force a refresh of chats to get the real data
+                // This might be handled by the parent component or store sync
+            } else if (result.error) {
+                toast({ title: "Erro", description: result.error, variant: "destructive" });
+            }
+        } catch (e) {
+            toast({ title: "Erro", description: "Falha ao abrir conversa.", variant: "destructive" });
+        }
+    };
+
+    const hasResults = remoteChats.length > 0 || crmContacts.length > 0 || remoteMessages.length > 0;
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -131,28 +146,8 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
 
                 <ScrollArea className="flex-1 min-h-0 max-h-[70vh] p-6 overflow-y-auto">
                     <div className="space-y-8 pb-6 pr-1">
-                        {contactHighlight && (
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                    <UserIcon className="h-4 w-4" />
-                                    Contato
-                                </div>
-                                <div className="rounded-xl border border-white/5 bg-white/5 p-4 flex items-center gap-3">
-                                    <Avatar className="h-10 w-10 border border-white/10">
-                                        <AvatarImage src={contactHighlight.avatar_url || undefined} />
-                                        <AvatarFallback className="bg-zinc-800">{contactHighlight.name?.charAt(0) || '?'}</AvatarFallback>
-                                    </Avatar>
-                                    <div className="min-w-0 flex-1">
-                                        <p className="font-semibold text-white truncate">{contactHighlight.name}</p>
-                                        <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                            <Phone className="h-3 w-3" />
-                                            {contactHighlight.phone_number_jid || contactHighlight.email || 'Sem contato'}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
+                        {/* 1. Chats (Contact Matches) */}
                         {remoteChats.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -176,7 +171,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                         return (
                                             <button
                                                 key={chat.id}
-                                                onClick={() => handleSelect(chat)}
+                                                onClick={() => handleSelectChat(chat)}
                                                 className="relative flex flex-col gap-2 p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/15 transition-all text-left group"
                                             >
                                                 <div className="flex items-center gap-3">
@@ -212,67 +207,93 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                             </div>
                         )}
 
-                        {messageMatches.length > 0 && (
+                        {/* 2. Messages (Content Matches) */}
+                        {remoteMessages.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <MessageSquare className="h-4 w-4" />
-                                    Mensagens ({messageMatches.length})
+                                    Mensagens Encontradas ({remoteMessages.length})
                                 </div>
                                 <div className="space-y-2">
-                                    {messageMatches.map(({ chat, message }) => (
-                                        <button
-                                            key={message.id}
-                                            onClick={() => handleSelect(chat)}
-                                            className="w-full flex flex-col gap-2 p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all text-left group"
-                                        >
-                                            <div className="flex items-center justify-between w-full">
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <Avatar className="h-6 w-6 border border-white/10">
-                                                        <AvatarImage src={chat.contact.avatar_url} />
-                                                        <AvatarFallback className="bg-zinc-800 text-[10px]">{chat.contact.name.charAt(0)}</AvatarFallback>
-                                                    </Avatar>
-                                                    <span className="text-sm font-medium text-white/70 group-hover:text-blue-400 transition-colors truncate">
-                                                        {chat.contact.name}
+                                    {remoteMessages.map((message) => {
+                                        // We need to construct a minimal chat object for the click handler
+                                        // The message object from search should have contact info
+                                        const chatForMessage: Chat = {
+                                            id: message.chat_id,
+                                            status: 'atendimentos', // Assumption, or we need to fetch it
+                                            workspace_id: message.workspace_id,
+                                            contact: {
+                                                id: (message as any).contact_id,
+                                                workspace_id: message.workspace_id,
+                                                name: (message as any).contact_name || 'Contato',
+                                                avatar_url: (message as any).contact_avatar_url,
+                                                email: (message as any).contact_email,
+                                                phone_number_jid: (message as any).contact_phone_number_jid,
+                                                address: (message as any).contact_address,
+                                            },
+                                            messages: [message],
+                                            unreadCount: 0,
+                                            updatedAt: message.createdAt
+                                        };
+
+                                        return (
+                                            <button
+                                                key={message.id}
+                                                onClick={() => handleSelectChat(chatForMessage)}
+                                                className="w-full flex flex-col gap-2 p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all text-left group"
+                                            >
+                                                <div className="flex items-center justify-between w-full">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <Avatar className="h-6 w-6 border border-white/10">
+                                                            <AvatarImage src={chatForMessage.contact.avatar_url} />
+                                                            <AvatarFallback className="bg-zinc-800 text-[10px]">{chatForMessage.contact.name.charAt(0)}</AvatarFallback>
+                                                        </Avatar>
+                                                        <span className="text-sm font-medium text-white/70 group-hover:text-blue-400 transition-colors truncate">
+                                                            {chatForMessage.contact.name}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground flex items-center gap-1 flex-shrink-0">
+                                                        <Calendar className="h-3 w-3" />
+                                                        {format(new Date(message.createdAt), "dd/MM/yy HH:mm", { locale: ptBR })}
                                                     </span>
                                                 </div>
-                                                <span className="text-[10px] text-muted-foreground flex items-center gap-1 flex-shrink-0">
-                                                    <Calendar className="h-3 w-3" />
-                                                    {format(new Date(message.createdAt), "dd/MM/yy HH:mm", { locale: ptBR })}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-white/90 line-clamp-2 pl-8 border-l-2 border-white/10 group-hover:border-blue-500/50 transition-colors">
-                                                {message.content}
-                                            </p>
-                                        </button>
-                                    ))}
+                                                <p className="text-sm text-white/90 line-clamp-2 pl-8 border-l-2 border-white/10 group-hover:border-blue-500/50 transition-colors">
+                                                    {message.content}
+                                                </p>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
 
-                        {contactsWithoutChat.length > 0 && (
+                        {/* 3. CRM Contacts */}
+                        {crmContacts.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <UserIcon className="h-4 w-4" />
-                                    Contatos no CRM ({contactsWithoutChat.length})
+                                    Contatos no CRM ({crmContacts.length})
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {contactsWithoutChat.map(contact => (
-                                        <div
+                                    {crmContacts.map(contact => (
+                                        <button
                                             key={contact.id}
-                                            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors"
+                                            onClick={() => handleContactClick(contact)}
+                                            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
                                         >
                                             <Avatar className="h-10 w-10 border border-white/10">
                                                 <AvatarImage src={contact.avatar_url} />
                                                 <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
                                             </Avatar>
                                             <div className="min-w-0 flex-1">
-                                                <p className="font-medium text-white truncate">{contact.name}</p>
+                                                <p className="font-medium text-white truncate group-hover:text-blue-300 transition-colors">{contact.name}</p>
                                                 <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
                                                     <Phone className="h-3 w-3" />
                                                     {contact.phone_number_jid || contact.email || 'Dados indisponíveis'}
                                                 </p>
                                             </div>
-                                        </div>
+                                            <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors opacity-0 group-hover:opacity-100" />
+                                        </button>
                                     ))}
                                 </div>
                             </div>

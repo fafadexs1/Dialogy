@@ -17,6 +17,7 @@ interface AudioPlayerProps {
     waveform?: number[];
     isFromMe?: boolean;
     workspaceId: string;
+    chatId?: string;
 }
 
 const formatTime = (timeInSeconds: number) => {
@@ -26,20 +27,41 @@ const formatTime = (timeInSeconds: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe, workspaceId }: AudioPlayerProps) {
+import { useInboxStore } from '@/hooks/use-inbox-store';
+
+export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe, workspaceId, chatId }: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
+    const updateMessage = useInboxStore((state) => state.updateMessage);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(initialDuration || 0);
     const [transcription, setTranscription] = useState<string | null>(initialTranscription || null);
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [playbackRate, setPlaybackRate] = useState(1);
 
+    // ... (keep existing useEffects)
+
+    // Apply playback rate to audio element
+    useEffect(() => {
+        if (audioRef.current) {
+            audioRef.current.playbackRate = playbackRate;
+        }
+    }, [playbackRate]);
+
+    const togglePlaybackRate = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const rates = [1, 1.5, 2];
+        const nextRateIndex = (rates.indexOf(playbackRate) + 1) % rates.length;
+        const newRate = rates[nextRateIndex];
+        setPlaybackRate(newRate);
+        localStorage.setItem('audioPlaybackRate', newRate.toString());
+    };
 
     const simulatedWaveform = React.useMemo(() =>
-        Array.from({ length: 60 }, () => Math.random() * 0.8 + 0.2)
+        Array.from({ length: 40 }, () => Math.random() * 0.6 + 0.3) // Fewer bars, taller minimum
         , []);
 
     const handlePlayPause = (e: React.MouseEvent) => {
@@ -88,6 +110,10 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
                 // Save to DB in the background if messageId exists
                 if (messageId) {
                     await saveTranscriptionAction(messageId, result.transcription);
+                    // Update local store to persist across navigation
+                    if (chatId) {
+                        updateMessage(chatId, messageId, { transcription: result.transcription });
+                    }
                 }
             }
         } catch (error: any) {
@@ -121,65 +147,77 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
     }, [handleTimeUpdate, handleLoadedMetadata, initialDuration]);
 
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
-    const playButtonClasses = isFromMe ? "bg-white text-primary" : "bg-primary text-primary-foreground";
-    const waveformProgressClasses = isFromMe ? "bg-white" : "bg-primary";
-    const waveformBgClasses = isFromMe ? "bg-primary-foreground/30" : "bg-muted-foreground/30";
-    const timeClasses = isFromMe ? "text-primary-foreground/80" : "text-muted-foreground";
-    const handleClasses = isFromMe ? "bg-white" : "bg-primary";
+
+    // Premium styling
+    const containerClasses = isFromMe
+        ? "bg-transparent"
+        : "bg-transparent";
+
+    const playButtonClasses = isFromMe
+        ? "bg-white/20 hover:bg-white/30 text-white"
+        : "bg-blue-500 hover:bg-blue-600 text-white shadow-md shadow-blue-500/20";
+
+    const waveformBaseColor = isFromMe ? "bg-white/30" : "bg-zinc-300/50";
+    const waveformProgressColor = isFromMe ? "bg-white" : "bg-blue-500";
+
+    const timeColor = isFromMe ? "text-white/70" : "text-zinc-500";
+    const speedButtonColor = isFromMe
+        ? "bg-white/20 text-white hover:bg-white/30"
+        : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300";
 
     return (
-        <div className='flex flex-col gap-2'>
-            <div className="flex w-[300px] items-center gap-3">
+        <div className={cn('flex flex-col gap-2 min-w-[280px]', containerClasses)}>
+            <div className="flex items-center gap-3">
                 <audio ref={audioRef} src={src} preload="metadata" />
 
                 <button
                     onClick={handlePlayPause}
-                    className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2", playButtonClasses)}
+                    className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200", playButtonClasses)}
                 >
-                    {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
+                    {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current pl-0.5" />}
                 </button>
 
-                <div className="flex min-w-0 flex-grow flex-col">
+                <div className="flex min-w-0 flex-grow flex-col justify-center gap-1">
                     <div
                         ref={progressRef}
                         onClick={handleSeek}
-                        className="relative h-12 w-full cursor-pointer"
+                        className="relative h-8 w-full cursor-pointer group"
                     >
-                        {/* Background Waveform */}
-                        <div className="absolute top-0 left-0 flex h-full w-full items-center gap-px overflow-hidden">
-                            {simulatedWaveform.map((barHeight, index) => (
-                                <div
-                                    key={index}
-                                    className={cn("w-[3px] rounded-full", waveformBgClasses)}
-                                    style={{ height: `${barHeight * 100}%` }}
-                                />
-                            ))}
-                        </div>
-                        {/* Progress Waveform */}
-                        <div className="absolute top-0 left-0 h-full overflow-hidden" style={{ width: `${progressPercentage}%` }}>
-                            <div className="flex h-full items-center gap-px" style={{ width: progressRef.current?.offsetWidth }}>
-                                {simulatedWaveform.map((barHeight, index) => (
+                        <div className="absolute inset-0 flex items-center justify-between gap-[2px] px-1">
+                            {simulatedWaveform.map((barHeight, index) => {
+                                const barPercent = (index / simulatedWaveform.length) * 100;
+                                const isPlayed = barPercent <= progressPercentage;
+                                return (
                                     <div
                                         key={index}
-                                        className={cn("w-[3px] rounded-full", waveformProgressClasses)}
-                                        style={{ height: `${barHeight * 100}%` }}
+                                        className={cn(
+                                            "w-1.5 rounded-full transition-colors duration-150",
+                                            isPlayed ? waveformProgressColor : waveformBaseColor
+                                        )}
+                                        style={{
+                                            height: `${Math.max(20, barHeight * 100)}%`,
+                                            opacity: isPlayed ? 1 : 0.6
+                                        }}
                                     />
-                                ))}
-                            </div>
+                                );
+                            })}
                         </div>
-                        {/* Seek Handle */}
-                        <div
-                            className={cn("absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full ring-2 ring-background transition-all", handleClasses)}
-                            style={{ left: `min(${progressPercentage}%, calc(100% - 10px))` }}
-                        />
                     </div>
 
-                    <div className={cn("flex justify-between text-xs font-mono", timeClasses)}>
+                    <div className={cn("flex justify-between text-[10px] font-medium px-1", timeColor)}>
                         <span>{formatTime(currentTime)}</span>
                         <span>{formatTime(duration)}</span>
                     </div>
                 </div>
+
+                <button
+                    onClick={togglePlaybackRate}
+                    className={cn("h-7 px-2 rounded-full text-[10px] font-bold transition-colors flex-shrink-0", speedButtonColor)}
+                >
+                    {playbackRate}x
+                </button>
             </div>
+
             <div className="mt-1">
                 {transcription ? (
                     <p className="text-xs italic text-foreground p-2 rounded-md bg-secondary/50 border border-white/10">{transcription}</p>
@@ -190,8 +228,8 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
                     </div>
                 ) : (
                     !isFromMe && (
-                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-7 text-xs text-black bg-white hover:bg-white/90 border-none">
-                            <Languages className="mr-2 h-3 w-3" />
+                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-6 text-[10px] px-2 text-black bg-white hover:bg-white/90 border-none shadow-sm">
+                            <Languages className="mr-1.5 h-3 w-3" />
                             Transcrever
                         </Button>
                     )

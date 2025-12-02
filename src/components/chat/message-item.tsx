@@ -18,7 +18,8 @@ import {
     StickyNote,
     MapPin,
     Copy,
-    Clock
+    Clock,
+    ArrowRightLeft
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -168,6 +169,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                 waveform={waveform}
                 isFromMe={Boolean(message.from_me)}
                 workspaceId={workspaceId}
+                chatId={message.chat_id}
             />;
         }
 
@@ -205,9 +207,10 @@ interface MessageItemProps {
     onDelete: (messageId: string, instanceName?: string) => void;
     currentUserId: string;
     instanceName?: string;
+    onForward?: (message: Message) => void;
 }
 
-const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName }: MessageItemProps) => {
+const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward }: MessageItemProps) => {
     const { toast } = useToast();
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
@@ -335,6 +338,13 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                                                 >
                                                     <Copy className="mr-2 h-4 w-4" />
                                                     Copiar
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    className="cursor-pointer hover:bg-white/10 focus:bg-white/10"
+                                                    onClick={() => onForward && onForward(message)}
+                                                >
+                                                    <ArrowRightLeft className="mr-2 h-4 w-4" />
+                                                    Encaminhar
                                                 </DropdownMenuItem>
                                                 {isFromMe && (
                                                     <AlertDialogTrigger asChild>

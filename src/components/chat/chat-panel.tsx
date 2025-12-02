@@ -93,6 +93,7 @@ import { AudioRecorder } from './audio-recorder';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
+import { ForwardMessageDialog } from './forward-message-dialog';
 
 
 interface ChatPanelProps {
@@ -232,6 +233,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+    const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
+    const [messageToForward, setMessageToForward] = useState<Message | null>(null);
 
     const { toast } = useToast();
 
@@ -466,6 +469,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             onActionSuccess();
         }
     };
+
+    const handleForwardMessage = useCallback((message: Message) => {
+        setMessageToForward(message);
+        setIsForwardDialogOpen(true);
+    }, []);
 
     const generateVideoThumbnail = async (file: File): Promise<string> => {
         return new Promise((resolve) => {
@@ -922,6 +930,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 onDelete={handleDeleteMessage}
                                 currentUserId={currentUser.id}
                                 instanceName={chat.instance_name}
+                                onForward={handleForwardMessage}
                             />
                         ))}
                     </div>
@@ -1114,6 +1123,13 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     </p>
                 </footer>
             )}
+            <ForwardMessageDialog
+                isOpen={isForwardDialogOpen}
+                onOpenChange={setIsForwardDialogOpen}
+                messageToForward={messageToForward}
+                workspaceId={currentUser.activeWorkspaceId || ''}
+                currentUserId={currentUser.id}
+            />
         </div>
     );
 }
