@@ -106,8 +106,14 @@ export async function dispatchMessageToWebhooks(
         }
 
         const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
+        const activeAgents = agents.rows.filter((a: any) => {
+            const url = (a.webhook_url || '').trim();
+            // Marketing agents sem webhook não devem disparar nada.
+            if (a.type === 'marketing') return url.length > 0;
+            return url.length > 0;
+        });
 
-        if ((agents.rowCount ?? 0) === 0) {
+        if (activeAgents.length === 0) {
             console.log(`[WEBHOOK_DISPATCHER] Nenhum agente ativo com webhook encontrado para o workspace ${chat.workspace_id}.`);
             return;
         }
@@ -156,44 +162,44 @@ export async function dispatchMessageToWebhooks(
 
         // Determine if this message should go only to a specific system agent (marketing handoff)
         const resolveTargetSystemAgent = async (): Promise<{ targetAgentId: string | null; marketingSenderSystemAgentId: string | null; marketingMessageCreatedAt: string | null }> => {
-            const meta = (message.metadata as any) || {};
-            if (meta.marketingTargetSystemAgentId) {
-                return {
-                    targetAgentId: meta.marketingTargetSystemAgentId,
-                    marketingSenderSystemAgentId: meta.from_system_agent_id || null,
-                    marketingMessageCreatedAt: null,
-                };
+            // Only act if the last outbound message was marketing with a target.
+            const res = await db.query(
+                `SELECT metadata->>'marketingTargetSystemAgentId' AS target,
+                        metadata->>'from_system_agent_id' AS marketing_sender,
+                        created_at,
+                        metadata->>'isMarketing' AS is_marketing
+                 FROM messages
+                 WHERE chat_id = $1
+                   AND from_me = TRUE
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [chat.id]
+            );
+
+            const row = res.rows[0];
+            if (!row) {
+                return { targetAgentId: null, marketingSenderSystemAgentId: null, marketingMessageCreatedAt: null };
             }
 
-            // For incoming replies, look back to the last marketing message that specified a target.
-            if (!message.from_me || message.direction === 'incoming') {
-                const res = await db.query(
-                    `SELECT metadata->>'marketingTargetSystemAgentId' AS target
-                             , metadata->>'from_system_agent_id' AS marketing_sender
-                             , created_at
-                     FROM messages
-                     WHERE chat_id = $1
-                       AND from_me = TRUE
-                       AND metadata ? 'isMarketing'
-                       AND metadata->>'marketingTargetSystemAgentId' IS NOT NULL
-                     ORDER BY created_at DESC
-                     LIMIT 1`,
-                    [chat.id]
-                );
-                return {
-                    targetAgentId: res.rows[0]?.target || null,
-                    marketingSenderSystemAgentId: res.rows[0]?.marketing_sender || null,
-                    marketingMessageCreatedAt: res.rows[0]?.created_at || null,
-                };
+            const isMarketing = row.is_marketing === 'true';
+            if (!isMarketing || !row.target) {
+                return { targetAgentId: null, marketingSenderSystemAgentId: null, marketingMessageCreatedAt: null };
             }
-            return { targetAgentId: null, marketingSenderSystemAgentId: null, marketingMessageCreatedAt: null };
+
+            return {
+                targetAgentId: row.target,
+                marketingSenderSystemAgentId: row.marketing_sender || null,
+                marketingMessageCreatedAt: row.created_at || null,
+            };
         };
 
         const { targetAgentId, marketingSenderSystemAgentId, marketingMessageCreatedAt } = await resolveTargetSystemAgent();
+        const isChatClosed = chat.status === 'encerrados';
+        const isChatAssigned = !!(chat as any).agent_id || !!chat.agent?.id;
 
-        // On incoming reply, mark chat back to "gerais" and log a system handoff message (for metrics),
-        // but do not route to a specific system agent.
-        if (!message.from_me || message.direction === 'incoming') {
+        // Se não há contexto de marketing, ou se o chat já está em atendimento/encerrado, não aplica handoff nem nota.
+        const hasMarketingContext = targetAgentId || marketingSenderSystemAgentId || marketingMessageCreatedAt;
+        if (hasMarketingContext && !isChatClosed && !isChatAssigned && (!message.from_me || message.direction === 'incoming')) {
             const hasHandoff = await db.query(
                 `SELECT 1 FROM messages 
                  WHERE chat_id = $1 
@@ -203,16 +209,9 @@ export async function dispatchMessageToWebhooks(
                 [chat.id, marketingMessageCreatedAt]
             );
 
-            if (hasHandoff.rowCount === 0) {
-                const targetAgentName = targetAgentId
-                  ? (await db.query('SELECT name FROM system_agents WHERE id = $1', [targetAgentId])).rows[0]?.name || 'Agente do Sistema'
-                  : 'Fila (gerais)';
-
-                // Move chat back to gerais and clear assignment.
-                await db.query(
-                  `UPDATE chats SET status = 'gerais', agent_id = NULL, assigned_at = NULL WHERE id = $1`,
-                  [chat.id]
-                );
+            if (hasHandoff.rowCount === 0 && targetAgentId) {
+                const targetAgentRes = await db.query('SELECT name FROM system_agents WHERE id = $1', [targetAgentId]);
+                const targetAgentName = targetAgentRes.rows[0]?.name || 'Agente do Sistema';
 
                 await db.query(
                     `INSERT INTO messages (
@@ -221,12 +220,12 @@ export async function dispatchMessageToWebhooks(
                     [
                         chat.workspace_id,
                         chat.id,
-                        `Cliente respondeu à mensagem de marketing. Chat movido para Gerais (${targetAgentName}).`,
-                        targetAgentId || null,
+                        `Cliente respondeu à mensagem de marketing. Encaminhado para ${targetAgentName}.`,
+                        targetAgentId,
                         {
                             marketingHandoff: true,
                             from_system_agent_id: marketingSenderSystemAgentId,
-                            to_system_agent_id: targetAgentId || null,
+                            to_system_agent_id: targetAgentId,
                         },
                     ]
                 );
@@ -272,7 +271,8 @@ export async function dispatchMessageToWebhooks(
             }
         };
 
-        await Promise.allSettled(agents.rows.map(sendWebhook));
+        const targetAgents = targetAgentId ? activeAgents.filter((a: any) => a.id === targetAgentId) : activeAgents;
+        await Promise.allSettled(targetAgents.map(sendWebhook));
     } catch (error) {
         console.error('[WEBHOOK_DISPATCHER] Falha inesperada ao despachar webhooks:', error);
     }

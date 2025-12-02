@@ -229,7 +229,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       if (data.metadata) {
         metadata = typeof data.metadata === 'object' ? data.metadata : JSON.parse(data.metadata);
       }
-      const chat = chats.find((c) => c.id === data.chat_id);
+      const chat = useInboxStore.getState().chats.find((c) => c.id === data.chat_id);
       let sender = undefined;
       if (data.from_me) {
         if (chat?.agent) {
@@ -401,10 +401,12 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
     console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
 
-    const messageChat = chats.find((chat) => chat.id === message.chat_id);
+    const snapshot = useInboxStore.getState();
+    const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
     const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+    const currentSelectedChatId = snapshot.selectedChatId;
 
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
@@ -418,7 +420,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     // If we receive a message update where api_message_status is READ and it's from us,
     // we assume all previous messages are also read.
     if (message.from_me && message.api_message_status === 'READ') {
-      useInboxStore.getState().markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
+      snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
 
     if (!messageChat && runDeltaSyncRef.current) {
@@ -426,12 +428,12 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
 
     if (!message.from_me) {
-      const shouldTrackUnread = message.chat_id !== selectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
+      const shouldTrackUnread = message.chat_id !== currentSelectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
       if (shouldTrackUnread) {
         incrementUnread(message.chat_id);
       }
 
-      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== selectedChatId || isQueueMessage;
+      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== currentSelectedChatId || isQueueMessage;
       if (shouldPlay) {
         if (isQueueMessage || !messageChat) {
           playNotificationSound('queue');
@@ -440,7 +442,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         }
       }
     }
-  }, [appendMessagesToChat, chats, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat, selectedChatId]);
+  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
     try {
