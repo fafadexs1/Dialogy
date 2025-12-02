@@ -198,47 +198,7 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 
 
 
-function TakeOwnershipOverlay({ onTakeOwnership }: { onTakeOwnership: () => void }) {
-    const [isAssigning, setIsAssigning] = useState(false);
-    const [isPeeking, setIsPeeking] = useState(false);
 
-    const handleTakeOwnershipClick = async () => {
-        setIsAssigning(true);
-        try {
-            await onTakeOwnership();
-        } finally {
-            setIsAssigning(false);
-        }
-    };
-
-    return (
-        <div className={cn(
-            "absolute inset-0 z-10 flex flex-col items-center justify-center p-6 transition-all",
-            isPeeking ? "bg-black/30 backdrop-blur-none pointer-events-none" : "bg-black/60 backdrop-blur-sm"
-        )}>
-            <div className={cn("text-center transition-opacity pointer-events-auto", { "opacity-0 pointer-events-none": isPeeking })}>
-                <div className="inline-block p-4 bg-blue-500/20 rounded-full mb-4">
-                    <Hand className="h-10 w-10 text-blue-400" />
-                </div>
-                <h3 className="text-xl font-bold text-white">Atendimento Disponível</h3>
-                <p className="text-white/70 mt-1 mb-6">Este chat está na fila geral e aguardando um atendente.</p>
-                <Button size="lg" onClick={handleTakeOwnershipClick} disabled={isAssigning} className="bg-blue-600 hover:bg-blue-500 text-white">
-                    {isAssigning && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-                    Assumir este Atendimento
-                </Button>
-            </div>
-
-            <Button
-                variant="outline"
-                className="absolute bottom-6 border-white/10 bg-black/40 text-white hover:bg-white/10 pointer-events-auto"
-                onClick={() => setIsPeeking(!isPeeking)}
-            >
-                {isPeeking ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
-                {isPeeking ? "Ocultar Mensagens" : "Ver Mensagens"}
-            </Button>
-        </div>
-    );
-}
 
 export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel }: ChatPanelProps) {
 
@@ -757,19 +717,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         }
     };
 
-    const handleTakeOwnership = async () => {
-        if (!chat) return;
-        const result = await assignChatToSelfAction(chat.id);
-        if (result.success) {
-            toast({ title: "Você assumiu o atendimento!" });
-            onActionSuccess();
-            // Polling fallback to ensure UI update
-            setTimeout(onActionSuccess, 1000);
-            setTimeout(onActionSuccess, 3000);
-        } else {
-            toast({ title: "Erro ao assumir", description: result.error, variant: 'destructive' });
-        }
-    };
+
 
     const onEmojiClick = (emojiData: EmojiClickData) => {
         const editableDiv = contentEditableRef.current;
@@ -978,11 +926,11 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                         ))}
                     </div>
                 </ScrollArea>
-                {isChatInGeneralQueue && <TakeOwnershipOverlay onTakeOwnership={handleTakeOwnership} />}
+
             </div>
 
 
-            {isChatOpen && isChatAssignedToMe ? (
+            {isChatOpen ? (
                 <footer className="p-4 bg-transparent z-20">
                     {showShortcutSuggestions && filteredShortcuts.length > 0 && (
                         <div className="mb-2 p-2 border border-white/10 rounded-xl bg-black/60 backdrop-blur-xl max-h-40 overflow-y-auto shadow-xl">
@@ -1161,9 +1109,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 </footer>
             ) : (
                 <footer className="p-4 flex-shrink-0 text-center bg-black/20 backdrop-blur-xl border-t border-white/10">
-                    <p className='text-sm font-medium text-white/50'>{
-                        chat.status === 'gerais' ? "Este atendimento está aguardando um agente." : "Este atendimento foi encerrado."
-                    }</p>
+                    <p className='text-sm font-medium text-white/50'>
+                        Este atendimento foi encerrado.
+                    </p>
                 </footer>
             )}
         </div>

@@ -159,12 +159,28 @@ async function internalSendMessage(
         const chatInfo = chatInfoRes.rows[0];
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
 
-        // Se for humano e chat em "gerais", atribui o agente
+        // Se for humano e não tiver agente (independente do status), atribui o agente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
-        if (chatStatus === 'gerais' && !currentAgentId && isFromHumanAgent) {
+        if (!currentAgentId && isFromHumanAgent) {
             await client.query(
                 "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
                 [senderId, chatId]
+            );
+
+            // Insert system message indicating attendance started
+            // We need to fetch the agent's name to be consistent with assignChatToSelfAction
+            // Since senderId is the user ID, we can try to get the name from a separate query or assume it's available.
+            // However, internalSendMessage doesn't receive the sender's name directly.
+            // We can fetch it or just use a generic message if name is unavailable, but fetching is better.
+            const agentRes = await client.query('SELECT full_name, email FROM users WHERE id = $1', [senderId]);
+            const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, 
+                    sender_user_id, created_at, is_read
+                ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
+                [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, senderId]
             );
         }
 

@@ -31,16 +31,35 @@ export async function fetchEvolutionAPI(
     endpoint: string,
     apiConfig: { api_url: string; api_key: string },
     options: RequestInit = {}
-) {
+): Promise<any> {
     if (!apiConfig.api_url || !apiConfig.api_key) {
         throw new Error("A configuração da API (URL e Chave) é necessária.");
     }
     const baseUrl = apiConfig.api_url.endsWith('/') ? apiConfig.api_url.slice(0, -1) : apiConfig.api_url;
     const url = `${baseUrl}${endpoint}`;
-} catch (error) {
-    console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
-    throw error;
-}
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': apiConfig.api_key,
+                ...options.headers,
+            },
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`Evolution API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+        }
+
+        const text = await response.text();
+        return text ? JSON.parse(text) : null;
+
+    } catch (error) {
+        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+        throw error;
+    }
 }
 
 /**
