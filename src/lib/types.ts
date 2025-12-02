@@ -179,6 +179,7 @@ export type Chat = {
   id: string;
   contact: Contact;
   agent?: User;
+  agentId?: string;
   messages: Message[];
   updatedAt?: string;
   status: 'atendimentos' | 'gerais' | 'encerrados';

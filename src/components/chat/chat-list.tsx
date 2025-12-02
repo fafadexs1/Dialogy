@@ -334,7 +334,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className='flex-1 min-w-0'>
             <p className={cn("font-semibold truncate text-sm", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
-              {chat.contact.name}
+              {chat.contact.name.split(' ').slice(0, 3).join(' ')}
             </p>
           </div>
           {lastMessage && (
@@ -423,10 +423,28 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const isFirstRun = React.useRef(true);
   const selectedChatIdRef = React.useRef(selectedChat?.id);
+  const lastSelectedStatusRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChat?.id;
   }, [selectedChat?.id]);
+
+  useEffect(() => {
+    const status = selectedChat?.status;
+    if (!status) {
+      lastSelectedStatusRef.current = null;
+      return;
+    }
+
+    const statusChanged = lastSelectedStatusRef.current !== status;
+    const isKnownTab = status === 'gerais' || status === 'atendimentos' || status === 'encerrados';
+
+    if (statusChanged && isKnownTab && activeTab !== status) {
+      setActiveTab(status);
+    }
+
+    lastSelectedStatusRef.current = status;
+  }, [activeTab, selectedChat?.status]);
 
   useEffect(() => {
     if (isFirstRun.current) {
@@ -501,6 +519,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         statusFilter === 'all' ||
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
 
+      const chatAgentId = chat.agent?.id || chat.agentId;
       // Client-side ownership filter is now redundant if server filters correctly, 
       // but we keep it for safety or if mixed data is present.
       // Actually, if we fetch 'everyone', we might want to filter 'mine' on client?
@@ -510,7 +529,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       const matchesOwner =
         ownershipFilter === 'everyone' ||
-        chat.agent?.id === currentUser.id ||
+        chatAgentId === currentUser.id ||
         chat.status === 'gerais';
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;

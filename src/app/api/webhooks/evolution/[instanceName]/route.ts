@@ -143,20 +143,50 @@ async function handleMessagesUpdate(payload: any) {
     }
 
     const { keyId, status } = data;
+    const normalizedStatus = status.toUpperCase();
 
-    console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
-    if (status === 'READ' || status === 'PLAYED') {
+    console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${normalizedStatus} na instância ${instanceName}`);
+    if (normalizedStatus === 'READ' || normalizedStatus === 'PLAYED') {
         console.log(`[WEBHOOK_MSG_VIEWED] Mensagem ${keyId} foi visualizada/reproduzida pelo contato.`);
     }
 
+    const client = await db.connect();
     try {
-        await db.query(
-            `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2`,
-            [status.toUpperCase(), keyId]
+        await client.query('BEGIN');
+
+        // 1. Update the specific message
+        const updateRes = await client.query(
+            `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2 RETURNING chat_id, created_at, from_me`,
+            [normalizedStatus, keyId]
         );
+
+        if ((updateRes.rowCount ?? 0) > 0 && (normalizedStatus === 'READ' || normalizedStatus === 'PLAYED')) {
+            const { chat_id, created_at, from_me } = updateRes.rows[0];
+
+            // 2. If it's a read receipt for a message sent by us, mark all older messages in the same chat as READ
+            if (from_me) {
+                const olderMessagesRes = await client.query(
+                    `UPDATE messages 
+                     SET api_message_status = 'READ' 
+                     WHERE chat_id = $1 
+                       AND from_me = TRUE 
+                       AND created_at <= $2 
+                       AND (api_message_status IS NULL OR api_message_status NOT IN ('READ', 'PLAYED'))`,
+                    [chat_id, created_at]
+                );
+                if ((olderMessagesRes.rowCount ?? 0) > 0) {
+                    console.log(`[WEBHOOK_MSG_UPDATE] Propagado status READ para ${olderMessagesRes.rowCount} mensagens anteriores no chat ${chat_id}.`);
+                }
+            }
+        }
+
+        await client.query('COMMIT');
         console.log(`[WEBHOOK_MSG_UPDATE] Status da mensagem ${keyId} atualizado com sucesso.`);
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('[WEBHOOK_MSG_UPDATE] Erro ao atualizar status da mensagem:', error);
+    } finally {
+        client.release();
     }
 }
 

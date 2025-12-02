@@ -12,6 +12,7 @@ import { sendImageMessage } from '@/services/whatsapp/send-image-message';
 import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
+import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
 import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
 import {
@@ -131,6 +132,7 @@ async function internalSendMessage(
     tabId: string | null, // ID da aba que está enviando a mensagem
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
+    messageId?: string // Opcional: ID da mensagem gerado pelo cliente
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -227,18 +229,33 @@ async function internalSendMessage(
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
-        await client.query(
-            `INSERT INTO messages (
-                workspace_id, chat_id, type, content, from_me, 
-                message_id_from_api, api_message_status, instance_name, 
-                metadata, is_read, ${senderColumn}, sent_by_tab
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-            [
-                workspaceId, chatId, 'text', content, true,
-                apiResponse?.key?.id, 'SENT', instanceName,
-                metadata ?? {}, true, senderId, tabId
-            ]
-        );
+        if (messageId) {
+            await client.query(
+                `INSERT INTO messages (
+                    id, workspace_id, chat_id, type, content, from_me, 
+                    message_id_from_api, api_message_status, instance_name, 
+                    metadata, is_read, ${senderColumn}, sent_by_tab
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+                [
+                    messageId, workspaceId, chatId, 'text', content, true,
+                    apiResponse?.key?.id, 'SENT', instanceName,
+                    metadata ?? {}, true, senderId, tabId
+                ]
+            );
+        } else {
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, 
+                    message_id_from_api, api_message_status, instance_name, 
+                    metadata, is_read, ${senderColumn}, sent_by_tab
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                [
+                    workspaceId, chatId, 'text', content, true,
+                    apiResponse?.key?.id, 'SENT', instanceName,
+                    metadata ?? {}, true, senderId, tabId
+                ]
+            );
+        }
 
         await client.query('COMMIT');
 
@@ -391,7 +408,8 @@ export const sendAgentMessageAction = withDebug(
     async function sendAgentMessageAction(
         chatId: string,
         content: string,
-        tabId: string | null
+        tabId: string | null,
+        messageId?: string
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -443,7 +461,7 @@ export const sendAgentMessageAction = withDebug(
             client.release();
         }
 
-        return internalSendMessage(chatId, content, user.id, tabId);
+        return internalSendMessage(chatId, content, user.id, tabId, undefined, undefined, messageId);
     },
     {
         contextResolver: (chatId, content) => ({ payload: { chatId, content } })
@@ -720,6 +738,113 @@ export async function sendAutomatedMediaAction(
 
     return internalSendMedia(chatId, caption, mediaFiles, agentId, null, undefined, instanceName);
 }
+
+export const sendAgentTemplateAction = withDebug(
+    'send_agent_template',
+    async function sendAgentTemplateAction(
+        input: {
+            agentId: string;
+            workspaceId: string;
+            numberid: string;
+            instanceName: string;
+            name: string;
+            language: string;
+            components: any[];
+        }
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
+        const { agentId, workspaceId, numberid, instanceName, name, language, components } = input;
+
+        if (!numberid || !instanceName || !name || !language) {
+            return { success: false, error: 'Campos obrigatórios faltando.' };
+        }
+
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const fullJid = numberid.includes('@') ? numberid : `${numberid}@s.whatsapp.net`;
+
+            // 1. Find or create the contact
+            let contactRes = await client.query(
+                'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+                [workspaceId, fullJid]
+            );
+            let contactId;
+            if (contactRes.rowCount === 0) {
+                const newContactRes = await client.query(
+                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
+                    [workspaceId, numberid, fullJid]
+                );
+                contactId = newContactRes.rows[0].id;
+            } else {
+                contactId = contactRes.rows[0].id;
+            }
+
+            // 2. Find or create the chat
+            let chatRes = await client.query(
+                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
+                [workspaceId, contactId]
+            );
+            let chatId;
+            if (chatRes.rowCount && chatRes.rowCount > 0) {
+                chatId = chatRes.rows[0].id;
+            } else {
+                const newChatRes = await client.query(
+                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
+                    [workspaceId, contactId, agentId]
+                );
+                chatId = newChatRes.rows[0].id;
+            }
+
+            // 3. Get API Config
+            const apiConfig = await getApiConfigForInstance(instanceName);
+            if (!apiConfig) {
+                throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
+            }
+
+            // 4. Send Template
+            const apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
+                number: fullJid,
+                name,
+                language,
+                components
+            });
+
+            // 5. Persist Message
+            // We'll save it as a text message with metadata indicating it's a template
+            // Construct a representation of the template for the content
+            const content = `[Template: ${name}]`;
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, 
+                    message_id_from_api, api_message_status, instance_name, 
+                    metadata, is_read, sender_system_agent_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    workspaceId, chatId, 'text', content, true,
+                    apiResponse?.key?.id, 'SENT', instanceName,
+                    { isTemplate: true, templateName: name, templateComponents: components }, true, agentId
+                ]
+            );
+
+            await client.query('COMMIT');
+            return { success: true, apiResponse };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[SEND_AGENT_TEMPLATE_ACTION] Erro:', error);
+            const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
+            return { success: false, error: `Falha ao enviar template: ${errorMessage}` };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({ payload: { instanceName: input.instanceName, template: input.name } })
+    }
+);
+
 
 export const startNewConversation = withDebug(
     'start_conversation',

@@ -35,6 +35,7 @@ type InboxState = {
   markChatAsRead: (chatId: string) => void;
   incrementUnread: (chatId: string) => void;
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
+  markMessagesAsReadByRecipient: (chatId: string, upToDate: string) => void;
   reset: () => void;
 };
 
@@ -165,7 +166,21 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const cleanedCurrent = messages.reduce((acc, incoming) => {
         if (incoming.sentByTab) {
           return acc.filter(
-            (message) => !(message.optimistic && message.sentByTab === incoming.sentByTab)
+            (message) => {
+              // Only remove optimistic messages that have temporary IDs (start with 'optimistic-')
+              // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
+              // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
+              if (message.optimistic && message.sentByTab === incoming.sentByTab) {
+                if (message.id.startsWith('optimistic-')) {
+                  return false; // Remove legacy/media optimistic messages
+                }
+                // For UUID messages, we KEEP them here. 
+                // dedupeMessages will handle the merge/overwrite if the IDs match.
+                // If the IDs don't match (different pending message), we definitely want to KEEP it.
+                return true;
+              }
+              return true;
+            }
           );
         }
         return acc;
@@ -237,6 +252,33 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         messagesByChat: {
           ...state.messagesByChat,
           [chatId]: current.filter((message) => !predicate(message)),
+        },
+      };
+    });
+  },
+  markMessagesAsReadByRecipient: (chatId, upToDate) => {
+    set((state) => {
+      const current = state.messagesByChat[chatId] || [];
+      // Add a small buffer (2 seconds) to account for minor clock skews or precision loss
+      const upToTime = new Date(upToDate).getTime() + 2000;
+
+      let updatedCount = 0;
+      const updated = current.map((message) => {
+        if (message.from_me && new Date(message.createdAt).getTime() <= upToTime && message.api_message_status !== 'READ') {
+          updatedCount++;
+          return { ...message, api_message_status: 'READ' };
+        }
+        return message;
+      });
+
+      if (updatedCount > 0) {
+        console.log(`[STORE] Optimistically marked ${updatedCount} messages as READ in chat ${chatId}`);
+      }
+
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: updated,
         },
       };
     });

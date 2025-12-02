@@ -408,7 +408,17 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
-      removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab);
+      // Only remove optimistic messages that have temporary IDs (start with 'optimistic-')
+      // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
+      // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
+      removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab && m.id.startsWith('optimistic-'));
+    }
+
+    // Optimistic update for read receipts:
+    // If we receive a message update where api_message_status is READ and it's from us,
+    // we assume all previous messages are also read.
+    if (message.from_me && message.api_message_status === 'READ') {
+      useInboxStore.getState().markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
 
     if (!messageChat && runDeltaSyncRef.current) {
@@ -434,8 +444,13 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
     try {
-      const result = await getChatMessagesWindow({ chatId, before: before ?? undefined });
-      if (result.error) throw new Error(result.error);
+      const result = await getChatMessagesWindow({
+        chatId,
+        before: before ?? undefined,
+        limit: 50,
+        timezone: workspaceTimezone
+      });
+      // result.error does not exist on the return type of getChatMessagesWindow
       if (before) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
       } else {
@@ -448,7 +463,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       console.error('[LOAD_MESSAGES] Error:', error);
       toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
     }
-  }, [prependMessagesToChat, setMessagesForChat, updateChatContact]);
+  }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatId) return;
@@ -495,6 +510,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         lastSyncMessageForSelected: result.lastSyncMessageForSelected,
         oldestMessageDate: result.oldestMessageDate,
         hasMoreHistory: result.hasMoreHistory,
+        hasMoreChats: result.hasMoreChats,
       });
       if (result.selectedChatId) {
         selectedChatIdRef.current = result.selectedChatId;
@@ -608,8 +624,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
-        // Interval: 5s if visible, 30s if background. Backoff to 10s+ on error.
-        let interval = isVisible ? 5000 : 30000;
+        // Interval: 3s if visible, 15s if background. Backoff to 10s+ on error.
+        let interval = isVisible ? 3000 : 15000;
         if (errorCount > 0) interval = Math.max(interval, 10000);
 
         timeoutId = setTimeout(poll, interval);
@@ -689,6 +705,36 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         table: 'messages',
         filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
       }, (payload) => handleRealtimeMessageRef.current(payload))
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => handleRealtimeMessageRef.current(payload))
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'chats',
+        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
+      }, (payload) => {
+        console.log('[REALTIME] Chat update received:', payload);
+        const newChatData = payload.new as any; // Use any to access snake_case properties
+
+        // Construct the partial chat object for update
+        const chatUpdate: Partial<Chat> = {
+          ...newChatData,
+          agentId: newChatData.agent_id, // Map snake_case to camelCase
+        };
+
+        // If assigned to self, we can optimistically set the agent object
+        if (newChatData.agent_id === initialUser.id) {
+          chatUpdate.agent = initialUser;
+        } else if (newChatData.agent_id === null) {
+          chatUpdate.agent = undefined; // Explicitly clear agent if unassigned
+        }
+
+        useInboxStore.getState().upsertChats([chatUpdate as Chat]);
+      })
       .subscribe((status) => {
         console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
       });

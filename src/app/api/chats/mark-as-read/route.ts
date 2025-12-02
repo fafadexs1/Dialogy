@@ -145,7 +145,11 @@ async function sendReceiptToWhatsApp(
         console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
         return;
     } catch (error: any) {
-        console.error(`[MARK_AS_READ_API] Error sending read receipt: ${error.message}`);
+        if (error.message.includes('404') || error.message.includes('Not Found')) {
+            console.warn(`[MARK_AS_READ_API] Endpoint not found for instance ${instanceName}. Check API version.`);
+        } else {
+            console.error(`[MARK_AS_READ_API] Error sending read receipt: ${error.message}`);
+        }
         // No fallback needed as we are now using the correct endpoint
     }
 }
