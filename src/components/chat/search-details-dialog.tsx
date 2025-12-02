@@ -44,7 +44,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         }
 
         setIsLoading(true);
-        searchChatsAndContacts({ workspaceId, query: searchQuery }).then((res) => {
+        searchChatsAndContacts(workspaceId, searchQuery).then((res) => {
             if (!active) return;
             if (res.error) {
                 setError(res.error);

@@ -29,9 +29,12 @@ export async function POST(request: Request) {
         try {
             await client.query('BEGIN');
 
-            // 1. Find all unread messages for this chat
+            // 1. Find all unread messages for this chat, skipping any that are currently locked (e.g. by webhook updates)
             const unreadMessagesRes = await client.query(
-                `SELECT id, message_id_from_api, from_me FROM messages WHERE chat_id = $1 AND from_me = FALSE AND is_read = FALSE`,
+                `SELECT id, message_id_from_api, from_me 
+                 FROM messages 
+                 WHERE chat_id = $1 AND from_me = FALSE AND is_read = FALSE
+                 FOR UPDATE SKIP LOCKED`,
                 [chatId]
             );
             const unreadMessages: Pick<Message, 'id' | 'message_id_from_api' | 'from_me'>[] = unreadMessagesRes.rows;
@@ -145,11 +148,11 @@ async function sendReceiptToWhatsApp(
         console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
         return;
     } catch (error: any) {
+        // Suppress 404 errors as they likely mean the instance is stopped or the endpoint is different
         if (error.message.includes('404') || error.message.includes('Not Found')) {
-            console.warn(`[MARK_AS_READ_API] Endpoint not found for instance ${instanceName}. Check API version.`);
+            console.warn(`[MARK_AS_READ_API] Instance ${instanceName} not found or endpoint invalid. Ignoring.`);
         } else {
             console.error(`[MARK_AS_READ_API] Error sending read receipt: ${error.message}`);
         }
-        // No fallback needed as we are now using the correct endpoint
     }
 }

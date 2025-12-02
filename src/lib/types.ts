@@ -484,6 +484,9 @@ export interface SystemAgent {
   webhook_url: string;
   is_active: boolean;
   created_at: string;
+  type?: string | null;
+  handoff_system_agent_id?: string | null;
+  hide_from_chatlist?: boolean;
 }
 
 // Analytics Types

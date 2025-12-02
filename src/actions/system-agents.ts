@@ -36,7 +36,7 @@ export async function getSystemAgents(workspaceId: string): Promise<{ agents: Sy
 
 export async function createSystemAgent(
     workspaceId: string,
-    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
+    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist'>>
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -62,9 +62,11 @@ export async function createSystemAgent(
     const token = `dgy_${randomBytes(24).toString('hex')}`;
 
     try {
+        const webhookValue = data.type === 'marketing' ? '' : (data.webhook_url || null);
         const res = await db.query(
-            'INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [workspaceId, data.name, data.avatar_url || null, data.webhook_url || null, token, user.id]
+            `INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id, type, handoff_system_agent_id, hide_from_chatlist)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false)) RETURNING *`,
+            [workspaceId, data.name, data.avatar_url || null, webhookValue, token, user.id, data.type || 'default', data.handoff_system_agent_id || null, data.hide_from_chatlist]
         );
         revalidatePath('/automations/robots');
         return { success: true, agent: res.rows[0] };
@@ -79,7 +81,7 @@ export async function createSystemAgent(
 
 export async function updateSystemAgent(
     agentId: string,
-    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'>
+    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist'>>
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -103,9 +105,18 @@ export async function updateSystemAgent(
             }
         }
 
+        const webhookValue = data.type === 'marketing' ? '' : (data.webhook_url || null);
+
         await db.query(
-            'UPDATE system_agents SET name = $1, avatar_url = $2, webhook_url = $3 WHERE id = $4',
-            [data.name, data.avatar_url || null, data.webhook_url || null, agentId]
+            `UPDATE system_agents SET 
+                name = $1, 
+                avatar_url = $2, 
+                webhook_url = $3,
+                type = COALESCE($4, type),
+                handoff_system_agent_id = COALESCE($5, handoff_system_agent_id),
+                hide_from_chatlist = COALESCE($6, hide_from_chatlist)
+             WHERE id = $7`,
+            [data.name, data.avatar_url || null, webhookValue, data.type || null, data.handoff_system_agent_id || null, data.hide_from_chatlist, agentId]
         );
         
         revalidatePath('/automations/robots');

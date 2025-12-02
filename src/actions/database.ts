@@ -357,6 +357,21 @@ create table if not exists public.system_agents (
   constraint uq_system_agents_token unique(token)
 );
 create index if not exists idx_system_agents_workspace on public.system_agents(workspace_id);
+-- Ensure webhook_url can be null (marketing agents)
+alter table if exists public.system_agents alter column webhook_url drop not null;
+alter table if exists public.system_agents add column if not exists type text default 'default';
+alter table if exists public.system_agents add column if not exists handoff_system_agent_id uuid;
+alter table if exists public.system_agents add column if not exists hide_from_chatlist boolean not null default false;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'system_agents_handoff_system_agent_id_fkey'
+  ) then
+    alter table public.system_agents
+      add constraint system_agents_handoff_system_agent_id_fkey
+      foreign key (handoff_system_agent_id) references public.system_agents(id) on delete set null;
+  end if;
+end$$;
 
 -- Clusters WhatsApp
 create table if not exists public.whatsapp_clusters (

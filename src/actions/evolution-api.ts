@@ -69,8 +69,6 @@ export async function createEvolutionApiInstance(
     payload: EvolutionInstanceCreationPayload,
     workspaceId: string
 ): Promise<{ success: boolean; error?: string | null; qrCode?: string }> {
-    const client = await db.connect();
-
     if (!workspaceId) {
         return { success: false, error: 'ID do Workspace não encontrado.' };
     }
@@ -83,7 +81,7 @@ export async function createEvolutionApiInstance(
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
     }
 
-
+    const client = await db.connect();
     try {
         await client.query('BEGIN');
 

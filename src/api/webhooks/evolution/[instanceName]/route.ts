@@ -101,8 +101,7 @@ async function handleMessagesUpdate(payload: any) {
 
 async function handleMessagesUpsert(payload: any) {
     const { instance: instanceName, data, sender, server_url } = payload;
-    const client = await db.connect();
-    
+
     let savedChat: Chat | null = null;
     let savedMessage: Message | null = null;
     let workspaceId: string | null = null;
@@ -239,6 +238,7 @@ async function handleMessagesUpsert(payload: any) {
 
     const contactPhone = contactJid.split('@')[0];
     
+    const client = await db.connect();
     try {
         await client.query('BEGIN');
 

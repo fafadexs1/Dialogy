@@ -705,7 +705,9 @@ export async function sendAutomatedMediaAction(
     }[],
     agentId: string,
     instanceName?: string,
+    metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string }> {
+    const baseMetadata = metadata ?? {};
     // Meta first
     const client = await db.connect();
     try {
@@ -727,15 +729,15 @@ export async function sendAutomatedMediaAction(
                     channel: metaCtx.channel,
                     chat: metaCtx.chat,
                     contact: metaCtx.contact,
-                    message: {
-                        type: file.mediatype === 'document' ? 'document' : file.mediatype,
-                        content: caption,
-                        metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
-                        mediaUrl: file.base64,
-                    },
-                    platform: metaCtx.platform,
-                    direction: 'outgoing',
-                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                        message: {
+                            type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                            content: caption,
+                            metadata: { ...baseMetadata, mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                            mediaUrl: file.base64,
+                        },
+                        platform: metaCtx.platform,
+                        direction: 'outgoing',
+                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
                     externalSenderId: metaCtx.externalUserId,
                     externalChannelId: metaCtx.externalChannelId,
                     rawPayload: { request: { caption, file }, response: apiResponse },
@@ -752,7 +754,7 @@ export async function sendAutomatedMediaAction(
         client.release();
     }
 
-    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, undefined, instanceName);
+    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, baseMetadata, instanceName);
 }
 
 export const sendAgentTemplateAction = withDebug(
@@ -766,9 +768,10 @@ export const sendAgentTemplateAction = withDebug(
             name: string;
             language: string;
             components: any[];
+            metadata?: MessageMetadata;
         }
     ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
-        const { agentId, workspaceId, numberid, instanceName, name, language, components } = input;
+        const { agentId, workspaceId, numberid, instanceName, name, language, components, metadata } = input;
 
         if (!numberid || !instanceName || !name || !language) {
             return { success: false, error: 'Campos obrigatórios faltando.' };
@@ -805,9 +808,10 @@ export const sendAgentTemplateAction = withDebug(
             if (chatRes.rowCount && chatRes.rowCount > 0) {
                 chatId = chatRes.rows[0].id;
             } else {
+                // For system agents, avoid setting agent_id (FK to users) to prevent constraint violations.
                 const newChatRes = await client.query(
-                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
-                    [workspaceId, contactId, agentId]
+                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'gerais', NULL, NULL) RETURNING id`,
+                    [workspaceId, contactId]
                 );
                 chatId = newChatRes.rows[0].id;
             }
@@ -827,9 +831,17 @@ export const sendAgentTemplateAction = withDebug(
             });
 
             // 5. Persist Message
-            // We'll save it as a text message with metadata indicating it's a template
-            // Construct a representation of the template for the content
-            const content = `[Template: ${name}]`;
+            // Build human-readable content preview from components, fallback to template name.
+            let content = `[Template: ${name}]`;
+            const bodyComponent = components.find((c: any) => c.type === 'body');
+            const bodyText = bodyComponent?.parameters
+                ?.map((p: any) => p.text || p.payload || p.example || '')
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+            if (bodyText) {
+                content = bodyText;
+            }
 
             await client.query(
                 `INSERT INTO messages (
@@ -840,7 +852,12 @@ export const sendAgentTemplateAction = withDebug(
                 [
                     workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
-                    { isTemplate: true, templateName: name, templateComponents: components }, true, agentId
+                    {
+                        isTemplate: true,
+                        templateName: name,
+                        templateComponents: components,
+                        ...(metadata ?? {}),
+                    }, true, agentId
                 ]
             );
 

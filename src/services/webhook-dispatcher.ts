@@ -154,6 +154,85 @@ export async function dispatchMessageToWebhooks(
             },
         };
 
+        // Determine if this message should go only to a specific system agent (marketing handoff)
+        const resolveTargetSystemAgent = async (): Promise<{ targetAgentId: string | null; marketingSenderSystemAgentId: string | null; marketingMessageCreatedAt: string | null }> => {
+            const meta = (message.metadata as any) || {};
+            if (meta.marketingTargetSystemAgentId) {
+                return {
+                    targetAgentId: meta.marketingTargetSystemAgentId,
+                    marketingSenderSystemAgentId: meta.from_system_agent_id || null,
+                    marketingMessageCreatedAt: null,
+                };
+            }
+
+            // For incoming replies, look back to the last marketing message that specified a target.
+            if (!message.from_me || message.direction === 'incoming') {
+                const res = await db.query(
+                    `SELECT metadata->>'marketingTargetSystemAgentId' AS target
+                             , metadata->>'from_system_agent_id' AS marketing_sender
+                             , created_at
+                     FROM messages
+                     WHERE chat_id = $1
+                       AND from_me = TRUE
+                       AND metadata ? 'isMarketing'
+                       AND metadata->>'marketingTargetSystemAgentId' IS NOT NULL
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [chat.id]
+                );
+                return {
+                    targetAgentId: res.rows[0]?.target || null,
+                    marketingSenderSystemAgentId: res.rows[0]?.marketing_sender || null,
+                    marketingMessageCreatedAt: res.rows[0]?.created_at || null,
+                };
+            }
+            return { targetAgentId: null, marketingSenderSystemAgentId: null, marketingMessageCreatedAt: null };
+        };
+
+        const { targetAgentId, marketingSenderSystemAgentId, marketingMessageCreatedAt } = await resolveTargetSystemAgent();
+
+        // On incoming reply, mark chat back to "gerais" and log a system handoff message (for metrics),
+        // but do not route to a specific system agent.
+        if (!message.from_me || message.direction === 'incoming') {
+            const hasHandoff = await db.query(
+                `SELECT 1 FROM messages 
+                 WHERE chat_id = $1 
+                   AND metadata ? 'marketingHandoff'
+                   AND ($2::timestamptz IS NULL OR created_at > $2::timestamptz)
+                 LIMIT 1`,
+                [chat.id, marketingMessageCreatedAt]
+            );
+
+            if (hasHandoff.rowCount === 0) {
+                const targetAgentName = targetAgentId
+                  ? (await db.query('SELECT name FROM system_agents WHERE id = $1', [targetAgentId])).rows[0]?.name || 'Agente do Sistema'
+                  : 'Fila (gerais)';
+
+                // Move chat back to gerais and clear assignment.
+                await db.query(
+                  `UPDATE chats SET status = 'gerais', agent_id = NULL, assigned_at = NULL WHERE id = $1`,
+                  [chat.id]
+                );
+
+                await db.query(
+                    `INSERT INTO messages (
+                        workspace_id, chat_id, type, content, from_me, is_read, sender_system_agent_id, metadata
+                    ) VALUES ($1, $2, 'system', $3, true, true, $4, $5)`,
+                    [
+                        chat.workspace_id,
+                        chat.id,
+                        `Cliente respondeu à mensagem de marketing. Chat movido para Gerais (${targetAgentName}).`,
+                        targetAgentId || null,
+                        {
+                            marketingHandoff: true,
+                            from_system_agent_id: marketingSenderSystemAgentId,
+                            to_system_agent_id: targetAgentId || null,
+                        },
+                    ]
+                );
+            }
+        }
+
         const sendWebhook = async (agent: any) => {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);

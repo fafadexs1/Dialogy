@@ -33,11 +33,13 @@ import { useCurrentUser } from '@/hooks/use-online-status';
 
 function AgentForm({
   workspaceId,
+  agents,
   onSuccess,
   onClose,
   agent
 }: {
   workspaceId: string;
+  agents: SystemAgent[];
   onSuccess: () => void;
   onClose: () => void;
   agent?: SystemAgent | null;
@@ -45,6 +47,9 @@ function AgentForm({
   const [name, setName] = useState(agent?.name || '');
   const [avatarUrl, setAvatarUrl] = useState(agent?.avatar_url || '');
   const [webhookUrl, setWebhookUrl] = useState(agent?.webhook_url || '');
+  const [type, setType] = useState<string>(agent?.type || 'default');
+  const [hideMarketing, setHideMarketing] = useState<boolean>(agent?.hide_from_chatlist ?? false);
+  const [handoffSystemAgentId, setHandoffSystemAgentId] = useState<string>(agent?.handoff_system_agent_id || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -56,7 +61,14 @@ function AgentForm({
     }
     setIsSubmitting(true);
 
-    const data = { name, avatar_url: avatarUrl, webhook_url: webhookUrl };
+    const data = {
+      name,
+      avatar_url: avatarUrl,
+      webhook_url: webhookUrl,
+      type,
+      hide_from_chatlist: hideMarketing,
+      handoff_system_agent_id: handoffSystemAgentId || null,
+    };
 
     const result = agent
       ? await updateSystemAgent(agent.id, data)
@@ -85,14 +97,58 @@ function AgentForm({
           <Input id="agent-name" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Robô de Qualificação" required />
         </div>
         <div className="space-y-2">
+          <Label htmlFor="agent-type">Tipo do Agente</Label>
+          <select
+            id="agent-type"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            <option value="default">Padrão</option>
+            <option value="marketing">Marketing</option>
+          </select>
+          <p className="text-xs text-muted-foreground">Escolha "Marketing" para disparos iniciais e roteamento posterior.</p>
+        </div>
+        <div className="space-y-2">
           <Label htmlFor="agent-avatar">URL do Avatar</Label>
           <Input id="agent-avatar" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} type="url" placeholder="https://exemplo.com/avatar.png" />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="agent-webhook">URL do Webhook</Label>
-          <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} type="url" placeholder="https://seu-sistema.com/api/dialogy-webhook" />
-          <p className="text-xs text-muted-foreground">Deve ser uma URL completa, começando com http:// ou https://</p>
-        </div>
+        {type !== 'marketing' && (
+          <div className="space-y-2">
+            <Label htmlFor="agent-webhook">URL do Webhook</Label>
+            <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} type="url" placeholder="https://seu-sistema.com/api/dialogy-webhook" />
+            <p className="text-xs text-muted-foreground">Deve ser uma URL completa, começando com http:// ou https://</p>
+          </div>
+        )}
+        {type === 'marketing' && (
+          <>
+            <div className="space-y-2">
+              <Label>Agente de Sistema para Handoff</Label>
+              <select
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={handoffSystemAgentId}
+                onChange={(e) => setHandoffSystemAgentId(e.target.value)}
+              >
+                <option value="">Nenhum (enviar a todos)</option>
+                {agents
+                  .filter((a) => !agent || a.id !== agent.id)
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">Resposta do cliente será encaminhada para este agente de sistema.</p>
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-input bg-muted/20 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-white">Ocultar mensagens no chatlist</p>
+                <p className="text-xs text-muted-foreground">Não mostra mensagens de marketing no preview.</p>
+              </div>
+              <Switch checked={hideMarketing} onCheckedChange={setHideMarketing} />
+            </div>
+          </>
+        )}
       </div>
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
@@ -184,6 +240,7 @@ export default function RobotsPage() {
           <DialogContent>
             <AgentForm
               workspaceId={user.activeWorkspaceId!}
+              agents={agents}
               onSuccess={handleSuccess}
               onClose={() => setIsModalOpen(false)}
               agent={editingAgent}

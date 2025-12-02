@@ -30,14 +30,22 @@ interface AgentMessagePayload {
 async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: string): Promise<string> {
   const client = await db.connect();
   try {
-    // 1. Find the contact by phone number in the specified workspace
-    const contactRes = await client.query(
+    const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+    const rawDigits = phoneNumber.replace(/\D/g, '') || phoneNumber;
+
+    // 1. Find or create the contact by phone number JID in the specified workspace
+    let contactRes = await client.query(
       'SELECT id FROM contacts WHERE phone_number_jid = $1 AND workspace_id = $2',
-      [phoneNumber, workspaceId]
+      [fullJid, workspaceId]
     );
 
     if (contactRes.rowCount === 0) {
-      throw new Error(`Contact with phone number ${phoneNumber} not found in this workspace.`);
+      contactRes = await client.query(
+        `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [workspaceId, rawDigits, rawDigits, fullJid]
+      );
     }
     const contactId = contactRes.rows[0].id;
 
@@ -89,6 +97,14 @@ export async function POST(request: Request) {
 
     const body: AgentMessagePayload = await request.json();
     let { chatId, phoneNumber, content = '', media, instance } = body;
+    const isMarketing = agent.type === 'marketing';
+    const marketingMetadata = isMarketing
+      ? {
+          isMarketing: true,
+          hideFromChatlist: agent.hide_from_chatlist ?? false,
+          marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
+        }
+      : {};
 
     if (!chatId && !phoneNumber) {
       return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
@@ -112,11 +128,11 @@ export async function POST(request: Request) {
 
     // If media is present, send it. Content will be used as caption.
     if (media && media.length > 0) {
-      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance);
+      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, marketingMetadata as any);
     }
     // Otherwise, send a text message.
     else {
-      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance);
+      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, marketingMetadata as any);
     }
 
 

@@ -2,11 +2,12 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from '@/lib/database.types';
 import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
+import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies, mapPayloadToSupabaseUser } from '@/lib/auth/token';
 
 export const createClient = async () => {
   const cookieStore = await cookies();
 
-  return createServerClient<Database>(
+  const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -29,4 +30,20 @@ export const createClient = async () => {
       },
     }
   );
+
+  // Override getUser to avoid repeated calls to /auth/v1/user on every action.
+  const accessToken = getSupabaseAccessTokenFromCookies(cookieStore);
+  const decoded = decodeSupabaseJwt(accessToken);
+
+  if (decoded) {
+    const cachedUser = mapPayloadToSupabaseUser(decoded);
+    const patchedGetUser = async () => ({
+      data: { user: cachedUser },
+      error: null,
+    });
+    // @ts-expect-error: patching runtime method for performance
+    supabase.auth.getUser = patchedGetUser;
+  }
+
+  return supabase;
 };

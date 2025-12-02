@@ -135,9 +135,18 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           event: '*',
           schema: 'public',
           table: 'user_workspace_presence',
-          filter: `workspace_id=eq.${localUser.activeWorkspaceId}`,
+          // filter: `workspace_id=eq.${localUser.activeWorkspaceId}`, // Removed due to "invalid column" error
         },
-        () => {
+        (payload) => {
+          // Client-side filtering
+          const newData = payload.new as any;
+          const oldData = payload.old as any;
+          const workspaceId = newData?.workspace_id || oldData?.workspace_id;
+
+          if (workspaceId && workspaceId !== localUser.activeWorkspaceId) {
+            return;
+          }
+
           // Whenever the presence table changes for this workspace, refresh the full list.
           // This ensures we always have the correct joined user data.
           refreshOnlineAgents();

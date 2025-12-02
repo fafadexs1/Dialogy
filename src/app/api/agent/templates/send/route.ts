@@ -35,6 +35,12 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Missing required fields: numberid, instanceName, name, language, components.' }, { status: 400 });
         }
 
+        const metadata = agent.type === 'marketing' ? {
+            isMarketing: true,
+            hideFromChatlist: agent.hide_from_chatlist ?? false,
+            marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
+        } : {};
+
         const result = await sendAgentTemplateAction({
             agentId: agent.id,
             workspaceId: agent.workspace_id,
@@ -42,7 +48,8 @@ export async function POST(request: Request) {
             instanceName,
             name,
             language,
-            components
+            components,
+            metadata
         });
 
         if (result.success) {

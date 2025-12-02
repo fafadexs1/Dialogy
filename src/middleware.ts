@@ -1,16 +1,17 @@
-import { type NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
 export async function middleware(request: NextRequest) {
-  // Log Server Action requests
-  // Log Server Action requests
-  // if (request.method === 'POST' && request.headers.get('next-action')) {
-  //   const actionId = request.headers.get('next-action');
-  //   console.log(`[MIDDLEWARE] Server Action Request: ${actionId} | URL: ${request.url} | UA: ${request.headers.get('user-agent')}`);
-  // }
+  // Only refresh the session for full page/HTML navigations.
+  // This avoids hammering Supabase Auth for JSON/data requests (e.g., polling, prefetch).
+  const acceptHeader = request.headers.get('accept') ?? '';
+  const isHtmlRequest = acceptHeader.includes('text/html');
 
-  // updateSession will take care of refreshing the session cookie
-  // if it's expired.
+  if (!isHtmlRequest) {
+    return NextResponse.next();
+  }
+
+  // updateSession will take care of refreshing the session cookie if it's expired.
   return await updateSession(request);
 }
 

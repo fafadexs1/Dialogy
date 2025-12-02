@@ -161,12 +161,22 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    const model = input.model || 'googleai/gemini-2.0-flash';
+    const model = input.model || 'googleai/gemini-2.5-flash-lite';
     const promptInput = AgentResponseInputSchema.parse({
         ...input,
         knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
         fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
     });
+
+    const genAiKey = process.env.GOOGLE_GENAI_API_KEY?.trim();
+    if (!genAiKey || genAiKey === 'no-key-configured') {
+        console.error('[AUTORESPONDER_FLOW_ERROR] GOOGLE_GENAI_API_KEY ausente ou inválida. Configure a variável de ambiente.');
+        const fallback = input.config?.default_fallback_reply?.trim();
+        if (fallback) {
+            return { response: fallback, triggeredRule: null };
+        }
+        return {};
+    }
     
     let output: AgentResponseOutput | null = null;
     try {

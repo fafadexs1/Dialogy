@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -259,10 +259,16 @@ interface ChatListItemProps {
   onSelect: (chat: Chat) => void;
   onUpdate: () => void;
   currentUser: User | null;
+  showMarketing: boolean;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser }) => {
-  const lastMessage = chat.messages[chat.messages.length - 1];
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing }) => {
+  const isMarketingChat = chat.messages.some((m: any) => (m.metadata as any)?.isMarketing);
+  const visibleMessages = React.useMemo(() => {
+    if (showMarketing) return chat.messages;
+    return chat.messages.filter(m => !(m.metadata as any)?.isMarketing);
+  }, [chat.messages, showMarketing]);
+  const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
 
   const handleSelect = () => {
@@ -328,6 +334,20 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </TooltipProvider>
           );
         })()}
+        {isMarketingChat && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="absolute -top-1 -left-1 flex h-5 w-5 items-center justify-center rounded-full text-white border-2 border-black shadow-sm bg-orange-500">
+                  <Megaphone size={10} />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
+                <p>Campanha de Marketing</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
       <div className="flex-1 min-w-0">
@@ -345,6 +365,15 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         </div>
 
         <div className="flex items-center gap-2 mt-1">
+          {isMarketingChat && (
+            <Badge
+              variant="secondary"
+              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 bg-orange-500/20 text-orange-200 border-orange-500/30"
+            >
+              <Megaphone className="h-3 w-3" />
+              Marketing
+            </Badge>
+          )}
           {chat.tag && chat.color && chat.status !== 'atendimentos' && (
             <Badge
               style={{
@@ -411,6 +440,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
+  const [showMarketing, setShowMarketing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -515,6 +545,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const filterChatByControls = useCallback(
     (chat: Chat) => {
+      const visibleMessages = showMarketing
+        ? chat.messages
+        : chat.messages.filter(m => !(m.metadata as any)?.isMarketing);
+      if (!showMarketing && visibleMessages.length === 0) {
+        return false;
+      }
+
       const matchesStatus =
         statusFilter === 'all' ||
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
@@ -541,16 +578,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         !query ||
         (chat.contact.name || '').toLowerCase().includes(query) ||
         (chat.contact.phone || '').includes(query) ||
-        chat.messages.some(m => (m.content || '').toLowerCase().includes(query));
+        visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
 
       return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, searchQuery]
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, searchQuery, showMarketing]
   );
 
   const filteredChats = useMemo(() => {
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
-  }, [activeTab, getBaseChatsForTab, filterChatByControls]);
+  }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
 
   const handleLoadMore = async () => {
     if (isLoadingMore || !currentUser.activeWorkspaceId) return;
@@ -653,6 +690,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       <p className="text-xs text-muted-foreground">Ótimo para dividir a fila com o time</p>
                     </div>
                     <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">Mostrar mensagens de Marketing</p>
+                      <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
+                    </div>
+                    <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
                   </div>
                 </div>
               </PopoverContent>
@@ -775,6 +819,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   isSelected={selectedChat?.id === chat.id}
                   onSelect={setSelectedChat}
                   onUpdate={onUpdate}
+                  showMarketing={showMarketing}
                   currentUser={currentUser}
                 />
               ))}
