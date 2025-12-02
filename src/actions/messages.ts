@@ -223,7 +223,7 @@ async function internalSendMessage(
             throw new Error('Configuracao da API nao encontrada para a instancia ' + instanceName + '.');
         }
 
-        const apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
+        const apiResponse: any = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
@@ -280,11 +280,12 @@ async function internalSendMedia(
     if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
     }
-    const client = await db.connect();
-    try {
-        await client.query('BEGIN');
 
-        const chatInfoRes = await client.query(`
+    // NOTE: We do NOT use a single transaction for the entire batch anymore.
+    // This prevents holding a DB connection while uploading files to the API.
+    try {
+        // 1. Initial checks (read-only, fast)
+        const chatInfoRes = await db.query(`
             SELECT c.workspace_id, ct.phone_number_jid, 
                    (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name
             FROM chats c
@@ -304,12 +305,14 @@ async function internalSendMedia(
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
+        // 2. Process each file independently
         for (const file of mediaFiles) {
-            let apiResponse;
+            let apiResponse: any;
             let dbMessageType: Message['type'];
 
             const mediaContent = file.base64; // Pode ser Base64 ou URL remota
 
+            // API Call (No DB connection held here)
             switch (file.mediatype) {
                 case 'image':
                     apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
@@ -324,11 +327,9 @@ async function internalSendMedia(
                     dbMessageType = 'document';
                     break;
                 case 'audio':
-                    // Special handling for recorded audio to be sent as voice note
                     if (file.filename === 'audio_gravado.mp3') {
                         apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent });
                     } else {
-                        // Send other audio files as documents
                         apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                     }
                     dbMessageType = 'audio';
@@ -353,7 +354,8 @@ async function internalSendMedia(
                 thumbnail: file.thumbnail || (metadata?.thumbnail ?? undefined),
             };
 
-            await client.query(
+            // Insert into DB (Quick operation, grabs connection and releases immediately)
+            await db.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me,
                     message_id_from_api, api_message_status, instance_name,
@@ -367,8 +369,6 @@ async function internalSendMedia(
             );
         }
 
-        await client.query('COMMIT');
-
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
@@ -376,12 +376,9 @@ async function internalSendMedia(
         return { success: true };
 
     } catch (error) {
-        await client.query('ROLLBACK');
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
         const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao enviar mídia.";
         return { success: false, error: errorMessage };
-    } finally {
-        client.release();
     }
 }
 

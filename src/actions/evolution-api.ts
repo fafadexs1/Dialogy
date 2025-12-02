@@ -37,41 +37,10 @@ export async function fetchEvolutionAPI(
     }
     const baseUrl = apiConfig.api_url.endsWith('/') ? apiConfig.api_url.slice(0, -1) : apiConfig.api_url;
     const url = `${baseUrl}${endpoint}`;
-
-    console.log(`[EVO_API_FETCH] Chamando: ${options.method || 'GET'} ${url}`);
-    if (options.body) {
-        console.log(`[EVO_API_FETCH] Body: ${options.body}`);
-    }
-
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                ...options.headers,
-                'apikey': apiConfig.api_key,
-                'Content-Type': 'application/json',
-            },
-            cache: 'no-store'
-        });
-
-        const responseBodyText = await response.text();
-        console.log(`[EVO_API_FETCH] Resposta recebida: Status ${response.status}, Body: ${responseBodyText}`);
-
-        if (!response.ok) {
-            console.error(`[EVO_API_FETCH] Erro na API Evolution: Status ${response.status}. URL: ${url}. Body: ${responseBodyText}`);
-            throw new Error(`Erro da API Evolution: ${response.statusText} - ${responseBodyText}`);
-        }
-
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json") && responseBodyText) {
-            return JSON.parse(responseBodyText);
-        }
-        return responseBodyText ? { text: responseBodyText } : undefined;
-
-    } catch (error) {
-        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
-        throw error;
-    }
+} catch (error) {
+    console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+    throw error;
+}
 }
 
 /**

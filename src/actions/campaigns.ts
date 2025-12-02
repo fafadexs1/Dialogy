@@ -147,13 +147,14 @@ export async function createCampaign(
 }
 
 async function startCampaignSending(campaignId: string) {
-    const client = await db.connect();
+    // NOTE: We do NOT hold a single client connection for the entire process anymore.
+    // This prevents connection pool exhaustion during long campaigns.
     try {
         console.log(`[CAMPAIGN_WORKER] Iniciando envio para a campanha ${campaignId}`);
 
-        await client.query("UPDATE campaigns SET status = 'sending', started_at = NOW() WHERE id = $1", [campaignId]);
+        await db.query("UPDATE campaigns SET status = 'sending', started_at = NOW() WHERE id = $1", [campaignId]);
 
-        const recipientsRes = await client.query(
+        const recipientsRes = await db.query(
             `SELECT cr.id as recipient_id, c.id as contact_id, c.name as contact_name, c.phone_number_jid, cam.message, cam.instance_name, cam.workspace_id
              FROM campaign_recipients cr
              JOIN contacts c ON cr.contact_id = c.id
@@ -172,7 +173,8 @@ async function startCampaignSending(campaignId: string) {
 
             try {
                 // Find or create a chat for the contact to send the message
-                let chatRes = await client.query(
+                // We use db.query here which grabs a connection, runs query, and releases it immediately.
+                let chatRes = await db.query(
                     `SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2 AND status IN ('gerais', 'atendimentos') LIMIT 1`,
                     [recipient.contact_id, recipient.workspace_id]
                 );
@@ -181,7 +183,7 @@ async function startCampaignSending(campaignId: string) {
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
                 } else {
-                    const newChatRes = await client.query(
+                    const newChatRes = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
                         [recipient.workspace_id, recipient.contact_id]
                     );
@@ -191,11 +193,12 @@ async function startCampaignSending(campaignId: string) {
                 // Personalize message
                 const personalizedMessage = recipient.message.replace(/{{nome}}/gi, recipient.contact_name);
 
-                // Use a generic system agent ID for now. This could be improved.
+                // Use a generic system agent ID for now.
                 const systemAgentId = '00000000-0000-0000-0000-000000000000';
+
+                // sendAutomatedMessageAction manages its own DB connection internally.
                 const result = await sendAutomatedMessageAction(chatId, personalizedMessage, systemAgentId, true, recipient.instance_name);
 
-                // Check for success. We trust the result.success which is based on HTTP 2xx from the API.
                 if (!result.success) {
                     throw new Error(result.error || 'Falha na resposta da API ao enviar a mensagem.');
                 }
@@ -208,7 +211,7 @@ async function startCampaignSending(campaignId: string) {
             }
 
             // Update recipient status
-            await client.query(
+            await db.query(
                 `UPDATE campaign_recipients SET status = $1, error_message = $2, sent_at = CASE WHEN $1 = 'sent' THEN NOW() ELSE NULL END WHERE id = $3`,
                 [messageStatus, errorMessage, recipient.recipient_id]
             );
@@ -217,19 +220,18 @@ async function startCampaignSending(campaignId: string) {
             revalidatePath('/campaigns');
 
             // Add a small delay to avoid rate limiting
+            // During this delay, NO database connection is held!
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         const finalStatus = hasFailures ? 'failed' : 'completed';
-        await client.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $2", [finalStatus, campaignId]);
+        await db.query("UPDATE campaigns SET status = $1, completed_at = NOW() WHERE id = $2", [finalStatus, campaignId]);
         revalidatePath('/campaigns');
         console.log(`[CAMPAIGN_WORKER] Campanha ${campaignId} concluída com status: ${finalStatus}.`);
 
     } catch (error) {
         console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
-        await client.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
-    } finally {
-        client.release();
+        await db.query("UPDATE campaigns SET status = 'failed' WHERE id = $1", [campaignId]);
     }
 }
 

@@ -78,8 +78,9 @@ export async function POST(request: Request) {
 
             await client.query('COMMIT');
 
-            // Revalidate the main path to trigger data refetch on the client.
-            revalidatePath('/', 'layout');
+            // Revalidation removed to prevent performance issues.
+            // Client updates optimistic state via store and Realtime handles sync.
+            // revalidatePath('/', 'layout');
 
             return NextResponse.json({ success: true });
         } catch (dbError) {

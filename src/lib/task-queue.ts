@@ -14,10 +14,19 @@ export class TaskQueue {
   private queue: Array<() => void> = [];
   private active = 0;
 
-  constructor(private readonly concurrency: number) {}
+  constructor(
+    private readonly concurrency: number,
+    private readonly maxQueueSize: number = 2000 // Default limit to prevent OOM
+  ) { }
 
   add<T>(task: Task<T>): Promise<T> {
     return new Promise((resolve, reject) => {
+      if (this.queue.length >= this.maxQueueSize) {
+        const error = new Error(`[TASK_QUEUE] Queue is full (size: ${this.queue.length}). Dropping task.`);
+        console.error(error.message);
+        return reject(error);
+      }
+
       const runTask = () => {
         this.active++;
         task()
