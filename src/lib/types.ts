@@ -9,6 +9,7 @@ export type Workspace = {
   timezone?: string;
   closeMessageTemplate?: string;
   transferTeamMessageTemplate?: string;
+  marketingAutoCloseSeconds?: number;
   roleName?: string;
   isOwner?: boolean;
 }
@@ -143,6 +144,8 @@ export type MessageMetadata = {
   notes?: string | null;
   authored_by?: string;
   template_applied?: boolean;
+  closed_by_system_agent_id?: string;
+  authored_by_system_agent_id?: string;
 }
 
 export type Message = {
@@ -181,6 +184,8 @@ export type Chat = {
   agent?: User;
   agentId?: string;
   messages: Message[];
+  protocol?: string;
+  protocolScoped?: boolean;
   updatedAt?: string;
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
@@ -481,7 +486,7 @@ export interface SystemAgent {
   name: string;
   avatar_url: string;
   token: string;
-  webhook_url: string;
+  webhook_url: string | null;
   is_active: boolean;
   created_at: string;
   type?: string | null;

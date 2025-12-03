@@ -215,6 +215,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
+    const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
     const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -231,6 +232,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
     const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+    useEffect(() => {
+        canLoadOlderRef.current = !((chat as any)?.protocolScoped) && canLoadOlder;
+    }, [canLoadOlder, chat]);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
     const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
@@ -286,6 +290,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const tryLoadOlder = useCallback(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
         if (!viewport) return;
+        if ((chat as any)?.protocolScoped) return;
         if (!canLoadOlderRef.current || isFetchingHistoryRef.current || showFullHistory) return;
         const { scrollTop } = viewport;
 
@@ -335,6 +340,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     }, [chat?.contact?.id]);
 
     useEffect(() => {
+        if (isProtocolScoped) return;
         if (showFullHistory && chat?.contact?.id && currentUser.activeWorkspaceId) {
             setIsLoadingHistory(true);
             getContactMessages({
@@ -348,14 +354,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 .catch(err => console.error('[CHAT_PANEL] Failed to load full history', err))
                 .finally(() => setIsLoadingHistory(false));
         }
-    }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId]);
+    }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId, isProtocolScoped]);
 
     const messagesToRender = useMemo(() => {
+        if (isProtocolScoped) {
+            return chat?.messages || [];
+        }
         if (showFullHistory && allContactMessages.length > 0) {
             return allContactMessages;
         }
         return chat?.messages || [];
-    }, [showFullHistory, allContactMessages, chat?.messages]);
+    }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages]);
 
     useLayoutEffect(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
@@ -809,7 +818,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const isChatOpen = chat.status !== 'encerrados';
     const isChatAssignedToMe = (chat.agent?.id || chat.agentId) === currentUser.id;
-    const isChatInGeneralQueue = chat.status === 'gerais';
 
     const showTextInput = !mediaFiles.length;
 
@@ -863,7 +871,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
                         <div className="w-px h-6 bg-white/10 mx-1" />
 
-                        {isChatOpen && (isChatAssignedToMe || isChatInGeneralQueue) && (
+                        {isChatOpen && isChatAssignedToMe && (
                             <>
                                 <CloseChatDialog
                                     chat={chat}
@@ -893,7 +901,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
                         </Tooltip>
 
-                        {isChatOpen && (isChatAssignedToMe || isChatInGeneralQueue) && (
+                        {isChatOpen && isChatAssignedToMe && (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button

@@ -453,6 +453,7 @@ create table if not exists public.chats (
   closed_at timestamptz,
   close_reason_tag_id uuid,
   closeNotes text,
+  protocol text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint chats_workspace_id_fkey
@@ -467,6 +468,12 @@ create table if not exists public.chats (
 create index if not exists idx_chats_workspace on public.chats(workspace_id);
 create index if not exists idx_chats_contact on public.chats(contact_id);
 create index if not exists idx_chats_agent on public.chats(agent_id);
+-- Garantir coluna de protocolo em chats (para bases já criadas)
+alter table if exists public.chats add column if not exists protocol text;
+create unique index if not exists idx_chats_protocol on public.chats(protocol);
+update public.chats
+   set protocol = COALESCE(protocol, 'PRT-' || upper(replace(id::text, '-', '')))
+ where protocol is null;
 
 -- Mensagens
 create table if not exists public.messages (

@@ -6,6 +6,8 @@ import { revalidatePath } from 'next/cache';
 import type { Campaign, CampaignRecipient, Contact } from '@/lib/types';
 import { sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
+import { randomUUID } from 'crypto';
+import { buildChatProtocol } from '@/lib/utils';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -183,9 +185,11 @@ async function startCampaignSending(campaignId: string) {
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
                 } else {
+                    const newChatId = randomUUID();
+                    const protocol = buildChatProtocol(newChatId);
                     const newChatRes = await db.query(
-                        `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
-                        [recipient.workspace_id, recipient.contact_id]
+                        `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING id`,
+                        [newChatId, recipient.workspace_id, recipient.contact_id, protocol]
                     );
                     chatId = newChatRes.rows[0].id;
                 }

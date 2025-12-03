@@ -7,6 +7,8 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+import { randomUUID } from 'crypto';
+import { buildChatProtocol } from '@/lib/utils';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 
@@ -286,9 +288,11 @@ async function handleMessagesUpsert(payload: any) {
             chat = chatRes.rows[0];
         } else {
              console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
+            const chatId = randomUUID();
+            const protocol = buildChatProtocol(chatId);
             const newChatRes = await client.query(
-                `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING *`,
-                [workspaceId, contactData.id]
+                `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING *`,
+                [chatId, workspaceId, contactData.id, protocol]
             );
             chat = newChatRes.rows[0];
         }

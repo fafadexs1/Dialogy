@@ -113,13 +113,11 @@ function AgentForm({
           <Label htmlFor="agent-avatar">URL do Avatar</Label>
           <Input id="agent-avatar" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} type="url" placeholder="https://exemplo.com/avatar.png" />
         </div>
-        {type !== 'marketing' && (
-          <div className="space-y-2">
-            <Label htmlFor="agent-webhook">URL do Webhook</Label>
-            <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} type="url" placeholder="https://seu-sistema.com/api/dialogy-webhook" />
-            <p className="text-xs text-muted-foreground">Deve ser uma URL completa, começando com http:// ou https://</p>
-          </div>
-        )}
+        <div className="space-y-2">
+          <Label htmlFor="agent-webhook">URL do Webhook</Label>
+          <Input id="agent-webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} type="url" placeholder="https://seu-sistema.com/api/dialogy-webhook" />
+          <p className="text-xs text-muted-foreground">Opcional: use para receber disparos e eventos deste agente (inclusive marketing). Precisa ser uma URL completa com http:// ou https://</p>
+        </div>
         {type === 'marketing' && (
           <>
             <div className="space-y-2">
@@ -310,10 +308,17 @@ export default function RobotsPage() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Webhook className="h-3 w-3" /> URL do Webhook</Label>
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Webhook className="h-3 w-3" /> URL do Webhook (Eventos)</Label>
                     <div className="flex items-center">
                       <Input readOnly value={agent.webhook_url || 'N/A'} className="h-8 font-mono text-xs flex-1" />
                       {agent.webhook_url && <CopyButton textToCopy={agent.webhook_url} />}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Rocket className="h-3 w-3" /> Link para Disparos (Webhook)</Label>
+                    <div className="flex items-center">
+                      <Input readOnly value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/hooks/${agent.token}`} className="h-8 font-mono text-xs flex-1" />
+                      <CopyButton textToCopy={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/hooks/${agent.token}`} />
                     </div>
                   </div>
                 </CardContent>

@@ -5,6 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function buildChatProtocol(chatId: string): string {
+  if (!chatId) return '';
+  const cleaned = chatId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return cleaned ? `PRT-${cleaned}` : '';
+}
+
 export function formatWhatsappText(text: string, options: { isOutgoing?: boolean } = {}): string {
   if (!text) return '';
 

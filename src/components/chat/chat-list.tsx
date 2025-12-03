@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -28,9 +28,10 @@ import { Label } from '../ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { startNewConversation } from '@/actions/messages';
+import { closeChatAction } from '@/actions/chats';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
-import { cn } from '@/lib/utils';
+import { buildChatProtocol, cn } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
@@ -270,9 +271,25 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   }, [chat.messages, showMarketing]);
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
 
   const handleSelect = () => {
     onSelect(chat);
+  };
+
+  const handleQuickClose = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isClosing) return;
+    setIsClosing(true);
+    const result = await closeChatAction(chat.id, null, null);
+    if (result.success) {
+      toast({ title: 'Atendimento encerrado' });
+      onUpdate();
+    } else {
+      toast({ title: 'Erro ao encerrar', description: result.error, variant: 'destructive' });
+    }
+    setIsClosing(false);
   };
 
   return (
@@ -357,11 +374,31 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               {chat.contact.name.split(' ').slice(0, 3).join(' ')}
             </p>
           </div>
-          {lastMessage && (
-            <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
-              {lastMessage.timestamp}
-            </p>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canQuickClose && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-white/70 hover:text-white"
+                      onClick={handleQuickClose}
+                      disabled={isClosing}
+                    >
+                      {isClosing ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Encerrar sem abrir</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {lastMessage && (
+              <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+                {lastMessage.timestamp}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 mt-1">
@@ -574,10 +611,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       // Search Logic
       const query = searchQuery.toLowerCase();
+      const protocol = chat.protocol || buildChatProtocol(chat.id);
       const matchesSearch =
         !query ||
         (chat.contact.name || '').toLowerCase().includes(query) ||
         (chat.contact.phone || '').includes(query) ||
+        (protocol || '').toLowerCase().includes(query) ||
+        (chat.id || '').toLowerCase().includes(query) ||
         visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
 
       return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch;

@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { randomUUID } from 'crypto';
 
 // Importando as novas funções de serviço
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
@@ -21,6 +22,96 @@ import {
 } from '@/services/meta/meta-channel.service';
 import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
+import { buildChatProtocol } from '@/lib/utils';
+
+const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
+
+async function getMarketingAutoCloseMs(workspaceId: string): Promise<number> {
+    try {
+        const res = await db.query(
+            'SELECT marketing_auto_close_seconds FROM workspaces WHERE id = $1',
+            [workspaceId]
+        );
+        if ((res.rowCount ?? 0) === 0) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
+        const raw = res.rows[0].marketing_auto_close_seconds;
+        if (raw === null || raw === undefined) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
+        const seconds = Number(raw);
+        if (!Number.isFinite(seconds) || seconds <= 0) return 0; // 0 ou negativo desabilita
+        return seconds * 1000;
+    } catch (err) {
+        console.error('[MARKETING_AUTO_CLOSE] Falha ao buscar configuracao, usando padrao:', err);
+        return DEFAULT_MARKETING_AUTO_CLOSE_MS;
+    }
+}
+
+async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
+    if (!autoCloseMs || autoCloseMs <= 0) return;
+    setTimeout(async () => {
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const chatRes = await client.query(
+                `SELECT status, agent_id FROM chats WHERE id = $1 FOR UPDATE`,
+                [chatId]
+            );
+            if (chatRes.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return;
+            }
+            const { status, agent_id } = chatRes.rows[0];
+
+            // Evita encerrar se já está encerrado ou com agente em atendimento
+            if (status === 'encerrados' || agent_id) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            const hasReply = await client.query(
+                `SELECT 1 FROM messages WHERE chat_id = $1 AND from_me = FALSE AND created_at > $2 LIMIT 1`,
+                [chatId, marketingSentAt.toISOString()]
+            );
+
+            if (hasReply.rowCount > 0) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            await client.query(
+                `UPDATE chats 
+                 SET status = 'encerrados', closed_at = NOW()
+                 WHERE id = $1`,
+                [chatId]
+            );
+
+            const seconds = Math.max(1, Math.round(autoCloseMs / 1000));
+            const humanDelay = seconds >= 60 ? `${Math.round(seconds / 60)} minutos` : `${seconds} segundos`;
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, is_read, metadata
+                 ) VALUES ($1, $2, 'system', $3, true, true, $4)`,
+                [
+                    workspaceId,
+                    chatId,
+                    `Atendimento encerrado automaticamente após ${humanDelay} sem resposta à mensagem de marketing.`,
+                    {
+                        event: 'marketing_auto_close',
+                        autoClosedAfterMs: autoCloseMs,
+                        marketingSentAt: marketingSentAt.toISOString(),
+                    }
+                ]
+            );
+
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', err);
+        } finally {
+            client.release();
+        }
+    }, autoCloseMs).unref?.();
+}
 
 type MetaSendContext = {
     channel: MetaChannelRecord;
@@ -554,12 +645,16 @@ export async function sendAutomatedMessageAction(
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
+    const shouldAutoCloseMarketing = !!metadata?.isMarketing;
+    const marketingSentAt = shouldAutoCloseMarketing ? new Date() : null;
+    let workspaceIdForAutoClose: string | null = null;
 
     // Meta first
     const client = await db.connect();
     try {
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
+            workspaceIdForAutoClose = metaCtx.chat.workspace_id;
             try {
                 const service = metaCtx.platform === 'instagram'
                     ? new InstagramMessagingService(metaCtx.channel)
@@ -598,7 +693,7 @@ export async function sendAutomatedMessageAction(
         client.release();
     }
 
-    return internalSendMessage(
+    const result = await internalSendMessage(
         chatId,
         content,
         agentId,
@@ -606,6 +701,23 @@ export async function sendAutomatedMessageAction(
         { ...baseMetadata, ...metadata },
         instanceName
     );
+
+    if (shouldAutoCloseMarketing && result.success) {
+        try {
+            if (!workspaceIdForAutoClose) {
+                const wsRes = await db.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
+                workspaceIdForAutoClose = wsRes.rows[0]?.workspace_id ?? null;
+            }
+            if (workspaceIdForAutoClose && marketingSentAt) {
+                const autoCloseMs = await getMarketingAutoCloseMs(workspaceIdForAutoClose);
+                await scheduleMarketingAutoClose(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs);
+            }
+        } catch (err) {
+            console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
+        }
+    }
+
+    return result;
 }
 
 export const sendMediaAction = withDebug(
@@ -808,10 +920,12 @@ export const sendAgentTemplateAction = withDebug(
             if (chatRes.rowCount && chatRes.rowCount > 0) {
                 chatId = chatRes.rows[0].id;
             } else {
+                const newChatId = randomUUID();
+                const protocol = buildChatProtocol(newChatId);
                 // For system agents, avoid setting agent_id (FK to users) to prevent constraint violations.
                 const newChatRes = await client.query(
-                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'gerais', NULL, NULL) RETURNING id`,
-                    [workspaceId, contactId]
+                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4) RETURNING id`,
+                    [newChatId, workspaceId, contactId, protocol]
                 );
                 chatId = newChatRes.rows[0].id;
             }
@@ -859,9 +973,19 @@ export const sendAgentTemplateAction = withDebug(
                         ...(metadata ?? {}),
                     }, true, agentId
                 ]
-            );
+              );
 
             await client.query('COMMIT');
+
+            if (metadata?.isMarketing) {
+                try {
+                    const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
+                } catch (err) {
+                    console.error('[SEND_AGENT_TEMPLATE_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
+                }
+            }
+
             return { success: true, apiResponse };
 
         } catch (error) {
@@ -928,9 +1052,11 @@ export const startNewConversation = withDebug(
             if (chatRes.rowCount && chatRes.rowCount > 0) {
                 chatId = chatRes.rows[0].id;
             } else {
+                const newChatId = randomUUID();
+                const protocol = buildChatProtocol(newChatId);
                 const newChatRes = await client.query(
-                    `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'atendimentos', $3, NOW()) RETURNING id`,
-                    [workspaceId, contactId, senderId]
+                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'atendimentos', $4, NOW(), $5) RETURNING id`,
+                    [newChatId, workspaceId, contactId, senderId, protocol]
                 );
                 chatId = newChatRes.rows[0].id;
             }

@@ -20,7 +20,8 @@ import {
     Calendar,
     Globe,
     MessageSquarePlus,
-    BarChart3
+    BarChart3,
+    Hash
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -40,7 +41,7 @@ import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { AddContactForm } from '../crm/add-contact-form';
 import { ContactStatisticsDialog } from '../crm/contact-statistics-dialog';
-import { cn } from '@/lib/utils';
+import { buildChatProtocol, cn } from '@/lib/utils';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -341,6 +342,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     }
 
     const { contact, agent } = chat;
+    const isProtocolScoped = (chat as any).protocolScoped;
 
     const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
     const platform = (
@@ -426,6 +428,17 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <Smartphone className="h-4 w-4 text-green-400" />
                                     </div>
                                     <span>{contact.phone_number_jid}</span>
+                                </div>
+                            )}
+                            {(chat.protocol || chat.id) && (
+                                <div className="flex items-center gap-3 text-white/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
+                                        <Hash className="h-4 w-4 text-indigo-400" />
+                                    </div>
+                                    <div className="flex flex-col leading-tight">
+                                        <span className="text-[11px] uppercase tracking-wide text-white/50">Protocolo</span>
+                                        <span className="font-mono text-sm text-white">{chat.protocol || buildChatProtocol(chat.id)}</span>
+                                    </div>
                                 </div>
                             )}
                             {chat.instance_name && (

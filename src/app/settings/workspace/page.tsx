@@ -278,6 +278,21 @@ export default function WorkspaceSettingsPage() {
                                 />
                             </div>
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="marketingAutoCloseSeconds">Encerrar marketing após inatividade (segundos)</Label>
+                                <Input
+                                    id="marketingAutoCloseSeconds"
+                                    name="marketingAutoCloseSeconds"
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    defaultValue={(activeWorkspace as any).marketingAutoCloseSeconds ?? 300}
+                                />
+                                <p className="text-xs text-muted-foreground">Tempo de inatividade em segundos. Use 0 para desativar o autoencerramento de campanhas de marketing.</p>
+                            </div>
+                        </div>
                     </CardContent>
                     <CardFooter className="border-t pt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">As alterações serão refletidas em toda a plataforma.</p>

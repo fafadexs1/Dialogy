@@ -38,6 +38,7 @@ export async function GET(request: Request) {
               w.timezone, 
               w.close_message_template, 
               w.transfer_team_message_template,
+              w.marketing_auto_close_seconds,
               (w.owner_id = $1) AS is_owner
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
@@ -51,6 +52,7 @@ export async function GET(request: Request) {
             timezone: r.timezone || undefined,
             closeMessageTemplate: r.close_message_template || '',
             transferTeamMessageTemplate: r.transfer_team_message_template || '',
+            marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
             isOwner: !!r.is_owner,
         }));
         console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w => w.name));

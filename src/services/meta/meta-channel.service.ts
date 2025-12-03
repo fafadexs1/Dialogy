@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import type { Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+import { buildChatProtocol } from '@/lib/utils';
 
 export type MetaChannelType = 'instagram' | 'messenger';
 
@@ -42,7 +43,7 @@ type ContactRow = Pick<
   'id' | 'workspace_id' | 'name' | 'avatar_url' | 'email' | 'phone' | 'phone_number_jid' | 'address'
 >;
 
-type ChatRow = Pick<Chat, 'id' | 'workspace_id' | 'status' | 'contact_id' | 'agent'> & {
+type ChatRow = Pick<Chat, 'id' | 'workspace_id' | 'status' | 'contact_id' | 'agent' | 'protocol'> & {
   contact_id: string;
   agent_id?: string | null;
 };
@@ -238,7 +239,8 @@ async function ensureConversation(
         ch.workspace_id,
         ch.status AS chat_status,
         ch.contact_id,
-        ch.agent_id
+        ch.agent_id,
+        ch.protocol AS chat_protocol
       FROM meta_conversations mc
       JOIN chats ch ON ch.id = mc.chat_id
       WHERE mc.channel_id = $1 AND mc.external_thread_id = $2
@@ -253,13 +255,15 @@ async function ensureConversation(
     // Se a conversa anterior foi encerrada, criamos um novo chat e
     // reusamos o mesmo meta_conversation para que um novo atendimento seja aberto.
     if (row.chat_status === 'encerrados' || row.conversation_status === 'closed') {
+      const newChatId = randomUUID();
+      const protocol = buildChatProtocol(newChatId);
       const newChatInsert = await db.query(
         `
-          INSERT INTO chats (id, workspace_id, contact_id, status)
-          VALUES ($1, $2, $3, 'gerais')
+          INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
+          VALUES ($1, $2, $3, 'gerais', $4)
           RETURNING *
         `,
-        [randomUUID(), channel.workspace_id, metaContact.contact_id]
+        [newChatId, channel.workspace_id, metaContact.contact_id, protocol]
       );
 
       const newChatRow = newChatInsert.rows[0];
@@ -289,6 +293,7 @@ async function ensureConversation(
         contact_id: newChatRow.contact_id,
         agent_id: newChatRow.agent_id,
         agent: undefined,
+        protocol: newChatRow.protocol,
       };
 
       return { chat, conversation };
@@ -301,6 +306,7 @@ async function ensureConversation(
       contact_id: row.contact_id,
       agent_id: row.agent_id,
       agent: undefined,
+      protocol: row.chat_protocol || buildChatProtocol(row.chat_id),
     };
 
     const conversation: MetaConversationRecord = {
@@ -315,13 +321,15 @@ async function ensureConversation(
     return { chat, conversation };
   }
 
+  const newChatId = randomUUID();
+  const protocol = buildChatProtocol(newChatId);
   const chatInsert = await db.query(
     `
-      INSERT INTO chats (id, workspace_id, contact_id, status)
-      VALUES ($1, $2, $3, 'gerais')
+      INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
+      VALUES ($1, $2, $3, 'gerais', $4)
       RETURNING *
     `,
-    [randomUUID(), channel.workspace_id, metaContact.contact_id]
+    [newChatId, channel.workspace_id, metaContact.contact_id, protocol]
   );
 
   const chatRow: ChatRow = chatInsert.rows[0];

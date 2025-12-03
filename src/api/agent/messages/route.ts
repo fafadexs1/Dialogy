@@ -4,6 +4,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sendAutomatedMessageAction, sendAutomatedMediaAction } from '@/actions/messages';
+import { randomUUID } from 'crypto';
+import { buildChatProtocol } from '@/lib/utils';
 
 interface MediaFilePayload {
     base64: string;
@@ -61,9 +63,11 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
 
         // 3. If no active chat, create a new one
         console.log(`[AGENT_API] No active chat found for ${phoneNumber}. Creating a new one.`);
+        const chatId = randomUUID();
+        const protocol = buildChatProtocol(chatId);
         const newChatRes = await client.query(
-            `INSERT INTO chats (workspace_id, contact_id, status) VALUES ($1, $2, 'gerais'::chat_status_enum) RETURNING id`,
-            [workspaceId, contactId]
+            `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING id`,
+            [chatId, workspaceId, contactId, protocol]
         );
 
         if (newChatRes.rowCount === 0) {

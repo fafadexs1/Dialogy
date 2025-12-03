@@ -10,6 +10,7 @@ import { Separator } from '../ui/separator';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { searchChatsAndContacts, getOrCreateChatAction } from '@/actions/chats';
 import type { Chat, Contact, Message } from '@/lib/types';
+import { buildChatProtocol } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 
@@ -31,6 +32,8 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
     const upsertChats = useInboxStore((state) => state.upsertChats);
     const router = useRouter();
     const { toast } = useToast();
+
+    const isProtocolSearch = searchQuery.trim().toUpperCase().startsWith('PRT-');
 
     useEffect(() => {
         let active = true;
@@ -90,12 +93,6 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         try {
             const result = await getOrCreateChatAction(workspaceId, contact.id);
             if (result.chatId) {
-                // We need to construct a minimal chat object to select it immediately
-                // Or just navigate to it. Since we use `onSelectChat` which expects a Chat object,
-                // we might need to fetch the full chat or just rely on the ID if we were using routing only.
-                // But `onSelectChat` updates the store.
-                // Let's try to construct a temporary chat object or fetch it.
-                // For speed, let's construct it.
                 const newChat: Chat = {
                     id: result.chatId,
                     status: 'gerais', // Default for new
@@ -104,10 +101,9 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                     messages: [],
                     unreadCount: 0,
                     updatedAt: new Date().toISOString(),
+                    protocol: buildChatProtocol(result.chatId),
                 };
                 handleSelectChat(newChat);
-                // Also force a refresh of chats to get the real data
-                // This might be handled by the parent component or store sync
             } else if (result.error) {
                 toast({ title: "Erro", description: result.error, variant: "destructive" });
             }
@@ -116,15 +112,18 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         }
     };
 
-    const hasResults = remoteChats.length > 0 || crmContacts.length > 0 || remoteMessages.length > 0;
+    const hasResults = remoteChats.length > 0 || (!isProtocolSearch && (crmContacts.length > 0 || remoteMessages.length > 0));
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col bg-zinc-950 border-white/10 text-white p-0 gap-0 overflow-hidden">
                 <DialogHeader className="p-6 pb-3 border-b border-white/10">
-                    <DialogTitle className="text-xl font-semibold flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-blue-400" />
-                        Buscando por <span className="text-blue-400">"{searchQuery}"</span>
+                    <DialogTitle className="text-xl font-semibold flex items-center gap-2 overflow-hidden">
+                        <Sparkles className="h-4 w-4 text-blue-400 flex-shrink-0" />
+                        <div className="flex items-center gap-1 truncate">
+                            <span>Buscando por</span>
+                            <span className="text-blue-400 truncate">"{searchQuery}"</span>
+                        </div>
                     </DialogTitle>
                     <p className="text-sm text-white/60 flex items-center gap-2 mt-1">
                         <Compass className="h-4 w-4 text-white/40" />
@@ -147,12 +146,12 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                 <ScrollArea className="flex-1 min-h-0 max-h-[70vh] p-6 overflow-y-auto">
                     <div className="space-y-8 pb-6 pr-1">
 
-                        {/* 1. Chats (Contact Matches) */}
+                        {/* 1. Chats (Contact/Protocol Matches) */}
                         {remoteChats.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <MessageSquare className="h-4 w-4" />
-                                    Conversas ({remoteChats.length})
+                                    {isProtocolSearch ? 'Protocolo' : `Conversas (${remoteChats.length})`}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     {remoteChats.map(chat => {
@@ -187,6 +186,11 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                                             <Badge className={`text-[10px] border ${statusColor}`}>
                                                                 {statusLabel}
                                                             </Badge>
+                                                            {chat.protocol && (
+                                                                <Badge className="text-[10px] bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 max-w-[120px] truncate" title={chat.protocol}>
+                                                                    {chat.protocol}
+                                                                </Badge>
+                                                            )}
                                                         </div>
                                                         <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
                                                             <Phone className="h-3 w-3" />
@@ -208,7 +212,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                         )}
 
                         {/* 2. Messages (Content Matches) */}
-                        {remoteMessages.length > 0 && (
+                        {!isProtocolSearch && remoteMessages.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <MessageSquare className="h-4 w-4" />
@@ -216,11 +220,9 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                 </div>
                                 <div className="space-y-2">
                                     {remoteMessages.map((message) => {
-                                        // We need to construct a minimal chat object for the click handler
-                                        // The message object from search should have contact info
                                         const chatForMessage: Chat = {
                                             id: message.chat_id,
-                                            status: 'atendimentos', // Assumption, or we need to fetch it
+                                            status: 'atendimentos',
                                             workspace_id: message.workspace_id,
                                             contact: {
                                                 id: (message as any).contact_id,

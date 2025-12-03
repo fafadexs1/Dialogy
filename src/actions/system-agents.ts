@@ -47,9 +47,11 @@ export async function createSystemAgent(
     }
 
     // Validate webhook URL if provided
-    if (data.webhook_url) {
+    const webhookUrl = data.webhook_url?.trim();
+
+    if (webhookUrl) {
         try {
-            const url = new URL(data.webhook_url);
+            const url = new URL(webhookUrl);
             if (url.protocol !== 'http:' && url.protocol !== 'https:') {
                 throw new Error();
             }
@@ -62,7 +64,7 @@ export async function createSystemAgent(
     const token = `dgy_${randomBytes(24).toString('hex')}`;
 
     try {
-        const webhookValue = data.type === 'marketing' ? '' : (data.webhook_url || null);
+        const webhookValue = webhookUrl || null;
         const res = await db.query(
             `INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id, type, handoff_system_agent_id, hide_from_chatlist)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false)) RETURNING *`,
@@ -96,16 +98,18 @@ export async function updateSystemAgent(
             return { success: false, error: "Você não tem permissão para editar agentes." };
         }
         
-        if (data.webhook_url) {
-             try {
-                const url = new URL(data.webhook_url);
+        const webhookUrl = data.webhook_url?.trim();
+
+        if (webhookUrl) {
+            try {
+                const url = new URL(webhookUrl);
                 if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
             } catch (_) {
                 return { success: false, error: "A URL do Webhook fornecida é inválida." };
             }
         }
 
-        const webhookValue = data.type === 'marketing' ? '' : (data.webhook_url || null);
+        const webhookValue = webhookUrl || null;
 
         await db.query(
             `UPDATE system_agents SET 

@@ -105,11 +105,12 @@ export async function updateWorkspaceAction(
     }
 
     const workspaceId = formData.get('workspaceId') as string;
-    const workspaceName = formData.get('workspaceName') as string;
-    const timezone = formData.get('timezone') as string;
-    const closeMessageTemplate = formData.get('closeMessageTemplate') as string;
-    const transferMessageTemplate = formData.get('transferMessageTemplate') as string;
-    const avatarFile = formData.get('avatarFile');
+  const workspaceName = formData.get('workspaceName') as string;
+  const timezone = formData.get('timezone') as string;
+  const closeMessageTemplate = formData.get('closeMessageTemplate') as string;
+  const transferMessageTemplate = formData.get('transferMessageTemplate') as string;
+  const marketingAutoCloseSecondsRaw = formData.get('marketingAutoCloseSeconds') as string;
+  const avatarFile = formData.get('avatarFile');
 
 
     if (!workspaceId) {
@@ -119,10 +120,17 @@ export async function updateWorkspaceAction(
     // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
     
     const fieldsToUpdate: { [key: string]: any } = {};
-    if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
-    if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
-    if (formData.has('closeMessageTemplate')) fieldsToUpdate.close_message_template = closeMessageTemplate || '';
-    if (formData.has('transferMessageTemplate')) fieldsToUpdate.transfer_team_message_template = transferMessageTemplate || '';
+  if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
+  if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
+  if (formData.has('closeMessageTemplate')) fieldsToUpdate.close_message_template = closeMessageTemplate || '';
+  if (formData.has('transferMessageTemplate')) fieldsToUpdate.transfer_team_message_template = transferMessageTemplate || '';
+  if (formData.has('marketingAutoCloseSeconds')) {
+      const parsed = Number(marketingAutoCloseSecondsRaw);
+      const normalized = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+      if (normalized !== null) {
+          fieldsToUpdate.marketing_auto_close_seconds = normalized;
+      }
+  }
 
     if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
         try {

@@ -10,6 +10,8 @@ import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { sendAutomatedMessageAction } from './messages';
 import { withDebug } from '@/lib/observability/logger';
+import { buildChatProtocol } from '@/lib/utils';
+import { randomUUID } from 'crypto';
 
 // Fallback timezone
 const defaultTimeZone = 'America/Sao_Paulo';
@@ -470,6 +472,7 @@ type ChatRow = {
     assigned_at: string | null;
     tag: string | null;
     color: string | null;
+    protocol: string | null;
     contact_id: string | null;
     agent_id: string | null;
     team_name: string | null;
@@ -639,10 +642,17 @@ async function fetchChats({
             c.assigned_at,
             c.tag,
             c.color,
+            c.protocol,
             c.contact_id,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
-            lmd.instance_name,
+            (
+                SELECT m.instance_name 
+                FROM messages m 
+                WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL 
+                ORDER BY m.created_at DESC 
+                LIMIT 1
+            ) AS instance_name,
             lmd.source_from_api AS source,
             COALESCE((
                 SELECT COUNT(*) FROM messages m
@@ -924,8 +934,133 @@ export const searchChatsAndContacts = withDebug(
         }
 
         try {
+            const protocolTerm = query.trim().toUpperCase();
+            const isProtocolQuery = protocolTerm.startsWith('PRT-');
             const timezone = await getWorkspaceTimezone(workspaceId);
             const searchTerm = `%${query.trim()}%`;
+
+            // Protocol search: return only the chat and its messages (no cross-content search)
+            if (isProtocolQuery) {
+                const chatRes = await db.query(
+                    `
+                    SELECT 
+                        c.id,
+                        c.status,
+                        c.workspace_id,
+                        c.assigned_at,
+                        c.tag,
+                        c.color,
+                        c.protocol,
+                        c.contact_id,
+                        c.agent_id,
+                        c.created_at as chat_created_at,
+                        c.closed_at,
+                        cont.name AS contact_name,
+                        cont.avatar_url AS contact_avatar_url,
+                        cont.email AS contact_email,
+                        cont.phone_number_jid AS contact_phone_number_jid,
+                        cont.address AS contact_address,
+                        t.name AS team_name
+                    FROM chats c
+                    LEFT JOIN contacts cont ON c.contact_id = cont.id
+                    LEFT JOIN team_members tm ON c.agent_id = tm.user_id
+                    LEFT JOIN teams t ON tm.team_id = t.id
+                    WHERE c.workspace_id = $1
+                      AND c.protocol ILIKE $2
+                    LIMIT 1
+                `,
+                    [workspaceId, protocolTerm]
+                );
+
+                if (chatRes.rowCount === 0) {
+                    return { chats: [], contacts: [], messages: [] };
+                }
+
+                const row = chatRes.rows[0];
+                const chat: Chat = {
+                    id: row.id,
+                    status: row.status,
+                    workspace_id: row.workspace_id,
+                    contact: {
+                        id: row.contact_id,
+                        workspace_id: row.workspace_id,
+                        name: row.contact_name || 'Contato',
+                        avatar_url: row.contact_avatar_url,
+                        email: row.contact_email,
+                        phone_number_jid: row.contact_phone_number_jid,
+                        address: row.contact_address,
+                    },
+                    agent: row.agent_id ? {
+                        id: row.agent_id,
+                        name: 'Agent',
+                        firstName: 'Agent',
+                        lastName: '',
+                        avatar_url: '',
+                        email: ''
+                    } : undefined,
+                    messages: [],
+                    updatedAt: row.chat_created_at,
+                    unreadCount: 0,
+                    tag: row.tag,
+                    color: row.color,
+                    teamName: row.team_name,
+                    protocol: row.protocol,
+                    protocolScoped: true,
+                };
+
+                const messagesRes = await db.query(
+                    `
+                    SELECT 
+                        m.id,
+                        m.chat_id,
+                        m.workspace_id,
+                        m.content,
+                        m.type,
+                        m.created_at,
+                        m.from_me,
+                        m.metadata,
+                        c.id AS contact_id,
+                        c.name AS contact_name,
+                        c.avatar_url AS contact_avatar_url,
+                        c.email AS contact_email,
+                        c.phone_number_jid AS contact_phone_number_jid,
+                        c.address AS contact_address
+                    FROM messages m
+                    JOIN chats ch ON ch.id = m.chat_id
+                    JOIN contacts c ON c.id = ch.contact_id
+                    WHERE ch.protocol ILIKE $1
+                    ORDER BY m.created_at DESC
+                    LIMIT 200
+                `,
+                    [protocolTerm]
+                );
+
+                const messages: Message[] = messagesRes.rows.map((m: any) => ({
+                    id: m.id,
+                    chat_id: m.chat_id,
+                    workspace_id: m.workspace_id,
+                    content: m.content,
+                    type: m.type,
+                    createdAt: m.created_at,
+                    timestamp: formatInTimeZone(new Date(m.created_at), 'HH:mm', { locale: ptBR, timeZone: timezone }),
+                    formattedDate: formatMessageDate(new Date(m.created_at), timezone),
+                    from_me: m.from_me,
+                    metadata: m.metadata || {},
+                    transcription: m.transcription || null,
+                    contact_id: m.contact_id,
+                    contact_name: m.contact_name,
+                    contact_avatar_url: m.contact_avatar_url,
+                    contact_email: m.contact_email,
+                    contact_phone_number_jid: m.contact_phone_number_jid,
+                    contact_address: m.contact_address,
+                    status: 'default',
+                }));
+
+                // Anexar as mensagens no chat para facilitar o render imediato
+                chat.messages = messages;
+
+                return { chats: [chat], contacts: [], messages: [] };
+            }
 
             // 1. Search in Chats (MATCHING CONTACT INFO ONLY)
             // We removed 'OR m.content ILIKE $2' to avoid random chats appearing without context
@@ -938,6 +1073,7 @@ export const searchChatsAndContacts = withDebug(
                     c.assigned_at,
                     c.tag,
                     c.color,
+                    c.protocol,
                     c.contact_id,
                     c.agent_id,
                     c.created_at as chat_created_at,
@@ -969,6 +1105,8 @@ export const searchChatsAndContacts = withDebug(
                       cont.name ILIKE $2
                       OR cont.phone_number_jid ILIKE $2
                       OR cont.email ILIKE $2
+                      OR c.protocol ILIKE $2
+                      OR c.id::text ILIKE $2
                   )
                 ORDER BY c.id, c.created_at DESC
                 LIMIT 20
@@ -1017,6 +1155,8 @@ export const searchChatsAndContacts = withDebug(
                     tag: row.tag,
                     color: row.color,
                     teamName: row.team_name
+                    ,
+                    protocol: row.protocol || buildChatProtocol(row.id),
                 };
             });
 
@@ -1120,9 +1260,9 @@ export const getOrCreateChatAction = withDebug(
         }
 
         try {
-            // Check for existing chat
+            // Check for existing active chat
             const existingChat = await db.query(
-                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
+                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') ORDER BY created_at DESC LIMIT 1`,
                 [workspaceId, contactId]
             );
 
@@ -1131,9 +1271,11 @@ export const getOrCreateChatAction = withDebug(
             }
 
             // Create new chat
+            const newChatId = randomUUID();
+            const protocol = buildChatProtocol(newChatId);
             const newChat = await db.query(
-                `INSERT INTO chats (workspace_id, contact_id, status, agent_id, assigned_at) VALUES ($1, $2, 'gerais', $3, NOW()) RETURNING id`,
-                [workspaceId, contactId, user.id]
+                `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', $4, NOW(), $5) RETURNING id`,
+                [newChatId, workspaceId, contactId, user.id, protocol]
             );
 
             return { chatId: newChat.rows[0].id };
@@ -1381,6 +1523,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             teamName: row.team_name || undefined,
             tag: row.tag || undefined,
             color: row.color || undefined,
+            protocol: row.protocol || buildChatProtocol(row.id),
         };
     });
 
