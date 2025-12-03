@@ -146,6 +146,7 @@ export type MessageMetadata = {
   template_applied?: boolean;
   closed_by_system_agent_id?: string;
   authored_by_system_agent_id?: string;
+  isMarketing?: boolean;
 }
 
 export type Message = {

@@ -148,6 +148,9 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [debugCounter, setDebugCounter] = useState(0);
   const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [selectedForwardingChatIds, setSelectedForwardingChatIds] = useState<Set<string>>(new Set());
+  const [isForwarding, setIsForwarding] = useState(false);
 
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
@@ -480,7 +483,15 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     await loadChatMessages(chatId);
   }, [loadChatMessages]);
 
-  const handleSetSelectedChat = useCallback((chat: Chat) => {
+  const handleSetSelectedChat = useCallback((chat: Chat | null) => {
+    if (!chat) {
+      selectedChatIdRef.current = null;
+      setSelectedChatId(null);
+      setShowFullHistory(false);
+      updateSelectedChatPath(null);
+      return;
+    }
+
     if (selectedChatIdRef.current === chat.id) return; // Prevent duplicate navigation
     selectedChatIdRef.current = chat.id;
     setSelectedChatId(chat.id);
@@ -573,6 +584,65 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     await runDeltaSync();
     notifyPeers();
   }, [notifyPeers, runDeltaSync]);
+
+  const handleForwardMessage = useCallback((message: Message) => {
+    setForwardingMessage(message);
+    setSelectedForwardingChatIds(new Set());
+    setIsForwarding(true);
+  }, []);
+
+  const handleToggleForwardSelection = useCallback((chatId: string) => {
+    setSelectedForwardingChatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCancelForward = useCallback(() => {
+    setForwardingMessage(null);
+    setSelectedForwardingChatIds(new Set());
+    setIsForwarding(false);
+  }, []);
+
+  const handleConfirmForward = useCallback(async () => {
+    if (!forwardingMessage || selectedForwardingChatIds.size === 0) return;
+
+    const chatIds = Array.from(selectedForwardingChatIds);
+    setIsForwarding(false); // Close UI immediately
+
+    // Import dynamically to avoid circular dependency issues if any, though here it's fine
+    const { forwardMessageAction } = await import('@/actions/messages');
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    toast({ title: 'Encaminhando mensagens...', description: `Enviando para ${chatIds.length} conversas.` });
+
+    // Send in parallel
+    await Promise.all(chatIds.map(async (targetChatId) => {
+      const result = await forwardMessageAction(forwardingMessage, targetChatId, null);
+      if (result.success) successCount++;
+      else errorCount++;
+    }));
+
+    if (errorCount === 0) {
+      toast({ title: 'Sucesso', description: `Mensagem encaminhada para ${successCount} conversas.` });
+    } else {
+      toast({
+        title: 'Encaminhamento concluído com erros',
+        description: `Sucesso: ${successCount}. Falhas: ${errorCount}.`,
+        variant: 'destructive'
+      });
+    }
+
+    setForwardingMessage(null);
+    setSelectedForwardingChatIds(new Set());
+  }, [forwardingMessage, selectedForwardingChatIds]);
 
   useEffect(() => {
     if (initialUser?.activeWorkspaceId) {
@@ -868,6 +938,11 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           setSelectedChat={handleSetSelectedChat}
           currentUser={initialUser}
           onUpdate={handleDataMutation}
+          isForwarding={isForwarding}
+          selectedForwardingChatIds={selectedForwardingChatIds}
+          onToggleForwardSelection={handleToggleForwardSelection}
+          onConfirmForward={handleConfirmForward}
+          onCancelForward={handleCancelForward}
         />
         <ChatPanel
           key={selectedChat?.id}
@@ -882,8 +957,9 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
           canLoadOlder={hasMoreHistory}
           workspaceTimezone={workspaceTimezone}
           onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
+          onForwardMessage={handleForwardMessage}
         />
-        {isContactPanelOpen && (
+        {isContactPanelOpen && !isForwarding && (
           <ContactPanel
             chat={enrichedSelectedChat}
             currentUser={initialUser}

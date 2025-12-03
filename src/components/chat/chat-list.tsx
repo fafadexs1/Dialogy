@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -257,13 +257,16 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
 interface ChatListItemProps {
   chat: Chat;
   isSelected: boolean;
-  onSelect: (chat: Chat) => void;
+  onSelect: (chat: Chat | null) => void;
   onUpdate: () => void;
   currentUser: User | null;
   showMarketing: boolean;
+  isForwarding?: boolean;
+  isSelectedForForwarding?: boolean;
+  onToggleForwardSelection?: (chatId: string) => void;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection }) => {
   const isMarketingChat = chat.messages.some((m: any) => (m.metadata as any)?.isMarketing);
   const visibleMessages = React.useMemo(() => {
     if (showMarketing) return chat.messages;
@@ -274,15 +277,23 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
 
-  const handleSelect = () => {
+  const handleSelect = (e?: React.MouseEvent) => {
+    if (isForwarding && onToggleForwardSelection) {
+      e?.preventDefault();
+      onToggleForwardSelection(chat.id);
+      return;
+    }
     onSelect(chat);
   };
 
   const handleQuickClose = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isClosing) return;
+    if (isSelected) {
+      onSelect(null);
+    }
     setIsClosing(true);
-    const result = await closeChatAction(chat.id, null, null);
+    const result = await closeChatAction(chat.id, null, null, false);
     if (result.success) {
       toast({ title: 'Atendimento encerrado' });
       onUpdate();
@@ -296,15 +307,26 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     <div
       className={cn(
         "flex cursor-pointer items-start gap-3 rounded-xl p-3 transition-all duration-200 border border-transparent relative overflow-hidden group",
-        isSelected
+        isSelected && !isForwarding
           ? "bg-white/10 border-white/10 shadow-lg"
-          : "hover:bg-white/5 hover:border-white/5"
+          : "hover:bg-white/5 hover:border-white/5",
+        isForwarding && isSelectedForForwarding ? "bg-blue-500/10 border-blue-500/30" : ""
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
-      {isSelected && (
+      {isSelected && !isForwarding && (
         <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+      )}
+
+      {/* Forwarding Checkbox */}
+      {isForwarding && (
+        <div className={cn(
+          "h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0 mt-1",
+          isSelectedForForwarding ? "bg-blue-500 border-blue-500" : "border-white/30 group-hover:border-white/50"
+        )}>
+          {isSelectedForForwarding && <Check className="h-3 w-3 text-white" />}
+        </div>
       )}
 
       <TagSelectionDialog
@@ -458,9 +480,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 interface ChatListProps {
   chats: Chat[];
   selectedChat: Chat | null;
-  setSelectedChat: (chat: Chat) => void;
+  setSelectedChat: (chat: Chat | null) => void;
   currentUser: User;
   onUpdate: () => void;
+  isForwarding?: boolean;
+  selectedForwardingChatIds?: Set<string>;
+  onToggleForwardSelection?: (chatId: string) => void;
+  onConfirmForward?: () => void;
+  onCancelForward?: () => void;
 }
 
 import { useInboxStore } from '@/hooks/use-inbox-store';
@@ -470,7 +497,7 @@ import { loadMoreChatsAction, getInitialChatsData } from '@/actions/chats';
 
 // ... existing components ...
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward }: ChatListProps) {
   const onlineAgents = usePresence();
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
@@ -496,22 +523,23 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     selectedChatIdRef.current = selectedChat?.id;
   }, [selectedChat?.id]);
 
-  useEffect(() => {
-    const status = selectedChat?.status;
-    if (!status) {
-      lastSelectedStatusRef.current = null;
-      return;
-    }
+  // Effect removed to prevent auto-navigation
+  // useEffect(() => {
+  //   const status = selectedChat?.status;
+  //   if (!status) {
+  //     lastSelectedStatusRef.current = null;
+  //     return;
+  //   }
 
-    const statusChanged = lastSelectedStatusRef.current !== status;
-    const isKnownTab = status === 'gerais' || status === 'atendimentos' || status === 'encerrados';
+  //   const statusChanged = lastSelectedStatusRef.current !== status;
+  //   const isKnownTab = status === 'gerais' || status === 'atendimentos' || status === 'encerrados';
 
-    if (statusChanged && isKnownTab && activeTab !== status) {
-      setActiveTab(status);
-    }
+  //   if (statusChanged && isKnownTab && activeTab !== status) {
+  //     setActiveTab(status);
+  //   }
 
-    lastSelectedStatusRef.current = status;
-  }, [activeTab, selectedChat?.status]);
+  //   lastSelectedStatusRef.current = status;
+  // }, [activeTab, selectedChat?.status]);
 
   useEffect(() => {
     if (isFirstRun.current) {
@@ -861,6 +889,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   onUpdate={onUpdate}
                   showMarketing={showMarketing}
                   currentUser={currentUser}
+                  isForwarding={isForwarding}
+                  isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
+                  onToggleForwardSelection={onToggleForwardSelection}
                 />
               ))}
               {hasMoreChats && activeTab === 'encerrados' && (
@@ -939,6 +970,33 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           )}
         </div>
       </ScrollArea >
+
+      {/* Forwarding Footer */}
+      {isForwarding && (
+        <div className="p-4 border-t border-white/10 bg-black/40 backdrop-blur-md">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-white font-medium">
+              {selectedForwardingChatIds?.size || 0} selecionados
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1 border-white/10 hover:bg-white/10"
+              onClick={onCancelForward}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
+              onClick={onConfirmForward}
+              disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
+            >
+              Encaminhar
+            </Button>
+          </div>
+        </div>
+      )}
     </div >
   );
 }

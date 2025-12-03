@@ -251,8 +251,12 @@ async function internalSendMessage(
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
 
         // Se for humano e não tiver agente (independente do status), atribui o agente
+        // Ignora atribuição se for mensagem de encerramento (close_notice)
+        // Se o chat estiver encerrado, força a atribuição para o novo atendente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
-        if (!currentAgentId && isFromHumanAgent) {
+        const isCloseNotice = metadata?.event === 'close_notice';
+
+        if ((!currentAgentId || chatStatus === 'encerrados') && isFromHumanAgent && !isCloseNotice) {
             await client.query(
                 "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
                 [senderId, chatId]
@@ -841,15 +845,15 @@ export async function sendAutomatedMediaAction(
                     channel: metaCtx.channel,
                     chat: metaCtx.chat,
                     contact: metaCtx.contact,
-                        message: {
-                            type: file.mediatype === 'document' ? 'document' : file.mediatype,
-                            content: caption,
-                            metadata: { ...baseMetadata, mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
-                            mediaUrl: file.base64,
-                        },
-                        platform: metaCtx.platform,
-                        direction: 'outgoing',
-                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
+                    message: {
+                        type: file.mediatype === 'document' ? 'document' : file.mediatype,
+                        content: caption,
+                        metadata: { ...baseMetadata, mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                        mediaUrl: file.base64,
+                    },
+                    platform: metaCtx.platform,
+                    direction: 'outgoing',
+                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
                     externalSenderId: metaCtx.externalUserId,
                     externalChannelId: metaCtx.externalChannelId,
                     rawPayload: { request: { caption, file }, response: apiResponse },
@@ -973,7 +977,7 @@ export const sendAgentTemplateAction = withDebug(
                         ...(metadata ?? {}),
                     }, true, agentId
                 ]
-              );
+            );
 
             await client.query('COMMIT');
 

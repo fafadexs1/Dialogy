@@ -93,7 +93,7 @@ import { AudioRecorder } from './audio-recorder';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
-import { ForwardMessageDialog } from './forward-message-dialog';
+
 
 
 interface ChatPanelProps {
@@ -108,6 +108,7 @@ interface ChatPanelProps {
     canLoadOlder: boolean;
     workspaceTimezone: string;
     onToggleContactPanel: () => void;
+    onForwardMessage: (message: Message) => void;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
@@ -201,7 +202,7 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 
 
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel }: ChatPanelProps) {
+export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel, onForwardMessage }: ChatPanelProps) {
 
     const [newMessage, setNewMessage] = useState('');
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
@@ -237,8 +238,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     }, [canLoadOlder, chat]);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
-    const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
-    const [messageToForward, setMessageToForward] = useState<Message | null>(null);
 
     const { toast } = useToast();
 
@@ -480,9 +479,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     };
 
     const handleForwardMessage = useCallback((message: Message) => {
-        setMessageToForward(message);
-        setIsForwardDialogOpen(true);
-    }, []);
+        onForwardMessage(message);
+    }, [onForwardMessage]);
 
     const generateVideoThumbnail = async (file: File): Promise<string> => {
         return new Promise((resolve) => {
@@ -1131,13 +1129,6 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                     </p>
                 </footer>
             )}
-            <ForwardMessageDialog
-                isOpen={isForwardDialogOpen}
-                onOpenChange={setIsForwardDialogOpen}
-                messageToForward={messageToForward}
-                workspaceId={currentUser.activeWorkspaceId || ''}
-                currentUserId={currentUser.id}
-            />
         </div>
     );
 }

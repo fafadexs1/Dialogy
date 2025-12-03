@@ -277,7 +277,8 @@ export const closeChatAction = withDebug(
     async function closeChatAction(
         chatId: string,
         reasonTagId: string | null,
-        notes: string | null
+        notes: string | null,
+        sendCloseMessage: boolean = true
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -377,7 +378,7 @@ export const closeChatAction = withDebug(
 
             await client.query('COMMIT');
 
-            if (closeTemplate) {
+            if (closeTemplate && sendCloseMessage) {
                 try {
                     await sendAutomatedMessageAction(chatId, closeTemplate, currentAgentId, false, last_instance_name || undefined, {
                         event: 'close_notice',
@@ -400,7 +401,7 @@ export const closeChatAction = withDebug(
         }
     },
     {
-        contextResolver: (chatId, reasonTagId, notes) => ({ payload: { chatId, reasonTagId, notes } })
+        contextResolver: (chatId, reasonTagId, notes, sendCloseMessage) => ({ payload: { chatId, reasonTagId, notes, sendCloseMessage } })
     }
 ); export const updateChatTagAction = withDebug(
     'update_chat_tag',
