@@ -128,6 +128,41 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       refreshOnlineAgents();
     });
 
+    // HEARTBEAT & ACTIVITY: Ensure user stays online aggressively
+    // "FODA" implementation: Heartbeat every 20s + activity triggers
+    const heartbeatInterval = setInterval(() => {
+      updateServerPresence(true);
+    }, 20000);
+
+    const handleActivity = () => {
+      if (document.visibilityState === 'visible') {
+        // We don't want to spam the server on every click, so we could throttle this if needed.
+        // But for now, let's rely on the fact that updateServerPresence is async and relatively cheap.
+        // To avoid absolute spam, we can check a timestamp or just let the heartbeat do the heavy lifting,
+        // but the user wants it "FODA", so let's ensure we catch them coming back.
+        // We'll just call it. The browser limits concurrent requests anyway.
+        // Actually, let's throttle it slightly to avoid 100 requests if they rage click.
+        // But for simplicity and robustness, we'll just trust the heartbeat mostly, 
+        // and use these events to catch "tab switch back" immediately.
+        updateServerPresence(true);
+      }
+    };
+
+    // Throttle the activity handler to run at most once every 5 seconds
+    let lastActivity = 0;
+    const throttledActivity = () => {
+      const now = Date.now();
+      if (now - lastActivity > 5000) {
+        lastActivity = now;
+        handleActivity();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleActivity); // Always fire on visibility change
+    window.addEventListener('focus', throttledActivity);
+    window.addEventListener('click', throttledActivity);
+    window.addEventListener('keydown', throttledActivity);
+
     const channel = supabase.channel(`db-presence-${localUser.activeWorkspaceId}`)
       .on(
         'postgres_changes',
@@ -156,6 +191,12 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     return () => {
       // Cleanup
+      clearInterval(heartbeatInterval);
+      window.removeEventListener('visibilitychange', handleActivity);
+      window.removeEventListener('focus', throttledActivity);
+      window.removeEventListener('click', throttledActivity);
+      window.removeEventListener('keydown', throttledActivity);
+
       supabase.removeChannel(channel);
       void updateServerPresence(false);
     };

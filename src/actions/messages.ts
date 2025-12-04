@@ -72,7 +72,7 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
                 [chatId, marketingSentAt.toISOString()]
             );
 
-            if (hasReply.rowCount > 0) {
+            if ((hasReply.rowCount ?? 0) > 0) {
                 await client.query('ROLLBACK');
                 return;
             }
