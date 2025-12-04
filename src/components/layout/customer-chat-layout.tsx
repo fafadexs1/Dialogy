@@ -559,6 +559,17 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
       React.startTransition(() => {
         upsertChats(result.deltaChats, result.lastSyncChats);
+
+        // SHARED POLLING: If the chat list received an update for the currently selected chat,
+        // we immediately push that message to the chat panel as well.
+        // This ensures that "active polling in chatlist" is shared with the chat view.
+        if (snapshot.selectedChatId) {
+          const chatFromList = result.deltaChats.find(c => c.id === snapshot.selectedChatId);
+          if (chatFromList && chatFromList.messages.length > 0) {
+            appendMessagesToChat(snapshot.selectedChatId, chatFromList.messages, undefined);
+          }
+        }
+
         if (result.updatedContacts.length) {
           result.updatedContacts.forEach((contact) => updateChatContact(contact));
         }
