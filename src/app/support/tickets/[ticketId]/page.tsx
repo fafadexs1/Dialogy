@@ -64,11 +64,11 @@ export default function TicketDetailPage({ params }: { params: { ticketId: strin
         const message = {
             id: Date.now().toString(),
             content: newMessage,
-            sender: 'user',
-            timestamp: new Date().toISOString(),
-        };
+        sender: 'user',
+        timestamp: new Date().toISOString(),
+    };
 
-        setMessages([...messages, message]);
+        setMessages((prev) => [...prev, message]);
         setNewMessage('');
 
         // Simulate agent reply

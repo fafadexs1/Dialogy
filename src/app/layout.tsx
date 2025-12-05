@@ -2,6 +2,7 @@
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
+import { AuthProvider } from '@/providers/auth-provider';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { ensureServerHeartbeat } from '@/lib/observability/logger';
@@ -26,11 +27,13 @@ export default async function RootLayout({
       </head>
       <body className="h-full font-body antialiased" suppressHydrationWarning>
         <ErrorBoundary>
-          <PresenceProvider initialUser={user}>
-            <MainAppLayout>
-              {children}
-            </MainAppLayout>
-          </PresenceProvider>
+          <AuthProvider>
+            <PresenceProvider initialUser={user}>
+              <MainAppLayout>
+                {children}
+              </MainAppLayout>
+            </PresenceProvider>
+          </AuthProvider>
         </ErrorBoundary>
         <Toaster />
       </body>

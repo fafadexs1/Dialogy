@@ -144,21 +144,25 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     }));
   },
   setMessagesForChat: (chatId, messages, lastSync, oldestDate, hasMoreHistory) => {
-    set((state) => ({
-      messagesByChat: { ...state.messagesByChat, [chatId]: dedupeMessages(messages) },
-      lastSyncMessages:
-        typeof lastSync !== 'undefined'
-          ? { ...state.lastSyncMessages, [chatId]: lastSync }
-          : state.lastSyncMessages,
-      oldestMessageDateByChat:
-        typeof oldestDate !== 'undefined'
-          ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
-          : state.oldestMessageDateByChat,
-      hasMoreHistoryByChat:
-        typeof hasMoreHistory !== 'undefined'
-          ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
-          : state.hasMoreHistoryByChat,
-    }));
+    set((state) => {
+      const current = state.messagesByChat[chatId] || [];
+      const merged = dedupeMessages([...current, ...messages]);
+      return {
+        messagesByChat: { ...state.messagesByChat, [chatId]: merged },
+        lastSyncMessages:
+          typeof lastSync !== 'undefined'
+            ? { ...state.lastSyncMessages, [chatId]: lastSync }
+            : state.lastSyncMessages,
+        oldestMessageDateByChat:
+          typeof oldestDate !== 'undefined'
+            ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
+            : state.oldestMessageDateByChat,
+        hasMoreHistoryByChat:
+          typeof hasMoreHistory !== 'undefined'
+            ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
+            : state.hasMoreHistoryByChat,
+      };
+    });
   },
   appendMessagesToChat: (chatId, messages, lastSync) => {
     if (!messages.length) return;

@@ -35,7 +35,7 @@ export default function InternalChatPanel({ channel, currentUser }: InternalChat
       channelId: channel.id,
     };
 
-    setMessages([...messages, message]);
+    setMessages((prev) => [...prev, message]);
     setNewMessage('');
   };
 

@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@genkit-ai/firebase": "1.16.0",
@@ -73,11 +74,12 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^20.19.0",
     "@types/papaparse": "^5.3.14",
     "@types/pg": "^8.11.6",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "vitest": "^3.0.4",
     "genkit-cli": "^0.0.2",
     "postcss": "^8",
     "prisma": "^6.19.0",

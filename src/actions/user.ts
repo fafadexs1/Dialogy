@@ -56,7 +56,9 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 uwp.online_since
             FROM user_workspace_presence uwp
             JOIN users u ON u.id = uwp.user_id
-            WHERE uwp.workspace_id = $1 AND uwp.is_online = TRUE
+            WHERE uwp.workspace_id = $1 
+            AND uwp.is_online = TRUE
+            AND uwp.last_seen > NOW() - INTERVAL '45 seconds'
             `,
             [workspaceId]
         );

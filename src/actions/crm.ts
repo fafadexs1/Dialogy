@@ -145,8 +145,8 @@ export const saveContactAction = withDebug(
 
 
             await client.query('COMMIT');
-            revalidatePath('/crm');
-            revalidatePath('/chat'); // revalidate chat in case contact info changed
+            // revalidatePath('/crm'); // Removed to prevent full page reload on inbox
+            // revalidatePath('/chat'); 
             return { success: true, error: null };
         } catch (error) {
             await client.query('ROLLBACK');

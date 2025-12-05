@@ -141,8 +141,9 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     if (state.success) {
       toast({ title: "Contato salvo!", description: "As informações do contato foram salvas com sucesso." });
       onSave();
+      setIsOpen(false);
     }
-  }, [state, onSave]);
+  }, [state, onSave, setIsOpen]);
 
   const renderCustomField = (field: CustomFieldDefinition) => {
     const fieldName = `custom_field_${field.id}`;

@@ -13,7 +13,7 @@ import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -21,6 +21,13 @@ import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import ReactDOM from 'react-dom';
+import {
+  buildChatMessageChannelName,
+  buildWorkspaceChatChannelName,
+  subscribeToChatMessages,
+  subscribeToWorkspaceChatUpdates,
+  teardownChannel,
+} from '@/lib/realtime/chat-subscriptions';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -741,7 +748,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
-  const realtimeChannelRef = useRef<any>(null);
+  const realtimeMessagesChannelRef = useRef<RealtimeChannel | null>(null);
+  const realtimeChatsChannelRef = useRef<RealtimeChannel | null>(null);
 
   // Ref to keep track of the latest handleRealtimeMessage without re-subscribing
   const handleRealtimeMessageRef = useRef(handleRealtimeMessage);
@@ -750,88 +758,109 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [handleRealtimeMessage]);
 
   useEffect(() => {
-    if (!initialUser?.activeWorkspaceId) return;
-
-    // We want a single subscription for the whole workspace to handle incoming messages for ALL chats
-    // This allows us to:
-    // 1. Play notifications for messages in other chats
-    // 2. Update unread counts for other chats
-    // 3. Update the message list if the chat is open
-
-    const channelName = `realtime-messages-workspace-${initialUser.activeWorkspaceId}`;
-
-    if (realtimeChannelRef.current && realtimeChannelRef.current.topic !== channelName) {
-      console.info(`[REALTIME] Removing old channel ${realtimeChannelRef.current.topic}`);
-      const supabase = createClient();
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
-    }
-
-    if (realtimeChannelRef.current) {
-      return; // Already subscribed to the correct channel
+    const workspaceId = initialUser?.activeWorkspaceId;
+    if (!workspaceId || !selectedChatId) {
+      if (realtimeMessagesChannelRef.current) {
+        const supabase = createClient();
+        console.info('[REALTIME] Cleaning up messages channel because no chat is selected.');
+        teardownChannel(supabase, realtimeMessagesChannelRef.current);
+        realtimeMessagesChannelRef.current = null;
+      }
+      return;
     }
 
     const supabase = createClient();
-    console.info(`[REALTIME] Subscribing to channel ${channelName}`);
+    const channelName = buildChatMessageChannelName(workspaceId, selectedChatId);
 
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
-      }, (payload) => handleRealtimeMessageRef.current(payload))
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
-      }, (payload) => handleRealtimeMessageRef.current(payload))
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
-      }, (payload) => handleRealtimeMessageRef.current(payload))
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'chats',
-        filter: `workspace_id=eq.${initialUser.activeWorkspaceId}`
-      }, (payload) => {
+    if (realtimeMessagesChannelRef.current?.topic === channelName) {
+      return;
+    }
+
+    if (realtimeMessagesChannelRef.current) {
+      console.info(`[REALTIME] Removing old messages channel ${realtimeMessagesChannelRef.current.topic}`);
+      teardownChannel(supabase, realtimeMessagesChannelRef.current);
+      realtimeMessagesChannelRef.current = null;
+    }
+
+    console.info(`[REALTIME] Subscribing to messages channel ${channelName}`);
+    const channel = subscribeToChatMessages({
+      client: supabase,
+      workspaceId,
+      chatId: selectedChatId,
+      onMessage: (payload) => handleRealtimeMessageRef.current(payload),
+      onStatusChange: (status) => console.info(`[REALTIME] Messages channel ${channelName} status: ${status}`),
+    });
+
+    realtimeMessagesChannelRef.current = channel;
+
+    return () => {
+      if (realtimeMessagesChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up messages channel ${channelName}`);
+        teardownChannel(supabase, realtimeMessagesChannelRef.current);
+        realtimeMessagesChannelRef.current = null;
+      }
+    };
+  }, [initialUser?.activeWorkspaceId, selectedChatId]);
+
+  useEffect(() => {
+    const workspaceId = initialUser?.activeWorkspaceId;
+    if (!workspaceId) {
+      if (realtimeChatsChannelRef.current) {
+        const supabase = createClient();
+        console.info('[REALTIME] Cleaning up chats channel because workspace is missing.');
+        teardownChannel(supabase, realtimeChatsChannelRef.current);
+        realtimeChatsChannelRef.current = null;
+      }
+      return;
+    }
+
+    const supabase = createClient();
+    const channelName = buildWorkspaceChatChannelName(workspaceId);
+
+    if (realtimeChatsChannelRef.current?.topic === channelName) {
+      return;
+    }
+
+    if (realtimeChatsChannelRef.current) {
+      console.info(`[REALTIME] Removing old chats channel ${realtimeChatsChannelRef.current.topic}`);
+      teardownChannel(supabase, realtimeChatsChannelRef.current);
+      realtimeChatsChannelRef.current = null;
+    }
+
+    console.info(`[REALTIME] Subscribing to chats channel ${channelName}`);
+    const channel = subscribeToWorkspaceChatUpdates({
+      client: supabase,
+      workspaceId,
+      onChatUpdate: (payload) => {
         console.log('[REALTIME] Chat update received:', payload);
         const newChatData = payload.new as any; // Use any to access snake_case properties
 
-        // Construct the partial chat object for update
         const chatUpdate: Partial<Chat> = {
           ...newChatData,
-          agentId: newChatData.agent_id, // Map snake_case to camelCase
+          agentId: newChatData.agent_id,
         };
 
-        // If assigned to self, we can optimistically set the agent object
-        if (newChatData.agent_id === initialUser.id) {
+        if (newChatData.agent_id === initialUser?.id) {
           chatUpdate.agent = initialUser;
         } else if (newChatData.agent_id === null) {
-          chatUpdate.agent = undefined; // Explicitly clear agent if unassigned
+          chatUpdate.agent = undefined;
         }
 
         useInboxStore.getState().upsertChats([chatUpdate as Chat]);
-      })
-      .subscribe((status) => {
-        console.info(`[REALTIME] Channel ${channelName} status: ${status}`);
-      });
+      },
+      onStatusChange: (status) => console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`),
+    });
 
-    realtimeChannelRef.current = channel;
+    realtimeChatsChannelRef.current = channel;
 
     return () => {
-      if (realtimeChannelRef.current) {
-        console.info(`[REALTIME] Cleaning up channel ${channelName}`);
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
+      if (realtimeChatsChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up chats channel ${channelName}`);
+        teardownChannel(supabase, realtimeChatsChannelRef.current);
+        realtimeChatsChannelRef.current = null;
       }
     };
-  }, [initialUser?.activeWorkspaceId]);
+  }, [initialUser?.activeWorkspaceId, initialUser?.id]);
 
   useEffect(() => {
     if (initialUser) {

@@ -107,6 +107,26 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
                         Envie esta conversa para outra equipe ou agente.
                     </DialogDescription>
                 </DialogHeader>
+                {currentUser && chat.agent?.id !== currentUser.id && (
+                    <div className="mb-2">
+                        <Button
+                            onClick={() => handleTransfer({ agentId: currentUser.id })}
+                            disabled={isTransferring}
+                            className="w-full bg-green-600 hover:bg-green-500 text-white"
+                        >
+                            {isTransferring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCheck className="mr-2 h-4 w-4" />}
+                            Assumir Atendimento
+                        </Button>
+                        <div className="relative my-4">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t border-white/10" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-black/90 px-2 text-white/50">Ou transferir para</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <Tabs defaultValue="team" className="w-full">
                     <TabsList className="grid w-full grid-cols-2 bg-white/5">
                         <TabsTrigger value="team" className="data-[state=active]:bg-white/10 data-[state=active]:text-white">Para Equipe</TabsTrigger>
