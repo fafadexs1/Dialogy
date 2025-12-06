@@ -571,9 +571,21 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         document.execCommand("insertText", false, text);
     };
 
+    const normalizePlainText = (text: string) => {
+        if (!text) return '';
+        // Collapse excessive blank lines and trim trailing spaces per line
+        const collapsed = text
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .map(line => line.replace(/\s+$/, ''))
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n');
+        return collapsed.trimEnd();
+    };
+
     const htmlToWhatsappMarkdown = (html: string): string => {
         if (!html) return '';
-        return html
+        const plain = html
             .replace(/<b>(.*?)<\/b>/g, '*$1*')
             .replace(/<strong>(.*?)<\/strong>/g, '*$1*')
             .replace(/<i>(.*?)<\/i>/g, '_$1_')
@@ -584,6 +596,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             .replace(/<br\s*\/?>/g, '\n')
             .replace(/&nbsp;/g, ' ')
             .replace(/<[^>]*>/g, '');
+        return normalizePlainText(plain);
     };
 
     const formatOptimisticTimestamp = (date: Date) =>
