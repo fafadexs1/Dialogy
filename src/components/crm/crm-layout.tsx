@@ -1,15 +1,17 @@
-
 'use client';
 
 import React from 'react';
 import CustomerList from './customer-list';
-import { type Contact } from '@/lib/types';
-import { contacts } from '@/lib/mock-data';
+import { useCurrentUser } from '@/hooks/use-online-status';
 
 export default function CrmLayout() {
+  const user = useCurrentUser();
+
+  if (!user) return null;
+
   return (
     <div className="flex flex-1 w-full min-h-0 bg-muted/40">
-      <CustomerList customers={contacts} />
+      <CustomerList user={user} />
     </div>
   );
 }

@@ -85,7 +85,18 @@ export const register = withDebug(
       }
 
       // On success, simply return a success state. The client will handle the redirect.
-      return { success: true, message: null, user: data.user as User };
+      const user: User = {
+        id: data.user.id,
+        email: data.user.email,
+        name: fullName,
+        firstName: firstName,
+        lastName: lastName,
+        avatar_url: data.user.user_metadata?.avatar_url || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+        phone: phone
+      };
+
+      // On success, simply return a success state. The client will handle the redirect.
+      return { success: true, message: null, user };
     } catch (error: any) {
       console.error('[REGISTER_ACTION] Erro no registro:', error);
       return { success: false, message: error.message || "Ocorreu um erro durante o registro.", user: null };

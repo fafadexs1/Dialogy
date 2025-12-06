@@ -16,7 +16,7 @@ async function requireUserInWorkspace(workspaceId: string) {
     `SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1`,
     [userId, workspaceId]
   );
-  if (membership.rowCount === 0) {
+  if ((membership.rowCount || 0) === 0) {
     throw new Error('Acesso negado para este workspace.');
   }
   return userId;
@@ -49,7 +49,7 @@ export async function createMetaChannel(payload: {
     `SELECT id FROM meta_channels WHERE workspace_id = $1 AND verify_token = $2 LIMIT 1`,
     [payload.workspaceId, payload.verifyToken]
   );
-  if (existing.rowCount > 0) {
+  if ((existing.rowCount || 0) > 0) {
     throw new Error('Já existe um canal com este verify_token neste workspace.');
   }
 
@@ -90,5 +90,5 @@ export async function deleteMetaChannel(id: string, workspaceId: string) {
     `DELETE FROM meta_channels WHERE id = $1 AND workspace_id = $2`,
     [id, workspaceId]
   );
-  return { success: res.rowCount > 0 };
+  return { success: (res.rowCount || 0) > 0 };
 }

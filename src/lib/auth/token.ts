@@ -108,5 +108,5 @@ export function mapPayloadToSupabaseUser(payload: SupabaseJwtPayload): SupabaseU
     // The rest are optional in our usage; set to null/default to satisfy the type.
     last_sign_in_at: null,
     factors: [],
-  } as SupabaseUser;
+  } as unknown as SupabaseUser;
 }

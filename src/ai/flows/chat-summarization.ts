@@ -10,8 +10,8 @@
  * - SummarizeChatOutput - The return type for the summarizeChat function.
  */
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import { ai } from '@/ai/genkit';
+import { z } from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import type { AutopilotConfig } from '@/lib/types';
 import { db } from '@/lib/db';
@@ -37,7 +37,7 @@ const SummarizeChatFlowInputSchema = SummarizeChatInputSchema.extend({
 
 
 export async function summarizeChat(input: SummarizeChatInput): Promise<SummarizeChatOutput> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated.");
@@ -48,9 +48,9 @@ export async function summarizeChat(input: SummarizeChatInput): Promise<Summariz
     'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',
     [input.workspaceId, userId]
   );
-  
+
   // Use a default config if none is found to avoid breaking summarization
-  const config = configRes.rows.length > 0 
+  const config = configRes.rows.length > 0
     ? configRes.rows[0]
     : { id: 'default', ai_model: 'googleai/gemini-2.0-flash' };
 
@@ -62,8 +62,8 @@ export async function summarizeChat(input: SummarizeChatInput): Promise<Summariz
 
 const summarizeChatPrompt = ai.definePrompt({
   name: 'summarizeChatPrompt',
-  input: {schema: SummarizeChatInputSchema},
-  output: {schema: SummarizeChatOutputSchema},
+  input: { schema: SummarizeChatInputSchema },
+  output: { schema: SummarizeChatOutputSchema },
   prompt: `Summarize the following chat history into key points, focusing on the main issues discussed and the resolutions provided.  The summary should be concise and easy to understand for a support agent who needs to quickly grasp the context of the conversation.\n\nChat History:\n{{{chatHistory}}}`,
 });
 
@@ -80,16 +80,16 @@ const summarizeChatFlow = ai.defineFlow(
     const result = await summarizeChatPrompt(promptInput, { model });
     const output = result.output!;
 
-     // Log usage
+    // Log usage
     if (result.usage && input.config?.id && input.config.id !== 'default') {
-        await logAutopilotUsage({
-            configId: input.config.id,
-            flowName: 'summarizeChatFlow',
-            modelName: model,
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            totalTokens: result.usage.totalTokens,
-        });
+      await logAutopilotUsage({
+        configId: input.config.id,
+        flowName: 'summarizeChatFlow',
+        modelName: model,
+        inputTokens: result.usage.inputTokens ?? 0,
+        outputTokens: result.usage.outputTokens ?? 0,
+        totalTokens: result.usage.totalTokens ?? 0,
+      });
     }
 
     return output;

@@ -3,7 +3,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getBillingData, type BillingData, getInstanceCosts, updateInstanceCosts, type InstanceCost } from "@/actions/billing";
+import { getBillingData, getInstanceCosts, updateInstanceCosts } from "@/actions/billing";
+import { type BillingData, type InstanceCost } from "@/lib/types";
 import { DollarSign, Server, Smartphone, Badge, Save, Loader2 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
@@ -58,27 +59,27 @@ function CostSettings({ initialCosts }: { initialCosts: InstanceCost[] }) {
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                     <Label htmlFor="baileys-cost" className="flex items-center gap-2"><Server className="h-4 w-4" /> Custo Instância Baileys (R$)</Label>
-                    <Input 
-                        id="baileys-cost" 
-                        type="number" 
+                    <Input
+                        id="baileys-cost"
+                        type="number"
                         value={costs.baileys}
                         onChange={(e) => setCosts(prev => ({ ...prev, baileys: parseFloat(e.target.value) || 0 }))}
                     />
                 </div>
-                 <div className="space-y-2">
+                <div className="space-y-2">
                     <Label htmlFor="cloud-cost" className="flex items-center gap-2"><Smartphone className="h-4 w-4" /> Custo Instância Cloud API (R$)</Label>
-                    <Input 
-                        id="cloud-cost" 
-                        type="number" 
+                    <Input
+                        id="cloud-cost"
+                        type="number"
                         value={costs.wa_cloud}
                         onChange={(e) => setCosts(prev => ({ ...prev, wa_cloud: parseFloat(e.target.value) || 0 }))}
                     />
                 </div>
             </CardContent>
             <CardFooter>
-                 <Button onClick={handleSave} disabled={isSubmitting}>
-                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
-                    <Save className="mr-2 h-4 w-4"/>
+                <Button onClick={handleSave} disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <Save className="mr-2 h-4 w-4" />
                     Salvar Custos
                 </Button>
             </CardFooter>
@@ -105,7 +106,7 @@ export default function BillingPage() {
             } else {
                 setBillingData(billingRes.data);
             }
-            
+
             setInstanceCosts(costsRes || []);
             setLoading(false);
         }
@@ -119,7 +120,7 @@ export default function BillingPage() {
 
     if (error || !billingData) {
         return (
-             <Card>
+            <Card>
                 <CardHeader>
                     <CardTitle>Erro ao carregar dados</CardTitle>
                     <CardDescription>
@@ -135,35 +136,35 @@ export default function BillingPage() {
 
     return (
         <div className="space-y-6">
-             <CostSettings initialCosts={instanceCosts} />
+            <CostSettings initialCosts={instanceCosts} />
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                 <StatCard 
+                <StatCard
                     title="Receita Total Mensal"
                     value={formatCurrency(billingData.totalCost)}
                     icon={DollarSign}
                     description={`${billingData.totalBaileysInstances + billingData.totalCloudInstances} instâncias ativas`}
                 />
-                 <StatCard 
+                <StatCard
                     title="Instâncias Baileys"
                     value={billingData.totalBaileysInstances.toString()}
                     icon={Server}
                     description={`Receita de ${formatCurrency(billingData.totalBaileysCost)}`}
                 />
-                <StatCard 
+                <StatCard
                     title="Instâncias Cloud API"
                     value={billingData.totalCloudInstances.toString()}
                     icon={Smartphone}
                     description={`Receita de ${formatCurrency(billingData.totalCloudCost)}`}
                 />
-                 <StatCard 
+                <StatCard
                     title="Ticket Médio"
                     value={formatCurrency(billingData.totalCost / (billingData.workspaces.length || 1))}
                     icon={Badge}
                     description={`Por workspace`}
                 />
             </div>
-            
-             <Card>
+
+            <Card>
                 <CardHeader>
                     <CardTitle>Faturamento por Workspace</CardTitle>
                     <CardDescription>
@@ -199,7 +200,7 @@ export default function BillingPage() {
                                     <TableCell className="text-right font-semibold">{formatCurrency(ws.subtotal)}</TableCell>
                                 </TableRow>
                             ))}
-                             {billingData.workspaces.length === 0 && (
+                            {billingData.workspaces.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={5} className="text-center text-muted-foreground">
                                         Nenhum workspace com instâncias encontrado.

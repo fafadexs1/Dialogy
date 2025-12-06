@@ -18,8 +18,9 @@ type SendPayload = {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { channelId: string } }
+  props: { params: Promise<{ channelId: string }> }
 ) {
+  const params = await props.params;
   const body = (await request.json().catch(() => null)) as SendPayload | null;
   if (!body || !body.externalContactId || !body.type) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
@@ -42,17 +43,17 @@ export async function POST(
     const messagingResponse =
       channel.type === 'instagram'
         ? await new InstagramMessagingService(channel).sendMessage({
-            recipientId: body.externalContactId,
-            type: body.type,
-            text: body.text,
-            mediaUrl: body.mediaUrl,
-          })
+          recipientId: body.externalContactId,
+          type: body.type,
+          text: body.text,
+          mediaUrl: body.mediaUrl,
+        })
         : await new MessengerMessagingService(channel).sendMessage({
-            recipientId: body.externalContactId,
-            type: body.type,
-            text: body.text,
-            mediaUrl: body.mediaUrl,
-          });
+          recipientId: body.externalContactId,
+          type: body.type,
+          text: body.text,
+          mediaUrl: body.mediaUrl,
+        });
 
     const externalMessageId =
       messagingResponse?.message_id ||

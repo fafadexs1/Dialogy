@@ -14,7 +14,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     const res = await db.query(`
         SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 
@@ -91,7 +91,7 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{ success
     try {
         // First get workspace_id from invite to check permissions
         const inviteRes = await db.query('SELECT workspace_id FROM workspace_invites WHERE id = $1', [inviteId]);
-        if (inviteRes.rowCount === 0) return { success: false, error: "Convite não encontrado." };
+        if ((inviteRes.rowCount || 0) === 0) return { success: false, error: "Convite não encontrado." };
 
         const { workspace_id } = inviteRes.rows[0];
         if (!await hasPermission(user.id, workspace_id, 'workspace:invites:manage')) {
@@ -135,7 +135,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
              WHERE code = $1`, [inviteCode]
         );
 
-        if (inviteRes.rowCount === 0) {
+        if ((inviteRes.rowCount || 0) === 0) {
             return { success: false, error: "Código de convite inválido." };
         }
         const invite = inviteRes.rows[0];
@@ -156,7 +156,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         const memberCheck = await client.query(
             'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]
         );
-        if (memberCheck.rowCount > 0) {
+        if ((memberCheck.rowCount || 0) > 0) {
             return { success: false, error: "Você já é membro deste workspace." };
         }
 
@@ -164,7 +164,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         const memberRoleRes = await client.query(
             "SELECT id FROM roles WHERE workspace_id = $1 AND is_default = TRUE", [workspaceId]
         );
-        if (memberRoleRes.rowCount === 0) {
+        if ((memberRoleRes.rowCount || 0) === 0) {
             throw new Error("Default 'Member' role not found for this workspace.");
         }
         const memberRoleId = memberRoleRes.rows[0].id;
@@ -218,7 +218,7 @@ export async function getInviteDetails(code: string): Promise<{ workspaceName: s
             WHERE wi.code = $1
         `, [code]);
 
-        if (res.rowCount === 0) {
+        if ((res.rowCount || 0) === 0) {
             return { error: "Convite não encontrado." };
         }
 

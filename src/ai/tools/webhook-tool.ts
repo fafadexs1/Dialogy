@@ -18,8 +18,8 @@ export const makeHttpRequestTool = ai.defineTool(
   {
     name: 'makeHttpRequest',
     description: 'Makes an HTTP request to a specified URL (webhook) and returns the response.',
-    input: { schema: WebhookInputSchema },
-    output: { schema: z.string().describe('The stringified JSON response from the webhook.') },
+    inputSchema: WebhookInputSchema,
+    outputSchema: z.string().describe('The stringified JSON response from the webhook.'),
   },
   async (input) => {
     console.log('[WEBHOOK_TOOL] Executing webhook request:', input);
@@ -37,7 +37,7 @@ export const makeHttpRequestTool = ai.defineTool(
         console.error(`[WEBHOOK_TOOL] HTTP Error ${response.status}: ${errorText}`);
         throw new Error(`Request failed with status ${response.status}: ${errorText}`);
       }
-      
+
       const responseData = await response.json();
       console.log('[WEBHOOK_TOOL] Received response:', responseData);
 

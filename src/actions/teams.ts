@@ -11,7 +11,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     const res = await db.query(`
         SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
@@ -20,7 +20,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
     if (!await hasPermission(user.id, workspaceId, 'teams:view')) {
-         return { teams: [], error: "Acesso não autorizado." };
+        return { teams: [], error: "Acesso não autorizado." };
     }
 
     try {
@@ -91,9 +91,9 @@ export async function createTeam(data: { workspaceId: string, name: string, role
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { team: null, error: "Usuário não autenticado." };
-    
+
     if (!await hasPermission(user.id, data.workspaceId, 'teams:edit')) {
-         return { team: null, error: "Você não tem permissão para criar equipes." };
+        return { team: null, error: "Você não tem permissão para criar equipes." };
     }
 
     const client = await db.connect();
@@ -110,7 +110,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
         const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
         const businessHoursValues = days.map((day, index) => `($1, $${index + 2})`).join(',');
         const businessHoursParams = [newTeam.id, ...days];
-        
+
         await client.query(
             `INSERT INTO business_hours (team_id, day_of_week) VALUES ${businessHoursValues}`,
             businessHoursParams
@@ -118,10 +118,10 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 
 
         await client.query('COMMIT');
-        
+
         // Fetch the newly created business hours to return the full team object
         const businessHoursRes = await client.query(
-             `SELECT id, day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
+            `SELECT id, day_of_week as day, is_enabled as "isEnabled", start_time as "startTime", end_time as "endTime"
                 FROM business_hours
                 WHERE team_id = $1 ORDER BY day_of_week`,
             [newTeam.id]
@@ -154,13 +154,13 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
-    
+
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
-    if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
+    if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
     if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para editar equipes." };
+        return { success: false, error: "Você não tem permissão para editar equipes." };
     }
 
     try {
@@ -168,7 +168,7 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
         if (fields.length === 0) {
             return { success: true }; // Nothing to update
         }
-        
+
         // Map JS-style keys to DB-style keys
         const fieldMapping: Record<string, string> = {
             roleId: 'role_id',
@@ -188,9 +188,9 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
         });
 
         const query = `UPDATE teams SET ${setClauses} WHERE id = $${fields.length + 1}`;
-        
+
         await db.query(query, [...values, teamId]);
-        
+
         return { success: true };
     } catch (error) {
         console.error("Erro ao atualizar equipe:", error);
@@ -204,11 +204,11 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
-    if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
+    if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
-    
+
     if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para remover equipes." };
+        return { success: false, error: "Você não tem permissão para remover equipes." };
     }
 
     try {
@@ -227,13 +227,13 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
-    if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
+    if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
-    
+
     if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
+        return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
-    
+
     try {
         await db.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [teamId, userId]);
         return { success: true };
@@ -249,11 +249,11 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
-    if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
+    if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
-    
+
     if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
+        return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
 
     try {
@@ -271,21 +271,27 @@ export async function updateBusinessHours(teamId: string, businessHourId: string
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
-    if(teamRes.rowCount === 0) return { success: false, error: "Equipe não encontrada."};
+    if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
-    
+
     if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
-         return { success: false, error: "Você não tem permissão para editar horários." };
+        return { success: false, error: "Você não tem permissão para editar horários." };
     }
-    
+
     try {
         const fields = Object.keys(data);
         const values = Object.values(data);
+        const fieldMapping: Partial<Record<keyof BusinessHour, string>> = {
+            isEnabled: 'is_enabled',
+            startTime: 'start_time',
+            endTime: 'end_time'
+        };
         const setClauses = fields.map((field, index) => {
-            const dbField = { isEnabled: 'is_enabled', startTime: 'start_time', endTime: 'end_time' }[field as keyof BusinessHour] || field;
+            const key = field as keyof BusinessHour;
+            const dbField = fieldMapping[key] || field;
             return `"${dbField}" = $${index + 1}`;
         }).join(', ');
-        
+
         const query = `UPDATE business_hours SET ${setClauses} WHERE id = $${fields.length + 1} AND team_id = $${fields.length + 2}`;
         await db.query(query, [...values, businessHourId, teamId]);
 
@@ -346,47 +352,47 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
 }
 
 export async function createScheduleException(
-  teamId: string,
-  data: Omit<ScheduleException, 'id' | 'team_id'>
+    teamId: string,
+    data: Omit<ScheduleException, 'id' | 'team_id'>
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
 
-  try {
-    // We should check permissions here too
-    await db.query(
-      `INSERT INTO schedule_exceptions (team_id, date, description, is_closed, start_time, end_time)
+    try {
+        // We should check permissions here too
+        await db.query(
+            `INSERT INTO schedule_exceptions (team_id, date, description, is_closed, start_time, end_time)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        teamId,
-        data.date,
-        data.description,
-        data.is_closed,
-        data.is_closed ? null : data.start_time,
-        data.is_closed ? null : data.end_time,
-      ]
-    );
-    return { success: true };
-  } catch (error: any) {
-    console.error('[CREATE_SCHEDULE_EXCEPTION] Error:', error);
-    return { success: false, error: `Falha ao salvar a exceção: ${error.message}` };
-  }
+            [
+                teamId,
+                data.date,
+                data.description,
+                data.is_closed,
+                data.is_closed ? null : data.start_time,
+                data.is_closed ? null : data.end_time,
+            ]
+        );
+        return { success: true };
+    } catch (error: any) {
+        console.error('[CREATE_SCHEDULE_EXCEPTION] Error:', error);
+        return { success: false, error: `Falha ao salvar a exceção: ${error.message}` };
+    }
 }
 
 export async function deleteScheduleException(exceptionId: string): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'Usuário não autenticado.' };
-  
-  try {
-    // We should check permissions here too
-    await db.query('DELETE FROM schedule_exceptions WHERE id = $1', [exceptionId]);
-    return { success: true };
-  } catch (error: any) {
-    console.error('[DELETE_SCHEDULE_EXCEPTION] Error:', error);
-    return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
-  }
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+
+    try {
+        // We should check permissions here too
+        await db.query('DELETE FROM schedule_exceptions WHERE id = $1', [exceptionId]);
+        return { success: true };
+    } catch (error: any) {
+        console.error('[DELETE_SCHEDULE_EXCEPTION] Error:', error);
+        return { success: false, error: `Falha ao remover a exceção: ${error.message}` };
+    }
 }
 
-    
+

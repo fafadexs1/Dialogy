@@ -1,13 +1,13 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { Database } from '@/lib/database.types';
+
 import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
 import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies, mapPayloadToSupabaseUser } from '@/lib/auth/token';
 
 export const createClient = async () => {
   const cookieStore = await cookies();
 
-  const supabase = createServerClient<Database>(
+  const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -41,7 +41,7 @@ export const createClient = async () => {
       data: { user: cachedUser },
       error: null,
     });
-    // @ts-expect-error: patching runtime method for performance
+
     supabase.auth.getUser = patchedGetUser;
   }
 

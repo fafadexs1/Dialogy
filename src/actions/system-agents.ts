@@ -12,7 +12,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     // For now, let's assume any logged in user can manage agents.
     // Replace with actual permission check later.
     const res = await db.query(`SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2`, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
@@ -21,7 +21,7 @@ export async function getSystemAgents(workspaceId: string): Promise<{ agents: Sy
     if (!user) return { agents: null, error: "Usuário não autenticado." };
 
     if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
-         return { agents: null, error: "Acesso não autorizado." };
+        return { agents: null, error: "Acesso não autorizado." };
     }
 
     try {
@@ -59,7 +59,7 @@ export async function createSystemAgent(
             return { success: false, error: "A URL do Webhook fornecida é inválida. Ela deve ser uma URL completa (ex: https://seu-site.com/webhook)." };
         }
     }
-    
+
     // Generate a secure, unique token
     const token = `dgy_${randomBytes(24).toString('hex')}`;
 
@@ -74,7 +74,7 @@ export async function createSystemAgent(
         return { success: true, agent: res.rows[0] };
     } catch (error: any) {
         console.error("[CREATE_SYSTEM_AGENT] Error:", error);
-         if (error.code === '23505') { // unique_violation
+        if (error.code === '23505') { // unique_violation
             return { success: false, error: "Já existe um agente com este nome neste workspace." };
         }
         return { success: false, error: "Falha ao criar o agente no banco de dados." };
@@ -91,13 +91,13 @@ export async function updateSystemAgent(
 
     try {
         const agentRes = await db.query('SELECT workspace_id FROM system_agents WHERE id = $1', [agentId]);
-        if (agentRes.rowCount === 0) return { success: false, error: 'Agente não encontrado.' };
+        if ((agentRes.rowCount || 0) === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
         if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
             return { success: false, error: "Você não tem permissão para editar agentes." };
         }
-        
+
         const webhookUrl = data.webhook_url?.trim();
 
         if (webhookUrl) {
@@ -122,13 +122,13 @@ export async function updateSystemAgent(
              WHERE id = $7`,
             [data.name, data.avatar_url || null, webhookValue, data.type || null, data.handoff_system_agent_id || null, data.hide_from_chatlist, agentId]
         );
-        
+
         revalidatePath('/automations/robots');
         return { success: true };
 
     } catch (error: any) {
         console.error("[UPDATE_SYSTEM_AGENT] Error:", error);
-         if (error.code === '23505') { // unique_violation
+        if (error.code === '23505') { // unique_violation
             return { success: false, error: "Já existe um agente com este nome neste workspace." };
         }
         return { success: false, error: "Falha ao atualizar o agente no banco de dados." };
@@ -143,7 +143,7 @@ export async function deleteSystemAgent(agentId: string): Promise<{ success: boo
 
     try {
         const agentRes = await db.query('SELECT workspace_id FROM system_agents WHERE id = $1', [agentId]);
-        if(agentRes.rowCount === 0) return { success: false, error: 'Agente não encontrado.'};
+        if ((agentRes.rowCount || 0) === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
         if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
@@ -161,4 +161,4 @@ export async function deleteSystemAgent(agentId: string): Promise<{ success: boo
 
 // TODO: Add a 'toggleSystemAgentActive' action
 
-    
+

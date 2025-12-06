@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
-import { useFormStatus } from 'react-dom';
+import { useEffect, useState } from 'react';
+import { useFormStatus, useFormState } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,7 @@ function SocialButton({ provider, icon, label, isIconOnly, children }: { provide
 }
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
-  const [state, formAction] = useActionState(login, { success: false, message: null });
+  const [state, formAction] = useFormState(login as any, { success: false, message: '' });
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

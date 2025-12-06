@@ -29,7 +29,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
          WHERE i.instance_name = $1`,
         [instanceName]
     );
-    if (instanceRes.rowCount === 0) {
+    if ((instanceRes.rowCount || 0) === 0) {
         return null;
     }
     return instanceRes.rows[0];
@@ -39,48 +39,48 @@ export async function POST(
     request: Request,
     { params }: { params: { instanceName: string } }
 ) {
-  const instanceNameFromUrl = params.instanceName;
-  console.log(`--- [WEBHOOK] Payload recebido para a instância: ${instanceNameFromUrl} ---`);
+    const instanceNameFromUrl = params.instanceName;
+    console.log(`--- [WEBHOOK] Payload recebido para a instância: ${instanceNameFromUrl} ---`);
 
-  try {
-    const payload = await request.json();
-    console.log('[WEBHOOK] Payload completo:', JSON.stringify(payload, null, 2));
+    try {
+        const payload = await request.json();
+        console.log('[WEBHOOK] Payload completo:', JSON.stringify(payload, null, 2));
 
-    const { event, instance: instanceNameFromPayload } = payload;
-    
-    if (instanceNameFromUrl !== instanceNameFromPayload) {
-        console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
-        return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
+        const { event, instance: instanceNameFromPayload } = payload;
+
+        if (instanceNameFromUrl !== instanceNameFromPayload) {
+            console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+            return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
+        }
+
+        if (!event) {
+            console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
+            return NextResponse.json({ error: 'Event not found' }, { status: 400 });
+        }
+
+        if (event === 'messages.upsert') {
+            await handleMessagesUpsert(payload);
+        } else if (event === 'messages.update') {
+            await handleMessagesUpdate(payload);
+        } else if (event === 'contacts.update') {
+            await handleContactsUpdate(payload);
+        } else if (event === 'chats.upsert') {
+            await handleChatsUpsert(payload);
+        } else {
+            console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
+        }
+
+        return NextResponse.json({ message: 'Webhook received successfully' });
+    } catch (error) {
+        console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
-
-    if (!event) {
-      console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
-      return NextResponse.json({ error: 'Event not found' }, { status: 400 });
-    }
-
-    if (event === 'messages.upsert') {
-      await handleMessagesUpsert(payload);
-    } else if (event === 'messages.update') {
-      await handleMessagesUpdate(payload);
-    } else if (event === 'contacts.update') {
-      await handleContactsUpdate(payload);
-    } else if (event === 'chats.upsert') {
-      await handleChatsUpsert(payload);
-    } else {
-      console.log(`[WEBHOOK] Evento '${event}' recebido para a instância ${instanceNameFromUrl}, mas não há handler implementado.`);
-    }
-
-    return NextResponse.json({ message: 'Webhook received successfully' });
-  } catch (error) {
-    console.error(`[WEBHOOK] Erro ao processar o webhook para ${instanceNameFromUrl}:`, error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
 }
 
 
 async function handleMessagesUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
-    
+
     if (!data || !data.keyId || !data.status) {
         console.log('[WEBHOOK_MSG_UPDATE] Payload inválido, keyId ou status ausente.');
         return;
@@ -89,7 +89,7 @@ async function handleMessagesUpdate(payload: any) {
     const { keyId, status } = data;
 
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${status} na instância ${instanceName}`);
-    
+
     try {
         await db.query(
             `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2`,
@@ -144,12 +144,12 @@ async function handleMessagesUpsert(payload: any) {
             ? `Localiza??o: ${latitude?.toFixed(5)}, ${longitude?.toFixed(5)}`
             : 'Localiza??o enviada')
         : '';
-    
+
     content = message.conversation || mediaDetails?.text || mediaDetails?.caption || locationLabel;
 
     // A URL da m?dia est? no n?vel superior do objeto `message`
     const mediaUrl = message.mediaUrl || null;
-    
+
     const effectiveMessageType = messageType || (locationDetails ? 'locationMessage' : undefined);
 
     if (effectiveMessageType) {
@@ -180,12 +180,12 @@ async function handleMessagesUpsert(payload: any) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
         return;
     }
-    
+
     if (!contactJid) {
         console.log('[WEBHOOK_MSG_UPSERT] Nao foi possivel determinar o JID do contato. Payload ignorado.');
         return;
     }
-    
+
     // Construir o objeto metadata
     let mimetype = mediaDetails?.mimetype || mediaDetails?.mime_type;
 
@@ -239,7 +239,7 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     const contactPhone = contactJid.split('@')[0];
-    
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
@@ -249,16 +249,16 @@ async function handleMessagesUpsert(payload: any) {
              FROM evolution_api_instances
              WHERE instance_name = $1`, [instanceName]
         );
-        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
-        
+        if ((instanceRes.rowCount || 0) === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
+
         workspaceId = instanceRes.rows[0].workspace_id;
         apiConfig = await getApiConfigForInstance(instanceName);
 
         let contactRes = await client.query(
             'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
         );
-        
-        if (contactRes.rowCount === 0) {
+
+        if ((contactRes.rowCount || 0) === 0) {
             console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
@@ -275,19 +275,20 @@ async function handleMessagesUpsert(payload: any) {
                 );
             }
         }
-        
-        if (contactRes.rowCount === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
+
+        if ((contactRes.rowCount || 0) === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
         contactData = contactRes.rows[0];
+        if (!contactData) throw new Error("Falha ao recuperar dados do contato.");
 
         let chatRes = await client.query(
             `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
         );
-        
+
         let chat: Chat;
-        if (chatRes.rowCount > 0) {
+        if ((chatRes.rowCount || 0) > 0) {
             chat = chatRes.rows[0];
         } else {
-             console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
+            console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const chatId = randomUUID();
             const protocol = buildChatProtocol(chatId);
             const newChatRes = await client.query(
@@ -313,7 +314,7 @@ async function handleMessagesUpsert(payload: any) {
         );
 
         await client.query('COMMIT');
-        
+
         savedChat = chat;
         savedMessage = messageResult.rows[0];
 
@@ -324,7 +325,7 @@ async function handleMessagesUpsert(payload: any) {
     } finally {
         client.release();
     }
-    
+
     if (savedChat && savedMessage) {
         const postTransactionTasks: Promise<any>[] = [
             dispatchMessageToWebhooks(savedChat, savedMessage, instanceName),
@@ -335,7 +336,7 @@ async function handleMessagesUpsert(payload: any) {
                 updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
             );
         }
-        
+
         Promise.all(postTransactionTasks).catch(err => {
             console.error("[WEBHOOK_POST_TRANSACTION] Erro ao executar tarefas em paralelo:", err);
         });
@@ -363,7 +364,7 @@ async function updateProfilePicture(contactId: string, contactJid: string, insta
 async function handleContactsUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
     if (!Array.isArray(data) || data.length === 0) return;
-    
+
     const contactUpdate = data[0];
     const profilePicUrl = contactUpdate?.profilePicUrl;
     const remoteJid = resolveWhatsappJid(
@@ -376,7 +377,7 @@ async function handleContactsUpdate(payload: any) {
 
     try {
         const instanceRes = await db.query('SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1', [instanceName]);
-        if (instanceRes.rowCount === 0) return;
+        if ((instanceRes.rowCount || 0) === 0) return;
         const workspaceId = instanceRes.rows[0].workspace_id;
 
         const result = await db.query(
@@ -384,7 +385,7 @@ async function handleContactsUpdate(payload: any) {
             [profilePicUrl, remoteJid, workspaceId]
         );
 
-        if (result.rowCount > 0) {
+        if ((result.rowCount || 0) > 0) {
             console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
         }
     } catch (error) {
@@ -394,8 +395,8 @@ async function handleContactsUpdate(payload: any) {
 
 async function handleChatsUpsert(payload: any) {
     const { instance: instanceName, data } = payload;
-     if (!Array.isArray(data) || data.length === 0) return;
-    
+    if (!Array.isArray(data) || data.length === 0) return;
+
     for (const chatUpdate of data) {
         const remoteJid = resolveWhatsappJid(
             chatUpdate?.id,
@@ -406,7 +407,7 @@ async function handleChatsUpsert(payload: any) {
         if (!remoteJid) continue;
 
         if (archive) {
-             console.log(`[WEBHOOK_CHAT_UPSERT] Recebido evento de arquivamento para ${remoteJid}. Esta funcionalidade ainda não está implementada.`);
+            console.log(`[WEBHOOK_CHAT_UPSERT] Recebido evento de arquivamento para ${remoteJid}. Esta funcionalidade ainda não está implementada.`);
         }
     }
 }

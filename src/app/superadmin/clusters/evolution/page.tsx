@@ -5,13 +5,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { PlusCircle, Cpu, MemoryStick, HardDrive, Network, Server, Loader2, ArrowDown, ArrowUp } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,7 +38,7 @@ function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, la
                 <span className="font-mono">{value}{unit}</span>
             </div>
             <div className="w-full bg-muted rounded-full h-2">
-                <div className={`h-2 rounded-full transition-all duration-500 ease-in-out ${getColor(value)}`} style={{ width: `${value}%`}}></div>
+                <div className={`h-2 rounded-full transition-all duration-500 ease-in-out ${getColor(value)}`} style={{ width: `${value}%` }}></div>
             </div>
         </div>
     )
@@ -55,7 +55,7 @@ function AddClusterDialog({ onClusterAdded }: { onClusterAdded: () => void }) {
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
-        
+
         const result = await createCluster({ name, apiUrl, apiKey });
 
         if (result.success) {
@@ -80,7 +80,7 @@ function AddClusterDialog({ onClusterAdded }: { onClusterAdded: () => void }) {
                 </Button>
             </DialogTrigger>
             <DialogContent>
-                 <form onSubmit={handleSubmit}>
+                <form onSubmit={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Adicionar Novo Cluster</DialogTitle>
                         <DialogDescription>
@@ -149,26 +149,26 @@ function ClusterCard({ cluster }: { cluster: WhatsappCluster }) {
             <CardContent className="space-y-4">
                 <MetricBar value={cluster.metrics?.cpu || 0} label="CPU" icon={Cpu} />
                 <MetricBar value={cluster.metrics?.memory || 0} label="Memória" icon={MemoryStick} />
-                
+
                 <div className="space-y-1">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span className="flex items-center gap-1.5"><HardDrive className="h-3 w-3" /> Armazenamento</span>
                         <span className="font-mono">{storageMetrics ? `${storageMetrics.used.toFixed(1)}GB / ${storageMetrics.total.toFixed(1)}GB` : 'N/A'}</span>
                     </div>
                     <div className="w-full bg-muted rounded-full h-2">
-                        <div className="h-2 rounded-full bg-cyan-500 transition-all duration-500 ease-in-out" style={{ width: `${storageUsage}%`}}></div>
+                        <div className="h-2 rounded-full bg-cyan-500 transition-all duration-500 ease-in-out" style={{ width: `${storageUsage}%` }}></div>
                     </div>
                 </div>
-                
-                 <div className="space-y-1">
+
+                <div className="space-y-1">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span className="flex items-center gap-1.5"><Network className="h-3 w-3" /> Rede</span>
                         <div className="flex items-center gap-2 font-mono">
-                            <span className='flex items-center gap-1'><ArrowDown className="h-3 w-3 text-emerald-500"/>{networkMetrics?.down || 0} Mbps</span>
-                            <span className='flex items-center gap-1'><ArrowUp className="h-3 w-3 text-sky-500"/>{networkMetrics?.up || 0} Mbps</span>
+                            <span className='flex items-center gap-1'><ArrowDown className="h-3 w-3 text-emerald-500" />{networkMetrics?.down || 0} Mbps</span>
+                            <span className='flex items-center gap-1'><ArrowUp className="h-3 w-3 text-sky-500" />{networkMetrics?.up || 0} Mbps</span>
                         </div>
                     </div>
-                 </div>
+                </div>
 
                 <div className="pt-2 border-t mt-4">
                     <div className="flex items-center justify-between text-sm">
@@ -188,7 +188,7 @@ export default function EvolutionClustersPage() {
 
     const fetchClusters = useCallback(async (isInitial = false) => {
         if (isInitial) setLoading(true);
-        
+
         const result = await getClusters();
         if (result.error) {
             toast({ title: "Erro ao carregar clusters", description: result.error, variant: "destructive" });
@@ -196,12 +196,12 @@ export default function EvolutionClustersPage() {
         } else {
             setClusters(result.clusters || []);
         }
-        if(isInitial) setLoading(false);
+        if (isInitial) setLoading(false);
     }, [toast]);
-    
+
     useEffect(() => {
         fetchClusters(true); // Initial fetch
-        
+
         const supabase = createClient();
         const channel = supabase
             .channel('whatsapp-clusters-db-changes')
@@ -210,7 +210,7 @@ export default function EvolutionClustersPage() {
                 { event: '*', schema: 'public', table: 'whatsapp_clusters' },
                 (payload) => {
                     console.log('Change received!', payload);
-                    const updatedCluster = payload.new;
+                    const updatedCluster = payload.new as WhatsappCluster;
                     setClusters(currentClusters => {
                         const existingClusterIndex = currentClusters.findIndex(c => c.id === updatedCluster.id);
                         if (existingClusterIndex !== -1) {
@@ -231,7 +231,7 @@ export default function EvolutionClustersPage() {
         return () => {
             supabase.removeChannel(channel);
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
 
@@ -246,16 +246,16 @@ export default function EvolutionClustersPage() {
                 </div>
                 <AddClusterDialog onClusterAdded={() => fetchClusters(true)} />
             </div>
-            
+
             {loading ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <Card className="h-80 animate-pulse bg-muted"></Card>
                     <Card className="h-80 animate-pulse bg-muted"></Card>
-                 </div>
+                </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {clusters.map(cluster => (
-                       <ClusterCard key={cluster.id} cluster={cluster} />
+                        <ClusterCard key={cluster.id} cluster={cluster} />
                     ))}
                 </div>
             )}
@@ -263,4 +263,3 @@ export default function EvolutionClustersPage() {
     )
 }
 
-    

@@ -1,8 +1,8 @@
-
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { PresenceProvider } from '@/hooks/use-online-status';
 import { AuthProvider } from '@/providers/auth-provider';
+import { ThemeProvider } from '@/providers/theme-provider';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { ensureServerHeartbeat } from '@/lib/observability/logger';
@@ -18,7 +18,7 @@ export default async function RootLayout({
   const user = await getCurrentUser();
 
   return (
-    <html lang="en" className="h-full bg-background" suppressHydrationWarning>
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -27,13 +27,20 @@ export default async function RootLayout({
       </head>
       <body className="h-full font-body antialiased" suppressHydrationWarning>
         <ErrorBoundary>
-          <AuthProvider>
-            <PresenceProvider initialUser={user}>
-              <MainAppLayout>
-                {children}
-              </MainAppLayout>
-            </PresenceProvider>
-          </AuthProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <AuthProvider>
+              <PresenceProvider initialUser={user}>
+                <MainAppLayout>
+                  {children}
+                </MainAppLayout>
+              </PresenceProvider>
+            </AuthProvider>
+          </ThemeProvider>
         </ErrorBoundary>
         <Toaster />
       </body>

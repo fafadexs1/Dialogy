@@ -47,8 +47,9 @@ async function authenticateAndValidate(request: Request, contactId: string) {
  */
 export async function POST(
     request: Request,
-    { params }: { params: { contactId: string } }
+    props: { params: Promise<{ contactId: string }> }
 ) {
+    const params = await props.params;
     const { contactId } = params;
 
     const authResult = await authenticateAndValidate(request, contactId);
@@ -93,8 +94,9 @@ export async function POST(
  */
 export async function DELETE(
     request: Request,
-    { params }: { params: { contactId: string } }
+    props: { params: Promise<{ contactId: string }> }
 ) {
+    const params = await props.params;
     const { contactId } = params;
 
     const authResult = await authenticateAndValidate(request, contactId);

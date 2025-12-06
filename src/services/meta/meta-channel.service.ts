@@ -43,7 +43,7 @@ type ContactRow = Pick<
   'id' | 'workspace_id' | 'name' | 'avatar_url' | 'email' | 'phone' | 'phone_number_jid' | 'address'
 >;
 
-type ChatRow = Pick<Chat, 'id' | 'workspace_id' | 'status' | 'contact_id' | 'agent' | 'protocol'> & {
+type ChatRow = Pick<Chat, 'id' | 'workspace_id' | 'status' | 'agent' | 'protocol'> & {
   contact_id: string;
   agent_id?: string | null;
 };
@@ -198,6 +198,8 @@ async function ensureContact(
       throw error;
     }
   }
+
+  if (!contactRow) throw new Error("Failed to resolve contact");
 
   const metaInsert = await db.query(
     `
@@ -498,7 +500,7 @@ export async function persistNormalizedMessage(params: {
     id: chat.id,
     workspace_id: chat.workspace_id,
     status: chat.status as Chat['status'],
-    contact,
+    contact: contact as any,
     messages: [],
   };
 

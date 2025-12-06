@@ -140,10 +140,10 @@ export function Sidebar({ user }: SidebarProps) {
     const pathname = usePathname();
 
     return (
-        <aside className="flex h-full w-20 flex-col items-center bg-zinc-950 p-4 z-50 relative">
+        <aside className="flex h-full w-20 flex-col items-center bg-zinc-950 border-r border-white/5 p-4 z-50 relative">
             {/* Top Section */}
             <div className="flex flex-col items-center gap-6 flex-shrink-0">
-                <Link href="/inbox" className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 transition-all duration-300">
+                <Link href="/inbox" className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/20 text-blue-500 ring-1 ring-blue-500/30 shadow-[0_0_20px_-5px_rgba(37,99,235,0.5)] hover:bg-blue-600/30 transition-all duration-300">
                     <DialogyLogo />
                     <span className="sr-only">Dialogy</span>
                 </Link>
@@ -164,16 +164,14 @@ export function Sidebar({ user }: SidebarProps) {
                                     <TooltipTrigger asChild>
                                         <Link
                                             href={item.href}
-                                            className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all duration-300 group relative
+                                            className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 group relative
                                     ${isActive
-                                                    ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/20 ring-1 ring-white/20'
-                                                    : 'text-white/50 hover:bg-white/10 hover:text-white'
+                                                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_-3px_rgba(59,130,246,0.3)]'
+                                                    : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
                                                 }`}
                                         >
-                                            {isActive && (
-                                                <div className="absolute inset-0 rounded-2xl bg-white/20 blur-md opacity-50" />
-                                            )}
-                                            <item.icon className={`h-5 w-5 relative z-10 ${isActive ? 'text-white' : ''}`} />
+
+                                            <item.icon className={`h-5 w-5 relative z-10 ${isActive ? 'text-blue-400 drop-shadow-sm' : ''}`} />
                                         </Link>
                                     </TooltipTrigger>
                                     <TooltipContent side="right" className="bg-zinc-950 border-white/10 text-white font-medium shadow-xl">
@@ -187,16 +185,13 @@ export function Sidebar({ user }: SidebarProps) {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <DropdownMenuTrigger asChild>
-                                        <button className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all duration-300 group relative
+                                        <button className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 group relative
                                         ${pathname.startsWith('/team')
-                                                ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/20 ring-1 ring-white/20'
-                                                : 'text-white/50 hover:bg-white/10 hover:text-white'
+                                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_-3px_rgba(59,130,246,0.3)]'
+                                                : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
                                             }`}
                                         >
-                                            {pathname.startsWith('/team') && (
-                                                <div className="absolute inset-0 rounded-2xl bg-white/20 blur-md opacity-50" />
-                                            )}
-                                            <Users2 className={`h-5 w-5 relative z-10 ${pathname.startsWith('/team') ? 'text-white' : ''}`} />
+                                            <Users2 className={`h-5 w-5 relative z-10 ${pathname.startsWith('/team') ? 'text-blue-400 drop-shadow-sm' : ''}`} />
                                         </button>
                                     </DropdownMenuTrigger>
                                 </TooltipTrigger>
@@ -233,16 +228,13 @@ export function Sidebar({ user }: SidebarProps) {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <DropdownMenuTrigger asChild>
-                                        <button className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all duration-300 group relative
+                                        <button className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 group relative
                                         ${pathname.startsWith('/automations') || pathname.startsWith('/autopilot')
-                                                ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/20 ring-1 ring-white/20'
-                                                : 'text-white/50 hover:bg-white/10 hover:text-white'
+                                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_-3px_rgba(59,130,246,0.3)]'
+                                                : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
                                             }`}
                                         >
-                                            {(pathname.startsWith('/automations') || pathname.startsWith('/autopilot')) && (
-                                                <div className="absolute inset-0 rounded-2xl bg-white/20 blur-md opacity-50" />
-                                            )}
-                                            <Bot className={`h-5 w-5 relative z-10 ${(pathname.startsWith('/automations') || pathname.startsWith('/autopilot')) ? 'text-white' : ''}`} />
+                                            <Bot className={`h-5 w-5 relative z-10 ${(pathname.startsWith('/automations') || pathname.startsWith('/autopilot')) ? 'text-blue-400 drop-shadow-sm' : ''}`} />
                                         </button>
                                     </DropdownMenuTrigger>
                                 </TooltipTrigger>

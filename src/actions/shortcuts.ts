@@ -14,7 +14,7 @@ async function hasAdminPermission(userId: string, workspaceId: string): Promise<
         JOIN roles r ON uwr.role_id = r.id
         WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND r.name = 'Administrador'
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Shortcut[] | null, error?: string }> {
@@ -80,7 +80,7 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
         if (id) {
             // Update
             const shortcutRes = await db.query('SELECT user_id, type FROM shortcuts WHERE id = $1', [id]);
-            if (shortcutRes.rowCount === 0) return { success: false, error: "Atalho não encontrado." };
+            if ((shortcutRes.rowCount || 0) === 0) return { success: false, error: "Atalho não encontrado." };
             const { user_id: ownerId } = shortcutRes.rows[0];
 
             // Permission check: 
@@ -142,7 +142,7 @@ export async function deleteShortcut(shortcutId: string): Promise<{ success: boo
 
     try {
         const shortcutRes = await db.query('SELECT user_id, workspace_id, type FROM shortcuts WHERE id = $1', [shortcutId]);
-        if (shortcutRes.rowCount === 0) return { success: false, error: "Atalho não encontrado." };
+        if ((shortcutRes.rowCount || 0) === 0) return { success: false, error: "Atalho não encontrado." };
 
         const { user_id: ownerId, workspace_id: workspaceId, type } = shortcutRes.rows[0];
 

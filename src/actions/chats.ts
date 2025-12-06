@@ -1780,7 +1780,7 @@ export async function getContactMessages({
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        return { messages: [], error: "Usu�rio n�o autenticado." };
+        return { messages: [], error: "Usuário não autenticado." };
     }
 
     try {
@@ -1835,8 +1835,6 @@ export async function getContactMessages({
 
     } catch (error: any) {
         console.error("[GET_CONTACT_MESSAGES] Error:", error);
-        return { messages: [], error: `Falha ao buscar hist�rico do contato: ${error.message}` };
+        return { messages: [], error: `Falha ao buscar histórico do contato: ${error.message}` };
     }
 }
-
-

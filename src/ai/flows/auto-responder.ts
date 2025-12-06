@@ -89,12 +89,12 @@ export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 
 // We create a new input schema for the Flow that includes the config object.
 const AutoResponderFlowInputSchema = AgentResponseInputSchema.extend({
-    config: z.any().describe("The autopilot config object from the database."),
+  config: z.any().describe("The autopilot config object from the database."),
 });
 
 export async function generateAgentResponse(input: z.infer<typeof AutoResponderFlowInputSchema>): Promise<AgentResponseOutput> {
-    // We pass the full input (including config) to the flow
-    return autoResponderFlow(input);
+  // We pass the full input (including config) to the flow
+  return autoResponderFlow(input);
 }
 
 // --- Agent Prompt ---
@@ -104,17 +104,17 @@ const prompt = ai.definePrompt({
   tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `VocǦ Ǹ 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. VocǦ interpreta arquivos treinados, segue regras rígidas e pode acionar integraes externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
+  prompt: `Você é 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. Você interpreta arquivos treinados, segue regras rígidas e pode acionar integrações externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
 
-Siga esta hierarquia de mǸtodos para gerar uma resposta:
+Siga esta hierarquia de métodos para gerar uma resposta:
 
-1.  **Regras de Automaǜo (Prioridade Mǭxima)**: Avalie a mensagem do cliente em relaǜo s "Regras de Automaǜo". Use seu raciocnio para ver se a intenǜo corresponde claramente a um gatilho.
-    - Se a regra for do tipo 'reply', retorne exatamente o value daquela aǜo em 'response' e informe 'triggeredRule'.
+1.  **Regras de Automação (Prioridade Máxima)**: Avalie a mensagem do cliente em relação às "Regras de Automação". Use seu raciocínio para ver se a intenção corresponde claramente a um gatilho.
+    - Se a regra for do tipo 'reply', retorne exatamente o value daquela ação em 'response' e informe 'triggeredRule'.
     - Se a regra for do tipo 'webhook', use a ferramenta 'makeHttpRequestTool' passando url, method e body previstos (placeholders como {{contact.id}} podem ser usados). Resuma ao cliente o resultado dessa chamada.
 
-2.  **Base de Conhecimento**: Se nenhuma regra for aplicǭvel, consulte os textos e DOCUMENTOS carregados para responder com dados oficiais. Nunca invente informaes.
+2.  **Base de Conhecimento**: Se nenhuma regra for aplicável, consulte os textos e DOCUMENTOS carregados para responder com dados oficiais. Nunca invente informações.
 
-3.  **Conhecimento Geral + Histrico**: Se ainda assim faltar algo, use o contexto da conversa e descreva claramente o prximo passo (coletar dados, escalar para humano, etc.).
+3.  **Conhecimento Geral + Histórico**: Se ainda assim faltar algo, use o contexto da conversa e descreva claramente o próximo passo (coletar dados, escalar para humano, etc.).
 
 **IMPORTANTE**:
 - Seja conciso e direto.
@@ -132,23 +132,23 @@ Siga esta hierarquia de mǸtodos para gerar uma resposta:
 {{/each}}
 
 ---
-**REGRAS DE AUTOMAǟO (prioridade mǭxima)**:
+**REGRAS DE AUTOMAÇÃO (prioridade máxima)**:
 {{#each rules}}
 - Nome da Regra: "{{name}}"
   - Gatilho: "{{trigger}}"
-  - Aǜo: {{json action}}
+  - Ação: {{json action}}
 {{/each}}
 ---
 **DADOS DO CONTATO ATUAL (para interpolar nos webhooks)**:
 {{json contact}}
 ---
-**HIST"RICO DO CHAT (Para contexto)**:
+**HISTÓRICO DO CHAT (Para contexto)**:
 {{{chatHistory}}}
 ---
-**RESPOSTA PADRǕO DE CONTINGNCIA (use somente se nada funcionar)**:
+**RESPOSTA PADRÃO DE CONTINGÊNCIA (use somente se nada funcionar)**:
 {{{fallbackReply}}}
 ---
-**sLTIMA MENSAGEM DO CLIENTE**:
+**ÚLTIMA MENSAGEM DO CLIENTE**:
 {{{customerMessage}}}
 
 Agora, avalie e responda.`,
@@ -163,59 +163,59 @@ const autoResponderFlow = ai.defineFlow(
   async (input) => {
     const model = input.model || 'googleai/gemini-2.5-flash-lite';
     const promptInput = AgentResponseInputSchema.parse({
-        ...input,
-        knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
-        fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
+      ...input,
+      knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
+      fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
     });
 
     const genAiKey = process.env.GOOGLE_GENAI_API_KEY?.trim();
     if (!genAiKey || genAiKey === 'no-key-configured') {
-        console.error('[AUTORESPONDER_FLOW_ERROR] GOOGLE_GENAI_API_KEY ausente ou inválida. Configure a variável de ambiente.');
-        const fallback = input.config?.default_fallback_reply?.trim();
-        if (fallback) {
-            return { response: fallback, triggeredRule: null };
-        }
-        return {};
+      console.error('[AUTORESPONDER_FLOW_ERROR] GOOGLE_GENAI_API_KEY ausente ou inválida. Configure a variável de ambiente.');
+      const fallback = input.config?.default_fallback_reply?.trim();
+      if (fallback) {
+        return { response: fallback, triggeredRule: null };
+      }
+      return {};
     }
-    
+
     let output: AgentResponseOutput | null = null;
     try {
-        const result = await prompt(promptInput, { model });
-        output = result.output;
-        
-        // Log usage in the background without awaiting it.
-        // This allows the flow to return faster.
-        if (result.usage && input.config?.id) {
-            logAutopilotUsage({
-                configId: input.config.id,
-                flowName: 'autoResponderFlow',
-                modelName: model,
-                inputTokens: result.usage.inputTokens,
-                outputTokens: result.usage.outputTokens,
-                totalTokens: result.usage.totalTokens,
-                ruleName: output?.triggeredRule ?? undefined,
-            }).catch(err => {
-                // Log the error but don't block the main flow.
-                console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
-            });
-        }
+      const result = await prompt(promptInput, { model });
+      output = result.output;
+
+      // Log usage in the background without awaiting it.
+      // This allows the flow to return faster.
+      if (result.usage && input.config?.id) {
+        logAutopilotUsage({
+          configId: input.config.id,
+          flowName: 'autoResponderFlow',
+          modelName: model,
+          inputTokens: result.usage.inputTokens ?? 0,
+          outputTokens: result.usage.outputTokens ?? 0,
+          totalTokens: result.usage.totalTokens ?? 0,
+          ruleName: output?.triggeredRule ?? undefined,
+        }).catch(err => {
+          // Log the error but don't block the main flow.
+          console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
+        });
+      }
     } catch (error) {
-        console.error('[AUTORESPONDER_FLOW_ERROR] Error calling prompt:', error);
-        // Do not re-throw; allow the flow to proceed to fallback logic.
-        output = null; 
+      console.error('[AUTORESPONDER_FLOW_ERROR] Error calling prompt:', error);
+      // Do not re-throw; allow the flow to proceed to fallback logic.
+      output = null;
     }
 
     // Only return a response if the AI decided a rule was triggered or it could answer.
     // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
-        return output;
+      return output;
     }
     const fallback = input.config?.default_fallback_reply?.trim();
     if (fallback) {
-        return {
-            response: fallback,
-            triggeredRule: output?.triggeredRule ?? null,
-        };
+      return {
+        response: fallback,
+        triggeredRule: output?.triggeredRule ?? null,
+      };
     }
     // Otherwise, return an empty object, indicating no action should be taken.
     return {};

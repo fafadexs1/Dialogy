@@ -10,35 +10,41 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookieOptions: baseCookieOptions,
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookies) {
-          const mergedCookies = cookies.map(({ name, value, options }) => {
-            const mergedOptions = buildSessionCookieOptions(options);
-            request.cookies.set({ name, value, ...mergedOptions });
-            return { name, value, options: mergedOptions };
-          });
+  let supabase;
+  try {
+    supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+      {
+        cookieOptions: baseCookieOptions,
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookies) {
+            const mergedCookies = cookies.map(({ name, value, options }) => {
+              const mergedOptions = buildSessionCookieOptions(options);
+              request.cookies.set({ name, value, ...mergedOptions });
+              return { name, value, options: mergedOptions };
+            });
 
-          response = NextResponse.next({
-            request: {
-              headers: new Headers(request.headers),
-            },
-          });
+            response = NextResponse.next({
+              request: {
+                headers: new Headers(request.headers),
+              },
+            });
 
-          mergedCookies.forEach(({ name, value, options }) => {
-            response.cookies.set({ name, value, ...options });
-          });
+            mergedCookies.forEach(({ name, value, options }) => {
+              response.cookies.set({ name, value, ...options });
+            });
+          },
         },
-      },
-    }
-  );
+      }
+    );
+  } catch (error) {
+    console.error('Supabase Client Init Error in Middleware:', error);
+    return response;
+  }
 
   // Refresh only when the token is close to expiring to avoid hammering /auth/v1/user.
   const accessToken = getSupabaseAccessTokenFromCookies(request.cookies);

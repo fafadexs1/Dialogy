@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache';
 import type { Chat } from '@/lib/types';
 
 interface TagsPayload {
-  tagId: string | null;
+    tagId: string | null;
 }
 
 /**
@@ -48,10 +48,11 @@ async function authenticateAndValidate(request: Request, chatId: string) {
  */
 export async function POST(
     request: Request,
-    { params }: { params: { chatId: string } }
+    props: { params: Promise<{ chatId: string }> }
 ) {
+    const params = await props.params;
     const { chatId } = params;
-    
+
     const authResult = await authenticateAndValidate(request, chatId);
     if (authResult.error || !authResult.agent || !authResult.chat) {
         return NextResponse.json({ error: authResult.error }, { status: authResult.status });
@@ -61,7 +62,7 @@ export async function POST(
     try {
         const body: TagsPayload = await request.json();
         const { tagId } = body;
-        
+
         let tagLabel: string | null = null;
         let tagColor: string | null = null;
 
@@ -99,8 +100,9 @@ export async function POST(
  */
 export async function GET(
     request: Request,
-    { params }: { params: { chatId: string } }
+    props: { params: Promise<{ chatId: string }> }
 ) {
+    const params = await props.params;
     const { chatId } = params;
 
     const authResult = await authenticateAndValidate(request, chatId);
@@ -108,7 +110,7 @@ export async function GET(
         return NextResponse.json({ error: authResult.error }, { status: authResult.status });
     }
     const { chat } = authResult;
-    
+
     return NextResponse.json({
         chatId: chat.id,
         tag: chat.tag,

@@ -78,8 +78,9 @@ async function authenticateAndValidate(request: Request, chatId: string) {
  */
 export async function POST(
     request: Request,
-    { params }: { params: { chatId: string } }
+    props: { params: Promise<{ chatId: string }> }
 ) {
+    const params = await props.params;
     const { chatId } = params;
 
     // Authenticate the system agent and validate it has access to this chat.

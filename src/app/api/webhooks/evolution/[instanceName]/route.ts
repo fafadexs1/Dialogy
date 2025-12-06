@@ -42,8 +42,9 @@ import { logAction } from '@/lib/observability/logger';
 
 export async function POST(
     request: Request,
-    { params }: { params: { instanceName: string } }
+    props: { params: Promise<{ instanceName: string }> }
 ) {
+    const params = await props.params;
     const instanceNameFromUrl = params.instanceName;
     let payload: any;
 

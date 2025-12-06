@@ -5,10 +5,11 @@ import { getOnlineAgents } from '@/actions/user';
 
 export async function GET(
   request: Request,
-  { params }: { params: { workspaceId: string } }
+  props: { params: Promise<{ workspaceId: string }> }
 ) {
+  const params = await props.params;
   const supabase = await createClient();
-  
+
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

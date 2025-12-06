@@ -11,17 +11,17 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
     const res = await db.query(`
         SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
     `, [userId, workspaceId]);
-    return res.rowCount > 0;
+    return (res.rowCount || 0) > 0;
 }
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: [], error: "Usuário não autenticado." };
-    
+
     // Check if the user has permission to view members
     if (!await hasPermission(user.id, workspaceId, 'members:view')) {
-         return { members: [], error: "Acesso não autorizado." };
+        return { members: [], error: "Acesso não autorizado." };
     }
 
     try {
@@ -74,7 +74,7 @@ export async function removeMemberAction(memberId: string, workspaceId: string):
     if (!await hasPermission(user.id, workspaceId, 'members:remove')) {
         return { success: false, error: "Você não tem permissão para remover membros." };
     }
-    
+
     // Prevent user from removing themselves
     if (user.id === memberId) {
         return { success: false, error: "Você não pode remover a si mesmo do workspace." };
@@ -88,7 +88,7 @@ export async function removeMemberAction(memberId: string, workspaceId: string):
         }
 
         await db.query('DELETE FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [memberId, workspaceId]);
-        
+
         revalidatePath('/team/members');
         return { success: true };
     } catch (error) {
@@ -116,7 +116,7 @@ export async function updateMemberRoleAction(
     if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para alterar funções de membros." };
     }
-    
+
     // Prevent changing role of the workspace owner
     const workspaceOwnerCheck = await db.query('SELECT owner_id FROM workspaces WHERE id = $1', [workspaceId]);
     if (workspaceOwnerCheck.rows[0]?.owner_id === memberId) {

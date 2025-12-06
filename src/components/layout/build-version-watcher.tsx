@@ -115,7 +115,7 @@ export function BuildVersionWatcher() {
       const response = await originalFetch(...args);
       if (reloadTriggeredRef.current) return response;
 
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+      const url = typeof args[0] === 'string' ? args[0] : ('url' in args[0] ? (args[0] as Request).url : args[0].toString());
       const headerBuildId = response.headers.get('x-build-id');
       if (headerBuildId && headerBuildId !== currentBuildIdRef.current) {
         triggerReload('header-mismatch', headerBuildId);

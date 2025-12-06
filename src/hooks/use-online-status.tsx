@@ -108,10 +108,11 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   useEffect(() => {
     if (!localUser?.activeWorkspaceId || !localUser.id) return;
 
-    // Set self as online immediately and then refresh list
-    updateServerPresence(true).then(() => {
-      refreshOnlineAgents();
-    });
+    // Decoupled: Fetch online agents immediately to show the list ASAP
+    refreshOnlineAgents();
+
+    // Set self as online in parallel
+    updateServerPresence(true);
 
     // HEARTBEAT & ACTIVITY: Ensure user stays online aggressively
     const heartbeatInterval = setInterval(() => {

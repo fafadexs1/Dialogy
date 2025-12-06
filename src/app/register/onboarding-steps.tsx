@@ -10,10 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CheckCircle2, Building, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
 import { createWorkspaceAction } from '@/actions/workspace';
-import { useFormStatus, useActionState as useActionStateFromReact } from 'react';
+import { useFormStatus, useFormState } from 'react-dom';
 
 function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () => void }) {
-  const [state, formAction] = useActionStateFromReact(createWorkspaceAction, { success: false, error: null });
+  const [state, formAction] = useFormState(createWorkspaceAction, { success: false, error: null });
   const { pending } = useFormStatus();
 
   useEffect(() => {
@@ -26,7 +26,7 @@ function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () =>
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="workspaceName">Nome do Workspace</Label>
-        <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." required disabled={pending}/>
+        <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." required disabled={pending} />
       </div>
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
@@ -62,16 +62,16 @@ export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated 
         // Etapas removidas. Se chegar aqui, redireciona.
         finishOnboarding();
         return (
-             <div>
-                <p>Redirecionando...</p>
-            </div>
+          <div>
+            <p>Redirecionando...</p>
+          </div>
         )
     }
   };
 
   return (
-      <>
-        {renderStepContent()}
-      </>
+    <>
+      {renderStepContent()}
+    </>
   );
 }

@@ -33,10 +33,11 @@ function isTimeInRange(timeStr: string, startStr: string | null, endStr: string 
 
 export async function GET(
     request: Request,
-    { params }: { params: { teamId: string } }
+    props: { params: Promise<{ teamId: string }> }
 ) {
+    const params = await props.params;
     const { teamId } = params;
-    
+
     // --- Autenticação do Agente do Sistema ---
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) {
@@ -63,7 +64,7 @@ export async function GET(
              GROUP BY t.id, w.timezone`,
             [teamId, workspaceId]
         );
-        
+
         if (teamRes.rowCount === 0) {
             return NextResponse.json({ error: 'Team not found or not in this workspace.' }, { status: 404 });
         }
@@ -71,17 +72,17 @@ export async function GET(
         const team = teamRes.rows[0];
         const timezone = team.timezone || 'America/Sao_Paulo';
         const now = toZonedTime(new Date(), timezone);
-        
+
         const currentDate = format(now, 'yyyy-MM-dd');
         const currentTime = format(now, 'HH:mm');
         const currentDayOfWeek = format(now, 'EEEE', { locale: ptBR }); // 'Segunda-feira', 'Terça-feira', etc.
-        
+
         let isOpen = false;
         let reason = 'closed_by_default';
-        
+
         // 1. Verificar exceções para o dia atual
         const todayException = team.scheduleExceptions.find((ex: any) => ex.date.toISOString().split('T')[0] === currentDate);
-        
+
         if (todayException) {
             if (todayException.is_closed) {
                 isOpen = false;
@@ -91,8 +92,8 @@ export async function GET(
                 reason = isOpen ? `open_by_exception: ${todayException.description}` : `closed_by_exception_hours: ${todayException.description}`;
             }
         } else {
-        // 2. Se não houver exceção, verificar o horário normal
-            const todayBusinessHour = team.businessHours.find((bh: any) => 
+            // 2. Se não houver exceção, verificar o horário normal
+            const todayBusinessHour = team.businessHours.find((bh: any) =>
                 bh.day_of_week.toLowerCase() === currentDayOfWeek.toLowerCase()
             );
 
@@ -103,7 +104,7 @@ export async function GET(
                 reason = 'closed_day_off';
             }
         }
-        
+
         return NextResponse.json({
             teamId: team.id,
             teamName: team.name,
