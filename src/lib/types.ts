@@ -147,6 +147,7 @@ export type MessageMetadata = {
   closed_by_system_agent_id?: string;
   authored_by_system_agent_id?: string;
   isMarketing?: boolean;
+  is_bulk_action?: boolean;
 }
 
 export type Message = {

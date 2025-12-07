@@ -403,6 +403,92 @@ export const closeChatAction = withDebug(
     {
         contextResolver: (chatId, reasonTagId, notes, sendCloseMessage) => ({ payload: { chatId, reasonTagId, notes, sendCloseMessage } })
     }
+);
+
+export const closeMultipleChatsAction = withDebug(
+    'close_multiple_chats',
+    async function closeMultipleChatsAction(
+        chatIds: string[],
+        message?: string
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { success: false, error: "Usuário não autenticado." };
+        }
+
+        if (!chatIds || chatIds.length === 0) {
+            return { success: false, error: "Nenhum chat selecionado." };
+        }
+
+        const currentAgentId = user.id;
+
+        try {
+            // Processing in parallel might be too heavy if many chats, but for reasonable numbers it's fine.
+            // We'll process them strictly to ensure we handle errors gracefully but try to close all.
+            const stats = { success: 0, failed: 0 };
+
+            // We will use Promise.all for speed, but catch individual errors
+            const results = await Promise.all(chatIds.map(async (chatId) => {
+                try {
+                    // If a custom message is provided, send it first.
+                    if (message && message.trim() !== '') {
+                        // Find the last instance name for the chat to send the message
+                        const instanceRes = await db.query(`
+                            SELECT m.instance_name
+                            FROM messages m
+                            WHERE m.chat_id = $1 AND m.instance_name IS NOT NULL
+                            ORDER BY m.created_at DESC
+                            LIMIT 1
+                        `, [chatId]);
+
+                        const instanceName = instanceRes.rows[0]?.instance_name;
+
+                        // We use sendAutomatedMessageAction to send the custom message
+                        await sendAutomatedMessageAction(
+                            chatId,
+                            message,
+                            currentAgentId,
+                            false,
+                            instanceName || undefined,
+                            {
+                                event: 'close_notice',
+                                authored_by: currentAgentId,
+                                is_bulk_action: true
+                            }
+                        );
+                    }
+
+                    // Then close the chat. 
+                    // If we sent a custom message, we might NOT want to send the default template.
+                    // However, the closeChatAction takes 'sendCloseMessage'. 
+                    // If 'message' was provided, we pass false to sendCloseMessage to avoid double messages (template + custom).
+                    // If 'message' was NOT provided, we pass true to use the default template if configured.
+                    const shouldSendTemplate = !message;
+
+                    const closeResult = await closeChatAction(chatId, null, "Encerramento em massa via botão 'Encerrar Todos'", shouldSendTemplate);
+
+                    if (closeResult.success) return true;
+                    return false;
+                } catch (err) {
+                    console.error(`Erro ao encerrar chat ${chatId} em massa:`, err);
+                    return false;
+                }
+            }));
+
+            const successCount = results.filter(r => r).length;
+
+            return { success: true }; // We return success if we processed the request, even if some failed. The UI will refresh.
+
+        } catch (error) {
+            console.error("Erro no encerramento em massa:", error);
+            return { success: false, error: "Falha ao processar encerramento em massa." };
+        }
+    },
+    {
+        contextResolver: (chatIds) => ({ payload: { count: chatIds?.length } })
+    }
 ); export const updateChatTagAction = withDebug(
     'update_chat_tag',
     async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {

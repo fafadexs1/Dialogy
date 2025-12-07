@@ -28,7 +28,7 @@ import { Label } from '../ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { startNewConversation } from '@/actions/messages';
-import { closeChatAction } from '@/actions/chats';
+import { closeChatAction, closeMultipleChatsAction } from '@/actions/chats';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { buildChatProtocol, cn } from '@/lib/utils';
@@ -264,9 +264,13 @@ interface ChatListItemProps {
   isForwarding?: boolean;
   isSelectedForForwarding?: boolean;
   onToggleForwardSelection?: (chatId: string) => void;
+  isBulkMode?: boolean;
+  isSelectedForBulk?: boolean;
+  onToggleBulkSelection?: (chatId: string) => void;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection }) => {
+
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, isBulkMode, isSelectedForBulk, onToggleBulkSelection }) => {
   const isMarketingChat = chat.messages.some((m: any) => (m.metadata as any)?.isMarketing);
   const visibleMessages = React.useMemo(() => {
     if (showMarketing) return chat.messages;
@@ -278,6 +282,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
 
   const handleSelect = (e?: React.MouseEvent) => {
+    if (isBulkMode && onToggleBulkSelection) {
+      e?.preventDefault();
+      onToggleBulkSelection(chat.id);
+      return;
+    }
     if (isForwarding && onToggleForwardSelection) {
       e?.preventDefault();
       onToggleForwardSelection(chat.id);
@@ -306,17 +315,27 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-xl p-3 transition-all duration-200 border border-transparent relative overflow-hidden group",
-        isSelected && !isForwarding
+        "relative flex items-center gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent",
+        isSelected && !isForwarding && !isBulkMode
           ? "bg-white/10 border-white/10 shadow-lg"
           : "hover:bg-white/5 hover:border-white/5",
-        isForwarding && isSelectedForForwarding ? "bg-blue-500/10 border-blue-500/30" : ""
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-blue-500/10 border-blue-500/30" : ""
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
     >
-      {isSelected && !isForwarding && (
+      {isSelected && !isForwarding && !isBulkMode && (
         <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+      )}
+
+      {/* Bulk Mode Checkbox */}
+      {isBulkMode && (
+        <div className={cn(
+          "h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all flex-shrink-0 mt-1",
+          isSelectedForBulk ? "bg-blue-500 border-blue-500" : "border-white/30 group-hover:border-white/50"
+        )}>
+          {isSelectedForBulk && <Check className="h-3 w-3 text-white" />}
+        </div>
       )}
 
       {/* Forwarding Checkbox */}
@@ -513,9 +532,89 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const appendChats = useInboxStore((state) => state.appendChats);
   const setInitialData = useInboxStore((state) => state.setInitialData);
+
   const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
 
   const isFirstRun = React.useRef(true);
+
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedBulkChats, setSelectedBulkChats] = useState<Set<string>>(new Set());
+  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+
+  const toggleBulkMode = () => {
+    setIsBulkMode(!isBulkMode);
+    setSelectedBulkChats(new Set());
+    // If we're entering bulk mode, maybe we want to select the current filtered list?
+    // No, usually user selects manually.
+  };
+
+  const handleToggleBulkSelection = (chatId: string) => {
+    const newSelected = new Set(selectedBulkChats);
+    if (newSelected.has(chatId)) {
+      newSelected.delete(chatId);
+    } else {
+      newSelected.add(chatId);
+    }
+    setSelectedBulkChats(newSelected);
+  };
+
+  const handleSelectAllBulk = () => {
+    // Select all visible chats in the current tab
+    // We can use filteredChats
+    if (filteredChats.length === 0) return;
+
+    const allIds = filteredChats.map(c => c.id);
+    const allSelected = allIds.every(id => selectedBulkChats.has(id));
+
+    if (allSelected) {
+      // Deselect all
+      setSelectedBulkChats(new Set());
+    } else {
+      // Select all
+      setSelectedBulkChats(new Set(allIds));
+    }
+  };
+
+  const handleBulkSubmit = async () => {
+    if (selectedBulkChats.size === 0) return;
+    setIsBulkSubmitting(true);
+
+    const chatIds = Array.from(selectedBulkChats);
+    let successCount = 0;
+
+    // Process one by one on the client to avoid server timeouts on vast operations
+    for (const chatId of chatIds) {
+      try {
+        // We reuse the action but send one by one
+        const result = await closeMultipleChatsAction([chatId], bulkMessage);
+        if (result.success) {
+          successCount++;
+          // Optional: We could update the UI here to remove the processed chat from the list or selection
+          // But since we want to be safe, we just wait for the end.
+        }
+      } catch (err) {
+        console.error(`Falha ao encerrar chat ${chatId}`, err);
+      }
+    }
+
+    // Always finish "successfully" regarding the UI flow, 
+    // reporting how many were actually closed if needed.
+    if (successCount > 0) {
+      toast({ title: `Concluído`, description: `${successCount} atendimentos foram encerrados.` });
+      setIsBulkDialogOpen(false);
+      setBulkMessage('');
+      setSelectedBulkChats(new Set());
+      setIsBulkMode(false);
+      onUpdate();
+    } else {
+      toast({ title: 'Erro', description: 'Não foi possível encerrar os atendimentos selecionados.', variant: 'destructive' });
+    }
+
+    setIsBulkSubmitting(false);
+  };
+
   const selectedChatIdRef = React.useRef(selectedChat?.id);
   const lastSelectedStatusRef = React.useRef<string | null>(null);
 
@@ -769,6 +868,28 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </div>
               </PopoverContent>
             </Popover>
+
+            {/* Bulk Mode Toggle - Only in 'atendimentos' tab usually, but user might want it generally */}
+            {activeTab === 'atendimentos' && !isForwarding && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={isBulkMode ? "secondary" : "ghost"}
+                      size="icon"
+                      className={cn("h-8 w-8 text-muted-foreground hover:text-white hover:bg-white/10", isBulkMode && "bg-blue-500/20 text-blue-400")}
+                      onClick={toggleBulkMode}
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isBulkMode ? "Sair da seleção em massa" : "Selecionar conversas para encerrar"}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
             {currentUser.activeWorkspaceId && (
               <NewConversationDialog
                 workspaceId={currentUser.activeWorkspaceId}
@@ -875,101 +996,155 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
       </div>
 
-      {/* Chat list */}
-      <ScrollArea className="flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        <div className="space-y-1 p-2">
-          {filteredChats.length > 0 ? (
-            <>
-              {filteredChats.map((chat) => (
-                <ChatListItem
-                  key={chat.id}
-                  chat={chat}
-                  isSelected={selectedChat?.id === chat.id}
-                  onSelect={setSelectedChat}
-                  onUpdate={onUpdate}
-                  showMarketing={showMarketing}
-                  currentUser={currentUser}
-                  isForwarding={isForwarding}
-                  isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
-                  onToggleForwardSelection={onToggleForwardSelection}
-                />
-              ))}
-              {hasMoreChats && activeTab === 'encerrados' && (
-                <div className="p-2 flex justify-center">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleLoadMore}
-                    disabled={isLoadingMore}
-                    className="text-muted-foreground hover:text-white"
-                  >
-                    {isLoadingMore ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                    )}
-                    Carregar mais conversas
-                  </Button>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
-              {activeTab === 'atendimentos' ? (
-                <>
-                  <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
-                    <div className="h-8 w-8 text-blue-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
-                    </div>
-                  </div>
-                  <h3 className="font-semibold text-white">Nenhuma conversa</h3>
-                  <p className="text-sm text-muted-foreground max-w-[200px]">
-                    Você não é responsável por nenhuma conversa no momento
+      {/* Bulk Action Bar */}
+      {isBulkMode && (
+        <div className="p-2 border-b border-white/10 bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 px-2">
+            <p className="text-sm font-medium text-blue-100">{selectedBulkChats.size} selecionado(s)</p>
+            <Button variant="link" size="sm" className="h-auto p-0 text-blue-300" onClick={handleSelectAllBulk}>
+              {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
+            </Button>
+          </div>
+          <div className="flex items-center gap-1">
+            <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
+                  Encerrar
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
+                  <DialogDescription className="text-white/60">
+                    Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <Label htmlFor="bulk-message" className="text-white/80 mb-2 block">Mensagem de Encerramento (opcional)</Label>
+                  <Textarea
+                    id="bulk-message"
+                    placeholder="Ex: Agradecemos o contato!"
+                    className="bg-white/5 border-white/10 text-white min-h-[100px]"
+                    value={bulkMessage}
+                    onChange={(e) => setBulkMessage(e.target.value)}
+                  />
+                  <p className="text-xs text-white/40 mt-2">
+                    Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
                   </p>
-                  {currentUser.activeWorkspaceId && (
-                    <div className="pt-2 opacity-100 pointer-events-auto">
-                      <NewConversationDialog
-                        workspaceId={currentUser.activeWorkspaceId}
-                        onActionSuccess={onUpdate}
-                        trigger={
-                          <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300">
-                            <PlusCircle className="h-4 w-4" />
-                            Nova Conversa
-                          </Button>
-                        }
-                      />
-                    </div>
-                  )}
-
-                </>
-              ) : (
-                <>
-                  <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
-                  <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
-                  {hasMoreChats && activeTab === 'encerrados' && (
-                    <div className="pt-4">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleLoadMore}
-                        disabled={isLoadingMore}
-                        className="text-muted-foreground hover:text-white"
-                      >
-                        {isLoadingMore ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                        )}
-                        Carregar mais conversas
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
+                  <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                    {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Confirmar Encerramento
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
-      </ScrollArea >
+      )}
+
+      {/* Chat list */}
+      <div className="flex-1 overflow-hidden relative">
+        <ScrollArea className="h-full flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="space-y-1 p-2">
+            {filteredChats.length > 0 ? (
+              <>
+                {filteredChats.map((chat) => (
+                  <ChatListItem
+                    key={chat.id}
+                    chat={chat}
+                    isSelected={selectedChat?.id === chat.id}
+                    onSelect={setSelectedChat}
+                    onUpdate={onUpdate}
+                    showMarketing={showMarketing}
+                    currentUser={currentUser}
+                    isForwarding={isForwarding}
+                    isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
+                    onToggleForwardSelection={onToggleForwardSelection}
+                    isBulkMode={isBulkMode}
+                    isSelectedForBulk={selectedBulkChats.has(chat.id)}
+                    onToggleBulkSelection={handleToggleBulkSelection}
+                  />
+                ))}
+                {hasMoreChats && activeTab === 'encerrados' && (
+                  <div className="p-2 flex justify-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleLoadMore}
+                      disabled={isLoadingMore}
+                      className="text-muted-foreground hover:text-white"
+                    >
+                      {isLoadingMore ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Carregar mais conversas
+                    </Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
+                {activeTab === 'atendimentos' ? (
+                  <>
+                    <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
+                      <div className="h-8 w-8 text-blue-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+                      </div>
+                    </div>
+                    <h3 className="font-semibold text-white">Nenhuma conversa</h3>
+                    <p className="text-sm text-muted-foreground max-w-[200px]">
+                      Você não é responsável por nenhuma conversa no momento
+                    </p>
+                    {currentUser.activeWorkspaceId && (
+                      <div className="pt-2 opacity-100 pointer-events-auto">
+                        <NewConversationDialog
+                          workspaceId={currentUser.activeWorkspaceId}
+                          onActionSuccess={onUpdate}
+                          trigger={
+                            <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                              <PlusCircle className="h-4 w-4" />
+                              Nova Conversa
+                            </Button>
+                          }
+                        />
+                      </div>
+                    )}
+
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
+                    {hasMoreChats && activeTab === 'encerrados' && (
+                      <div className="pt-4">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleLoadMore}
+                          disabled={isLoadingMore}
+                          className="text-muted-foreground hover:text-white"
+                        >
+                          {isLoadingMore ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                          )}
+                          Carregar mais conversas
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </ScrollArea >
+      </div>
 
       {/* Forwarding Footer */}
       {isForwarding && (
@@ -997,6 +1172,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         </div>
       )}
-    </div >
+    </div>
   );
 }
