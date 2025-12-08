@@ -200,6 +200,7 @@ export type Chat = {
   teamName?: string;
   tag?: string;
   color?: string;
+  is_autopilot_active?: boolean;
 };
 
 export type InternalChannel = {

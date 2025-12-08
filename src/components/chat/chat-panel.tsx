@@ -58,10 +58,11 @@ import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '../ui/separator';
+import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
-import { closeChatAction, assignChatToSelfAction, getContactMessages } from '@/actions/chats';
+import { closeChatAction, assignChatToSelfAction, getContactMessages, toggleChatAutopilot } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
@@ -93,7 +94,7 @@ import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
-import { useInboxStore } from '@/hooks/use-inbox-store';
+
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 
@@ -207,9 +208,10 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
 
 export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel, onForwardMessage }: ChatPanelProps) {
 
+    const updateChat = useInboxStore(state => state.updateChat);
     const [newMessage, setNewMessage] = useState('');
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
-    const [isAiAgentActive, setIsAiAgentActive] = useState(false);
+    const [isAiAgentActive, setIsAiAgentActive] = useState(chat?.is_autopilot_active ?? false);
     const [isInternalNote, setIsInternalNote] = useState(false);
     const autopilotSwitchTouchedRef = useRef(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
@@ -244,9 +246,13 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const { toast } = useToast();
 
-    const handleAiSwitchChange = (checked: boolean) => {
+    const handleAiSwitchChange = async (checked: boolean) => {
         autopilotSwitchTouchedRef.current = true;
         setIsAiAgentActive(checked);
+        if (chat) {
+            updateChat(chat.id, { is_autopilot_active: checked });
+            await toggleChatAutopilot(chat.id, checked);
+        }
     };
 
     const fetchAutopilotData = useCallback(async () => {
@@ -274,20 +280,9 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     }, [fetchAutopilotData, fetchShortcuts]);
 
     useEffect(() => {
+        setIsAiAgentActive(chat?.is_autopilot_active ?? false);
         autopilotSwitchTouchedRef.current = false;
-    }, [chat?.id]);
-
-    useEffect(() => {
-        if (!autopilotConfig) {
-            if (!autopilotSwitchTouchedRef.current) {
-                setIsAiAgentActive(false);
-            }
-            return;
-        }
-        if (!autopilotSwitchTouchedRef.current) {
-            setIsAiAgentActive(Boolean(autopilotConfig.is_active));
-        }
-    }, [autopilotConfig, chat?.id]);
+    }, [chat?.id, chat?.is_autopilot_active]);
 
     const tryLoadOlder = useCallback(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');

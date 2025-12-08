@@ -589,6 +589,7 @@ type ChatRow = {
     last_message_is_read: boolean | null;
     last_message_sent_by_tab: string | null;
     contact_custom_fields: Record<string, any> | null;
+    is_autopilot_active?: boolean | null;
 };
 
 type MessageRow = {
@@ -730,6 +731,7 @@ async function fetchChats({
             c.tag,
             c.color,
             c.protocol,
+            c.is_autopilot_active,
             c.contact_id,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
@@ -1457,6 +1459,7 @@ async function fetchChatsDelta({
             c.tag,
             c.color,
             c.contact_id,
+            c.is_autopilot_active,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
@@ -1611,6 +1614,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             tag: row.tag || undefined,
             color: row.color || undefined,
             protocol: row.protocol || buildChatProtocol(row.id),
+            is_autopilot_active: row.is_autopilot_active ?? false,
         };
     });
 
@@ -1924,3 +1928,34 @@ export async function getContactMessages({
         return { messages: [], error: `Falha ao buscar histórico do contato: ${error.message}` };
     }
 }
+
+export const toggleChatAutopilot = withDebug(
+    'toggle_chat_autopilot',
+    async function toggleChatAutopilot(
+        chatId: string,
+        isActive: boolean
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { success: false, error: "Usuário não autenticado." };
+        }
+
+        try {
+            await db.query(
+                'UPDATE chats SET is_autopilot_active = $1 WHERE id = $2',
+                [isActive, chatId]
+            );
+
+            // revalidatePath('/', 'layout'); // Optional
+            return { success: true };
+        } catch (error: any) {
+            console.error("Erro ao alterar autopilot do chat:", error);
+            return { success: false, error: "Falha ao atualizar status do autopilot." };
+        }
+    },
+    {
+        contextResolver: (chatId, isActive) => ({ payload: { chatId, isActive } })
+    }
+);

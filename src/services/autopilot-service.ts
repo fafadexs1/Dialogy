@@ -82,6 +82,11 @@ export async function processAutopilotForChat(
         return;
     }
 
+    if (!chat.is_autopilot_active) {
+        console.log(`[AUTOPILOT_SERVICE] Autopilot desativado para este chat (ID: ${chat.id})`);
+        return;
+    }
+
     // 2. Prepare Context
     // Need full history? usually yes.
     // For now, let's just fetch simplified history or rely on what's passed?
