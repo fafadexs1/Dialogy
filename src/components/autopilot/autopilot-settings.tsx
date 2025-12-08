@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,8 +14,14 @@ interface AutopilotSettingsProps {
     setAgentName: (name: string) => void;
     aiModel: string;
     setAiModel: (model: string) => void;
+    knowledgeBase: string;
+    setKnowledgeBase: (kb: string) => void;
     isActive: boolean;
     setIsActive: (active: boolean) => void;
+    isPrivate: boolean;
+    setIsPrivate: (privateAgent: boolean) => void;
+    isPrimary: boolean;
+    onSetPrimary: () => void;
     geminiApiKey: string;
     setGeminiApiKey?: (key: string) => void;
     hasGlobalKey?: boolean;
@@ -29,8 +36,14 @@ export function AutopilotSettings({
     setAgentName,
     aiModel,
     setAiModel,
+    knowledgeBase,
+    setKnowledgeBase,
     isActive,
     setIsActive,
+    isPrivate,
+    setIsPrivate,
+    isPrimary,
+    onSetPrimary,
     geminiApiKey,
     setGeminiApiKey,
     hasGlobalKey = false,
@@ -86,6 +99,19 @@ export function AutopilotSettings({
                     </div>
 
                     <div className="space-y-2">
+                        <Label>Definição do Agente (Persona)</Label>
+                        <Textarea
+                            value={knowledgeBase}
+                            onChange={(e) => setKnowledgeBase(e.target.value)}
+                            placeholder="Descreva quem é este agente, seu tom de voz e objetivo principal..."
+                            className="min-h-[100px]"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            Esta definição será usada como o prompt principal do sistema.
+                        </p>
+                    </div>
+
+                    <div className="space-y-2">
                         <Label>Chave da API Gemini (Integração)</Label>
                         <Input
                             type="password"
@@ -105,6 +131,32 @@ export function AutopilotSettings({
                                 <p className="text-sm text-muted-foreground">Quando desativado, o agente não responderá a mensagens.</p>
                             </div>
                             <Switch checked={isActive} onCheckedChange={setIsActive} />
+                        </div>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                                <Label className="text-base">Agente Privado</Label>
+                                <p className="text-sm text-muted-foreground">Se ativado, apenas você poderá ver e usar este agente.</p>
+                            </div>
+                            <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
+                        </div>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                                <Label className="text-base">Agente Principal</Label>
+                                <p className="text-sm text-muted-foreground">O agente padrão será usado se nenhum outro for específico para o usuário.</p>
+                            </div>
+                            <Switch
+                                checked={isPrimary}
+                                onCheckedChange={(checked) => {
+                                    if (checked) onSetPrimary();
+                                }}
+                                disabled={isPrimary} // Cannot unset primary directly, another must take its place or be set
+                            />
                         </div>
                     </div>
                 </div>

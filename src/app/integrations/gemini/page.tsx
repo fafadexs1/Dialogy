@@ -30,6 +30,7 @@ export default function GeminiIntegrationPage() {
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState('gemini-2.0-flash-exp');
     const [customModel, setCustomModel] = useState('');
+    const [transcriptionModel, setTranscriptionModel] = useState('');
 
     useEffect(() => {
         async function loadConfig() {
@@ -51,6 +52,7 @@ export default function GeminiIntegrationPage() {
                         setModel('custom');
                         setCustomModel(currentModel);
                     }
+                    setTranscriptionModel(res.config.transcription_model || '');
                 } else {
                     const createRes = await createAutopilotAgent(user.activeWorkspaceId, 'Agente Gemini');
                     if (createRes.success && createRes.id) {
@@ -86,6 +88,7 @@ export default function GeminiIntegrationPage() {
 
             const finalModel = model === 'custom' ? customModel : model;
             formData.append('aiModel', finalModel);
+            formData.append('transcriptionModel', transcriptionModel);
 
             const result = await saveAutopilotConfig(null, formData);
 
@@ -183,6 +186,19 @@ export default function GeminiIntegrationPage() {
                                     <a href="https://ai.google.dev/gemini-api/docs/models/gemini" target="_blank" rel="noreferrer" className="text-primary hover:underline ml-1">
                                         Ver lista de modelos
                                     </a>
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="transcriptionModel">ID do Modelo de Transcrição (Opcional)</Label>
+                                <Input
+                                    id="transcriptionModel"
+                                    placeholder="Ex: gemini-1.5-flash-8b"
+                                    value={transcriptionModel}
+                                    onChange={(e) => setTranscriptionModel(e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Se vazio, usará o mesmo modelo do agente. Recomendado: gemini-1.5-flash para rapidez.
                                 </p>
                             </div>
                         </CardContent>

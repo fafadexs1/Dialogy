@@ -51,7 +51,7 @@ const transcribeAudioFlow = ai.defineFlow(
     if (!apiKey) {
       throw new Error('Chave de API do Gemini não configurada. Acesse Integrações > Gemini para configurar.');
     }
-    const modelName = config.ai_model || 'gemini-2.0-flash-exp';
+    const modelName = config.transcription_model || config.ai_model || 'gemini-2.0-flash-exp';
 
     // 2. Initialize Google Generative AI
     const genAI = new GoogleGenerativeAI(apiKey);

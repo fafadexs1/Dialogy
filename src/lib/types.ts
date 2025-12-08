@@ -360,10 +360,12 @@ export interface AutopilotConfig {
   name: string;
   gemini_api_key: string | null;
   ai_model: string | null;
+  transcription_model: string | null;
   knowledge_base: string | null;
   knowledge_base_documents: KnowledgeBaseDocument[] | null;
   is_primary: boolean;
   is_active: boolean;
+  is_private: boolean;
   default_fallback_reply: string | null;
   created_at: string;
   updated_at: string;

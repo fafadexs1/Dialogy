@@ -57,12 +57,14 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
                 knowledge_base_documents: normalizedDocs,
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
+                is_private: Boolean(row.is_private),
                 default_fallback_reply: row.default_fallback_reply || null,
             } as AutopilotConfig;
-        });
+        }).filter(agent => !agent.is_private || agent.user_id === userId); // Show only own private agents or shared ones
 
         const selectedConfig =
             agents.find(agent => agent.id === agentId) ||
+            agents.find(agent => agent.user_id === userId) || // Prioritize user's own agent
             agents.find(agent => agent.is_primary) ||
             agents[0] ||
             null;
@@ -132,6 +134,10 @@ export async function saveAutopilotConfig(
             setClauses.push(`ai_model = $${valueIndex++}`);
             values.push(formData.get('aiModel'));
         }
+        if (formData.has('transcriptionModel')) {
+            setClauses.push(`transcription_model = $${valueIndex++}`);
+            values.push(formData.get('transcriptionModel'));
+        }
         if (formData.has('knowledgeBase')) {
             setClauses.push(`knowledge_base = $${valueIndex++}`);
             values.push(formData.get('knowledgeBase'));
@@ -162,6 +168,13 @@ export async function saveAutopilotConfig(
             values.push(formData.get('defaultFallbackReply') || null);
         }
 
+        const isPrivate = formData.get('isPrivate');
+        const value = typeof isPrivate === 'string' ? isPrivate : '';
+        const truthy = value === 'true' || value === 'on' || value === '1';
+        setClauses.push(`is_private = $${valueIndex++}`);
+        values.push(truthy);
+
+
         if (setClauses.length === 0) {
             return { success: true }; // Nothing to update
         }
@@ -187,7 +200,7 @@ export async function saveAutopilotConfig(
     }
 }
 
-export async function createAutopilotAgent(workspaceId: string, name: string): Promise<{ success: boolean; id?: string; error?: string }> {
+export async function createAutopilotAgent(workspaceId: string, name: string, isPrivate: boolean = false): Promise<{ success: boolean; id?: string; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Usuário não autenticado.' };
@@ -203,10 +216,10 @@ export async function createAutopilotAgent(workspaceId: string, name: string): P
         const shouldBePrimary = existingCount === 0;
 
         const insertRes = await db.query(
-            `INSERT INTO autopilot_configs (workspace_id, user_id, name, is_primary)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO autopilot_configs (workspace_id, user_id, name, is_primary, is_private)
+             VALUES ($1, $2, $3, $4, $5)
              RETURNING id`,
-            [workspaceId, user.id, normalizedName, shouldBePrimary]
+            [workspaceId, user.id, normalizedName, shouldBePrimary, isPrivate]
         );
 
         const newId = insertRes.rows[0]?.id;
@@ -414,11 +427,14 @@ export async function addDocumentToKnowledgeBase(
         return { success: false, error: 'Acesso não autorizado.' };
     }
 
+    // Try to find the user's own PRIVATE agent first, then their own SHARED, then fallback to primary
     try {
-        // Find primary or first agent
         const configRes = await db.query(
-            'SELECT * FROM autopilot_configs WHERE workspace_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1',
-            [workspaceId]
+            `SELECT * FROM autopilot_configs 
+             WHERE workspace_id = $1 
+             ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END, is_private DESC, is_primary DESC, created_at ASC 
+             LIMIT 1`,
+            [workspaceId, user.id]
         );
 
         if (configRes.rowCount === 0) {

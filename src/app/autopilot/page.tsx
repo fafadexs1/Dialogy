@@ -11,7 +11,8 @@ import {
     toggleAutopilotRule,
     getAutopilotUsageLogs,
     createAutopilotAgent,
-    deleteAutopilotAgent
+    deleteAutopilotAgent,
+    setPrimaryAutopilotAgent
 } from '@/actions/autopilot';
 
 // UI Components
@@ -45,7 +46,10 @@ export default function AutopilotPage() {
     const [agentName, setAgentName] = useState('');
     const [aiModel, setAiModel] = useState('googleai/gemini-2.0-flash');
     const [isActive, setIsActive] = useState(false);
+    const [isPrivate, setIsPrivate] = useState(false);
+    const [isPrimary, setIsPrimary] = useState(false);
     const [geminiApiKey, setGeminiApiKey] = useState('');
+    const [knowledgeBase, setKnowledgeBase] = useState('');
     const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
 
     // UI States
@@ -83,7 +87,10 @@ export default function AutopilotPage() {
                 setAgentName(data.config.name || '');
                 setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
                 setIsActive(Boolean(data.config.is_active));
+                setIsPrivate(Boolean(data.config.is_private));
+                setIsPrimary(Boolean(data.config.is_primary));
                 setGeminiApiKey(data.config.gemini_api_key || '');
+                setKnowledgeBase(data.config.knowledge_base || '');
                 setKnowledgeDocuments(data.config.knowledge_base_documents || []);
 
                 // Fetch stats separately to not block UI
@@ -147,6 +154,17 @@ export default function AutopilotPage() {
         fetchData(id);
     };
 
+    const handleSetPrimary = async () => {
+        if (!config || !user?.activeWorkspaceId) return;
+        const result = await setPrimaryAutopilotAgent(config.id);
+        if (result.success) {
+            toast({ title: 'Agente definido como principal' });
+            fetchData(config.id);
+        } else {
+            toast({ title: 'Erro ao definir principal', description: result.error, variant: 'destructive' });
+        }
+    };
+
     const handleSaveConfig = async () => {
         if (!config || !user?.activeWorkspaceId) return;
         setIsSaving(true);
@@ -159,9 +177,10 @@ export default function AutopilotPage() {
             formData.append('aiModel', aiModel);
             formData.append('geminiApiKey', geminiApiKey);
             formData.append('isActive', isActive ? 'on' : 'off');
+            formData.append('isPrivate', isPrivate ? 'on' : 'off');
+            formData.append('knowledgeBase', knowledgeBase);
             // Re-serialize documents
-            formData.append('knowledgeBase', JSON.stringify(knowledgeDocuments)); // Legacy field if needed or just use documents
-            formData.append('knowledgeDocuments', JSON.stringify(knowledgeDocuments));
+            formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
 
             // We need to adapt the saveAutopilotConfig to accept FormData or object
             // The existing action takes FormData.
@@ -352,8 +371,14 @@ export default function AutopilotPage() {
                                     setAgentName={setAgentName}
                                     aiModel={aiModel}
                                     setAiModel={setAiModel}
+                                    knowledgeBase={knowledgeBase}
+                                    setKnowledgeBase={setKnowledgeBase}
                                     isActive={isActive}
                                     setIsActive={setIsActive}
+                                    isPrivate={isPrivate}
+                                    setIsPrivate={setIsPrivate}
+                                    isPrimary={isPrimary}
+                                    onSetPrimary={handleSetPrimary}
                                     geminiApiKey={geminiApiKey}
                                     setGeminiApiKey={setGeminiApiKey}
                                     hasGlobalKey={hasGlobalKey}
