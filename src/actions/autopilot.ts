@@ -1,10 +1,8 @@
-
-
 'use server';
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument } from '@/lib/types';
+import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 
 
@@ -18,25 +16,32 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     config: AutopilotConfig | null,
     rules: NexusFlowInstance[] | null,
     agents: AutopilotConfig[] | null,
-    error?: string
+    workspace: Workspace | null,
+    error?: string,
+    hasGlobalKey?: boolean
 }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        return { config: null, rules: null, agents: null, error: "Usuário não autenticado." };
+        return { config: null, rules: null, agents: null, workspace: null, error: "Usuário não autenticado." };
     }
     const userId = user.id;
 
     if (!await isWorkspaceMember(userId, workspaceId)) {
-        return { config: null, rules: null, agents: null, error: "Acesso não autorizado." };
+        return { config: null, rules: null, agents: null, workspace: null, error: "Acesso não autorizado." };
     }
 
     try {
-        const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2 ORDER BY created_at', [workspaceId, userId]);
+        // Fetch configs for the workspace
+        const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 ORDER BY created_at', [workspaceId]);
+
+        // Fetch workspace details (global messages)
+        const workspaceRes = await db.query('SELECT * FROM workspaces WHERE id = $1', [workspaceId]);
+        const workspace = workspaceRes.rows[0] as Workspace || null;
 
         if (configRes.rowCount === 0) {
-            return { config: null, rules: [], agents: [] };
+            return { config: null, rules: [], agents: [], workspace };
         }
 
         const agents = configRes.rows.map((row: any) => {
@@ -63,7 +68,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             null;
 
         if (!selectedConfig) {
-            return { config: null, rules: [], agents };
+            return { config: null, rules: [], agents, workspace };
         }
 
         const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name', [selectedConfig.id]);
@@ -73,11 +78,11 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action
         }));
 
-        return { config: selectedConfig, rules, agents };
+        return { config: selectedConfig, rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
 
     } catch (error) {
         console.error(`[GET_AUTOPILOT_CONFIG] Erro ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);
-        return { config: null, rules: null, agents: null, error: 'Falha ao buscar configurações do banco de dados.' };
+        return { config: null, rules: null, agents: null, workspace: null, error: 'Falha ao buscar configurações do banco de dados.', hasGlobalKey: false };
     }
 }
 
@@ -112,7 +117,12 @@ export async function saveAutopilotConfig(
         const fieldsToUpdate: { [key: string]: any } = {};
         const setClauses: string[] = [];
         const values: any[] = [];
-        let valueIndex = 4; // Start index for parameterized query, after workspaceId, userId, configId
+        let valueIndex = 4; // Start index for parameterized query, after workspaceId, configId (removed userId from WHERE) + placeholder for userId logging if needed? No, purely config update.
+        // Actually, let's reset index logic.
+        // Params: [workspaceId, configId] -> indices $1, $2
+        // Dynamic values start at $3
+
+        valueIndex = 3;
 
         if (formData.has('geminiApiKey')) {
             setClauses.push(`gemini_api_key = $${valueIndex++}`);
@@ -159,10 +169,10 @@ export async function saveAutopilotConfig(
         const updateQuery = `
             UPDATE autopilot_configs
             SET ${setClauses.join(', ')}, updated_at = NOW()
-            WHERE workspace_id = $1 AND user_id = $2 AND id = $3
+            WHERE workspace_id = $1 AND id = $2
         `;
 
-        const result = await db.query(updateQuery, [workspaceId, userId, configId, ...values]);
+        const result = await db.query(updateQuery, [workspaceId, configId, ...values]);
 
         if (result.rowCount === 0) {
             return { success: false, error: 'Agente não encontrado ou nenhuma alteração foi feita.' };
@@ -187,7 +197,7 @@ export async function createAutopilotAgent(workspaceId: string, name: string): P
     }
 
     try {
-        const countRes = await db.query('SELECT COUNT(*)::int AS total FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2', [workspaceId, user.id]);
+        const countRes = await db.query('SELECT COUNT(*)::int AS total FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
         const existingCount = countRes.rows[0]?.total ?? 0;
         const normalizedName = name?.trim() || `Agente ${existingCount + 1}`;
         const shouldBePrimary = existingCount === 0;
@@ -215,13 +225,18 @@ export async function setPrimaryAutopilotAgent(agentId: string): Promise<{ succe
 
     try {
         const agentRes = await db.query('SELECT workspace_id, user_id FROM autopilot_configs WHERE id = $1', [agentId]);
-        if (agentRes.rowCount === 0 || agentRes.rows[0].user_id !== user.id) {
+        if (agentRes.rowCount === 0) { // Removed user_id check as multiple users can manage workspace
             return { success: false, error: 'Agente não encontrado.' };
         }
         const workspaceId = agentRes.rows[0].workspace_id;
 
-        await db.query('UPDATE autopilot_configs SET is_primary = false WHERE workspace_id = $1 AND user_id = $2', [workspaceId, user.id]);
-        await db.query('UPDATE autopilot_configs SET is_primary = true WHERE id = $1 AND user_id = $2', [agentId, user.id]);
+        // Check permissions
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { success: false, error: 'Acesso não autorizado.' };
+        }
+
+        await db.query('UPDATE autopilot_configs SET is_primary = false WHERE workspace_id = $1', [workspaceId]);
+        await db.query('UPDATE autopilot_configs SET is_primary = true WHERE id = $1', [agentId]);
 
         revalidatePath('/autopilot');
         return { success: true };
@@ -230,6 +245,36 @@ export async function setPrimaryAutopilotAgent(agentId: string): Promise<{ succe
         return { success: false, error: 'Não foi possível definir o agente principal.' };
     }
 }
+
+export async function deleteAutopilotAgent(agentId: string) {
+    try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) return { success: false, error: 'Usuário não autenticado' };
+
+        // Verify ownership/membership
+        const agentRes = await db.query('SELECT workspace_id FROM autopilot_configs WHERE id = $1', [agentId]);
+
+        if (agentRes.rowCount === 0) {
+            return { success: false, error: 'Agente não encontrado' };
+        }
+
+        const workspaceId = agentRes.rows[0].workspace_id;
+
+        const isMember = await isWorkspaceMember(user.id, workspaceId);
+        if (!isMember) return { success: false, error: 'Sem permissão no workspace' };
+
+        await db.query('DELETE FROM autopilot_configs WHERE id = $1', [agentId]);
+
+        revalidatePath('/autopilot');
+        return { success: true };
+    } catch (error) {
+        console.error('Error deleting autopilot agent:', error);
+        return { success: false, error: 'Falha ao deletar agente' };
+    }
+}
+
 
 export async function saveAutopilotRule(
     configId: string,
@@ -353,4 +398,60 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
     }
 }
 
+export async function addDocumentToKnowledgeBase(
+    workspaceId: string,
+    title: string,
+    content: string
+): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
 
+    if (!user) {
+        return { success: false, error: 'Usuário não autenticado.' };
+    }
+
+    if (!await isWorkspaceMember(user.id, workspaceId)) {
+        return { success: false, error: 'Acesso não autorizado.' };
+    }
+
+    try {
+        // Find primary or first agent
+        const configRes = await db.query(
+            'SELECT * FROM autopilot_configs WHERE workspace_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1',
+            [workspaceId]
+        );
+
+        if (configRes.rowCount === 0) {
+            return { success: false, error: 'Nenhum agente de IA encontrado neste workspace.' };
+        }
+
+        const config = configRes.rows[0];
+        const currentDocs: KnowledgeBaseDocument[] = typeof config.knowledge_base_documents === 'string'
+            ? JSON.parse(config.knowledge_base_documents)
+            : Array.isArray(config.knowledge_base_documents)
+                ? config.knowledge_base_documents
+                : [];
+
+        const newDoc: KnowledgeBaseDocument = {
+            id: crypto.randomUUID(),
+            name: title,
+            content: content,
+            uploaded_at: new Date().toISOString(),
+            tokens: 0 // We could estimate tokens here if needed
+        };
+
+        const updatedDocs = [...currentDocs, newDoc];
+
+        await db.query(
+            'UPDATE autopilot_configs SET knowledge_base_documents = $1, updated_at = NOW() WHERE id = $2',
+            [JSON.stringify(updatedDocs), config.id]
+        );
+
+        revalidatePath('/autopilot');
+        return { success: true };
+
+    } catch (error) {
+        console.error('[ADD_DOC_KB] Erro ao adicionar documento:', error);
+        return { success: false, error: 'Falha ao salvar o documento na base de conhecimento.' };
+    }
+}

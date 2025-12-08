@@ -355,6 +355,7 @@ export interface NexusFlowInstance {
 export interface AutopilotConfig {
   id: string;
   workspace_id: string;
+  user_id: string;
   name: string;
   gemini_api_key: string | null;
   ai_model: string | null;

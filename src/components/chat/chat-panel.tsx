@@ -45,7 +45,9 @@ import {
     Users,
     Globe,
     Lock,
-    MapPin
+    MapPin,
+    FileText,
+    Brain
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
@@ -63,8 +65,9 @@ import { closeChatAction, assignChatToSelfAction, getContactMessages } from '@/a
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
-import { getAutopilotConfig } from '@/actions/autopilot';
+import { getAutopilotConfig, addDocumentToKnowledgeBase } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
+import { generateChatHtml } from '@/lib/chat-export';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -481,6 +484,46 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const handleForwardMessage = useCallback((message: Message) => {
         onForwardMessage(message);
     }, [onForwardMessage]);
+
+    const handleExportChat = () => {
+        if (!chat) return;
+        const html = generateChatHtml(chat, currentUser);
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const dateStr = new Date().toISOString().split('T')[0];
+        const safeName = chat.contact.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `chat-${safeName}-${dateStr}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast({ title: "Exportado", description: "Download do HTML iniciado." });
+    };
+
+    const handleTrainAgent = async () => {
+        if (!chat) return;
+
+        // Simplify conversation for training
+        const conversationText = chat.messages
+            .map(m => {
+                const sender = m.from_me ? 'Atendente' : 'Cliente';
+                const body = m.type === 'text' ? m.content : `[${m.type.toUpperCase()}]`;
+                return `${sender}: ${body}`;
+            })
+            .join('\n');
+
+        const title = `Conversa - ${chat.contact.name} - ${new Date().toLocaleDateString()}`;
+
+        const result = await addDocumentToKnowledgeBase(chat.workspace_id, title, conversationText);
+
+        if (result.success) {
+            toast({ title: "Agente Treinado!", description: "Conversa adicionada à base de conhecimento." });
+        } else {
+            toast({ title: "Erro", description: result.error, variant: 'destructive' });
+        }
+    };
 
     const generateVideoThumbnail = async (file: File): Promise<string> => {
         return new Promise((resolve) => {
@@ -910,6 +953,36 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
+                        </Tooltip>
+
+                        <div className="w-px h-6 bg-white/10 mx-1" />
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    onClick={handleExportChat}
+                                >
+                                    <FileText className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Salvar como HTML</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-white/50 hover:text-purple-400 hover:bg-purple-500/10"
+                                    onClick={handleTrainAgent}
+                                >
+                                    <Brain className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Treinar Agente</p></TooltipContent>
                         </Tooltip>
 
                         {isChatOpen && isChatAssignedToMe && (

@@ -46,11 +46,11 @@ const transcribeAudioFlow = ai.defineFlow(
       throw new Error(error || 'Configuração do Gemini não encontrada para este workspace.');
     }
 
-    if (!config.gemini_api_key) {
+    const apiKey = config.gemini_api_key || process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
       throw new Error('Chave de API do Gemini não configurada. Acesse Integrações > Gemini para configurar.');
     }
-
-    const apiKey = config.gemini_api_key;
     const modelName = config.ai_model || 'gemini-2.0-flash-exp';
 
     // 2. Initialize Google Generative AI

@@ -129,7 +129,7 @@ export default function GeminiIntegrationPage() {
                         <CardHeader>
                             <CardTitle>Configuração da API</CardTitle>
                             <CardDescription>
-                                Você precisa de uma chave de API do Google AI Studio para usar esta integração.
+                                Configure a chave de API da sua organização para ativar o Gemini.
                                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center ml-1">
                                     Obter chave <ExternalLink className="h-3 w-3 ml-1" />
                                 </a>
@@ -137,7 +137,7 @@ export default function GeminiIntegrationPage() {
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="space-y-2">
-                                <Label htmlFor="apiKey">Chave de API (API Key)</Label>
+                                <Label htmlFor="apiKey">Chave de API do Workspace</Label>
                                 <Input
                                     id="apiKey"
                                     type="password"
@@ -146,7 +146,7 @@ export default function GeminiIntegrationPage() {
                                     onChange={(e) => setApiKey(e.target.value)}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    Sua chave será armazenada de forma segura e usada apenas para gerar respostas.
+                                    Esta chave será usada por todos os membros do workspace para gerar respostas e transcrições.
                                 </p>
                             </div>
 

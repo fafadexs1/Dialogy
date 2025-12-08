@@ -312,32 +312,36 @@ export function Sidebar({ user }: SidebarProps) {
             {/* Bottom Section */}
             <div className="flex flex-col items-center gap-4 flex-shrink-0">
                 <DropdownMenu>
-                    <TooltipProvider>
+                    <TooltipProvider delayDuration={0}>
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
-                                    <button className="relative group p-1">
+                                    <button className="relative group p-1 focus:outline-none">
                                         <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full opacity-0 group-hover:opacity-50 blur-md transition-opacity duration-500" />
                                         <Avatar className="cursor-pointer h-9 w-9 border border-white/10 group-hover:border-white/30 transition-all relative">
-                                            <AvatarImage src={user.avatar} alt={user.name} />
-                                            <AvatarFallback className="bg-zinc-800 text-xs font-medium text-white">{user.name?.charAt(0).toUpperCase()}</AvatarFallback>
+                                            {user.avatar ? (
+                                                <AvatarImage src={user.avatar} alt={user.name || 'User'} className="object-cover" />
+                                            ) : null}
+                                            <AvatarFallback className="bg-zinc-800 text-xs font-medium text-white">{user.name?.charAt(0).toUpperCase() || '?'}</AvatarFallback>
                                         </Avatar>
                                     </button>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
                             <TooltipContent side="right" className="bg-[#0f1117]/90 backdrop-blur border-white/10 text-white font-medium shadow-xl z-[200]">
-                                <p>{user.name}</p>
+                                <p>{user.name || 'Sua Conta'}</p>
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                     <DropdownMenuContent side="right" sideOffset={10} className="bg-[#0f1117]/90 backdrop-blur-xl border-white/10 text-white w-64 mb-2 shadow-2xl p-1 rounded-xl z-[200]">
                         <div className="flex items-center gap-3 p-3 mb-1 bg-white/5 rounded-lg border border-white/5">
                             <Avatar className="h-10 w-10 border border-white/10">
-                                <AvatarImage src={user.avatar} />
-                                <AvatarFallback className="bg-zinc-800 text-white">{user.name?.charAt(0).toUpperCase()}</AvatarFallback>
+                                {user.avatar ? (
+                                    <AvatarImage src={user.avatar} className="object-cover" />
+                                ) : null}
+                                <AvatarFallback className="bg-zinc-800 text-white">{user.name?.charAt(0).toUpperCase() || '?'}</AvatarFallback>
                             </Avatar>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+                                <p className="text-sm font-semibold text-white truncate">{user.name || 'Usuário'}</p>
                                 <p className="text-xs text-white/50 truncate">{user.email}</p>
                             </div>
                         </div>

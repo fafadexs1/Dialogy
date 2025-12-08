@@ -90,6 +90,7 @@ export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 // We create a new input schema for the Flow that includes the config object.
 const AutoResponderFlowInputSchema = AgentResponseInputSchema.extend({
   config: z.any().describe("The autopilot config object from the database."),
+  workspaceGeminiApiKey: z.string().optional().describe('Workspace-level Gemini key (Integrações > Gemini) used when the agent has no key.'),
 });
 
 export async function generateAgentResponse(input: z.infer<typeof AutoResponderFlowInputSchema>): Promise<AgentResponseOutput> {
@@ -99,9 +100,11 @@ export async function generateAgentResponse(input: z.infer<typeof AutoResponderF
 
 // --- Agent Prompt ---
 
-const prompt = ai.definePrompt({
+// --- Agent Prompt Config ---
+
+const promptConfig = {
   name: 'autoResponderPrompt',
-  tools: [makeHttpRequestTool],
+  // tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
   prompt: `Você é 'Dialogy', um copiloto autônomo especialista em atendimento ao cliente. Você interpreta arquivos treinados, segue regras rígidas e pode acionar integrações externas para resolver o que o cliente precisa. Seja proativo, didático e transparente ao usar dados externos.
@@ -143,7 +146,11 @@ Siga esta hierarquia de métodos para gerar uma resposta:
 {{json contact}}
 ---
 **HISTÓRICO DO CHAT (Para contexto)**:
+{{#if chatHistory}}
 {{{chatHistory}}}
+{{else}}
+(Sem histórico anterior)
+{{/if}}
 ---
 **RESPOSTA PADRÃO DE CONTINGÊNCIA (use somente se nada funcionar)**:
 {{{fallbackReply}}}
@@ -152,7 +159,10 @@ Siga esta hierarquia de métodos para gerar uma resposta:
 {{{customerMessage}}}
 
 Agora, avalie e responda.`,
-});
+};
+
+// Default prompt with global AI (legacy/fallback)
+const globalPrompt = ai.definePrompt(promptConfig);
 
 const autoResponderFlow = ai.defineFlow(
   {
@@ -161,26 +171,42 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    const model = input.model || 'googleai/gemini-2.5-flash-lite';
+    const model = input.model || 'googleai/gemini-2.0-flash';
     const promptInput = AgentResponseInputSchema.parse({
       ...input,
       knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
       fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
     });
 
-    const genAiKey = process.env.GOOGLE_GENAI_API_KEY?.trim();
-    if (!genAiKey || genAiKey === 'no-key-configured') {
-      console.error('[AUTORESPONDER_FLOW_ERROR] GOOGLE_GENAI_API_KEY ausente ou inválida. Configure a variável de ambiente.');
-      const fallback = input.config?.default_fallback_reply?.trim();
-      if (fallback) {
-        return { response: fallback, triggeredRule: null };
-      }
-      return {};
+    // 1. Resolve Gemini API key (agent -> workspace integration -> env)
+    const configKey = input.config?.gemini_api_key?.trim();
+    const workspaceKey = input.workspaceGeminiApiKey?.trim();
+    const envKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim();
+    const apiKey = configKey || workspaceKey || (envKey && envKey !== 'no-key-configured' ? envKey : '');
+
+    if (!apiKey) {
+      console.error('[AUTORESPONDER_FLOW_ERROR] Nenhuma chave de API encontrada (Config, Integrações ou ENV).');
+      throw new Error('Chave Gemini não configurada. Configure em Integrações > Google Gemini.');
     }
 
+    let effectivePrompt = globalPrompt;
+
+    // Use a dynamic Genkit instance when we are overriding the default env key
+    const defaultEnvKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+    if (!defaultEnvKey || defaultEnvKey !== apiKey) {
+      const { genkit } = require('genkit');
+      const { googleAI } = require('@genkit-ai/googleai');
+
+      const dynamicAi = genkit({
+        plugins: [googleAI({ apiKey })],
+        model: model,
+        // tools: [makeHttpRequestTool],
+      });
+      effectivePrompt = dynamicAi.definePrompt(promptConfig);
+    }
     let output: AgentResponseOutput | null = null;
     try {
-      const result = await prompt(promptInput, { model });
+      const result = await effectivePrompt(promptInput, { model });
       output = result.output;
 
       // Log usage in the background without awaiting it.

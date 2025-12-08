@@ -10,6 +10,7 @@ import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol } from '@/lib/utils';
+import { processAutopilotForChat } from '@/services/autopilot-service';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 
@@ -432,6 +433,13 @@ async function handleMessagesUpsert(payload: any) {
         if (contactData?.id && apiConfig && !contactData.avatar_url) {
             postTransactionTasks.push(
                 updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
+            );
+        }
+
+        // Trigger Autopilot for incoming messages
+        if (!key.fromMe) {
+            postTransactionTasks.push(
+                processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName)
             );
         }
 

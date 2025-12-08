@@ -42,6 +42,13 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
 
+    // Sync state with prop if it updates (e.g. from other user)
+    useEffect(() => {
+        if (initialTranscription) {
+            setTranscription(initialTranscription);
+        }
+    }, [initialTranscription]);
+
     // ... (keep existing useEffects)
 
     // Apply playback rate to audio element
