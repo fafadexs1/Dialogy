@@ -223,7 +223,8 @@ async function internalSendMessage(
     tabId: string | null, // ID da aba que está enviando a mensagem
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
-    messageId?: string // Opcional: ID da mensagem gerado pelo cliente
+    messageId?: string, // Opcional: ID da mensagem gerado pelo cliente
+    template?: { name: string; language: string; components: any[] } // New: support for templates
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -336,7 +337,19 @@ async function internalSendMessage(
             throw new Error('Configuracao da API nao encontrada para a instancia ' + instanceName + '.');
         }
 
-        const apiResponse: any = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
+
+
+        let apiResponse: any;
+        if (template) {
+            apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
+                number: remoteJid,
+                name: template.name,
+                language: template.language,
+                components: template.components
+            });
+        } else {
+            apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
+        }
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
@@ -350,7 +363,7 @@ async function internalSendMessage(
                 [
                     messageId, workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
-                    metadata ?? {}, true, senderId, tabId
+                    { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) }, true, senderId, tabId
                 ]
             );
         } else {
@@ -363,7 +376,7 @@ async function internalSendMessage(
                 [
                     workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
-                    metadata ?? {}, true, senderId, tabId
+                    { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) }, true, senderId, tabId
                 ]
             );
         }
@@ -1010,7 +1023,14 @@ export const sendAgentTemplateAction = withDebug(
 export const startNewConversation = withDebug(
     'start_conversation',
     async function startNewConversation(
-        input: { workspaceId: string, instanceName: string, phoneNumber: string, message: string, tabId: string | null }
+        input: {
+            workspaceId: string,
+            instanceName: string,
+            phoneNumber: string,
+            message: string,
+            tabId: string | null,
+            template?: { name: string; language: string; components: any[] }
+        }
     ): Promise<{ success: boolean, error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -1020,7 +1040,7 @@ export const startNewConversation = withDebug(
         }
         const senderId = user.id;
 
-        const { workspaceId, instanceName, phoneNumber, message, tabId } = input;
+        const { workspaceId, instanceName, phoneNumber, message, tabId, template } = input;
         if (!workspaceId || !instanceName || !phoneNumber || !message) {
             return { success: false, error: 'Todos os campos são obrigatórios.' };
         }
@@ -1069,7 +1089,7 @@ export const startNewConversation = withDebug(
 
             // 3. Send the message using the existing internal action
             // We pass the instanceName directly to ensure it's used.
-            const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName);
+            const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName, undefined, template);
 
             if (sendResult.success) {
                 return { success: true };

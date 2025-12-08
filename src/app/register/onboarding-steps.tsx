@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CheckCircle2, Building, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
 import { createWorkspaceAction } from '@/actions/workspace';
-import { useFormStatus, useFormState } from 'react-dom';
+import { useFormStatus } from 'react-dom';
+import { useActionState } from 'react';
 
 function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () => void }) {
-  const [state, formAction] = useFormState(createWorkspaceAction, { success: false, error: null });
+  const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
   const { pending } = useFormStatus();
 
   useEffect(() => {

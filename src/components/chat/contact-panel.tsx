@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
 import {
     Mail,
@@ -190,6 +190,24 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     const [isLoadingInstances, setIsLoadingInstances] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    const [templates, setTemplates] = useState<any[]>([]);
+    const [selectedTemplateName, setSelectedTemplateName] = useState('');
+    const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
+    const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+    const isCloud = useMemo(() => instances.find(i => i.instance_name === selectedInstance)?.type === 'wa_cloud', [instances, selectedInstance]);
+    const selectedTemplate = useMemo(() => templates.find(t => t.name === selectedTemplateName), [templates, selectedTemplateName]);
+
+    const variableKeys = useMemo(() => {
+        if (!selectedTemplate) return [];
+        const bodyComponent = selectedTemplate.components.find((c: any) => c.type === 'BODY');
+        if (!bodyComponent || !bodyComponent.text) return [];
+        const matches = bodyComponent.text.match(/\{\{\d+\}\}/g);
+        if (!matches) return [];
+        const uniqueNumbers = Array.from(new Set(matches.map((m: string) => parseInt(m.replace(/\{|\}/g, ''), 10)))) as number[];
+        return uniqueNumbers.sort((a, b) => a - b).map(n => n.toString());
+    }, [selectedTemplate]);
+
     const derivePhone = () => {
         const candidate =
             chat.contact.phone_number_jid ||
@@ -210,7 +228,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
         getEvolutionApiInstances(currentUser.activeWorkspaceId)
             .then((res) => {
                 if (res.error) {
-                    toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
+                    toast({ title: 'Erro ao carregar instâncias', description: res.error, variant: 'destructive' });
                     setInstances([]);
                     setSelectedInstance('');
                     return;
@@ -221,13 +239,38 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                 setSelectedInstance((prev) => prev || fallbackInstance);
             })
             .catch((error) => {
-                console.error('[CONTACT_PANEL] Falha ao buscar inst\u00e2ncias', error);
-                toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+                console.error('[CONTACT_PANEL] Falha ao buscar instâncias', error);
+                toast({ title: 'Erro ao carregar instâncias', description: 'Não foi possível buscar as instâncias de WhatsApp.', variant: 'destructive' });
                 setInstances([]);
                 setSelectedInstance('');
             })
             .finally(() => setIsLoadingInstances(false));
     }, [isOpen, currentUser?.activeWorkspaceId, chat.instance_name]);
+
+    useEffect(() => {
+        if (isCloud && selectedInstance) {
+            setLoadingTemplates(true);
+            import('@/actions/evolution-api').then(({ findWhatsappTemplates }) => {
+                findWhatsappTemplates(selectedInstance)
+                    .then(res => {
+                        if (res.templates) {
+                            setTemplates(res.templates.filter((t: any) => t.status === 'APPROVED'));
+                        } else {
+                            setTemplates([]);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to fetch templates', err);
+                        setTemplates([]);
+                    })
+                    .finally(() => setLoadingTemplates(false));
+            });
+        } else {
+            setTemplates([]);
+            setSelectedTemplateName('');
+            setTemplateVariables({});
+        }
+    }, [isCloud, selectedInstance]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -244,19 +287,37 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
             return;
         }
 
+        let templatePayload = undefined;
+        if (isCloud && selectedTemplate) {
+            const parameters = variableKeys.map(key => ({
+                type: 'text',
+                text: templateVariables[key] || ''
+            }));
+            templatePayload = {
+                name: selectedTemplate.name,
+                language: selectedTemplate.language,
+                components: [
+                    { type: 'body', parameters }
+                ]
+            };
+        }
+
         setIsSubmitting(true);
         const result = await startNewConversation({
             workspaceId: currentUser.activeWorkspaceId,
             instanceName: selectedInstance,
             phoneNumber: phone,
-            message,
-            tabId: null
+            message: templatePayload ? `[Template: ${selectedTemplate.name}]` : message,
+            tabId: null,
+            template: templatePayload
         });
 
         if (result.success) {
             toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerá na sua lista.' });
             setIsOpen(false);
             onSuccess();
+            setTemplateVariables({});
+            setSelectedTemplateName('');
         } else {
             toast({ title: 'Falha ao iniciar', description: result.error, variant: 'destructive' });
         }
@@ -271,7 +332,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                     Nova conversa
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg bg-black/90 border-white/10 text-white">
+            <DialogContent className="max-w-lg bg-black/90 border-white/10 text-white max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Reabrir atendimento</DialogTitle>
                     <DialogDescription className="text-white/60">
@@ -289,7 +350,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                                 {isLoadingInstances && <div className="p-3 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>}
                                 {!isLoadingInstances && instances.map((instance) => (
                                     <SelectItem key={instance.id} value={instance.instance_name}>
-                                        {instance.display_name}
+                                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -304,17 +365,67 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                             className="bg-white/5 border-white/10 text-white"
                         />
                     </div>
-                    <div className="space-y-2">
-                        <Label>Mensagem inicial</Label>
-                        <Textarea value={message} onChange={(e) => setMessage(e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
-                    </div>
+
+                    {isCloud ? (
+                        <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-white/5 p-2 rounded-r-md">
+                            <div className="space-y-2">
+                                <Label className="text-white/80">Selecionar Template (Cloud API)</Label>
+                                <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
+                                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                                        <SelectValue placeholder={loadingTemplates ? "Carregando templates..." : "Selecione um template..."} />
+                                    </SelectTrigger>
+                                    <SelectContent className="bg-zinc-900 border-white/10 text-white max-h-[200px]">
+                                        {loadingTemplates ? (
+                                            <div className="p-2 text-center text-xs text-muted-foreground">Carregando...</div>
+                                        ) : templates.length === 0 ? (
+                                            <div className="p-2 text-center text-xs text-muted-foreground">Nenhum template aprovado encontrado.</div>
+                                        ) : (
+                                            templates.map((t: any) => (
+                                                <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>
+                                            ))
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                                {selectedTemplate && (
+                                    <p className="text-xs text-white/50 italic mt-1 bg-black/20 p-2 rounded">
+                                        "{(selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '')}"
+                                    </p>
+                                )}
+                            </div>
+
+                            {variableKeys.length > 0 && (
+                                <div className="space-y-3">
+                                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
+                                    {variableKeys.map((key) => (
+                                        <div key={key} className="space-y-1">
+                                            <Label htmlFor={`var-${key}`} className="text-xs text-white/70">Variável {`{{${key}}}`}</Label>
+                                            <Input
+                                                id={`var-${key}`}
+                                                className="bg-zinc-950/50 border-white/10 h-8 text-sm"
+                                                placeholder={`Valor para {{${key}}}`}
+                                                value={templateVariables[key] || ''}
+                                                onChange={(e) => setTemplateVariables(prev => ({ ...prev, [key]: e.target.value }))}
+                                                required
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            <Label>Mensagem inicial</Label>
+                            <Textarea value={message} onChange={(e) => setMessage(e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 pt-2">
                         <DialogClose asChild>
                             <Button variant="ghost">Cancelar</Button>
                         </DialogClose>
-                        <Button type="submit" disabled={isSubmitting || !phone} className="bg-blue-600 hover:bg-blue-500 text-white">
+                        <Button type="submit" disabled={isSubmitting || !phone || (isCloud && !selectedTemplate)} className="bg-blue-600 hover:bg-blue-500 text-white">
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Enviar
+                            {isCloud ? 'Enviar Template' : 'Enviar'}
                         </Button>
                     </div>
                 </form>

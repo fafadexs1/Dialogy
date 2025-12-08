@@ -40,13 +40,13 @@ export async function createWorkspaceAction(
 
     // 2. Criar os papéis (roles) padrão para o novo workspace.
     const adminRoleRes = await client.query(
-        `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE) RETURNING id`,
-        [newWorkspaceId]
+      `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE) RETURNING id`,
+      [newWorkspaceId]
     );
     // CRIAÇÃO DO PAPEL DE MEMBRO - CORREÇÃO
     await client.query(
-        `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Membro', 'Acesso às funcionalidades principais, mas com permissões limitadas.', TRUE)`,
-        [newWorkspaceId]
+      `INSERT INTO roles (workspace_id, name, description, is_default) VALUES ($1, 'Membro', 'Acesso às funcionalidades principais, mas com permissões limitadas.', TRUE)`,
+      [newWorkspaceId]
     );
     const adminRoleId = adminRoleRes.rows[0].id;
 
@@ -70,12 +70,12 @@ export async function createWorkspaceAction(
 
     // 6. Atualizar o workspace ativo do usuário
     await client.query(
-        'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
-        [newWorkspaceId, userId]
+      'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
+      [newWorkspaceId, userId]
     );
 
     await client.query('COMMIT');
-    
+
     console.log(`[CREATE_WORKSPACE] Workspace "${workspaceName}" (ID: ${newWorkspaceId}) criado, usuário ${userId} definido como Administrador com ${permissions.length} permissões.`);
 
   } catch (error: any) {
@@ -88,7 +88,7 @@ export async function createWorkspaceAction(
   }
 
   revalidatePath('/', 'layout');
-  
+
   // Return success state instead of redirecting
   return { success: true, error: null };
 }
@@ -98,13 +98,13 @@ export async function updateWorkspaceAction(
   prevState: any,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: 'Usuário não autenticado.' };
+  }
 
-    const workspaceId = formData.get('workspaceId') as string;
+  const workspaceId = formData.get('workspaceId') as string;
   const workspaceName = formData.get('workspaceName') as string;
   const timezone = formData.get('timezone') as string;
   const closeMessageTemplate = formData.get('closeMessageTemplate') as string;
@@ -113,99 +113,125 @@ export async function updateWorkspaceAction(
   const avatarFile = formData.get('avatarFile');
 
 
-    if (!workspaceId) {
-        return { success: false, error: 'ID do workspace não encontrado.' };
-    }
-    
-    // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
-    
-    const fieldsToUpdate: { [key: string]: any } = {};
+  if (!workspaceId) {
+    return { success: false, error: 'ID do workspace não encontrado.' };
+  }
+
+  // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
+
+  const fieldsToUpdate: { [key: string]: any } = {};
   if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
   if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
   if (formData.has('closeMessageTemplate')) fieldsToUpdate.close_message_template = closeMessageTemplate || '';
   if (formData.has('transferMessageTemplate')) fieldsToUpdate.transfer_team_message_template = transferMessageTemplate || '';
   if (formData.has('marketingAutoCloseSeconds')) {
-      const parsed = Number(marketingAutoCloseSecondsRaw);
-      const normalized = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
-      if (normalized !== null) {
-          fieldsToUpdate.marketing_auto_close_seconds = normalized;
-      }
+    const parsed = Number(marketingAutoCloseSecondsRaw);
+    const normalized = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+    if (normalized !== null) {
+      fieldsToUpdate.marketing_auto_close_seconds = normalized;
+    }
   }
 
-    if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
-        try {
-            const arrayBuffer = await avatarFile.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            const extension = avatarFile.name?.split('.').pop() || 'png';
-            const filePath = `public/${workspaceId}-${Date.now()}.${extension}`;
-
-            const { error: uploadError } = await supabaseAdmin.storage
-                .from('workspace-avatars')
-                .upload(filePath, buffer, {
-                    upsert: true,
-                    contentType: avatarFile.type || 'image/png',
-                });
-
-            if (uploadError) {
-                console.error('[UPDATE_WORKSPACE] Upload erro:', uploadError);
-                return { success: false, error: `Erro ao enviar avatar: ${uploadError.message}` };
-            }
-
-            const { data: signedData, error: signedUrlError } = await supabaseAdmin.storage
-                .from('workspace-avatars')
-                .createSignedUrl(filePath, 31536000);
-
-            if (signedUrlError) {
-                console.error('[UPDATE_WORKSPACE] Signed URL erro:', signedUrlError);
-                return { success: false, error: `Erro ao gerar URL do avatar: ${signedUrlError.message}` };
-            }
-
-            fieldsToUpdate.avatar_url = signedData?.signedUrl;
-        } catch (error: any) {
-            console.error('[UPDATE_WORKSPACE] Avatar upload exception:', error);
-            return { success: false, error: 'Erro inesperado ao enviar o avatar do workspace.' };
-        }
-    }
-
-    if (Object.keys(fieldsToUpdate).length === 0) {
-        return { success: true, error: null }; // Nada para atualizar
-    }
-
-    const setClause = Object.keys(fieldsToUpdate)
-        .map((key, i) => `${key} = $${i + 1}`)
-        .join(', ');
-    
-    const values = Object.values(fieldsToUpdate);
-
+  if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
     try {
-        await db.query(`UPDATE workspaces SET ${setClause} WHERE id = $${values.length + 1}`, [...values, workspaceId]);
-        console.log(`[UPDATE_WORKSPACE] Workspace ${workspaceId} atualizado. Campos: ${Object.keys(fieldsToUpdate).join(', ')}.`);
+      const arrayBuffer = await avatarFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const extension = avatarFile.name?.split('.').pop() || 'png';
+      const filePath = `public/${workspaceId}-${Date.now()}.${extension}`;
+
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from('workspace-avatars')
+        .upload(filePath, buffer, {
+          upsert: true,
+          contentType: avatarFile.type || 'image/png',
+        });
+
+      if (uploadError) {
+        console.error('[UPDATE_WORKSPACE] Upload erro:', uploadError);
+        return { success: false, error: `Erro ao enviar avatar: ${uploadError.message}` };
+      }
+
+      const { data: signedData, error: signedUrlError } = await supabaseAdmin.storage
+        .from('workspace-avatars')
+        .createSignedUrl(filePath, 31536000);
+
+      if (signedUrlError) {
+        console.error('[UPDATE_WORKSPACE] Signed URL erro:', signedUrlError);
+        return { success: false, error: `Erro ao gerar URL do avatar: ${signedUrlError.message}` };
+      }
+
+      fieldsToUpdate.avatar_url = signedData?.signedUrl;
     } catch (error: any) {
-        console.error('[UPDATE_WORKSPACE] Erro:', error);
-        return { success: false, error: `Ocorreu um erro no servidor ao atualizar o workspace: ${error.message}` };
+      console.error('[UPDATE_WORKSPACE] Avatar upload exception:', error);
+      return { success: false, error: 'Erro inesperado ao enviar o avatar do workspace.' };
     }
+  }
 
-    revalidatePath('/', 'layout');
-    revalidatePath('/settings/workspace');
+  if (Object.keys(fieldsToUpdate).length === 0) {
+    return { success: true, error: null }; // Nada para atualizar
+  }
 
-    return { success: true, error: null };
+  const setClause = Object.keys(fieldsToUpdate)
+    .map((key, i) => `${key} = $${i + 1}`)
+    .join(', ');
+
+  const values = Object.values(fieldsToUpdate);
+
+  try {
+    await db.query(`UPDATE workspaces SET ${setClause} WHERE id = $${values.length + 1}`, [...values, workspaceId]);
+    console.log(`[UPDATE_WORKSPACE] Workspace ${workspaceId} atualizado. Campos: ${Object.keys(fieldsToUpdate).join(', ')}.`);
+  } catch (error: any) {
+    console.error('[UPDATE_WORKSPACE] Erro:', error);
+    return { success: false, error: `Ocorreu um erro no servidor ao atualizar o workspace: ${error.message}` };
+  }
+
+  revalidatePath('/', 'layout');
+  revalidatePath('/settings/workspace');
+
+  return { success: true, error: null };
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
-        return;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
+    return;
+  }
+  const userId = user.id;
+
+  try {
+    // 1. Get the current active workspace to mark as offline
+    const userRes = await db.query('SELECT last_active_workspace_id FROM users WHERE id = $1', [userId]);
+    const oldWorkspaceId = userRes.rows[0]?.last_active_workspace_id;
+
+    if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
+      // 2. Mark as offline in the OLD workspace
+      await db.query(`
+                INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
+                VALUES ($1, $2, FALSE, NULL, NOW())
+                ON CONFLICT (user_id, workspace_id)
+                DO UPDATE SET is_online = FALSE, online_since = NULL, last_seen = NOW()
+             `, [userId, oldWorkspaceId]);
+
+      console.log(`[SWITCH_WORKSPACE] User ${userId} marked offline in old workspace ${oldWorkspaceId}`);
     }
-    const userId = user.id;
-    
-    try {
-        await db.query('UPDATE users SET last_active_workspace_id = $1 WHERE id = $2', [workspaceId, userId]);
-        console.log(`[SWITCH_WORKSPACE] Usuário ${userId} trocou para o workspace ${workspaceId}.`);
-    } catch (error) {
-        console.error('[SWITCH_WORKSPACE] Erro:', error);
-    }
-    
-    revalidatePath('/', 'layout');
+
+    // 3. Switch to NEW workspace
+    await db.query('UPDATE users SET last_active_workspace_id = $1 WHERE id = $2', [workspaceId, userId]);
+
+    // 4. Force online in NEW workspace immediately
+    await db.query(`
+            INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
+            VALUES ($1, $2, TRUE, NOW(), NOW())
+            ON CONFLICT (user_id, workspace_id)
+            DO UPDATE SET is_online = TRUE, online_since = COALESCE(user_workspace_presence.online_since, NOW()), last_seen = NOW()
+         `, [userId, workspaceId]);
+
+    console.log(`[SWITCH_WORKSPACE] Usuário ${userId} trocou para o workspace ${workspaceId}.`);
+  } catch (error) {
+    console.error('[SWITCH_WORKSPACE] Erro:', error);
+  }
+
+  revalidatePath('/', 'layout');
 }

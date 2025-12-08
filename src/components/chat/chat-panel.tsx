@@ -223,7 +223,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const contentEditableRef = useRef<HTMLElement>(null);
+    const contentEditableRef = useRef<any>(null);
     const processedMessageIds = useRef(new Set());
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);

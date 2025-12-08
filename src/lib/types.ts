@@ -48,6 +48,7 @@ export type User = {
   // RBAC properties
   role?: Role;
   permissions?: string[];
+  team?: string;
 };
 
 export type WorkspaceMember = {

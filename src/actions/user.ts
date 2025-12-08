@@ -53,9 +53,12 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 u.full_name,
                 u.avatar_url,
                 u.email,
-                uwp.online_since
+                uwp.online_since,
+                t.name as team_name
             FROM user_workspace_presence uwp
             JOIN users u ON u.id = uwp.user_id
+            LEFT JOIN team_members tm ON u.id = tm.user_id
+            LEFT JOIN teams t ON tm.team_id = t.id AND t.workspace_id = uwp.workspace_id
             WHERE uwp.workspace_id = $1 
             AND uwp.is_online = TRUE
             AND uwp.last_seen > NOW() - INTERVAL '45 seconds'
@@ -72,6 +75,7 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 avatar: row.avatar_url, // Map to avatar for UI compatibility
                 firstName: row.full_name?.split(' ')[0] ?? row.full_name,
                 lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
+                team: row.team_name || undefined,
             },
             joined_at: row.online_since ?? new Date().toISOString(),
         }));
@@ -154,16 +158,19 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const dbUser = userRes.rows[0];
 
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url
+            SELECT w.id, w.name, w.avatar_url, w.owner_id, r.name as role_name
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
+            LEFT JOIN roles r ON uwr.role_id = r.id
             WHERE uwr.user_id = $1
         `, [authUser.id]);
 
         const workspaces = workspacesRes.rows.map((r: any) => ({
             id: r.id,
             name: r.name,
-            avatar: r.avatar_url || ''
+            avatar: r.avatar_url || '',
+            isOwner: r.owner_id === authUser.id,
+            roleName: r.role_name
         }));
 
         return {

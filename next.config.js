@@ -8,15 +8,12 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '100mb',
     },
-    middlewareClientMaxBodySize: '100mb',
+    // Renamed from middlewareClientMaxBodySize
+    proxyClientMaxBodySize: '100mb',
   },
   typescript: {
     // Evita que erros de tipo parem o build.
     ignoreBuildErrors: true,
-  },
-  eslint: {
-    // Permite que o build continue mesmo com avisos do ESLint.
-    ignoreDuringBuilds: true,
   },
   images: {
     remotePatterns: [
@@ -29,7 +26,6 @@ const nextConfig = {
         hostname: '**',
       },
     ],
-    domains: ['localhost'],
   },
   webpack: (config, { isServer, dev }) => {
     // Evita que modulos nativos sejam empacotados para o cliente.

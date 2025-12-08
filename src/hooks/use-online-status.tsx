@@ -19,7 +19,7 @@ export const useCurrentUser = () => {
 };
 
 export const PresenceProvider = ({ children, initialUser = null }: { children: ReactNode, initialUser?: User | null }) => {
-  const { user: authUser } = useAuth();
+  const { user: authUser, isLoading: isAuthLoading } = useAuth();
   const [localUser, setLocalUser] = useState<User | null>(initialUser);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [useApiFallback, setUseApiFallback] = useState(false);
@@ -29,6 +29,13 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   // Sync AuthUser with LocalUser (fetch profile if needed)
   useEffect(() => {
+    // If initialUser updates (e.g. from server refresh), update local state
+    if (initialUser && initialUser.activeWorkspaceId !== localUser?.activeWorkspaceId) {
+      setLocalUser(initialUser);
+    }
+
+    if (isAuthLoading) return; // Wait for client auth to initialize
+
     if (authUser && !localUser) {
       // We have an auth user but no local user profile yet. Fetch it.
       // This is one of the allowed "initial" fetches.
@@ -48,7 +55,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       // User logged out
       setLocalUser(null);
     }
-  }, [authUser, localUser]);
+  }, [authUser, localUser, isAuthLoading, initialUser]);
 
   useEffect(() => {
     // Reset per-session tracking when user or workspace changes
@@ -57,6 +64,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     setPresenceBootstrapDone(false);
 
     const loadExistingPresence = async () => {
+      // Don't bootstrap if we aren't confirmed logged in yet (or if localUser is missing)
+      if (isAuthLoading) return;
+
       if (!localUser?.id || !localUser.activeWorkspaceId) {
         setPresenceBootstrapDone(true);
         return;
@@ -80,7 +90,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     };
 
     loadExistingPresence();
-  }, [localUser?.id, localUser?.activeWorkspaceId, supabase]);
+  }, [localUser?.id, localUser?.activeWorkspaceId, supabase, isAuthLoading]);
 
   const persistPresenceViaApi = useCallback(
     async (isOnline: boolean, workspaceId: string) => {
@@ -106,6 +116,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   const updateServerPresence = useCallback(
     async (isOnline: boolean) => {
+      if (isAuthLoading) return;
       if (!localUser?.activeWorkspaceId || !localUser.id) return;
       if (!presenceBootstrapDone) return;
 
@@ -160,7 +171,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
         await persistPresenceViaApi(isOnline, workspaceId);
       }
     },
-    [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, supabase, useApiFallback, presenceBootstrapDone]
+    [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, supabase, useApiFallback, presenceBootstrapDone, isAuthLoading]
   );
 
   const refreshOnlineAgents = useCallback(async () => {
@@ -179,7 +190,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   useEffect(() => {
     // Polling effect: Refresh online agents every 3 seconds
-    if (!localUser?.activeWorkspaceId || isPublicPage) return;
+    if (isAuthLoading || !localUser?.activeWorkspaceId || isPublicPage) return;
 
     let intervalId: NodeJS.Timeout;
     const isDeveloper = pathname.startsWith('/developer');
@@ -194,10 +205,10 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       clearTimeout(initialTimer);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname]);
+  }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname, isAuthLoading]);
 
   useEffect(() => {
-    if (!localUser?.activeWorkspaceId || !localUser.id || !presenceBootstrapDone) return;
+    if (isAuthLoading || !localUser?.activeWorkspaceId || !localUser.id || !presenceBootstrapDone) return;
 
     // Decoupled: Fetch online agents immediately to show the list ASAP
     refreshOnlineAgents();

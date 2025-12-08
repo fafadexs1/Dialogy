@@ -46,44 +46,127 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('55');
 
+  const [selectedInstanceName, setSelectedInstanceName] = useState('');
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateName, setSelectedTemplateName] = useState('');
+  const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  // Helper to find selected instance object
+  const selectedInstance = useMemo(() => instances.find(i => i.instance_name === selectedInstanceName), [instances, selectedInstanceName]);
+  const isCloud = selectedInstance?.type === 'wa_cloud';
+
+  // Helper to find selected template object
+  const selectedTemplate = useMemo(() => templates.find(t => t.name === selectedTemplateName), [templates, selectedTemplateName]);
+
+  // Parse variables from template body
+  const variableKeys = useMemo(() => {
+    if (!selectedTemplate) return [];
+    const bodyComponent = selectedTemplate.components.find((c: any) => c.type === 'BODY');
+    if (!bodyComponent || !bodyComponent.text) return [];
+
+    // Match {{1}}, {{2}}, etc.
+    const matches = bodyComponent.text.match(/\{\{\d+\}\}/g);
+    if (!matches) return [];
+
+    // Extract numbers and sort unique
+    const uniqueNumbers = Array.from(new Set(matches.map((m: string) => parseInt(m.replace(/\{|\}/g, ''), 10)))) as number[];
+    return uniqueNumbers.sort((a, b) => a - b).map(n => n.toString());
+  }, [selectedTemplate]);
+
   useEffect(() => {
     if (isOpen && workspaceId) {
       setIsLoading(true);
       getEvolutionApiInstances(workspaceId)
         .then((res) => {
           if (res.error) {
-            toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
+            toast({ title: 'Erro ao carregar instâncias', description: res.error, variant: 'destructive' });
             setInstances([]);
             return;
           }
           setInstances(res.instances || []);
         })
         .catch((error) => {
-          console.error('[CHAT_LIST] Falha ao buscar inst\u00e2ncias', error);
-          toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+          console.error('[CHAT_LIST] Falha ao buscar instâncias', error);
+          toast({ title: 'Erro ao carregar instâncias', description: 'Não foi possível buscar as instâncias de WhatsApp.', variant: 'destructive' });
           setInstances([]);
         })
         .finally(() => setIsLoading(false));
     }
   }, [isOpen, workspaceId]);
 
+  // Fetch templates when Cloud instance is selected
+  useEffect(() => {
+    if (isCloud && selectedInstanceName) {
+      setLoadingTemplates(true);
+      // We need to import findWhatsappTemplates. Assuming it's available or need to add import.
+      import('@/actions/evolution-api').then(({ findWhatsappTemplates }) => {
+        findWhatsappTemplates(selectedInstanceName)
+          .then(res => {
+            if (res.templates) {
+              setTemplates(res.templates.filter((t: any) => t.status === 'APPROVED'));
+            } else {
+              setTemplates([]);
+            }
+          })
+          .catch(err => {
+            console.error('Failed to fetch templates', err);
+            setTemplates([]);
+          })
+          .finally(() => setLoadingTemplates(false));
+      });
+    } else {
+      setTemplates([]);
+      setSelectedTemplateName('');
+      setTemplateVariables({});
+    }
+  }, [isCloud, selectedInstanceName]);
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
+    const message = formData.get('message') as string;
+
+    let templatePayload = undefined;
+
+    if (isCloud && selectedTemplate) {
+      // Construct template payload
+      // We only support BODY variables for now as per requirement "user fills {{1}}"
+      const parameters = variableKeys.map(key => ({
+        type: 'text',
+        text: templateVariables[key] || ''
+      }));
+
+      templatePayload = {
+        name: selectedTemplate.name,
+        language: selectedTemplate.language,
+        components: [
+          {
+            type: 'body',
+            parameters
+          }
+        ]
+      };
+    }
+
     const result = await startNewConversation({
       workspaceId,
-      instanceName: formData.get('instanceName') as string,
+      instanceName: selectedInstanceName,
       phoneNumber: phoneNumber,
-      message: formData.get('message') as string,
-      tabId: null
+      message: templatePayload ? `[Template: ${selectedTemplate.name}]` : message, // Fallback message for UI if needed
+      tabId: null,
+      template: templatePayload
     });
 
     if (result.success) {
       toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
       setIsOpen(false);
       onActionSuccess();
-      setPhoneNumber('55'); // Reset to default
+      setPhoneNumber('55');
+      setTemplateVariables({});
+      setSelectedTemplateName('');
+      // Keep instance selected
     } else {
       toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
     }
@@ -91,7 +174,13 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open);
+      if (!open) {
+        // Optional: reset state on close
+        // setSelectedInstanceName(''); 
+      }
+    }}>
       <DialogTrigger asChild>
         {trigger || (
           <Button variant="ghost" size="icon">
@@ -99,7 +188,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
+      <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-white">Iniciar Nova Conversa</DialogTitle>
           <DialogDescription className="text-white/60">
@@ -110,7 +199,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           <div className="space-y-4 py-2 pb-4">
             <div className="space-y-2">
               <Label htmlFor="instanceName" className="text-white/80">Instância de Envio</Label>
-              <Select name="instanceName" required>
+              <Select name="instanceName" required value={selectedInstanceName} onValueChange={setSelectedInstanceName}>
                 <SelectTrigger id="instanceName" className="bg-white/5 border-white/10 text-white">
                   <SelectValue placeholder="Selecione a instância..." />
                 </SelectTrigger>
@@ -120,7 +209,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                   ) : (
                     instances.map((instance) => (
                       <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-white/10 focus:text-white">
-                        {instance.display_name}
+                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'}
                       </SelectItem>
                     ))
                   )}
@@ -142,16 +231,66 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
               </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="message" className="text-white/80">Mensagem</Label>
-              <Textarea
-                id="message"
-                name="message"
-                placeholder="Olá! Gostaria de falar sobre..."
-                required
-                className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
-              />
-            </div>
+
+            {isCloud ? (
+              <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-white/5 p-2 rounded-r-md">
+                <div className="space-y-2">
+                  <Label className="text-white/80">Selecionar Template (Cloud API)</Label>
+                  <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
+                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                      <SelectValue placeholder={loadingTemplates ? "Carregando templates..." : "Selecione um template..."} />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-white/10 text-white max-h-[200px]">
+                      {loadingTemplates ? (
+                        <div className="p-2 text-center text-xs text-muted-foreground">Carregando...</div>
+                      ) : templates.length === 0 ? (
+                        <div className="p-2 text-center text-xs text-muted-foreground">Nenhum template aprovado encontrado.</div>
+                      ) : (
+                        templates.map((t: any) => (
+                          <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {selectedTemplate && (
+                    <p className="text-xs text-white/50 italic mt-1 bg-black/20 p-2 rounded">
+                      "{(selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '')}"
+                    </p>
+                  )}
+                </div>
+
+                {variableKeys.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
+                    {variableKeys.map((key) => (
+                      <div key={key} className="space-y-1">
+                        <Label htmlFor={`var-${key}`} className="text-xs text-white/70">Variável {`{{${key}}}`}</Label>
+                        <Input
+                          id={`var-${key}`}
+                          className="bg-zinc-950/50 border-white/10 h-8 text-sm"
+                          placeholder={`Valor para {{${key}}}`}
+                          value={templateVariables[key] || ''}
+                          onChange={(e) => setTemplateVariables(prev => ({ ...prev, [key]: e.target.value }))}
+                          required
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="message" className="text-white/80">Mensagem</Label>
+                <Textarea
+                  id="message"
+                  name="message"
+                  placeholder="Olá! Gostaria de falar sobre..."
+                  required={!isCloud}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
+                />
+              </div>
+            )}
+
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -159,9 +298,9 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 Cancelar
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-500 text-white">
+            <Button type="submit" disabled={isSubmitting || (isCloud && !selectedTemplate)} className="bg-blue-600 hover:bg-blue-500 text-white">
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Enviar Mensagem
+              {isCloud ? 'Enviar Template' : 'Enviar Mensagem'}
             </Button>
           </DialogFooter>
         </form>
@@ -516,8 +655,13 @@ import { loadMoreChatsAction, getInitialChatsData } from '@/actions/chats';
 
 // ... existing components ...
 
+import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
+
+// ... existing imports ...
+
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward }: ChatListProps) {
   const onlineAgents = usePresence();
+  const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
@@ -941,7 +1085,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             {onlineAgents.map((agent) => (
               <Tooltip key={agent.user.id}>
                 <TooltipTrigger>
-                  <div className="relative">
+                  <div
+                    className="relative cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={() => setSelectedAgent(agent.user)}
+                  >
                     <Avatar className="h-8 w-8 border-2 border-black ring-2 ring-green-500/50">
                       <AvatarImage src={agent.user.avatar} />
                       <AvatarFallback className="bg-zinc-800 text-xs">{agent.user.name.charAt(0)}</AvatarFallback>
@@ -960,6 +1107,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         </TooltipProvider>
       </div>
+
+      <AgentProfileSheet
+        member={selectedAgent}
+        isOpen={!!selectedAgent}
+        onClose={() => setSelectedAgent(null)}
+        isOnline={true}
+      />
 
       {/* Tabs */}
       <div className="p-3 xl:p-4 flex-shrink-0 border-b border-white/10">
