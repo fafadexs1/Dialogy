@@ -41,6 +41,7 @@ export async function createMetaChannel(payload: {
   igBusinessId?: string | null;
   externalPageId?: string | null;
   status?: string | null;
+  fbUserId?: string | null;
 }) {
   const userId = await requireUserInWorkspace(payload.workspaceId);
 
@@ -56,6 +57,8 @@ export async function createMetaChannel(payload: {
   const id = (await db.query('SELECT gen_random_uuid() as id')).rows[0].id as string;
   const now = new Date().toISOString();
 
+  const settings = payload.fbUserId ? { fb_user_id: payload.fbUserId } : {};
+
   await db.query(
     `
       INSERT INTO meta_channels (
@@ -63,7 +66,7 @@ export async function createMetaChannel(payload: {
         access_token, app_secret, verify_token, name, status, settings, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5,
-        $6, $7, $8, $9, COALESCE($10, 'active'), '{}', $11, $11
+        $6, $7, $8, $9, COALESCE($10, 'active'), $12, $11, $11
       )
     `,
     [
@@ -78,6 +81,7 @@ export async function createMetaChannel(payload: {
       payload.name ?? null,
       payload.status ?? 'active',
       now,
+      settings
     ]
   );
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { db } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
     try {
@@ -32,10 +33,25 @@ export async function POST(req: NextRequest) {
         }
 
         const userId = data.user_id;
-        console.log(`[Deauthorize] User ${userId} has deauthorized the app.`);
+        console.log(`[Deauthorize] User ${userId} has deauthorized the app. Removing channels...`);
 
-        // Here you would typically mark the user or their channels as disconnected/inactive in your database.
-        // await deactivateUserChannels(userId);
+        // Requires the 'settings' column to store the fb_user_id inside JSON
+        try {
+            // Note: Postgres JSONB query syntax. 
+            // We assume 'settings' is a JSONB column as defined in schema (implied). 
+            // If it's text, we might need a different approach or cast.
+            // Using parameterized query for safety. 
+            // Syntax for checking JSON key: settings->>'fb_user_id'
+            const result = await db.query(
+                `DELETE FROM meta_channels WHERE settings->>'fb_user_id' = $1 RETURNING id`,
+                [userId]
+            );
+
+            console.log(`[Deauthorize] Removed ${result.rowCount} channels for user ${userId}.`);
+        } catch (dbError) {
+            console.error("[Deauthorize] Failed to delete channels:", dbError);
+            // We still return success to Facebook because we received the callback
+        }
 
         // Facebook expects a success response
         return NextResponse.json({ success: true });

@@ -54,6 +54,7 @@ export default function MetaInstagramIntegrationPage() {
     verifyToken: '',
     accessToken: '',
     appSecret: '',
+    fbUserId: '',
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/instagram`;
@@ -99,9 +100,10 @@ export default function MetaInstagramIntegrationPage() {
         verifyToken: form.verifyToken,
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
+        fbUserId: form.fbUserId,
       });
       toast({ title: 'Instagram Conectado!', description: 'Conexão estabelecida com sucesso.' });
-      setForm({ name: '', igBusinessId: '', verifyToken: '', accessToken: '', appSecret: '' });
+      setForm({ name: '', igBusinessId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
       setSelectedAccountId('');
       setAvailableAccounts([]);
       loadChannels(user.activeWorkspaceId);
@@ -127,12 +129,14 @@ export default function MetaInstagramIntegrationPage() {
   // --- Automatic Instagram Logic ---
   const handleFacebookLoginSuccess = async (response: any) => {
     const userAccessToken = response.accessToken;
+    const fbUserId = response.userID;
     // 1. Get Pages first
     try {
       const pagesRes = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,instagram_business_account{id,name,username,profile_picture_url}`);
       const pagesData = await pagesRes.json();
 
       if (pagesData.data) {
+        setForm(prev => ({ ...prev, fbUserId }));
         const accounts: InstagramAccount[] = [];
 
         for (const page of pagesData.data) {

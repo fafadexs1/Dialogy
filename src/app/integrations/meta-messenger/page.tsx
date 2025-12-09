@@ -52,6 +52,7 @@ export default function MetaMessengerIntegrationPage() {
     verifyToken: '',
     accessToken: '',
     appSecret: '',
+    fbUserId: '', // Add fbUserId here
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/messenger`;
@@ -97,9 +98,10 @@ export default function MetaMessengerIntegrationPage() {
         verifyToken: form.verifyToken,
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
+        fbUserId: form.fbUserId, // Pass it to action
       });
       toast({ title: 'Conexão Estabelecida!', description: 'Facebook Messenger conectado com sucesso.' });
-      setForm({ name: '', pageId: '', verifyToken: '', accessToken: '', appSecret: '' });
+      setForm({ name: '', pageId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
       setSelectedPageId('');
       setAvailablePages([]);
       loadChannels(user.activeWorkspaceId);
@@ -125,12 +127,15 @@ export default function MetaMessengerIntegrationPage() {
   // --- Facebook Login Automatic Flow Helpers ---
   const handleFacebookLoginSuccess = async (response: any) => {
     const userAccessToken = response.accessToken;
+    const fbUserId = response.userID; // Capture User ID
     try {
       // Fetch Pages
       const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture`);
       const data = await res.json();
       if (data.data) {
         setAvailablePages(data.data);
+        // Store fbUserId temporarily in form state even if page not selected yet, or handle via selection
+        setForm(prev => ({ ...prev, fbUserId }));
         toast({ title: 'Páginas Carregadas', description: `${data.data.length} páginas encontradas.` });
       } else {
         toast({ title: 'Nenhuma página', description: 'Não encontramos páginas administrativas nesta conta.', variant: 'destructive' });
