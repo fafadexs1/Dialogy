@@ -1931,31 +1931,27 @@ export async function getContactMessages({
 
 export const toggleChatAutopilot = withDebug(
     'toggle_chat_autopilot',
-    async function toggleChatAutopilot(
-        chatId: string,
-        isActive: boolean
-    ): Promise<{ success: boolean; error?: string }> {
+    async function toggleChatAutopilot(chatId: string, isActive: boolean, agentId: string | null = null): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
-
-        if (!user) {
-            return { success: false, error: "Usuário não autenticado." };
-        }
+        if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
-            await db.query(
-                'UPDATE chats SET is_autopilot_active = $1 WHERE id = $2',
-                [isActive, chatId]
-            );
+            await db.query(`
+                UPDATE chats 
+                SET is_autopilot_active = $1, 
+                    autopilot_config_id = $2
+                WHERE id = $3
+            `, [isActive, agentId, chatId]);
 
-            // revalidatePath('/', 'layout'); // Optional
+            revalidatePath('/', 'layout');
             return { success: true };
         } catch (error: any) {
-            console.error("Erro ao alterar autopilot do chat:", error);
+            console.error("Erro ao alternar autopilot:", error);
             return { success: false, error: "Falha ao atualizar status do autopilot." };
         }
     },
     {
-        contextResolver: (chatId, isActive) => ({ payload: { chatId, isActive } })
+        contextResolver: (chatId, isActive, agentId) => ({ payload: { chatId, isActive, agentId } })
     }
 );

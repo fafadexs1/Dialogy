@@ -201,6 +201,7 @@ export type Chat = {
   tag?: string;
   color?: string;
   is_autopilot_active?: boolean;
+  autopilot_config_id?: string | null;
 };
 
 export type InternalChannel = {

@@ -221,6 +221,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
+    const [autopilotAgents, setAutopilotAgents] = useState<AutopilotConfig[]>([]);
     const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
@@ -249,9 +250,33 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const handleAiSwitchChange = async (checked: boolean) => {
         autopilotSwitchTouchedRef.current = true;
         setIsAiAgentActive(checked);
+
+        let agentId = chat?.autopilot_config_id || undefined;
+        if (checked && !agentId && autopilotAgents.length > 0) {
+            const primary = autopilotAgents.find(a => a.is_primary) || autopilotAgents[0];
+            agentId = primary.id;
+        }
+
         if (chat) {
-            updateChat(chat.id, { is_autopilot_active: checked });
-            await toggleChatAutopilot(chat.id, checked);
+            updateChat(chat.id, { is_autopilot_active: checked, autopilot_config_id: agentId });
+            await toggleChatAutopilot(chat.id, checked, agentId || null);
+
+            if (checked && agentId) {
+                const selected = autopilotAgents.find(a => a.id === agentId);
+                if (selected) setAutopilotConfig(selected);
+            }
+        }
+    };
+
+    const handleAgentChange = async (agentId: string) => {
+        autopilotSwitchTouchedRef.current = true;
+        setIsAiAgentActive(true);
+        if (chat) {
+            updateChat(chat.id, { is_autopilot_active: true, autopilot_config_id: agentId });
+            await toggleChatAutopilot(chat.id, true, agentId);
+
+            const selected = autopilotAgents.find(a => a.id === agentId);
+            if (selected) setAutopilotConfig(selected);
         }
     };
 
@@ -261,6 +286,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         if (!data.error) {
             setAutopilotConfig(data.config);
             setAutopilotRules(data.rules || []);
+            setAutopilotAgents(data.agents || []);
         } else {
             console.error("Failed to fetch autopilot config:", data.error);
         }
@@ -1186,10 +1212,27 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     id="ai-agent-switch"
                                     checked={isAiAgentActive}
                                     onCheckedChange={handleAiSwitchChange}
-                                    disabled={isAiTyping || !autopilotConfig}
+                                    disabled={isAiTyping || (!autopilotConfig && autopilotAgents.length === 0)}
                                     className="data-[state=checked]:bg-blue-600"
                                 />
-                                <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-white cursor-pointer">Agente de IA</Label>
+                                {autopilotAgents.length > 1 ? (
+                                    <Select
+                                        value={chat?.autopilot_config_id || autopilotConfig?.id || (autopilotAgents.find(a => a.is_primary)?.id)}
+                                        onValueChange={handleAgentChange}
+                                        disabled={!isAiAgentActive}
+                                    >
+                                        <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-white focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0">
+                                            <SelectValue placeholder="Agente" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {autopilotAgents.map(agent => (
+                                                <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-white cursor-pointer">Agente de IA</Label>
+                                )}
                                 {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
                             </div>
                             {autopilotConfig && (

@@ -42,9 +42,9 @@ export async function getAutopilotConfigService(workspaceId: string, agentId?: s
         });
 
         const selectedConfig =
-            agents.find(agent => agent.id === agentId) ||
-            agents.find(agent => agent.is_primary) ||
-            agents[0] ||
+            agents.find(agent => agent.id === agentId) || // Specific agent request (by ID)
+            agents.find(agent => agent.is_primary && !agent.is_private) || // Default public primary
+            agents.find(agent => !agent.is_private) || // Any public agent
             null;
 
         if (!selectedConfig) {
@@ -75,7 +75,7 @@ export async function processAutopilotForChat(
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
 
     // 1. Fetch Config
-    const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } = await getAutopilotConfigService(workspaceId);
+    const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } = await getAutopilotConfigService(workspaceId, chat.autopilot_config_id || undefined);
 
     if (!autopilotConfig || !autopilotConfig.is_active) {
         console.log(`[AUTOPILOT_SERVICE] Autopilot desativado ou não configurado para workspace ${workspaceId}`);
