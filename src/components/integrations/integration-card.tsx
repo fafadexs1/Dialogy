@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
-import { CheckCircle2, Edit, Loader2, Save } from 'lucide-react';
+import { CheckCircle2, Edit, Loader2, Save, ArrowRight, Settings2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import Link from 'next/link';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -131,50 +131,72 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
 
     return (
         <>
-            <Card className="flex flex-col h-full hover:shadow-lg transition-shadow group">
+            <Card className="flex flex-col h-full hover:shadow-xl hover:border-primary/20 transition-all duration-300 group overflow-hidden bg-background relative">
+                {/* Background gradient hint */}
+                <div className="absolute inset-0 bg-gradient-to-br from-transparent to-muted/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
                 <CardWrapper>
-                    <CardHeader className="flex-row items-start justify-between gap-4">
-                        <Avatar className="w-12 h-12 rounded-lg border">
-                            <AvatarImage src={integration.icon_url} alt={integration.name} data-ai-hint="logo" />
-                            <AvatarFallback>{integration.name.slice(0, 2)}</AvatarFallback>
-                        </Avatar>
+                    <CardHeader className="flex-row items-start justify-between gap-4 pb-2 z-10 relative">
+                        <div className="p-2 bg-muted/30 rounded-xl border border-border/50 group-hover:bg-background group-hover:shadow-sm transition-all duration-300">
+                            <Avatar className="w-10 h-10 rounded-lg">
+                                <AvatarImage src={integration.icon_url} alt={integration.name} data-ai-hint="logo" className="object-cover" />
+                                <AvatarFallback className="rounded-lg">{integration.name.slice(0, 2)}</AvatarFallback>
+                            </Avatar>
+                        </div>
+
                         {isSuperAdmin && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={(e) => { e.preventDefault(); setIsEditDialogOpen(true); }}>
-                                <Edit className="h-4 w-4" />
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-4"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditDialogOpen(true); }}
+                            >
+                                <Settings2 className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                             </Button>
                         )}
                     </CardHeader>
-                    <CardContent className="flex-grow">
-                        <div className="flex items-center gap-2">
+                    <CardContent className="flex-grow z-10 relative">
+                        <div className="flex items-center gap-2 mb-2">
+                            <CardTitle className="text-lg font-semibold tracking-tight">
+                                {integration.name}
+                            </CardTitle>
+                            {integration.status === 'active' && <CheckCircle2 className="h-4 w-4 text-green-500 fill-green-500/10" />}
+                        </div>
+
+                        <CardDescription className="text-sm leading-relaxed line-clamp-2 min-h-[2.5rem]">
+                            {integration.description}
+                        </CardDescription>
+
+                        <div className="flex items-center gap-2 mt-4">
                             {integration.tag && (
                                 <Badge
                                     variant={getTagVariant(integration.tag_type)}
-                                    className={cn({
-                                        'bg-secondary/80 border-transparent': integration.tag_type === 'secondary',
-                                        'bg-transparent border-foreground/80': integration.tag_type === 'beta',
+                                    className={cn("text-[10px] px-2 py-0.5 h-5 font-normal", {
+                                        'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 border-blue-200': integration.tag_type === 'secondary',
+                                        'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 border-amber-200': integration.tag_type === 'beta',
+                                        'bg-primary/10 text-primary hover:bg-primary/20 border-primary/20': integration.tag_type === 'primary',
                                     })}
                                 >
                                     {integration.tag}
                                 </Badge>
                             )}
-                            {integration.status === 'active' && <CheckCircle2 className="h-4 w-4 text-green-600" />}
                         </div>
-                        <CardTitle className="text-base font-bold mt-2">
-                            {integration.name}
-                        </CardTitle>
-                        <CardDescription className="mt-1 text-xs leading-5">
-                            {integration.description}
-                        </CardDescription>
                     </CardContent>
-                    <CardFooter className='mt-auto'>
+                    <CardFooter className='mt-auto pt-2 z-10 relative'>
                         <Button
-                            variant="outline"
+                            variant={integration.status === 'active' ? "default" : "secondary"}
                             size="sm"
-                            className="w-full"
+                            className={cn("w-full gap-2 transition-all", {
+                                'opacity-80 group-hover:opacity-100': integration.status === 'active'
+                            })}
                             disabled={(!integration.href || integration.href === '#') || !isSuperAdmin}
                             onClick={(e) => { if ((!integration.href || integration.href === '#') || !isSuperAdmin) e.preventDefault(); }}
                         >
-                            {integration.status === 'active' ? 'Gerenciar' : (integration.status === 'coming_soon' ? 'Em Breve' : 'Habilitar')}
+                            {integration.status === 'active' ? (
+                                <>
+                                    Gerenciar <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                                </>
+                            ) : (integration.status === 'coming_soon' ? 'Em Breve' : 'Habilitar')}
                         </Button>
                     </CardFooter>
                 </CardWrapper>
