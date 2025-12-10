@@ -1,0 +1,61 @@
+'use client';
+
+import { useEffect } from 'react';
+
+declare global {
+    interface Window {
+        FB: any;
+        checkLoginState: () => void;
+    }
+}
+
+interface FacebookXFBMLButtonProps {
+    onLogin?: (response: any) => void;
+    size?: 'small' | 'medium' | 'large' | 'xlarge';
+    buttonText?: string; // Note: XFBML button text is somewhat fixed but layout can change
+    layout?: 'rounded' | 'button' | 'icon' | 'box_count' | 'button_count';
+    autoLogoutLink?: boolean;
+    useContinueAs?: boolean;
+}
+
+export function FacebookXFBMLButton({
+    onLogin,
+    size = 'large',
+    layout = 'rounded',
+    autoLogoutLink = false,
+    useContinueAs = true
+}: FacebookXFBMLButtonProps) {
+
+    useEffect(() => {
+        // Definir callback global esperado pelo atributo onlogin do botão XFBML
+        window.checkLoginState = () => {
+            if (window.FB) {
+                window.FB.getLoginStatus((response: any) => {
+                    console.log('XFBML Content Login Status:', response);
+                    if (onLogin) {
+                        onLogin(response);
+                    }
+                });
+            }
+        };
+
+        // Reparse XFBML content when component mounts (in case SDK loaded before this component)
+        if (window.FB) {
+            window.FB.XFBML.parse();
+        }
+    }, [onLogin]);
+
+    return (
+        <div className="fb-login-button"
+            data-width=""
+            data-size={size}
+            data-button-type={layout}
+            data-layout={layout}
+            data-auto-logout-link={autoLogoutLink}
+            data-use-continue-as={useContinueAs}
+            // @ts-ignore - onlogin is a custom attribute for XFBML
+            onlogin="checkLoginState();"
+        >
+        </div>
+    );
+}

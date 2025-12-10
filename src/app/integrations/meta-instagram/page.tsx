@@ -157,7 +157,7 @@ export default function MetaInstagramIntegrationPage() {
           setAvailableAccounts(accounts);
           toast({ title: 'Contas Encontradas', description: `${accounts.length} contas de Instagram Business encontradas.` });
         } else {
-          toast({ title: 'Nenhuma conta Business', description: 'Encontramos suas páginas, mas nenhuma tem conta Instagram Business vinculada.', variant: 'warning' });
+          toast({ title: 'Nenhuma conta Business', description: 'Encontramos suas páginas, mas nenhuma tem conta Instagram Business vinculada.', variant: 'destructive' });
         }
       }
     } catch (err) {
@@ -292,8 +292,14 @@ export default function MetaInstagramIntegrationPage() {
                           )}
                         </div>
                         <div className="pt-4 flex justify-end">
-                          <Button type="button" onClick={() => setStep(2)} disabled={!form.accessToken || !form.igBusinessId}>
-                            Próximo: Configurar Webhook <ArrowRight className="ml-2 h-4 w-4" />
+                          <Button
+                            type="button"
+                            onClick={() => handleCreate()}
+                            disabled={saving || !form.accessToken || !form.igBusinessId}
+                            className="bg-pink-600 hover:bg-pink-700 text-white min-w-[150px]"
+                          >
+                            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            <Check className="mr-2 h-4 w-4" /> Conectar Instagram
                           </Button>
                         </div>
                       </TabsContent>

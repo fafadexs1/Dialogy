@@ -1,5 +1,7 @@
 
 
+const enableWebpackOverrides = process.env.NODE_ENV === 'production';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -27,26 +29,28 @@ const nextConfig = {
       },
     ],
   },
-  webpack: (config, { isServer, dev }) => {
-    // Evita que modulos nativos sejam empacotados para o cliente.
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        async_hooks: false,
-        fs: false,
-      };
-    }
+  ...(enableWebpackOverrides && {
+    webpack: (config, { isServer, dev }) => {
+      // Evita que modulos nativos sejam empacotados para o cliente.
+      if (!isServer) {
+        config.resolve.fallback = {
+          ...config.resolve.fallback,
+          async_hooks: false,
+          fs: false,
+        };
+      }
 
-    // Fix for OneDrive/Windows file locking issues and "Big strings" warning
-    // Using memory cache avoids writing to the synced folder during dev
-    if (dev) {
-      config.cache = {
-        type: 'memory',
-      };
-    }
+      // Fix for OneDrive/Windows file locking issues and "Big strings" warning
+      // Using memory cache avoids writing to the synced folder during dev
+      if (dev) {
+        config.cache = {
+          type: 'memory',
+        };
+      }
 
-    return config;
-  },
+      return config;
+    },
+  }),
   async headers() {
     return [
       {
@@ -78,5 +82,9 @@ console.log(
   'Next.js config loaded with experimental.serverActions.bodySizeLimit:',
   nextConfig.experimental?.serverActions?.bodySizeLimit
 );
+
+if (!enableWebpackOverrides) {
+  console.log('Skipping custom webpack config (dev uses Turbopack).');
+}
 
 module.exports = nextConfig;

@@ -33,7 +33,7 @@ export const createClient = async () => {
 
   // Override getUser to avoid repeated calls to /auth/v1/user on every action.
   const accessToken = getSupabaseAccessTokenFromCookies(cookieStore);
-  const decoded = decodeSupabaseJwt(accessToken);
+  const decoded = await decodeSupabaseJwt(accessToken);
 
   if (decoded) {
     const cachedUser = mapPayloadToSupabaseUser(decoded);

@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Facebook, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import Script from 'next/script';
 
 interface FacebookLoginButtonProps {
     appId: string;
@@ -38,36 +37,15 @@ export function FacebookLoginButton({
     appId,
     onLoginSuccess,
     onLoginFailure,
-    scope = 'public_profile,email,pages_show_list,pages_messaging,instagram_basic,instagram_manage_messages',
+    scope = 'public_profile,email,pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages',
     label = 'Continuar com Facebook',
     className
 }: FacebookLoginButtonProps) {
     const [isLoading, setIsLoading] = useState(false);
-    const [sdkLoaded, setSdkLoaded] = useState(false);
     const { toast } = useToast();
 
-    useEffect(() => {
-        if (!appId) return;
-
-        // Function initializng the SDK
-        window.fbAsyncInit = function () {
-            window.FB.init({
-                appId: appId,
-                cookie: true,
-                xfbml: true,
-                version: 'v18.0'
-            });
-            setSdkLoaded(true);
-        };
-
-        // If SDK is already loaded (e.g. navigation back and forth)
-        if (window.FB) {
-            setSdkLoaded(true);
-        }
-    }, [appId]);
-
     const handleLogin = () => {
-        if (!sdkLoaded || !window.FB) {
+        if (!window.FB) {
             toast({ title: 'SDK não carregado', description: 'Aguarde o carregamento do Facebook SDK.', variant: 'destructive' });
             return;
         }
@@ -100,33 +78,14 @@ export function FacebookLoginButton({
     };
 
     return (
-        <>
-            <Script
-                src="https://connect.facebook.net/en_US/sdk.js"
-                strategy="lazyOnload"
-                onLoad={() => {
-                    if (window.FB) {
-                        try {
-                            window.FB.init({
-                                appId: appId,
-                                cookie: true,
-                                xfbml: true,
-                                version: 'v18.0'
-                            });
-                            setSdkLoaded(true);
-                        } catch (e) { console.error("FB Init error", e) }
-                    }
-                }}
-            />
-            <Button
-                type="button"
-                onClick={handleLogin}
-                className={`bg-[#1877F2] hover:bg-[#1864D9] text-white ${className}`}
-                disabled={isLoading || !appId}
-            >
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
-                {label}
-            </Button>
-        </>
+        <Button
+            type="button"
+            onClick={handleLogin}
+            className={`bg-[#1877F2] hover:bg-[#1864D9] text-white ${className}`}
+            disabled={isLoading || !appId}
+        >
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
+            {label}
+        </Button>
     );
 }

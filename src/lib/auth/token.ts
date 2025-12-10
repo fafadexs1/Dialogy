@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export type SupabaseJwtPayload = {
@@ -13,11 +12,43 @@ export type SupabaseJwtPayload = {
   user_metadata?: Record<string, unknown>;
 };
 
-const base64UrlDecode = (value: string) => {
+const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
+
+const base64UrlToUint8Array = (value: string): Uint8Array => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const pad = normalized.length % 4;
   const padded = normalized + (pad ? '='.repeat(4 - pad) : '');
-  return Buffer.from(padded, 'base64').toString('utf8');
+  if (typeof atob === 'function') {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+  return Uint8Array.from(Buffer.from(padded, 'base64'));
+};
+
+const base64UrlDecode = (value: string) => textDecoder.decode(base64UrlToUint8Array(value));
+
+const arrayBufferToBase64Url = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  let base64: string;
+  if (typeof btoa === 'function') {
+    base64 = btoa(binary);
+  } else if (typeof Buffer !== 'undefined') {
+    base64 = Buffer.from(bytes).toString('base64');
+  } else {
+    base64 = '';
+  }
+
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
 function safeJsonParse<T>(value: string): T | null {
@@ -28,20 +59,23 @@ function safeJsonParse<T>(value: string): T | null {
   }
 }
 
-function verifySignature(token: string, secret: string): SupabaseJwtPayload | null {
+async function verifySignature(token: string, secret: string): Promise<SupabaseJwtPayload | null> {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
 
   const [header, payload, signature] = parts;
   const data = `${header}.${payload}`;
 
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(data)
-    .digest('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    return decodeWithoutVerify(token);
+  }
+
+  const key = await subtle.importKey('raw', textEncoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+  ]);
+  const signatureBuffer = await subtle.sign('HMAC', key, textEncoder.encode(data));
+  const expected = arrayBufferToBase64Url(signatureBuffer);
 
   if (expected !== signature) return null;
 
@@ -82,12 +116,12 @@ export function getSupabaseAccessTokenFromCookies(
   return null;
 }
 
-export function decodeSupabaseJwt(token: string | null): SupabaseJwtPayload | null {
+export async function decodeSupabaseJwt(token: string | null): Promise<SupabaseJwtPayload | null> {
   if (!token) return null;
   const secret = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_SECRET || '';
 
   if (secret) {
-    const verified = verifySignature(token, secret);
+    const verified = await verifySignature(token, secret);
     if (verified) return verified;
   }
 

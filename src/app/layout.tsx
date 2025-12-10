@@ -8,6 +8,7 @@ import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { ensureServerHeartbeat } from '@/lib/observability/logger';
 
 import { getCurrentUser } from '@/actions/user';
+import { FacebookSDK } from '@/components/integrations/facebook-sdk';
 
 export default async function RootLayout({
   children,
@@ -34,6 +35,7 @@ export default async function RootLayout({
             disableTransitionOnChange
           >
             <AuthProvider>
+              <FacebookSDK appId={process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || ''} />
               <PresenceProvider initialUser={user}>
                 <MainAppLayout>
                   {children}

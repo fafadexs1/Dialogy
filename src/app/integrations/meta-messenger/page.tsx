@@ -273,8 +273,14 @@ export default function MetaMessengerIntegrationPage() {
                         </div>
 
                         <div className="pt-4 flex justify-end">
-                          <Button type="button" onClick={() => setStep(2)} disabled={!form.accessToken || !form.pageId}>
-                            Próximo: Configurar Webhook <ArrowRight className="ml-2 h-4 w-4" />
+                          <Button
+                            type="button"
+                            onClick={() => handleCreate()}
+                            disabled={saving || !form.accessToken || !form.pageId}
+                            className="bg-blue-600 hover:bg-blue-700 text-white min-w-[150px]"
+                          >
+                            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            <Check className="mr-2 h-4 w-4" /> Conectar Página
                           </Button>
                         </div>
                       </TabsContent>

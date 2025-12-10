@@ -56,8 +56,46 @@ export async function createMetaChannel(payload: {
 
   const id = (await db.query('SELECT gen_random_uuid() as id')).rows[0].id as string;
   const now = new Date().toISOString();
-
   const settings = payload.fbUserId ? { fb_user_id: payload.fbUserId } : {};
+
+  // --- AUTOMATION: Subscribe App to Page Webhooks ---
+  if (payload.externalPageId && payload.accessToken) {
+    try {
+      let fields: string[] = [];
+
+      if (payload.type === 'instagram') {
+        fields = [
+          'messages',
+          'messaging_postbacks',
+          'messaging_optins',
+          'messaging_seen'
+        ];
+      } else {
+        fields = [
+          'messages',
+          'messaging_postbacks',
+          'messaging_optins',
+          'message_deliveries',
+          'message_reads'
+        ];
+      }
+
+      const subscribeUrl = `https://graph.facebook.com/v18.0/${payload.externalPageId}/subscribed_apps?subscribed_fields=${fields.join(',')}&access_token=${payload.accessToken}`;
+
+      const subRes = await fetch(subscribeUrl, { method: 'POST' });
+      const subData = await subRes.json();
+
+      if (!subData.success) {
+        console.error('Falha ao inscrever App na Página (subscribed_apps):', subData);
+      } else {
+        console.log('App inscrito com sucesso na Página:', payload.externalPageId);
+      }
+    } catch (err) {
+      console.error('Erro de conexão ao tentar inscrever App:', err);
+    }
+  }
+  // --------------------------------------------------
+
 
   await db.query(
     `
