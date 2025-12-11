@@ -55,6 +55,7 @@ export default function MetaInstagramIntegrationPage() {
   const [form, setForm] = useState({
     name: '',
     igBusinessId: '',
+    pageId: '',
     verifyToken: '',
     accessToken: '',
     appSecret: '',
@@ -130,14 +131,14 @@ export default function MetaInstagramIntegrationPage() {
         workspaceId: user.activeWorkspaceId,
         type: 'instagram',
         name: form.name,
-        externalPageId: form.igBusinessId,
+        externalPageId: form.pageId || form.igBusinessId,
         verifyToken: form.verifyToken,
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
         fbUserId: form.fbUserId,
       });
       toast({ title: 'Instagram Conectado!', description: 'Conexão estabelecida com sucesso.' });
-      setForm({ name: '', igBusinessId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
+      setForm({ name: '', igBusinessId: '', pageId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
       setSelectedAccountId('');
       setAvailableAccounts([]);
       loadChannels(user.activeWorkspaceId);
@@ -208,6 +209,7 @@ export default function MetaInstagramIntegrationPage() {
         ...prev,
         name: acc.username,
         igBusinessId: acc.id,
+        pageId: acc.page_id,
         accessToken: acc.access_token
       }));
     }
@@ -216,7 +218,7 @@ export default function MetaInstagramIntegrationPage() {
   const handleInstagramLogin = () => {
     const currentRedirectUri = `${window.location.origin}/integrations/meta-instagram`;
     const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
-    const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${encodeURIComponent(currentRedirectUri)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights`;
+    const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${encodeURIComponent(currentRedirectUri)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish`;
 
     console.log('[Instagram Auth] Client ID:', clientId);
     console.log('[Instagram Auth] Redirect URI:', currentRedirectUri);

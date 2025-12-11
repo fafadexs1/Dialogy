@@ -1,207 +1,184 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { createClient } from '@/lib/supabase/server';
-import type { MetaChannel } from '@/lib/types';
+import { randomUUID } from 'crypto';
+import { revalidatePath } from 'next/cache';
+import { MetaChannel } from '@/lib/types';
+import { findChannelByExternalId } from '@/services/meta/meta-channel.service';
 
-async function requireUserInWorkspace(workspaceId: string) {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getUser();
-  const userId = data.user?.id;
-  if (!userId) {
-    throw new Error('Usuário não autenticado.');
-  }
-
-  const membership = await db.query(
-    `SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1`,
-    [userId, workspaceId]
-  );
-  if ((membership.rowCount || 0) === 0) {
-    throw new Error('Acesso negado para este workspace.');
-  }
-  return userId;
-}
-
-export async function listMetaChannels(workspaceId: string, type: 'instagram' | 'messenger'): Promise<MetaChannel[]> {
-  await requireUserInWorkspace(workspaceId);
+export async function listMetaChannels(
+  workspaceId: string,
+  type: 'messenger' | 'instagram'
+): Promise<MetaChannel[]> {
   const { rows } = await db.query(
     `SELECT * FROM meta_channels WHERE workspace_id = $1 AND type = $2 ORDER BY created_at DESC`,
     [workspaceId, type]
   );
-  return rows;
+
+  return rows.map(row => ({
+    id: row.id,
+    workspace_id: row.workspace_id,
+    type: row.type,
+    external_page_id: row.external_page_id,
+    ig_business_id: row.ig_business_id,
+    access_token: row.access_token,
+    verify_token: row.verify_token,
+    app_secret: row.app_secret,
+    name: row.name,
+    status: row.status,
+    settings: row.settings,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }));
 }
 
-export async function createMetaChannel(payload: {
+export async function createMetaChannel(data: {
   workspaceId: string;
-  type: 'instagram' | 'messenger';
-  name?: string;
+  type: 'messenger' | 'instagram';
+  name: string;
+  externalPageId: string;
   verifyToken: string;
   accessToken: string;
   appSecret?: string | null;
-  igBusinessId?: string | null;
-  externalPageId?: string | null;
-  status?: string | null;
-  fbUserId?: string | null;
+  fbUserId?: string;
+  igBusinessId?: string; // Add optional support just in case
 }) {
-  const userId = await requireUserInWorkspace(payload.workspaceId);
+  const {
+    workspaceId,
+    type,
+    name,
+    externalPageId,
+    verifyToken,
+    accessToken,
+    appSecret,
+    igBusinessId
+  } = data;
 
-  // Evita reuso de verify_token dentro do mesmo workspace (boa prática/segurança)
-  const existing = await db.query(
-    `SELECT id FROM meta_channels WHERE workspace_id = $1 AND verify_token = $2 LIMIT 1`,
-    [payload.workspaceId, payload.verifyToken]
-  );
-  if ((existing.rowCount || 0) > 0) {
-    throw new Error('Já existe um canal com este verify_token neste workspace.');
+  // Check if already exists
+  const existing = await findChannelByExternalId(type, externalPageId);
+  if (existing) {
+    throw new Error('Canal já conectado com este ID.');
   }
 
-  const id = (await db.query('SELECT gen_random_uuid() as id')).rows[0].id as string;
-  const now = new Date().toISOString();
-  const settings = payload.fbUserId ? { fb_user_id: payload.fbUserId } : {};
+  // Determine IDs
+  const pageId = type === 'messenger' ? externalPageId : (externalPageId || null);
+  const igId = type === 'instagram' ? (igBusinessId || externalPageId) : null;
+  // Note: For IG, if igBusinessId is providing, use it. If only externalPageId is provided as "pageId || igBusinessId", we use it as igId if type is instagram.
 
-  // --- AUTOMATION: Subscribe App to Page Webhooks ---
-  if (payload.externalPageId && payload.accessToken) {
-    try {
-      let fields: string[] = [];
-
-      if (payload.type === 'instagram') {
-        fields = [
-          'messages',
-          'messaging_postbacks',
-          'messaging_optins',
-          'messaging_seen'
-        ];
-      } else {
-        fields = [
-          'messages',
-          'messaging_postbacks',
-          'messaging_optins',
-          'messaging_seen'
-        ];
-      }
-
-      const subscribeUrl = `https://graph.facebook.com/v18.0/${payload.externalPageId}/subscribed_apps?subscribed_fields=${fields.join(',')}&access_token=${payload.accessToken}`;
-
-      const subRes = await fetch(subscribeUrl, { method: 'POST' });
-      const subData = await subRes.json();
-
-      if (!subData.success) {
-        console.error('Falha ao inscrever App na Página (subscribed_apps):', subData);
-      } else {
-        console.log('App inscrito com sucesso na Página:', payload.externalPageId);
-      }
-    } catch (err) {
-      console.error('Erro de conexão ao tentar inscrever App:', err);
-    }
-  }
-  // --------------------------------------------------
-
+  const id = randomUUID();
 
   await db.query(
     `
       INSERT INTO meta_channels (
-        id, workspace_id, type, external_page_id, ig_business_id,
-        access_token, app_secret, verify_token, name, status, settings, created_at, updated_at
-      ) VALUES (
-        $1, $2, $3, $4, $5,
-        $6, $7, $8, $9, COALESCE($10, 'active'), $12, $11, $11
+        id, workspace_id, type, name, 
+        external_page_id, ig_business_id, 
+        access_token, verify_token, app_secret, 
+        status
       )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
     `,
     [
       id,
-      payload.workspaceId,
-      payload.type,
-      payload.externalPageId ?? null,
-      payload.igBusinessId ?? null,
-      payload.accessToken,
-      payload.appSecret ?? null,
-      payload.verifyToken,
-      payload.name ?? null,
-      payload.status ?? 'active',
-      now,
-      settings
+      workspaceId,
+      type,
+      name,
+      pageId, // external_page_id
+      igId,   // ig_business_id
+      accessToken,
+      verifyToken,
+      appSecret || null
     ]
   );
 
-  return { success: true, id, created_by: userId };
+  revalidatePath('/integrations/meta-messenger');
+  revalidatePath('/integrations/meta-instagram');
+
+  return { id };
 }
 
 export async function deleteMetaChannel(id: string, workspaceId: string) {
-  await requireUserInWorkspace(workspaceId);
-  const res = await db.query(
-    `DELETE FROM meta_channels WHERE id = $1 AND workspace_id = $2`,
-    [id, workspaceId]
-  );
-  return { success: (res.rowCount || 0) > 0 };
+  await db.query(`DELETE FROM meta_channels WHERE id = $1 AND workspace_id = $2`, [id, workspaceId]);
+  revalidatePath('/integrations/meta-messenger');
+  revalidatePath('/integrations/meta-instagram');
 }
 
-export async function exchangeInstagramToken(code: string, workspaceId: string, redirectUri: string) {
-  const userId = await requireUserInWorkspace(workspaceId);
+export async function exchangeInstagramToken(
+  code: string,
+  workspaceId: string,
+  redirectUri: string
+) {
+  const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
+  const clientSecret = process.env.INSTAGRAM_APP_SECRET;
 
-  const clientId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
-  const clientSecret = process.env.FACEBOOK_APP_SECRET;
-
-  // redirectUri is now passed from the client to ensure match
-
-  if (!clientSecret) {
-    throw new Error('FACEBOOK_APP_SECRET não configurado.');
+  if (!clientId || !clientSecret) {
+    throw new Error('Credenciais do Instagram não configuradas no servidor.');
   }
 
-  // 1. Exchange Code for Short-Lived Token
-  const form = new FormData();
-  form.append('client_id', clientId || '');
-  form.append('client_secret', clientSecret);
-  form.append('grant_type', 'authorization_code');
-  form.append('redirect_uri', redirectUri);
-  form.append('code', code);
+  // 1. Exchange code for short-lived access token
+  const tokenUrl = 'https://api.instagram.com/oauth/access_token';
+  const formData = new URLSearchParams();
+  formData.append('client_id', clientId);
+  formData.append('client_secret', clientSecret);
+  formData.append('grant_type', 'authorization_code');
+  formData.append('redirect_uri', redirectUri);
+  formData.append('code', code);
 
-  const shortRes = await fetch('https://api.instagram.com/oauth/access_token', {
+  const tokenRes = await fetch(tokenUrl, {
     method: 'POST',
-    body: form,
+    body: formData,
   });
-  const shortData = await shortRes.json();
 
-  if (shortData.error_type || !shortData.access_token) {
-    console.error('Instagram Token Exchange Error:', shortData);
-    throw new Error(shortData.error_message || 'Falha ao trocar código pelo token.');
+  const tokenData = await tokenRes.json();
+
+  if (tokenData.error_message || !tokenData.access_token) {
+    console.error('[INSTAGRAM_EXCHANGE_ERROR]', tokenData);
+    throw new Error(tokenData.error_message || 'Falha ao trocar código por token.');
   }
 
-  const shortToken = shortData.access_token;
-  const igUserId = shortData.user_id;
+  const shortLivedToken = tokenData.access_token;
+  const userId = tokenData.user_id; // Instagram User ID
 
-  // 2. Exchange Short-Lived for Long-Lived Token
-  const longRes = await fetch(
-    `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortToken}`
-  );
-  const longData = await longRes.json();
+  // 2. Exchange for long-lived token (optional, but good)
+  // GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret={client-secret}&access_token={short-lived-access-token}
 
-  if (!longData.access_token) {
-    console.error('Instagram Long-Lived Token Error:', longData);
-    throw new Error('Falha ao obter token de longa duração.');
+  let finalToken = shortLivedToken;
+  try {
+    const longLiveUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortLivedToken}`;
+    const longLiveRes = await fetch(longLiveUrl);
+    const longLiveData = await longLiveRes.json();
+    if (longLiveData.access_token) {
+      finalToken = longLiveData.access_token;
+    }
+  } catch (e) {
+    console.warn('Falha ao obter token de longa duração, usando curto.', e);
   }
 
-  const longToken = longData.access_token;
+  // 3. Get User Details (to get username/name)
+  // GET https://graph.instagram.com/me?fields=id,username&access_token={token}
+  const meUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${finalToken}`;
+  const meRes = await fetch(meUrl);
+  const meData = await meRes.json();
 
-  // 3. Get User Details
-  const userRes = await fetch(`https://graph.instagram.com/v19.0/me?fields=id,username,account_type&access_token=${longToken}`);
-  const userData = await userRes.json();
-
-  if (userData.error) {
+  if (!meData.id) {
     throw new Error('Falha ao obter dados do usuário Instagram.');
   }
 
-  const name = userData.username;
-  // Generate a random verify token for this channel
-  const verifyToken = crypto.randomUUID().replace(/-/g, '');
+  const name = meData.username || `Instagram ${meData.id}`;
+  const igId = meData.id;
 
   // 4. Save Channel
-  return await createMetaChannel({
+  const verifyToken = randomUUID().replace(/-/g, '');
+
+  await createMetaChannel({
     workspaceId,
     type: 'instagram',
-    name: name,
+    name,
+    externalPageId: igId, // Using IG ID as external ID
+    igBusinessId: igId,
     verifyToken,
-    accessToken: longToken,
-    externalPageId: igUserId, // For webhook subscription and ID
-    igBusinessId: igUserId,   // Main ID for the account
-    appSecret: clientSecret,
+    accessToken: finalToken,
+    appSecret: clientSecret
   });
+
+  return true;
 }
