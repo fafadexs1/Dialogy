@@ -70,6 +70,19 @@ export async function createCampaign(
         return { campaign: null, error: 'Dados da campanha incompletos.' };
     }
 
+    // --- BILLING: Check Campaign Access ---
+    const { getWorkspaceLimits } = await import('@/lib/billing-logic');
+    const { limits, plan } = await getWorkspaceLimits(workspaceId);
+
+    // Check if campaigns are allowed at all (Starter = false)
+    if (!limits.campaigns) {
+        return {
+            campaign: null,
+            error: `O plano ${plan.toUpperCase()} não permite criar Campanhas de Disparo. Faça upgrade para o plano PRO.`
+        };
+    }
+    // --------------------------------------
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');

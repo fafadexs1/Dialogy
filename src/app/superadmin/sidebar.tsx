@@ -1,56 +1,104 @@
-
 'use client';
 
 import Link from "next/link";
 import { usePathname } from 'next/navigation';
-import { Bell, Home, LineChart, Package, Package2, ShoppingCart, Users, CreditCard, HardDrive, FileText, Activity } from "lucide-react";
+import {
+    Home,
+    CreditCard,
+    FileText,
+    HardDrive,
+    Activity,
+    Users,
+    Settings,
+    LogOut,
+    LayoutDashboard
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
 
-const navItems = [
-    { href: '/superadmin/billing', label: 'Cobrancas', icon: CreditCard },
-    { href: '/superadmin/plans', label: 'Planos', icon: FileText },
-    { href: '/superadmin/clusters', label: 'Clusters', icon: HardDrive },
-    { href: '/superadmin/meta-webhooks', label: 'Webhooks Meta', icon: Activity },
-    { href: '/superadmin/users', label: 'Usuarios', icon: Users },
+const mainNavItems = [
+    { href: '/superadmin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+    { href: '/superadmin/billing', label: 'Cobranças', icon: CreditCard, exact: false },
+    { href: '/superadmin/plans', label: 'Planos', icon: FileText, exact: false },
+    { href: '/superadmin/users', label: 'Usuários', icon: Users, exact: false },
+    { href: '/superadmin/clusters', label: 'Clusters', icon: HardDrive, exact: false },
+];
+
+const configNavItems = [
+    { href: '/superadmin/meta-webhooks', label: 'Webhooks Meta', icon: Activity, exact: false },
+    { href: '/superadmin/billing/settings', label: 'Config. Faturamento', icon: Settings, exact: true },
 ];
 
 export function Sidebar() {
     const pathname = usePathname();
 
     return (
-        <div className="hidden border-r bg-muted/40 md:block">
-            <div className="flex h-full max-h-screen flex-col gap-2">
-                <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-                    <Link href="/superadmin" className="flex items-center gap-2 font-semibold">
-                        <Package2 className="h-6 w-6" />
-                        <span className="">Super Admin</span>
+        <div className="hidden border-r bg-card md:block h-screen sticky top-0">
+            <div className="flex h-full flex-col">
+                <div className="flex h-[60px] items-center border-b px-6">
+                    <Link href="/superadmin" className="flex items-center gap-2 font-bold text-lg text-primary">
+                        <Activity className="h-6 w-6" />
+                        <span className="">Dialogy Admin</span>
                     </Link>
                 </div>
-                <div className="flex-1">
-                    <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
-                        {navItems.map(item => {
-                             const isActive = pathname.startsWith(item.href);
-                             return (
+
+                <div className="flex-1 overflow-auto py-6">
+                    <nav className="grid items-start px-4 text-sm font-medium gap-1">
+                        <div className="px-2 text-xs font-semibold text-muted-foreground mb-2 mt-2 uppercase tracking-wider">
+                            Visão Geral
+                        </div>
+                        {mainNavItems.map(item => {
+                            const isActive = item.exact
+                                ? pathname === item.href
+                                : pathname.startsWith(item.href);
+
+                            return (
                                 <Link
                                     key={item.href}
                                     href={item.href}
                                     className={cn(
-                                        "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary",
-                                        isActive && "text-primary bg-muted"
+                                        "flex items-center gap-3 rounded-md px-3 py-2 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent/50",
+                                        isActive && "text-primary bg-primary/10 hover:bg-primary/15 font-semibold"
                                     )}
                                 >
                                     <item.icon className="h-4 w-4" />
                                     {item.label}
                                 </Link>
-                             )
+                            )
+                        })}
+
+                        <div className="px-2 text-xs font-semibold text-muted-foreground mb-2 mt-6 uppercase tracking-wider">
+                            Configuração
+                        </div>
+                        {configNavItems.map(item => {
+                            const isActive = item.exact
+                                ? pathname === item.href
+                                : pathname.startsWith(item.href);
+
+                            return (
+                                <Link
+                                    key={item.href}
+                                    href={item.href}
+                                    className={cn(
+                                        "flex items-center gap-3 rounded-md px-3 py-2 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent/50",
+                                        isActive && "text-primary bg-primary/10 hover:bg-primary/15 font-semibold"
+                                    )}
+                                >
+                                    <item.icon className="h-4 w-4" />
+                                    {item.label}
+                                </Link>
+                            )
                         })}
                     </nav>
                 </div>
-                <div className="mt-auto p-4">
-                    <Button size="sm" className="w-full" asChild>
-                         <Link href="/inbox">Voltar ao App</Link>
+
+                <div className="p-4 border-t">
+                    <Button variant="outline" className="w-full justify-start gap-2" asChild>
+                        <Link href="/inbox">
+                            <LogOut className="w-4 h-4" />
+                            Voltar ao App
+                        </Link>
                     </Button>
                 </div>
             </div>

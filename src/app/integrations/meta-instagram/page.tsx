@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import type { MetaChannel, User } from '@/lib/types';
-import { createMetaChannel, listMetaChannels, deleteMetaChannel } from '@/actions/meta-channels';
+import { createMetaChannel, listMetaChannels, deleteMetaChannel, exchangeInstagramToken } from '@/actions/meta-channels';
 import { Loader2, Trash2, Link2, RefreshCw, Wand2, Instagram, Check, Copy, ArrowRight, ShieldCheck, Key, Laptop, Settings, Facebook } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -16,6 +16,7 @@ import { FacebookLoginButton } from '@/components/integrations/facebook-login-bu
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from '@/components/ui/separator';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 function useOrigin() {
   return useMemo(() => (typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || ''), []);
@@ -35,9 +36,12 @@ export default function MetaInstagramIntegrationPage() {
   const { toast } = useToast();
   const origin = useOrigin();
   const user = useCurrentUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [channels, setChannels] = useState<MetaChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [isExchanging, setIsExchanging] = useState(false);
 
   // Wizard States
   const [step, setStep] = useState(1);
@@ -86,6 +90,36 @@ export default function MetaInstagramIntegrationPage() {
       loadChannels(user.activeWorkspaceId);
     }
   }, [user?.activeWorkspaceId]);
+
+  // --- Instagram Login Code Exchange ---
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (code && user?.activeWorkspaceId && !isExchanging) {
+      const handleExchange = async () => {
+        setIsExchanging(true);
+        toast({ title: 'Conectando...', description: 'Trocando código de autorização...' });
+        try {
+          const currentRedirectUri = `${window.location.origin}/integrations/meta-instagram`;
+          await exchangeInstagramToken(code, user.activeWorkspaceId!, currentRedirectUri);
+          toast({ title: 'Sucesso!', description: 'Instagram conectado com sucesso.' });
+
+          // Clear query params
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, '', newUrl);
+
+          loadChannels(user.activeWorkspaceId!);
+        } catch (error: any) {
+          console.error(error);
+          toast({ title: 'Erro na conexão', description: error.message || 'Falha ao conectar Instagram.', variant: 'destructive' });
+        } finally {
+          setIsExchanging(false);
+        }
+      };
+
+      handleExchange();
+    }
+  }, [searchParams, user?.activeWorkspaceId]);
+  // -------------------------------------
 
   const handleCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -179,6 +213,18 @@ export default function MetaInstagramIntegrationPage() {
     }
   };
 
+  const handleInstagramLogin = () => {
+    const currentRedirectUri = `${window.location.origin}/integrations/meta-instagram`;
+    const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
+    const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${encodeURIComponent(currentRedirectUri)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights`;
+
+    console.log('[Instagram Auth] Client ID:', clientId);
+    console.log('[Instagram Auth] Redirect URI:', currentRedirectUri);
+    console.log('[Instagram Auth] URL:', authUrl);
+
+    window.location.href = authUrl;
+  };
+
   return (
     <div className="flex flex-col h-full bg-muted/10">
       <div className="p-8 max-w-6xl mx-auto w-full space-y-8">
@@ -224,125 +270,103 @@ export default function MetaInstagramIntegrationPage() {
                   <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                     <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
                       <TabsList className="grid w-full grid-cols-2 mb-6">
-                        <TabsTrigger value="automatic">Automático (Recomendado)</TabsTrigger>
-                        <TabsTrigger value="manual">Manual (Avançado)</TabsTrigger>
+                        <TabsTrigger value="automatic">Automático (Novo)</TabsTrigger>
+                        <TabsTrigger value="manual">Manual / Legacy</TabsTrigger>
                       </TabsList>
 
                       <TabsContent value="automatic" className="space-y-6">
                         <Alert className="bg-purple-50/50 border-purple-100 text-purple-800 dark:bg-purple-950/20 dark:border-purple-900/50 dark:text-purple-300">
                           <AlertTitle className="flex items-center gap-2 font-semibold">
-                            <Laptop className="h-4 w-4" /> Login com Facebook
+                            <Instagram className="h-4 w-4" /> Login com Instagram
                           </AlertTitle>
                           <AlertDescription className="text-sm mt-1">
-                            Conecte sua conta do Facebook para listar as contas do Instagram Business vinculadas às suas páginas.
+                            Use sua conta do Instagram Business para conectar diretamente.
                           </AlertDescription>
                         </Alert>
 
-                        <div className="space-y-4">
-                          {!fbAppId && (
-                            <Alert variant="destructive" className="mb-4">
-                              <AlertTitle>Configuração Pendente</AlertTitle>
-                              <AlertDescription>
-                                O <strong>App ID do Facebook</strong> não foi configurado no arquivo .env.
-                                Adicione <code>NEXT_PUBLIC_FACEBOOK_APP_ID</code> para usar o login automático.
-                              </AlertDescription>
-                            </Alert>
-                          )}
-
-                          {availableAccounts.length === 0 ? (
-                            <div className="flex justify-center py-6">
-                              <FacebookLoginButton
-                                appId={fbAppId}
-                                onLoginSuccess={handleFacebookLoginSuccess}
-                                label="Continuar com Facebook"
-                                className="w-full max-w-sm h-12 text-base shadow-sm bg-[#C13584] hover:bg-[#833AB4]"
-                              />
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <Label>Selecione a Conta do Instagram:</Label>
-                              <RadioGroup value={selectedAccountId} onValueChange={handleAccountSelection} className="grid grid-cols-1 gap-3">
-                                {availableAccounts.map(acc => (
-                                  <div key={acc.id}>
-                                    <RadioGroupItem value={acc.id} id={acc.id} className="peer sr-only" />
-                                    <Label
-                                      htmlFor={acc.id}
-                                      className="flex items-center justify-between rounded-lg border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary transition-all cursor-pointer"
-                                    >
-                                      <div className="flex items-center gap-3">
-                                        {acc.profile_picture_url ? (
-                                          // eslint-disable-next-line @next/next/no-img-element
-                                          <img src={acc.profile_picture_url} alt={acc.name} className="w-10 h-10 rounded-full" />
-                                        ) : (
-                                          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                                            <Instagram className="h-5 w-5 text-muted-foreground" />
-                                          </div>
-                                        )}
-                                        <div>
-                                          <div className="font-semibold text-lg">@{acc.username}</div>
-                                          <div className="text-xs text-muted-foreground">Via Página: {acc.page_name}</div>
-                                        </div>
-                                      </div>
-                                      {selectedAccountId === acc.id && <Check className="h-5 w-5 text-primary" />}
-                                    </Label>
-                                  </div>
-                                ))}
-                              </RadioGroup>
-                            </div>
-                          )}
-                        </div>
-                        <div className="pt-4 flex justify-end">
+                        <div className="flex justify-center py-6">
                           <Button
-                            type="button"
-                            onClick={() => handleCreate()}
-                            disabled={saving || !form.accessToken || !form.igBusinessId}
-                            className="bg-pink-600 hover:bg-pink-700 text-white min-w-[150px]"
+                            onClick={handleInstagramLogin}
+                            className="w-full max-w-sm h-12 text-base shadow-sm bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-90 text-white"
+                            disabled={isExchanging}
                           >
-                            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            <Check className="mr-2 h-4 w-4" /> Conectar Instagram
+                            {isExchanging ? (
+                              <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Conectando...</>
+                            ) : (
+                              <><Instagram className="mr-2 h-5 w-5" /> Conectar com Instagram</>
+                            )}
                           </Button>
                         </div>
                       </TabsContent>
 
                       <TabsContent value="manual" className="space-y-6">
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Nome do Canal</Label>
-                            <Input
-                              value={form.name}
-                              onChange={(e) => setForm({ ...form, name: e.target.value })}
-                              placeholder="Ex: Instagram Loja"
-                            />
-                          </div>
+                        <Alert className="mb-4">
+                          <AlertTitle>Modo Legacy (Facebook)</AlertTitle>
+                          <AlertDescription>
+                            Conecte via Facebook Login para listar páginas vinculadas.
+                          </AlertDescription>
+                        </Alert>
 
-                          <div className="space-y-2">
-                            <Label>Instagram Business ID</Label>
-                            <Input
-                              required
-                              value={form.igBusinessId}
-                              onChange={(e) => setForm({ ...form, igBusinessId: e.target.value })}
-                              placeholder="Ex: 17841..."
-                              className="font-mono text-sm"
-                            />
-                          </div>
+                        {!fbAppId && (
+                          <Alert variant="destructive" className="mb-4">
+                            <AlertDescription>NEXT_PUBLIC_FACEBOOK_APP_ID não configurado.</AlertDescription>
+                          </Alert>
+                        )}
 
-                          <div className="space-y-2">
-                            <Label>Token de Acesso (Page Token)</Label>
-                            <Input
-                              required
-                              type="password"
-                              value={form.accessToken}
-                              onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
-                              placeholder="EAA..."
-                              className="font-mono text-sm"
-                            />
+                        <div className="flex justify-center mb-6">
+                          <FacebookLoginButton
+                            appId={fbAppId}
+                            onLoginSuccess={handleFacebookLoginSuccess}
+                            label="Buscar Paginas via Facebook"
+                            className="w-full max-w-sm"
+                          />
+                        </div>
+
+                        {/* Existing manual connection fields if needed, or just list accounts found via FB */}
+                        {availableAccounts.length > 0 && (
+                          <div className="space-y-3">
+                            <Label>Selecione a Conta do Instagram (via Facebook):</Label>
+                            <RadioGroup value={selectedAccountId} onValueChange={handleAccountSelection} className="grid grid-cols-1 gap-3">
+                              {availableAccounts.map(acc => (
+                                <div key={acc.id}>
+                                  <RadioGroupItem value={acc.id} id={acc.id} className="peer sr-only" />
+                                  <Label
+                                    htmlFor={acc.id}
+                                    className="flex items-center justify-between rounded-lg border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary transition-all cursor-pointer"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      {acc.profile_picture_url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={acc.profile_picture_url} alt={acc.name} className="w-10 h-10 rounded-full" />
+                                      ) : (
+                                        <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                                          <Instagram className="h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="font-semibold text-lg">@{acc.username}</div>
+                                        <div className="text-xs text-muted-foreground">Via Página: {acc.page_name}</div>
+                                      </div>
+                                    </div>
+                                    {selectedAccountId === acc.id && <Check className="h-5 w-5 text-primary" />}
+                                  </Label>
+                                </div>
+                              ))}
+                            </RadioGroup>
+
+                            <div className="pt-4 flex justify-end">
+                              <Button
+                                type="button"
+                                onClick={() => handleCreate()}
+                                disabled={saving || !form.accessToken || !form.igBusinessId}
+                                className="bg-pink-600 hover:bg-pink-700 text-white min-w-[150px]"
+                              >
+                                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                <Check className="mr-2 h-4 w-4" /> Conectar Selecionada
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="pt-4 flex justify-end">
-                          <Button type="button" onClick={() => setStep(2)} disabled={!form.accessToken || !form.igBusinessId}>
-                            Próximo: Configurar Webhook <ArrowRight className="ml-2 h-4 w-4" />
-                          </Button>
-                        </div>
+                        )}
                       </TabsContent>
                     </Tabs>
                   </div>

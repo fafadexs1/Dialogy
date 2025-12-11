@@ -388,8 +388,8 @@ export async function persistNormalizedMessage(params: {
   fromMe?: boolean;
   senderUserId?: string | null;
   senderSystemAgentId?: string | null;
+  id?: string;
 }) {
-  const id = randomUUID();
   const {
     channel,
     chat,
@@ -404,7 +404,10 @@ export async function persistNormalizedMessage(params: {
     fromMe = direction === 'outgoing',
     senderUserId,
     senderSystemAgentId,
+    id: providedId,
   } = params;
+
+  const id = providedId || randomUUID();
 
   const result = await db.query(
     `

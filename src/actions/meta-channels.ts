@@ -75,8 +75,7 @@ export async function createMetaChannel(payload: {
           'messages',
           'messaging_postbacks',
           'messaging_optins',
-          'message_deliveries',
-          'message_reads'
+          'messaging_seen'
         ];
       }
 
@@ -133,4 +132,76 @@ export async function deleteMetaChannel(id: string, workspaceId: string) {
     [id, workspaceId]
   );
   return { success: (res.rowCount || 0) > 0 };
+}
+
+export async function exchangeInstagramToken(code: string, workspaceId: string, redirectUri: string) {
+  const userId = await requireUserInWorkspace(workspaceId);
+
+  const clientId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+  const clientSecret = process.env.FACEBOOK_APP_SECRET;
+
+  // redirectUri is now passed from the client to ensure match
+
+  if (!clientSecret) {
+    throw new Error('FACEBOOK_APP_SECRET não configurado.');
+  }
+
+  // 1. Exchange Code for Short-Lived Token
+  const form = new FormData();
+  form.append('client_id', clientId || '');
+  form.append('client_secret', clientSecret);
+  form.append('grant_type', 'authorization_code');
+  form.append('redirect_uri', redirectUri);
+  form.append('code', code);
+
+  const shortRes = await fetch('https://api.instagram.com/oauth/access_token', {
+    method: 'POST',
+    body: form,
+  });
+  const shortData = await shortRes.json();
+
+  if (shortData.error_type || !shortData.access_token) {
+    console.error('Instagram Token Exchange Error:', shortData);
+    throw new Error(shortData.error_message || 'Falha ao trocar código pelo token.');
+  }
+
+  const shortToken = shortData.access_token;
+  const igUserId = shortData.user_id;
+
+  // 2. Exchange Short-Lived for Long-Lived Token
+  const longRes = await fetch(
+    `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortToken}`
+  );
+  const longData = await longRes.json();
+
+  if (!longData.access_token) {
+    console.error('Instagram Long-Lived Token Error:', longData);
+    throw new Error('Falha ao obter token de longa duração.');
+  }
+
+  const longToken = longData.access_token;
+
+  // 3. Get User Details
+  const userRes = await fetch(`https://graph.instagram.com/v19.0/me?fields=id,username,account_type&access_token=${longToken}`);
+  const userData = await userRes.json();
+
+  if (userData.error) {
+    throw new Error('Falha ao obter dados do usuário Instagram.');
+  }
+
+  const name = userData.username;
+  // Generate a random verify token for this channel
+  const verifyToken = crypto.randomUUID().replace(/-/g, '');
+
+  // 4. Save Channel
+  return await createMetaChannel({
+    workspaceId,
+    type: 'instagram',
+    name: name,
+    verifyToken,
+    accessToken: longToken,
+    externalPageId: igUserId, // For webhook subscription and ID
+    igBusinessId: igUserId,   // Main ID for the account
+    appSecret: clientSecret,
+  });
 }

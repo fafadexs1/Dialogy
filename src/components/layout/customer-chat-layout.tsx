@@ -194,7 +194,14 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, []);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
-    tabIdRef.current = window.crypto.randomUUID();
+    // Safe UUID generation fallback
+    const genId = () => {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        try { return crypto.randomUUID(); } catch (e) { }
+      }
+      return Math.random().toString(36).substring(2) + Date.now().toString(36);
+    };
+    tabIdRef.current = genId();
     console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
 
@@ -241,14 +248,30 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       }
       const chat = useInboxStore.getState().chats.find((c) => c.id === data.chat_id);
       let sender = undefined;
+
+      // Helper to determine if message is from an automated agent
+      const isSystemAgent = data.sender_system_agent_id || metadata?.sentBy === 'system_agent' || metadata?.sentBy === 'autopilot';
+
       if (data.from_me) {
-        if (chat?.agent) {
-          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url, type: 'user' } as const;
+        if (isSystemAgent) {
+          // Use a generic agent profile or the chat's agent if available (but explicitly mark as system/bot if needed)
+          sender = {
+            id: data.sender_system_agent_id || 'system_agent',
+            name: 'Assistente Virtual', // Or use a reliable way to get the agent name if possible
+            avatar: chat?.agent?.avatar_url || undefined, // Fallback to chat agent avatar
+            type: 'user'
+          } as const;
+        } else if (data.sender_user_id === initialUser?.id && initialUser) {
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
+        } else if (chat?.agent && (!data.sender_user_id || data.sender_user_id === chat.agent.id)) {
+          // If sender_id matches chat agent or is missing (legacy), use chat agent
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url ?? undefined, type: 'user' } as const;
         } else if (initialUser) {
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url, type: 'user' } as const;
+          // Fallback to current user if nothing else matches (e.g. optimistic without ID persistence yet)
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
         }
       } else if (chat?.contact) {
-        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url, type: 'contact' } as const;
+        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url ?? undefined, type: 'contact' } as const;
       }
       return {
         id: data.id,

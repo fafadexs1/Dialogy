@@ -572,6 +572,7 @@ export const sendAgentMessageAction = withDebug(
                         fromMe: true,
                         senderUserId: user.id,
                         senderSystemAgentId: null,
+                        id: messageId,
                     });
                     return { success: true };
                 } catch (metaErr) {

@@ -76,6 +76,24 @@ export async function createEvolutionApiInstance(
         return { success: false, error: 'O apelido da instância é obrigatório.' }
     }
 
+    // --- BILLING: Check Channel Limits ---
+    const { checkLimit } = await import('@/lib/billing-logic');
+    // Count active instances
+    const countRes = await db.query(
+        'SELECT COUNT(*) as count FROM evolution_api_instances WHERE workspace_id = $1',
+        [workspaceId]
+    );
+    const currentCount = parseInt(countRes.rows[0].count, 10);
+
+    const limitCheck = await checkLimit(workspaceId, 'whatsapp', currentCount);
+    if (!limitCheck.allowed) {
+        return {
+            success: false,
+            error: `O limite de conexões de WhatsApp do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Fale com seu gerente de contas.`
+        };
+    }
+    // -------------------------------------
+
     const isBaileys = payload.integration === 'WHATSAPP-BAILEYS';
     if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };

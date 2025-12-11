@@ -152,6 +152,24 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
 
         const { workspace_id: workspaceId, id: inviteId } = invite;
 
+        // --- BILLING: Check User Limits ---
+        const { checkLimit } = await import('@/lib/billing-logic');
+        // Count current users
+        const userCountRes = await client.query(
+            'SELECT COUNT(*) as count FROM user_workspace_roles WHERE workspace_id = $1',
+            [workspaceId]
+        );
+        const currentUserCount = parseInt(userCountRes.rows[0].count, 10);
+
+        const limitCheck = await checkLimit(workspaceId, 'users', currentUserCount);
+        if (!limitCheck.allowed) {
+            return {
+                success: false,
+                error: `O limite de usuários do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Faça upgrade para aceitar mais membros.`
+            };
+        }
+        // ----------------------------------
+
         // 2. Check if user is already a member
         const memberCheck = await client.query(
             'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]

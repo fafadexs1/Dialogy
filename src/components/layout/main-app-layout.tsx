@@ -26,8 +26,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     '/reset-password',
     '/join',
     '/privacy',
-    '/terms',
-    '/support'
+    '/terms'
   ];
 
   const isRoot = pathname === '/';
