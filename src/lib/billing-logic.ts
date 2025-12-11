@@ -4,7 +4,12 @@ import { PLANS, PlanType, PlanLimits } from '@/lib/plans';
 export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: PlanType, limits: PlanLimits }> {
     try {
         const res = await db.query(
-            'SELECT plan, custom_limits FROM workspaces WHERE id = $1',
+            `SELECT 
+                COALESCE(b.plan, 'starter') as plan, 
+                w.custom_limits 
+             FROM workspaces w
+             LEFT JOIN billing_info b ON b.workspace_id = w.id
+             WHERE w.id = $1`,
             [workspaceId]
         );
 

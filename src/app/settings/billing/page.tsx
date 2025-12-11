@@ -181,7 +181,7 @@ export default function BillingPage() {
                                         className="w-full"
                                         variant={isCurrent ? "outline" : "default"}
                                         disabled={isCurrent}
-                                        onClick={() => window.open(`https://wa.me/5511999999999?text=Olá, gostaria de fazer upgrade para o plano ${plan.label}`, '_blank')}
+                                        onClick={() => window.location.href = '/pricing'}
                                     >
                                         {isCurrent ? "Plano Atual" : "Fazer Upgrade"}
                                     </Button>

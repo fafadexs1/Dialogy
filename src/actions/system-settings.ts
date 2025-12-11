@@ -32,14 +32,8 @@ export async function saveSystemSettingAction(key: string, value: string): Promi
     }
 }
 
-export async function getSystemSettingsAction(keys: string[]): Promise<{ [key: string]: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user || !await checkSuperAdmin(user.id)) {
-        return {};
-    }
-
+// Internal function (No Auth Check) - Use with caution
+export async function getSystemSettings(keys: string[]): Promise<{ [key: string]: string }> {
     try {
         const res = await db.query(`SELECT key, value FROM system_settings WHERE key = ANY($1)`, [keys]);
         const settings: { [key: string]: string } = {};
@@ -48,7 +42,19 @@ export async function getSystemSettingsAction(keys: string[]): Promise<{ [key: s
         });
         return settings;
     } catch (error) {
-        console.error('[GET_SYSTEM_SETTINGS] Error:', error);
+        console.error('[GET_SYSTEM_SETTINGS_INTERNAL] Error:', error);
         return {};
     }
+}
+
+// Public Action (Protected by Auth)
+export async function getSystemSettingsAction(keys: string[]): Promise<{ [key: string]: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user || !await checkSuperAdmin(user.id)) {
+        return {};
+    }
+
+    return getSystemSettings(keys);
 }

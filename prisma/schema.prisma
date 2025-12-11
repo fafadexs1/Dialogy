@@ -7,3 +7,21 @@ generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
+
+model User {
+  id        String   @id @default(uuid())
+  full_name String
+  email     String   @unique
+  workspaces Workspace[]
+  @@map("users")
+}
+
+model Workspace {
+  id            String   @id @default(uuid())
+  name          String
+  owner_id      String
+  owner         User     @relation(fields: [owner_id], references: [id])
+  custom_limits Json?
+  
+  @@map("workspaces")
+}

@@ -745,6 +745,13 @@ CREATE TABLE IF NOT EXISTS public.plan_integrations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_integration on public.plan_integrations(plan_id, integration_id);
 
+-- System Settings (Key-Value pairs for configs)
+create table if not exists public.system_settings (
+  key text primary key,
+  value text,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 
 -- ============================================
 -- Gatilho para sincronização de novos usuários (Supabase Auth)
@@ -828,7 +835,9 @@ select public._create_updated_at_trigger('public.instance_costs'); -- NEW
 select public._create_updated_at_trigger('public.plans'); -- NEW
 select public._create_updated_at_trigger('public.meta_channels'); -- NEW
 select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
+select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
 select public._create_updated_at_trigger('public.meta_conversations'); -- NEW
+select public._create_updated_at_trigger('public.system_settings'); -- NEW
 
 drop function if exists public._create_updated_at_trigger(regclass);
 `;
@@ -846,20 +855,20 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Criando tabelas, tipos, e funções se não existirem...');
     await client.query(TABLE_CREATION_QUERIES);
     console.log('[DB_SETUP] Verificação/criação de estrutura do DB concluída.');
-    
+
     // --- 2. Popular permissões padrão ---
     console.log('[DB_SETUP] Verificando e populando a tabela de permissões...');
     const existingPermissions = await client.query('SELECT id FROM permissions');
     const existingIds = new Set(existingPermissions.rows.map(p => p.id));
-    
+
     const permissionsToInsert = PERMISSIONS.filter(p => !existingIds.has(p.id));
 
     if (permissionsToInsert.length > 0) {
-        const permValues = permissionsToInsert.map(p => `('${p.id}', '${p.category}', '${p.description.replace(/'/g, "''")}')`).join(',');
-        await client.query(`INSERT INTO permissions (id, category, description) VALUES ${permValues}`);
-        console.log(`[DB_SETUP] ${permissionsToInsert.length} novas permissões foram inseridas.`);
+      const permValues = permissionsToInsert.map(p => `('${p.id}', '${p.category}', '${p.description.replace(/'/g, "''")}')`).join(',');
+      await client.query(`INSERT INTO permissions (id, category, description) VALUES ${permValues}`);
+      console.log(`[DB_SETUP] ${permissionsToInsert.length} novas permissões foram inseridas.`);
     } else {
-        console.log('[DB_SETUP] Todas as permissões padrão já existem. Nenhuma inserção necessária.');
+      console.log('[DB_SETUP] Todas as permissões padrão já existem. Nenhuma inserção necessária.');
     }
 
     // --- 3. Popular custos iniciais ---
@@ -867,14 +876,14 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     await client.query(`
         INSERT INTO instance_costs (type, cost) VALUES ('baileys', 35.00) ON CONFLICT (type) DO NOTHING;
     `);
-     await client.query(`
+    await client.query(`
         INSERT INTO instance_costs (type, cost) VALUES ('wa_cloud', 50.00) ON CONFLICT (type) DO NOTHING;
     `);
     console.log('[DB_SETUP] Custos iniciais das instâncias garantidos.');
 
     // --- 4. Popular integrações padrão ---
     console.log('[DB_SETUP] Verificando e populando a tabela de integrações...');
-     await client.query(`
+    await client.query(`
         INSERT INTO app_integrations (id, name, description, icon_url, tag, tag_type, href, status) VALUES
         ('evolution-api', 'Evolution API', 'Gerencie as inst?ncias de WhatsApp (n?o-oficial) para conectar seus n?meros.', 'https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
         ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avan?ados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),

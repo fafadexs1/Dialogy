@@ -4,6 +4,8 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Github, Linkedin, Twitter, Mail, Globe, Award, Code, Cpu, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
+import { Navbar } from "@/components/landing/navbar";
+import { Footer } from "@/components/landing/footer";
 
 const primary = "#3b82f6";
 
@@ -74,14 +76,9 @@ export default function CreatorsPage() {
 
     return (
         <div className="min-h-screen bg-[#020617] text-white selection:bg-blue-500/30 flex flex-col">
-            {/* Navbar */}
-            <nav className="fixed top-0 w-full p-6 z-50 flex justify-between items-center bg-[#020617]/80 backdrop-blur-md border-b border-white/5">
-                <Link href="/" className="text-white/50 hover:text-white transition-colors font-medium flex items-center gap-2">
-                    ← Voltar para Home
-                </Link>
-            </nav>
+            <Navbar />
 
-            <main className="flex-1 relative overflow-hidden pt-24 pb-20 px-6">
+            <main className="flex-1 relative overflow-hidden pt-32 pb-20 px-6">
                 {/* Background Elements */}
                 <div className="absolute inset-0 overflow-hidden pointer-events-none fixed">
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-600/10 blur-[120px] rounded-full" />
@@ -172,6 +169,7 @@ export default function CreatorsPage() {
                     ))}
                 </div>
             </main>
+            <Footer />
         </div>
     );
 }

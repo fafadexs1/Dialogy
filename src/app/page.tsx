@@ -1,67 +1,23 @@
 'use client';
 
-import React, { useEffect, useRef } from "react";
-import { motion, useScroll, useTransform, useSpring } from "framer-motion";
+import React, { useEffect } from "react";
+import { motion, useScroll, useSpring } from "framer-motion";
 import {
-  ArrowRight, Play, Check, Zap, Bot, MessagesSquare,
-  BarChart3, Shield, Sparkles, Code2, Users, Globe,
-  Cpu, Lock, Rocket, Terminal
+  ArrowRight, Check, Bot, MessagesSquare,
+  BarChart3, Shield, Code2, Users, Globe,
+  Terminal, Zap
 } from "lucide-react";
 import Link from "next/link";
+import { getLandingStats } from "@/actions/landing";
+import { PLANS } from "@/lib/plans";
+import { Navbar } from "@/components/landing/navbar";
+import { Footer } from "@/components/landing/footer";
+import {
+  Section, Badge, CTAButton, GradientOrb,
+  primary, secondary, accent, darkBg, glass
+} from "@/components/landing/ui";
 
-// --- Design Tokens ---
-const primary = "#3b82f6"; // Blue 500
-const secondary = "#8b5cf6"; // Violet 500
-const accent = "#ec4899"; // Pink 500
-const darkBg = "#030712"; // Gray 950
-
-const glass = "backdrop-blur-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300";
-const glow = "shadow-[0_0_40px_rgba(59,130,246,0.15)] hover:shadow-[0_0_60px_rgba(139,92,246,0.3)]";
-
-// --- Components ---
-
-function Section({ id, children, className = "" }: { id?: string; children: React.ReactNode; className?: string }) {
-  return <section id={id} className={`w-full max-w-7xl mx-auto px-6 md:px-8 relative z-10 ${className}`}>{children}</section>;
-}
-
-function Badge({ children, className = "" }: { children: React.ReactNode, className?: string }) {
-  return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs md:text-sm font-medium border border-white/10 bg-white/5 text-white/90 ${className}`}>
-      <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> {children}
-    </span>
-  );
-}
-
-function CTAButton({ children, variant = "primary", href = "#", className = "" }: { children: React.ReactNode; variant?: "primary" | "outline" | "ghost", href?: string, className?: string }) {
-  const base = "inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 font-semibold transition-all duration-300 active:scale-[0.98]";
-
-  if (variant === "outline") {
-    return (
-      <Link href={href} className={`${base} border border-white/20 text-white hover:bg-white/10 ${className}`}>{children}</Link>
-    );
-  }
-  if (variant === "ghost") {
-    return (
-      <Link href={href} className={`${base} text-white/70 hover:text-white hover:bg-white/5 ${className}`}>{children}</Link>
-    );
-  }
-  return (
-    <Link href={href} className={`${base} text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 ${className}`}
-      style={{ background: `linear-gradient(135deg, ${primary}, ${secondary})` }}>
-      {children}
-    </Link>
-  );
-};
-
-function GradientOrb({ className = "", color = primary }: { className?: string, color?: string }) {
-  return (
-    <div
-      aria-hidden
-      className={`pointer-events-none absolute rounded-full blur-[100px] opacity-40 mix-blend-screen ${className}`}
-      style={{ background: color }}
-    />
-  );
-}
+// --- Local Components (Page Specific) ---
 
 function FeatureCard({ icon: Icon, title, description, delay = 0 }: { icon: any, title: string, description: string, delay?: number }) {
   return (
@@ -80,6 +36,77 @@ function FeatureCard({ icon: Icon, title, description, delay = 0 }: { icon: any,
         <h3 className="text-xl font-bold text-white mb-3">{title}</h3>
         <p className="text-white/60 leading-relaxed">{description}</p>
       </div>
+    </motion.div>
+  );
+}
+
+function PricingCard({ plan, popular = false, delay = 0 }: { plan: any, popular?: boolean, delay?: number }) {
+  const isEnterprise = plan.id === 'enterprise';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay, duration: 0.5 }}
+      className={`relative p-8 rounded-3xl border ${popular ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/10 bg-white/5'} flex flex-col`}
+    >
+      {popular && (
+        <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full text-xs font-bold text-white uppercase tracking-wider shadow-lg">
+          Mais Popular
+        </div>
+      )}
+
+      <div className="mb-8">
+        <h3 className="text-xl font-bold text-white mb-2">{plan.label}</h3>
+        <div className="flex items-baseline gap-1">
+          {isEnterprise ? (
+            <span className="text-3xl font-bold text-white">Sob Consulta</span>
+          ) : (
+            <>
+              <span className="text-4xl font-bold text-white">R$ {plan.price}</span>
+              <span className="text-white/60">/mês</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <ul className="space-y-4 mb-8 flex-1">
+        <li className="flex items-center gap-3 text-white/80">
+          <Check className="w-5 h-5 text-green-400 shrink-0" />
+          <span>{isEnterprise ? 'Usuários Sob Demanda' : `${plan.limits.users} Usuário${plan.limits.users > 1 ? 's' : ''}`}</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          <Check className="w-5 h-5 text-green-400 shrink-0" />
+          <span>{isEnterprise ? 'WhatsApp Sob Demanda' : `${plan.limits.whatsapp} WhatsApp${plan.limits.whatsapp > 1 ? 's' : ''}`}</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          <Check className="w-5 h-5 text-green-400 shrink-0" />
+          <span>{isEnterprise ? 'Histórico Sob Demanda' : `${plan.limits.history_months} Meses de Histórico`}</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          {plan.limits.departments ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.departments ? '' : 'text-white/30'}>Departamentos</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          {plan.limits.api ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.api ? '' : 'text-white/30'}>API de Desenvolvedor</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          {plan.limits.transcription ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.transcription ? '' : 'text-white/30'}>Transcrição de Áudio</span>
+        </li>
+        <li className="flex items-center gap-3 text-white/80">
+          {plan.limits.campaigns ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.campaigns ? '' : 'text-white/30'}>
+            Disparos em Massa {typeof plan.limits.campaigns === 'string' ? `(${plan.limits.campaigns === 'high' ? 'CSV' : 'Contatos'})` : ''}
+          </span>
+        </li>
+      </ul>
+
+      <CTAButton href="/register" variant={popular ? 'primary' : 'outline'} className="w-full">
+        {isEnterprise ? 'Falar com Vendas' : 'Começar Agora'}
+      </CTAButton>
     </motion.div>
   );
 }
@@ -105,6 +132,14 @@ export default function DialogyLanding() {
     restDelta: 0.001
   });
 
+  const [stats, setStats] = React.useState({ messages: 0, workspaces: 0 });
+
+  useEffect(() => {
+    getLandingStats().then(data => {
+      setStats(data);
+    });
+  }, []);
+
   return (
     <div className={`min-h-screen w-full bg-[${darkBg}] selection:bg-blue-500/30 selection:text-white overflow-x-hidden`}>
 
@@ -122,38 +157,7 @@ export default function DialogyLanding() {
         <GradientOrb className="w-[30vw] h-[30vw] bottom-[10%] left-[20%]" color={accent} />
       </div>
 
-      {/* Navbar */}
-      <nav className="fixed top-0 w-full z-40 backdrop-blur-md border-b border-white/5 bg-[#030712]/50">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:shadow-blue-500/40 transition-all">
-              <Bot className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xl font-bold text-white tracking-tight">Dialogy</span>
-          </Link>
-
-          <div className="hidden md:flex items-center gap-8">
-            <Link href="/developer" className="text-sm font-medium text-white/70 hover:text-white transition-colors flex items-center gap-2">
-              <Code2 className="w-4 h-4" /> Desenvolvedores
-            </Link>
-            <Link href="/creators" className="text-sm font-medium text-white/70 hover:text-white transition-colors flex items-center gap-2">
-              <Users className="w-4 h-4" /> Criadores
-            </Link>
-            <Link href="#features" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
-              Funcionalidades
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Link href="/login" className="text-sm font-medium text-white hover:text-blue-400 transition-colors hidden sm:block">
-              Entrar
-            </Link>
-            <CTAButton href="/register" className="px-5 py-2.5 text-sm">
-              Começar Agora
-            </CTAButton>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* Hero Section */}
       <header className="relative pt-32 pb-20 md:pt-48 md:pb-32 overflow-hidden">
@@ -234,11 +238,10 @@ export default function DialogyLanding() {
 
       {/* Stats Section */}
       <Section className="py-20 border-y border-white/5 bg-white/[0.02]">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-12">
-          <Stat value="10M+" label="Mensagens Processadas" />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-12">
+          <Stat value={stats.messages > 0 ? stats.messages.toLocaleString() : "..."} label="Mensagens Processadas" />
           <Stat value="99.9%" label="SLA de Uptime" />
-          <Stat value="500+" label="Clientes Enterprise" />
-          <Stat value="24/7" label="Suporte Global" />
+          <Stat value={stats.workspaces > 0 ? stats.workspaces.toLocaleString() : "..."} label="Empresas Confiando" />
         </div>
       </Section>
 
@@ -288,6 +291,23 @@ export default function DialogyLanding() {
             description="Servidores em edge garantem baixa latência e alta disponibilidade onde quer que seus clientes estejam."
             delay={0.6}
           />
+        </div>
+      </Section>
+
+      {/* Pricing Section */}
+      <Section id="pricing" className="py-32">
+        <div className="text-center max-w-3xl mx-auto mb-20">
+          <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">Planos que cabem no seu bolso</h2>
+          <p className="text-lg text-white/60">
+            Comece grátis e escale conforme sua empresa cresce. Sem surpresas no fim do mês.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <PricingCard plan={PLANS.starter} delay={0.1} />
+          <PricingCard plan={PLANS.pro} popular={true} delay={0.2} />
+          <PricingCard plan={PLANS.business} delay={0.3} />
+          <PricingCard plan={PLANS.enterprise} delay={0.4} />
         </div>
       </Section>
 
@@ -369,50 +389,7 @@ export default function DialogyLanding() {
         </div>
       </Section>
 
-      {/* Footer */}
-      <footer className="border-t border-white/10 bg-[#020617] pt-20 pb-10">
-        <Section>
-          <div className="grid md:grid-cols-4 gap-12 mb-16">
-            <div className="col-span-1 md:col-span-2">
-              <Link href="/" className="flex items-center gap-2 mb-6">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-xl font-bold text-white">Dialogy</span>
-              </Link>
-              <p className="text-white/50 max-w-sm leading-relaxed">
-                A plataforma de IA conversacional mais avançada para empresas modernas.
-                Conecte, automatize e cresça com Dialogy.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-white font-semibold mb-6">Produto</h4>
-              <ul className="space-y-4 text-white/60">
-                <li><Link href="#features" className="hover:text-blue-400 transition-colors">Funcionalidades</Link></li>
-                <li><Link href="/pricing" className="hover:text-blue-400 transition-colors">Preços</Link></li>
-                <li><Link href="/integrations" className="hover:text-blue-400 transition-colors">Integrações</Link></li>
-                <li><Link href="/changelog" className="hover:text-blue-400 transition-colors">Changelog</Link></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-white font-semibold mb-6">Recursos</h4>
-              <ul className="space-y-4 text-white/60">
-                <li><Link href="/developer" className="hover:text-blue-400 transition-colors">Wiki do Desenvolvedor</Link></li>
-                <li><Link href="/creators" className="hover:text-blue-400 transition-colors">Criadores</Link></li>
-                <li><Link href="/blog" className="hover:text-blue-400 transition-colors">Blog</Link></li>
-                <li><Link href="/support" className="hover:text-blue-400 transition-colors">Suporte</Link></li>
-              </ul>
-            </div>
-          </div>
-          <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/40">
-            <p>© {new Date().getFullYear()} Dialogy Inc. Todos os direitos reservados.</p>
-            <div className="flex gap-6">
-              <Link href="/privacy" className="hover:text-white transition-colors">Política de Privacidade</Link>
-              <Link href="/terms" className="hover:text-white transition-colors">Termos de Serviço</Link>
-            </div>
-          </div>
-        </Section>
-      </footer>
+      <Footer />
     </div>
   );
 }
