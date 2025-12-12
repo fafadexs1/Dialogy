@@ -1,0 +1,186 @@
+[2025-12-12T17:05:03.164Z] Received webhook body length: 3806
+[2025-12-12T17:05:03.166Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.180Z] Received webhook body length: 1675
+[2025-12-12T17:05:03.180Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.289Z] Event constructed: payment_method.attached
+[2025-12-12T17:05:03.322Z] Received webhook body length: 5842
+[2025-12-12T17:05:03.323Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.325Z] Event constructed: charge.succeeded
+[2025-12-12T17:05:03.345Z] Event constructed: customer.subscription.created
+[2025-12-12T17:05:03.438Z] Received webhook body length: 2198
+[2025-12-12T17:05:03.439Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.444Z] Received webhook body length: 3957
+[2025-12-12T17:05:03.444Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.450Z] Received webhook body length: 1982
+[2025-12-12T17:05:03.451Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.461Z] Event constructed: payment_intent.succeeded
+[2025-12-12T17:05:03.473Z] Event constructed: checkout.session.completed
+[2025-12-12T17:05:03.475Z] Checkout Session Completed: ID=cs_test_b1GJnSaFoioIhqVq33Q452WgAEEnK37hMZkXX92TCbt65E3VRAGY5987Cy, Metadata={"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","planId":"pro"}
+[2025-12-12T17:05:03.475Z] Processing update for Workspace: e3b476a1-5de8-4744-80b5-a5d23fe15fab, Plan: pro
+[2025-12-12T17:05:03.505Z] Updating custom_limits for workspace
+[2025-12-12T17:05:03.541Z] Received webhook body length: 5742
+[2025-12-12T17:05:03.541Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.587Z] Webhook Handler Error: column "plan" of relation "workspaces" does not exist 
+Stack: error: column "plan" of relation "workspaces" does not exist
+    at C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async POST (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\[root-of-the-server]__754bdbf3._.js:345:29)
+    at async AppRouteRouteModule.do (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:37789)
+    at async AppRouteRouteModule.handle (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:45045)
+    at async responseGenerator (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14339:38)
+    at async AppRouteRouteModule.handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:1:187851)
+    at async handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14401:32)
+    at async handler (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14454:13)
+    at async DevServer.renderToResponseWithComponentsImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1413:9)
+    at async DevServer.renderPageComponent (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1465:24)
+    at async DevServer.renderToResponseImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1515:32)
+    at async DevServer.pipeImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1021:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\next-server.js:394:17)
+    at async DevServer.handleRequestImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:912:17)
+    at async C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:382:20
+    at async Span.traceAsyncFn (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\trace\trace.js:157:20)
+    at async DevServer.handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:378:24)
+    at async invokeRender (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:240:21)
+    at async handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:436:24)
+    at async requestHandlerImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:484:13)
+    at async Server.requestListener (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\start-server.js:226:13)
+[2025-12-12T17:05:03.598Z] Event constructed: invoice.created
+[2025-12-12T17:05:03.612Z] Received webhook body length: 5744
+[2025-12-12T17:05:03.613Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.615Z] Event constructed: payment_intent.created
+[2025-12-12T17:05:03.640Z] Event constructed: invoice.finalized
+[2025-12-12T17:05:03.648Z] Received webhook body length: 5739
+[2025-12-12T17:05:03.648Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.670Z] Event constructed: invoice.paid
+[2025-12-12T17:05:03.732Z] Received webhook body length: 5752
+[2025-12-12T17:05:03.733Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:03.754Z] Event constructed: invoice.payment_succeeded
+[2025-12-12T17:05:35.901Z] Received webhook body length: 843
+[2025-12-12T17:05:35.902Z] Secret found: true, Signature present: true
+[2025-12-12T17:05:36.052Z] Event constructed: invoice_payment.paid
+[2025-12-12T17:06:49.059Z] Received webhook body length: 1285
+[2025-12-12T17:06:49.060Z] Secret found: true, Signature present: true
+[2025-12-12T17:06:49.091Z] Event constructed: customer.created
+[2025-12-12T17:07:02.058Z] Received webhook body length: 3806
+[2025-12-12T17:07:02.059Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.097Z] Received webhook body length: 3962
+[2025-12-12T17:07:02.098Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.121Z] Received webhook body length: 1675
+[2025-12-12T17:07:02.122Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.196Z] Event constructed: checkout.session.completed
+[2025-12-12T17:07:02.198Z] Checkout Session Completed: ID=cs_test_b1bnFlyOjvesydiNvwc6EILoWPUxATenk8WWpEZ6CAX6Mquao9uy96uyBw, Metadata={"workspaceId":"1042b0c0-e7b3-4152-99b8-434e2e6863a2","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","planId":"business"}
+[2025-12-12T17:07:02.199Z] Processing update for Workspace: 1042b0c0-e7b3-4152-99b8-434e2e6863a2, Plan: business
+[2025-12-12T17:07:02.204Z] Event constructed: charge.succeeded
+[2025-12-12T17:07:02.213Z] Received webhook body length: 1311
+[2025-12-12T17:07:02.213Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.219Z] Updating custom_limits for workspace
+[2025-12-12T17:07:02.246Z] Webhook Handler Error: column "plan" of relation "workspaces" does not exist 
+Stack: error: column "plan" of relation "workspaces" does not exist
+    at C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async POST (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\[root-of-the-server]__754bdbf3._.js:345:29)
+    at async AppRouteRouteModule.do (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:37789)
+    at async AppRouteRouteModule.handle (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:45045)
+    at async responseGenerator (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14339:38)
+    at async AppRouteRouteModule.handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:1:187851)
+    at async handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14401:32)
+    at async handler (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14454:13)
+    at async DevServer.renderToResponseWithComponentsImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1413:9)
+    at async DevServer.renderPageComponent (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1465:24)
+    at async DevServer.renderToResponseImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1515:32)
+    at async DevServer.pipeImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1021:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\next-server.js:394:17)
+    at async DevServer.handleRequestImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:912:17)
+    at async C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:382:20
+    at async Span.traceAsyncFn (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\trace\trace.js:157:20)
+    at async DevServer.handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:378:24)
+    at async invokeRender (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:240:21)
+    at async handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:436:24)
+    at async requestHandlerImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:484:13)
+    at async Server.requestListener (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\start-server.js:226:13)
+[2025-12-12T17:07:02.249Z] Event constructed: customer.updated
+[2025-12-12T17:07:02.279Z] Event constructed: payment_method.attached
+[2025-12-12T17:07:02.299Z] Received webhook body length: 5847
+[2025-12-12T17:07:02.300Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.332Z] Event constructed: customer.subscription.created
+[2025-12-12T17:07:02.354Z] Received webhook body length: 2198
+[2025-12-12T17:07:02.355Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.384Z] Event constructed: payment_intent.succeeded
+[2025-12-12T17:07:02.410Z] Received webhook body length: 1982
+[2025-12-12T17:07:02.411Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.440Z] Event constructed: payment_intent.created
+[2025-12-12T17:07:02.620Z] Received webhook body length: 5757
+[2025-12-12T17:07:02.621Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.639Z] Received webhook body length: 5759
+[2025-12-12T17:07:02.640Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.649Z] Event constructed: invoice.created
+[2025-12-12T17:07:02.667Z] Event constructed: invoice.finalized
+[2025-12-12T17:07:02.732Z] Received webhook body length: 5754
+[2025-12-12T17:07:02.733Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.761Z] Event constructed: invoice.paid
+[2025-12-12T17:07:02.780Z] Received webhook body length: 5767
+[2025-12-12T17:07:02.780Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:02.808Z] Event constructed: invoice.payment_succeeded
+[2025-12-12T17:07:38.148Z] Received webhook body length: 843
+[2025-12-12T17:07:38.148Z] Secret found: true, Signature present: true
+[2025-12-12T17:07:38.298Z] Event constructed: invoice_payment.paid
+[2025-12-12T17:09:50.814Z] Received webhook body length: 3806
+[2025-12-12T17:09:50.815Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:50.853Z] Received webhook body length: 1675
+[2025-12-12T17:09:50.853Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:50.997Z] Event constructed: charge.succeeded
+[2025-12-12T17:09:51.000Z] Event constructed: payment_method.attached
+[2025-12-12T17:09:51.236Z] Received webhook body length: 2198
+[2025-12-12T17:09:51.237Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.243Z] Received webhook body length: 5847
+[2025-12-12T17:09:51.243Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.249Z] Received webhook body length: 1982
+[2025-12-12T17:09:51.249Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.267Z] Event constructed: payment_intent.succeeded
+[2025-12-12T17:09:51.272Z] Event constructed: customer.subscription.created
+[2025-12-12T17:09:51.379Z] Received webhook body length: 5757
+[2025-12-12T17:09:51.380Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.395Z] Event constructed: payment_intent.created
+[2025-12-12T17:09:51.409Z] Event constructed: invoice.created
+[2025-12-12T17:09:51.454Z] Received webhook body length: 5759
+[2025-12-12T17:09:51.455Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.484Z] Event constructed: invoice.finalized
+[2025-12-12T17:09:51.520Z] Received webhook body length: 3951
+[2025-12-12T17:09:51.521Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.551Z] Event constructed: checkout.session.completed
+[2025-12-12T17:09:51.553Z] Checkout Session Completed: ID=cs_test_b1PpEzNvgibo0wcSIJzawiMfSDyy7wFyYS1lJPPJcsxoZJ8niDX5Km8LQX, Metadata={"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","planId":"business"}
+[2025-12-12T17:09:51.554Z] Processing update for Workspace: e3b476a1-5de8-4744-80b5-a5d23fe15fab, Plan: business
+[2025-12-12T17:09:51.586Z] Received webhook body length: 5754
+[2025-12-12T17:09:51.587Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.588Z] Updating custom_limits for workspace
+[2025-12-12T17:09:51.616Z] Event constructed: invoice.paid
+[2025-12-12T17:09:51.626Z] Webhook Handler Error: column "plan" of relation "workspaces" does not exist 
+Stack: error: column "plan" of relation "workspaces" does not exist
+    at C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async POST (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\[root-of-the-server]__754bdbf3._.js:345:29)
+    at async AppRouteRouteModule.do (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:37789)
+    at async AppRouteRouteModule.handle (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:5:45045)
+    at async responseGenerator (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14339:38)
+    at async AppRouteRouteModule.handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.dev.js:1:187851)
+    at async handleResponse (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14401:32)
+    at async handler (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\.next\dev\server\chunks\d17e0_next_14e01eb9._.js:14454:13)
+    at async DevServer.renderToResponseWithComponentsImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1413:9)
+    at async DevServer.renderPageComponent (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1465:24)
+    at async DevServer.renderToResponseImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1515:32)
+    at async DevServer.pipeImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:1021:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\next-server.js:394:17)
+    at async DevServer.handleRequestImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\base-server.js:912:17)
+    at async C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:382:20
+    at async Span.traceAsyncFn (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\trace\trace.js:157:20)
+    at async DevServer.handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\dev\next-dev-server.js:378:24)
+    at async invokeRender (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:240:21)
+    at async handleRequest (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:436:24)
+    at async requestHandlerImpl (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\router-server.js:484:13)
+    at async Server.requestListener (C:\Users\fabri\Desktop\Projetos Chatbot\Dialogy\node_modules\next\dist\server\lib\start-server.js:226:13)
+[2025-12-12T17:09:51.684Z] Received webhook body length: 5767
+[2025-12-12T17:09:51.685Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:51.715Z] Event constructed: invoice.payment_succeeded
+[2025-12-12T17:09:54.873Z] Received webhook body length: 843
+[2025-12-12T17:09:54.874Z] Secret found: true, Signature present: true
+[2025-12-12T17:09:54.903Z] Event constructed: invoice_payment.paid

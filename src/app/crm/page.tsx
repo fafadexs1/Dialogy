@@ -34,10 +34,10 @@ export default function CrmPage() {
   }, [user?.activeWorkspaceId]);
 
   useEffect(() => {
-    if (user) {
+    if (user?.activeWorkspaceId) {
       fetchData();
     }
-  }, [user, fetchData]);
+  }, [fetchData, user?.activeWorkspaceId]);
 
   if (!user) {
     return (

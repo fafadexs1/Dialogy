@@ -9,7 +9,7 @@ import { Separator } from '../ui/separator';
 import { Mail, Phone, Building, Briefcase, CheckSquare, Edit, PlusCircle, Tag as TagIcon, Globe, Clock, Smartphone } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
-import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
+import { getTags, getCustomFieldDefinitions, getContactStatistics } from '@/actions/crm';
 import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -26,14 +26,19 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
     const user = useAuth();
     const [tags, setTags] = useState<Tag[]>([]);
     const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefinition[]>([]);
+    const [activities, setActivities] = useState<Activity[]>([]);
 
     useEffect(() => {
         if (isOpen && user?.activeWorkspaceId) {
             getTags(user.activeWorkspaceId).then(res => setTags(res.tags || []));
             getCustomFieldDefinitions(user.activeWorkspaceId).then(res => setCustomFieldDefs(res.fields || []));
-            onMutate(); // Re-fetch data when panel opens
         }
-    }, [isOpen, user?.activeWorkspaceId, onMutate]);
+        if (isOpen && contact?.id) {
+            getContactStatistics(contact.id).then(res => {
+                if (res.stats?.activities) setActivities(res.stats.activities);
+            });
+        }
+    }, [isOpen, user?.activeWorkspaceId, contact]);
 
     if (!contact) return null;
 
@@ -123,8 +128,8 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                             <section>
                                 <h3 className="text-sm font-semibold text-primary mb-3">Histórico de Atividades</h3>
                                 <div className="space-y-3">
-                                    {contact.activities && contact.activities.length > 0 ? (
-                                        contact.activities.map((activity: Activity, index: number) => (
+                                    {activities && activities.length > 0 ? (
+                                        activities.map((activity: Activity, index: number) => (
                                             <div key={activity.id || index} className="p-3 border rounded-lg bg-secondary/50 text-sm">
                                                 <p className="font-semibold capitalize">{activity.type.replace(/-/g, ' ')}</p>
                                                 <p className="text-muted-foreground mt-1">{activity.notes}</p>

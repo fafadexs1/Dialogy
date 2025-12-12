@@ -24,13 +24,26 @@ export async function createCheckoutSessionAction(priceId: string, planId: strin
         // For simplicity, we assume 1 User = 1 Workspace (or use last_active_workspace_id)
 
         // 1. Get Workspace
-        const workspaceResult = await db.query(`
+        // 1. Get User's Active Workspace
+        const userResult = await db.query('SELECT last_active_workspace_id FROM users WHERE id = $1', [user.id]);
+        const activeWorkspaceId = userResult.rows[0]?.last_active_workspace_id;
+
+        let query = `
             SELECT w.id, b.stripe_customer_id 
             FROM workspaces w
             LEFT JOIN billing_info b ON b.workspace_id = w.id
             WHERE w.owner_id = $1
-            LIMIT 1
-        `, [user.id]);
+        `;
+        const params = [user.id];
+
+        if (activeWorkspaceId) {
+            query += ` AND w.id = $2`;
+            params.push(activeWorkspaceId);
+        } else {
+            query += ` LIMIT 1`;
+        }
+
+        const workspaceResult = await db.query(query, params);
 
         if (workspaceResult.rowCount === 0) {
             return { error: "Workspace não encontrado." };
@@ -69,13 +82,14 @@ export async function createCheckoutSessionAction(priceId: string, planId: strin
                 },
             ],
             mode: 'subscription',
-            success_url: `${origin}/superadmin/billing/settings?success=true`,
+            success_url: `${origin}/settings/billing?success=true`,
             cancel_url: `${origin}/pricing?canceled=true`,
             metadata: {
                 workspaceId: workspace.id,
                 planId: planId,
                 userId: user.id
             },
+
             subscription_data: {
                 metadata: {
                     workspaceId: workspace.id,

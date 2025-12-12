@@ -46,3 +46,14 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
 
   return processedText.replace(/\n/g, '<br />'); // Handle line breaks
 }
+
+export function sanitizeUrl(url: string | null | undefined): string | null | undefined {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    return parsed.toString();
+  } catch (e) {
+    return url;
+  }
+}

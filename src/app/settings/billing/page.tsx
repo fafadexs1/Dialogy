@@ -14,6 +14,10 @@ import { PLANS, PlanType } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 
+import { useSearchParams, useRouter } from "next/navigation";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { PartyPopper } from "lucide-react";
+
 function formatCurrency(value: number) {
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
@@ -22,6 +26,18 @@ export default function BillingPage() {
     const { user, loading: userLoading } = useSettings();
     const [planData, setPlanData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (searchParams.get('success') === 'true') {
+            setShowSuccessModal(true);
+            // Clean URL
+            router.replace('/settings/billing');
+        }
+    }, [searchParams, router]);
 
     useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -32,7 +48,7 @@ export default function BillingPage() {
                 })
                 .finally(() => setLoading(false));
         }
-    }, [user]);
+    }, [user, showSuccessModal]); // Re-fetch when success modal triggers to ensure fresh data
 
     if (userLoading || loading) {
         return (
@@ -55,6 +71,26 @@ export default function BillingPage() {
 
     return (
         <div className="max-w-6xl mx-auto space-y-8 pb-10">
+            <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+                <DialogContent className="sm:max-w-md text-center">
+                    <DialogHeader>
+                        <div className="mx-auto bg-green-100 p-3 rounded-full w-fit mb-4">
+                            <PartyPopper className="h-8 w-8 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-xl text-center">Pagamento Confirmado!</DialogTitle>
+                        <DialogDescription className="text-center pt-2">
+                            Seu plano foi atualizado com sucesso. <br />
+                            Todos os novos limites já estão disponíveis para uso no seu workspace.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="sm:justify-center mt-4">
+                        <Button onClick={() => setShowSuccessModal(false)} className="w-full sm:w-auto min-w-[120px]">
+                            Maravilha!
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <header className="mb-6">
                 <h1 className="text-2xl font-bold flex items-center gap-2">
                     <CreditCard className="text-primary" />

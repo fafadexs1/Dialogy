@@ -605,3 +605,14 @@ export interface Plan {
   is_default: boolean;
   integrations: PlanIntegration[];
 }
+
+export interface Segment {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  criteria: any;
+  created_at: string;
+  updated_at: string;
+}
+

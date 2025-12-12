@@ -2,12 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { getSystemSettingsAction } from "@/actions/system-settings";
 import { db } from "@/lib/db";
+import { PLANS, PlanType } from "@/lib/plans";
 
 // Force dynamic because we read headers/body
-export const dynamic = 'force-dynamic';
+// export const dynamic = 'force-dynamic';
+
+import * as fs from 'fs';
+import * as path from 'path';
+
+function logToFile(message: string) {
+    const logPath = path.join(process.cwd(), 'webhook_debug.log');
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
+}
 
 export async function POST(req: NextRequest) {
     const body = await req.text();
+    logToFile(`Received webhook body length: ${body.length}`);
     const signature = req.headers.get("Stripe-Signature") as string;
 
     let webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -22,10 +33,12 @@ export async function POST(req: NextRequest) {
 
     // DEBUG LOGS (Remove in production)
     console.log(`[Webhook Debug] Secret found: ${!!webhookSecret}, Signature present: ${!!signature}`);
+    logToFile(`Secret found: ${!!webhookSecret}, Signature present: ${!!signature}`);
     if (webhookSecret) console.log(`[Webhook Debug] Secret starts with: ${webhookSecret.substring(0, 8)}...`);
 
     if (!webhookSecret || !signature) {
         console.error("[Webhook Error] Missing secret or signature");
+        logToFile("[Webhook Error] Missing secret or signature");
         return NextResponse.json({ error: "Missing secret or signature" }, { status: 400 });
     }
 
@@ -34,27 +47,58 @@ export async function POST(req: NextRequest) {
 
     try {
         event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+        logToFile(`Event constructed: ${event.type}`);
     } catch (err: any) {
         console.error(`Webhook signature verification failed: ${err.message}`);
+        logToFile(`Webhook signature verification failed: ${err.message}`);
         return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
     }
 
     try {
+        console.log(`[Stripe Webhook] Received event: ${event.type}`);
+
         switch (event.type) {
             case "checkout.session.completed": {
                 const session = event.data.object as any;
+                console.log(`[Stripe Webhook] Checkout Session Completed:`, {
+                    id: session.id,
+                    metadata: session.metadata,
+                    subscription: session.subscription
+                });
+                logToFile(`Checkout Session Completed: ID=${session.id}, Metadata=${JSON.stringify(session.metadata)}`);
+
                 const workspaceId = session.metadata?.workspaceId;
                 const planId = session.metadata?.planId;
                 const subscriptionId = session.subscription;
 
                 if (workspaceId && planId) {
+                    const planType = planId as PlanType;
+                    const newLimits = PLANS[planType]?.limits;
+
+                    logToFile(`Processing update for Workspace: ${workspaceId}, Plan: ${planId}`);
+
+                    // 1. Describe subscription in billing_info
                     await db.query(`
                         INSERT INTO billing_info (workspace_id, plan, status, stripe_subscription_id, updated_at)
                         VALUES ($1, $2, 'active', $3, NOW())
                         ON CONFLICT (workspace_id) DO UPDATE
                         SET plan = $2, status = 'active', stripe_subscription_id = $3, updated_at = NOW()
                     `, [workspaceId, planId, subscriptionId]);
+
+                    // 2. Update workspace limits directly to ensure immediate effect
+                    if (newLimits) {
+                        logToFile(`Updating custom_limits for workspace`);
+                        await db.query(`
+                            UPDATE workspaces 
+                            SET custom_limits = $1, updated_at = NOW() 
+                            WHERE id = $2
+                        `, [JSON.stringify(newLimits), workspaceId]);
+                    }
+
                     console.log(`[Stripe] Plan activated for workspace ${workspaceId}: ${planId}`);
+                    logToFile(`Success: Plan activated for workspace ${workspaceId}`);
+                } else {
+                    logToFile(`Error: Missing workspaceId or planId in metadata`);
                 }
                 break;
             }
@@ -64,6 +108,7 @@ export async function POST(req: NextRequest) {
                 const subscription = event.data.object as any;
                 const status = subscription.status; // active, past_due, canceled, etc.
                 const workspaceId = subscription.metadata?.workspaceId;
+                logToFile(`Subscription updated/deleted: ${status}, Workspace=${workspaceId}`);
 
                 // Map Stripe status to our status
                 const validStatus = status === 'active' || status === 'trialling' ? 'active' : 'inactive';
@@ -75,6 +120,7 @@ export async function POST(req: NextRequest) {
                         WHERE stripe_subscription_id = $2
                     `, [validStatus, subscription.id]);
                     console.log(`[Stripe] Subscription updated for workspace ${workspaceId}: ${status}`);
+                    logToFile(`Updated billing_info status to ${validStatus}`);
                 }
                 break;
             }
@@ -84,6 +130,7 @@ export async function POST(req: NextRequest) {
         }
     } catch (error: any) {
         console.error("Webhook Handler Error:", error);
+        logToFile(`Webhook Handler Error: ${error.message} \nStack: ${error.stack}`);
         return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
     }
 

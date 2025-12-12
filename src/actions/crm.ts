@@ -15,53 +15,110 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 }
 
 
-export async function getContacts(workspaceId: string): Promise<{ contacts: Contact[] | null, error?: string }> {
+import { buildCountQuery, buildSegmentQuery, CriteriaGroup } from '@/lib/crm-query-builder';
+import { Segment } from '@/lib/types';
+
+export async function getContacts(
+    workspaceId: string,
+    params: {
+        page?: number;
+        limit?: number;
+        segmentId?: string;
+        criteria?: CriteriaGroup;
+        search?: string;
+    } = {}
+): Promise<{ contacts: Contact[] | null, total: number, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { contacts: null, error: "Usuário não autenticado." };
+    if (!user) return { contacts: null, total: 0, error: "Usuário não autenticado." };
 
     if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
-        return { contacts: null, error: "Acesso não autorizado." };
+        return { contacts: null, total: 0, error: "Acesso não autorizado." };
     }
 
     try {
-        const res = await db.query(`
-            SELECT 
-                c.*,
-                (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
-                (SELECT MAX(a.date) FROM activities a WHERE a.contact_id = c.id) as last_activity,
-                COALESCE(
-                    (SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'value', t.value, 'color', t.color))
-                     FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id),
-                    '[]'::json
-                ) as tags,
-                COALESCE(
-                    (SELECT json_agg(act.* ORDER BY act.date DESC) FROM activities act WHERE act.contact_id = c.id),
-                    '[]'::json
-                ) as activities,
-                 COALESCE(
-                    (SELECT json_object_agg(cfd.id, cfv.value)
-                     FROM contact_custom_field_values cfv
-                     JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
-                     WHERE cfv.contact_id = c.id),
-                    '{}'::json
-                ) as custom_fields
-            FROM contacts c
-            WHERE c.workspace_id = $1
-            ORDER BY c.created_at DESC;
-        `, [workspaceId]);
+        let criteria = params.criteria;
 
-        const contacts: Contact[] = res.rows.map(row => ({
+        // If segmentId provided, fetch criteria from DB
+        if (params.segmentId) {
+            const segmentRes = await db.query('SELECT criteria FROM crm_segments WHERE id = $1 AND workspace_id = $2', [params.segmentId, workspaceId]);
+            if (segmentRes.rows.length > 0) {
+                params.criteria = segmentRes.rows[0].criteria;
+                criteria = params.criteria;
+            }
+        }
+
+        const page = params.page || 1;
+        const limit = params.limit || 50;
+        const offset = (page - 1) * limit;
+
+        const countQuery = buildCountQuery(workspaceId, criteria, params.search);
+        const dataQuery = buildSegmentQuery(workspaceId, criteria, params.search, limit, offset);
+
+        const [countRes, dataRes] = await Promise.all([
+            db.query(countQuery.text, countQuery.values),
+            db.query(dataQuery.text, dataQuery.values)
+        ]);
+
+        const contacts: Contact[] = dataRes.rows.map(row => ({
             ...row,
             owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
         }));
 
-        return { contacts };
+        return { contacts, total: parseInt(countRes.rows[0].total) };
     } catch (error) {
         console.error("[GET_CONTACTS] Error:", error);
-        return { contacts: null, error: "Falha ao buscar contatos." };
+        return { contacts: null, total: 0, error: "Falha ao buscar contatos." };
     }
 }
+
+export const createSegment = withDebug(
+    'create_segment',
+    async function createSegment(
+        workspaceId: string,
+        name: string,
+        description: string | null,
+        criteria: CriteriaGroup
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
+
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para criar segmentos." };
+        }
+
+        try {
+            await db.query(
+                'INSERT INTO crm_segments (workspace_id, name, description, criteria) VALUES ($1, $2, $3, $4)',
+                [workspaceId, name, description, JSON.stringify(criteria)]
+            );
+            revalidatePath('/crm');
+            return { success: true };
+        } catch (error) {
+            console.error("[CREATE_SEGMENT] Error:", error);
+            return { success: false, error: "Falha ao criar segmento." };
+        }
+    },
+    {
+        contextResolver: (workspaceId, name) => ({ payload: { workspaceId, name } })
+    }
+);
+
+export async function getSegments(workspaceId: string): Promise<{ segments: Segment[] | null, error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { segments: null, error: "Usuário não autenticado." };
+
+    try {
+        const res = await db.query('SELECT * FROM crm_segments WHERE workspace_id = $1 ORDER BY name', [workspaceId]);
+        return { segments: res.rows };
+    } catch (error) {
+        console.error("[GET_SEGMENTS] Error:", error);
+        return { segments: null, error: "Falha ao buscar segmentos." };
+    }
+}
+
 
 export const saveContactAction = withDebug(
     'save_contact',

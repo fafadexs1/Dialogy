@@ -754,14 +754,31 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         try {
             let result: { success: boolean; error?: string };
             if (!isTextOnly) {
-                const mediaData = currentMediaFiles.map(mf => ({
-                    base64: mf.base64,
-                    mimetype: mf.type,
-                    filename: mf.name,
-                    mediatype: mf.mediatype,
-                    thumbnail: mf.thumbnail,
+                // Upload files first to get a public URL
+                const uploadedFiles = await Promise.all(currentMediaFiles.map(async (mf) => {
+                    const extension = mf.name.split('.').pop() || 'dat';
+                    const fileName = `${Date.now()}_${crypto.randomUUID()}.${extension}`;
+                    const { publicUrl, error } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
+
+                    if (error || !publicUrl) {
+                        toast({
+                            title: `Erro ao enviar ${mf.name}`,
+                            description: error || 'Falha no upload',
+                            variant: 'destructive'
+                        });
+                        throw new Error(`Falha no upload de ${mf.name}`);
+                    }
+
+                    return {
+                        base64: publicUrl, // We pass the URL in the base64 field as expectations downstream handle it as a source
+                        mimetype: mf.type,
+                        filename: mf.name,
+                        mediatype: mf.mediatype,
+                        thumbnail: mf.thumbnail,
+                    };
                 }));
-                result = await sendMediaAction(chat.id, currentMessageText, mediaData as any, tabId);
+
+                result = await sendMediaAction(chat.id, currentMessageText, uploadedFiles as any, tabId);
             } else if (isInternalNote) {
                 result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
             } else {

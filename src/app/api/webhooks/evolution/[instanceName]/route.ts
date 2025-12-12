@@ -9,7 +9,7 @@ import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
-import { buildChatProtocol } from '@/lib/utils';
+import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
@@ -244,7 +244,7 @@ async function handleMessagesUpsert(payload: any) {
     content = message.conversation || mediaDetails?.text || mediaDetails?.caption || locationLabel;
 
     // A URL da mídia está no nível superior do objeto `message`
-    const mediaUrl = message.mediaUrl || null;
+    const mediaUrl = sanitizeUrl(message.mediaUrl) || null;
     console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
     console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
     console.log('[WEBHOOK_MSG_UPSERT] Message Type:', messageType);
@@ -323,7 +323,7 @@ async function handleMessagesUpsert(payload: any) {
         : undefined;
 
     let metadata: MessageMetadata = {
-        mediaUrl: mediaUrl,
+        mediaUrl: mediaUrl || undefined,
         mimetype: mimetype,
         fileName: mediaDetails?.fileName,
         duration: mediaDetails?.seconds,
@@ -457,8 +457,10 @@ async function updateProfilePicture(contactId: string, contactJid: string, insta
             apiConfig,
             { method: 'POST', body: JSON.stringify({ number: contactJid }) }
         );
-        if (profilePicRes?.profilePictureUrl) {
-            await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profilePicRes.profilePictureUrl, contactId]);
+        const profileUrl = sanitizeUrl(profilePicRes?.profilePictureUrl);
+
+        if (profileUrl) {
+            await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profileUrl, contactId]);
             console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
         }
     } catch (picError) {
@@ -472,7 +474,7 @@ async function handleContactsUpdate(payload: any) {
     if (!Array.isArray(data) || data.length === 0) return;
 
     const contactUpdate = data[0];
-    const profilePicUrl = contactUpdate?.profilePicUrl;
+    const profilePicUrl = sanitizeUrl(contactUpdate?.profilePicUrl);
     const remoteJid = resolveWhatsappJid(
         contactUpdate?.id,
         contactUpdate?.remoteJid,
