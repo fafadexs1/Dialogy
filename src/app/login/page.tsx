@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { LoginForm } from '@/components/auth/login-form';
 import { Code2 } from 'lucide-react';
 import Link from 'next/link';
@@ -36,11 +37,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
       <div className="w-full max-w-md relative z-10 px-6">
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Code2 className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold tracking-tight">Dialogy</span>
+          <Link href="/" className="inline-flex items-center gap-2 mb-2 group">
+            <Image src="/logo.png" alt="Dialogy" width={300} height={80} className="h-24 w-auto" />
           </Link>
 
           <h1 className="text-3xl font-bold mb-2 tracking-tight">Bem-vindo de volta</h1>

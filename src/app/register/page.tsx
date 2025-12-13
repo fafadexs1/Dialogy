@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -31,11 +32,8 @@ export default function RegisterPage() {
 
             <div className="w-full max-w-2xl relative z-10 px-6 py-12">
                 <div className="text-center mb-8">
-                    <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
-                        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <Code2 className="w-6 h-6 text-white" />
-                        </div>
-                        <span className="text-2xl font-bold tracking-tight">Dialogy</span>
+                    <Link href="/" className="inline-flex items-center gap-2 mb-2 group">
+                        <Image src="/logo.png" alt="Dialogy" width={300} height={80} className="h-24 w-auto" />
                     </Link>
 
                     <h1 className="text-3xl font-bold mb-2 tracking-tight">Crie sua conta</h1>

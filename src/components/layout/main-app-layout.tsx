@@ -76,4 +76,3 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-

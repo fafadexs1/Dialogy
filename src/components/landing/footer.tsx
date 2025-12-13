@@ -1,6 +1,7 @@
 'use client';
 
 import React from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Bot } from "lucide-react";
 import { Section } from "./ui";
@@ -12,10 +13,7 @@ export function Footer() {
                 <div className="grid md:grid-cols-4 gap-12 mb-16">
                     <div className="col-span-1 md:col-span-2">
                         <Link href="/" className="flex items-center gap-2 mb-6">
-                            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-                                <Bot className="w-5 h-5 text-white" />
-                            </div>
-                            <span className="text-xl font-bold text-white">Dialogy</span>
+                            <Image src="/logo.png" alt="Dialogy" width={200} height={60} className="h-16 w-auto" />
                         </Link>
                         <p className="text-white/50 max-w-sm leading-relaxed">
                             A plataforma de IA conversacional mais avançada para empresas modernas.

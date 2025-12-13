@@ -1,9 +1,8 @@
-
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { PLANS } from '@/lib/plans';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-
 
 export async function GET(request: Request) {
     const supabase = await createClient();
@@ -39,23 +38,47 @@ export async function GET(request: Request) {
               w.close_message_template, 
               w.transfer_team_message_template,
               w.marketing_auto_close_seconds,
-              (w.owner_id = $1) AS is_owner
+              (w.owner_id = $1) AS is_owner,
+              (SELECT plan FROM billing_info WHERE workspace_id = w.id LIMIT 1) as plan
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
             WHERE uwr.user_id = $1
         `, [userId]);
 
-        const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            avatar: r.avatar_url || '',
-            timezone: r.timezone || undefined,
-            closeMessageTemplate: r.close_message_template || '',
-            transferTeamMessageTemplate: r.transfer_team_message_template || '',
-            marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
-            isOwner: !!r.is_owner,
-        }));
-        console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w => w.name));
+        const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => {
+            const rawPlan = r.plan;
+            let planKey = 'starter';
+
+            if (rawPlan) {
+                // 1. Direct match (lowercase)
+                if (PLANS[rawPlan.toLowerCase() as keyof typeof PLANS]) {
+                    planKey = rawPlan.toLowerCase();
+                }
+                // 2. Case-insensitive search
+                else {
+                    const foundKey = Object.keys(PLANS).find(k => k.toLowerCase() === rawPlan.toLowerCase());
+                    if (foundKey) {
+                        planKey = foundKey;
+                    } else {
+                        // 3. Fallback to raw value (e.g. price_id) to show in UI for debugging
+                        planKey = rawPlan;
+                    }
+                }
+            }
+
+            return {
+                id: r.id,
+                name: r.name,
+                avatar: r.avatar_url || '',
+                timezone: r.timezone || undefined,
+                closeMessageTemplate: r.close_message_template || '',
+                transferTeamMessageTemplate: r.transfer_team_message_template || '',
+                marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
+                isOwner: !!r.is_owner,
+                plan: planKey,
+            };
+        });
+        console.log(`[API /user] Detalhes dos workspaces carregados:`, workspaces.map(w => `${w.name} (${w.plan})`));
 
         const user: User = {
             id: dbUser.id,

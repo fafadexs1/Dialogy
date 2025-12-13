@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, createContext, useContext, ReactNode, useCallback, useRef } from 'react';
+import { useState, useEffect, createContext, useContext, ReactNode, useCallback, useRef, useMemo } from 'react';
 import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { usePathname } from 'next/navigation';
@@ -25,29 +25,42 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const [useApiFallback, setUseApiFallback] = useState(false);
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
   const sessionOnlineSinceRef = useRef<string | null>(null);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+
+  // Ref to track if we are currently updating to avoid loop
+  const isUpdatingRef = useRef(false);
 
   // Sync AuthUser with LocalUser (fetch profile if needed)
   useEffect(() => {
     // If initialUser updates (e.g. from server refresh), update local state
-    if (initialUser && initialUser.activeWorkspaceId !== localUser?.activeWorkspaceId) {
+    if (initialUser && localUser) {
+      if (initialUser.id !== localUser.id || initialUser.activeWorkspaceId !== localUser.activeWorkspaceId) {
+        setLocalUser(initialUser);
+      }
+    } else if (initialUser && !localUser) {
       setLocalUser(initialUser);
     }
 
     if (isAuthLoading) return; // Wait for client auth to initialize
 
-    if (authUser && !localUser) {
+    if (authUser && !localUser && !isUpdatingRef.current) {
       // We have an auth user but no local user profile yet. Fetch it.
-      // This is one of the allowed "initial" fetches.
       const fetchProfile = async () => {
+        isUpdatingRef.current = true;
         try {
           const res = await fetch('/api/user');
           if (res.ok) {
             const userData = await res.json();
-            setLocalUser(userData);
+            // Prevent set if component unmounted or race condition
+            setLocalUser(prev => {
+              if (prev?.id === userData.id && prev?.activeWorkspaceId === userData.activeWorkspaceId) return prev;
+              return userData;
+            });
           }
         } catch (error) {
           console.error("PresenceProvider: Failed to fetch user profile.", error);
+        } finally {
+          isUpdatingRef.current = false;
         }
       };
       fetchProfile();
@@ -55,7 +68,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       // User logged out
       setLocalUser(null);
     }
-  }, [authUser, localUser, isAuthLoading, initialUser]);
+  }, [authUser, localUser?.id, localUser?.activeWorkspaceId, isAuthLoading, initialUser]);
 
   useEffect(() => {
     // Reset per-session tracking when user or workspace changes
@@ -207,6 +220,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     };
   }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname, isAuthLoading]);
 
+  // Use refs to track if we've already set up the subscription to avoid dupes/loops
+  const channelRef = useRef<any>(null);
+
   useEffect(() => {
     if (isAuthLoading || !localUser?.activeWorkspaceId || !localUser.id || !presenceBootstrapDone) return;
 
@@ -241,6 +257,12 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     window.addEventListener('click', throttledActivity);
     window.addEventListener('keydown', throttledActivity);
 
+    // Only subscribe if channel not already set up or if workspace changed
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
     const channel = supabase.channel(`db-presence-${localUser.activeWorkspaceId}`)
       .on(
         'postgres_changes',
@@ -262,6 +284,8 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       )
       .subscribe();
 
+    channelRef.current = channel;
+
     return () => {
       clearInterval(heartbeatInterval);
       window.removeEventListener('visibilitychange', handleActivity);
@@ -269,10 +293,13 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       window.removeEventListener('click', throttledActivity);
       window.removeEventListener('keydown', throttledActivity);
 
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
       void updateServerPresence(false);
     };
-  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone]);
+  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone, supabase, isAuthLoading]);
 
   useEffect(() => {
     if (!localUser?.id || !localUser.activeWorkspaceId) return;
@@ -299,8 +326,13 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     };
   }, [localUser?.id, localUser?.activeWorkspaceId]);
 
+  const contextValue = useMemo(() => ({
+    onlineAgents,
+    currentUser: localUser
+  }), [onlineAgents, localUser]);
+
   return (
-    <PresenceContext.Provider value={{ onlineAgents, currentUser: localUser }}>
+    <PresenceContext.Provider value={contextValue}>
       {children}
     </PresenceContext.Provider>
   );

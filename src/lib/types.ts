@@ -12,6 +12,7 @@ export type Workspace = {
   marketingAutoCloseSeconds?: number;
   roleName?: string;
   isOwner?: boolean;
+  plan?: string;
 }
 
 export type Permission = {

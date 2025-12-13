@@ -1,6 +1,7 @@
 'use client';
 
 import React from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Bot, Code2, Users } from "lucide-react";
 import { CTAButton } from "./ui";
@@ -14,10 +15,7 @@ export function Navbar() {
         <nav className="fixed top-0 w-full z-40 backdrop-blur-md border-b border-white/5 bg-[#030712]/50">
             <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-3 group">
-                    <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:shadow-blue-500/40 transition-all">
-                        <Bot className="w-6 h-6 text-white" />
-                    </div>
-                    <span className="text-xl font-bold text-white tracking-tight">Dialogy</span>
+                    <Image src="/logo.png" alt="Dialogy" width={250} height={80} className="h-16 w-auto" />
                 </Link>
 
                 {isHome ? (
