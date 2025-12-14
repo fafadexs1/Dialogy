@@ -31,27 +31,30 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const isUpdatingRef = useRef(false);
 
   // Sync AuthUser with LocalUser (fetch profile if needed)
+  // Sync AuthUser with LocalUser (fetch profile if needed)
   useEffect(() => {
-    // If initialUser updates (e.g. from server refresh), update local state
-    if (initialUser && localUser) {
-      if (initialUser.id !== localUser.id || initialUser.activeWorkspaceId !== localUser.activeWorkspaceId) {
-        setLocalUser(initialUser);
-      }
-    } else if (initialUser && !localUser) {
-      setLocalUser(initialUser);
+    // 1. Initial User Sync (Server -> Client)
+    if (initialUser) {
+      setLocalUser(prev => {
+        // Strict equality check for IDs to prevent unnecessary updates
+        if (prev?.id === initialUser.id && prev?.activeWorkspaceId === initialUser.activeWorkspaceId) {
+          return prev;
+        }
+        return initialUser;
+      });
     }
 
-    if (isAuthLoading) return; // Wait for client auth to initialize
+    if (isAuthLoading) return;
 
-    if (authUser && !localUser && !isUpdatingRef.current) {
-      // We have an auth user but no local user profile yet. Fetch it.
+    // 2. Fetch Profile if missing (Client fallback)
+    if (authUser && !localUser && !initialUser && !isUpdatingRef.current) {
+      // Only fetch if we really don't have a user (neither local nor initial)
       const fetchProfile = async () => {
         isUpdatingRef.current = true;
         try {
           const res = await fetch('/api/user');
           if (res.ok) {
             const userData = await res.json();
-            // Prevent set if component unmounted or race condition
             setLocalUser(prev => {
               if (prev?.id === userData.id && prev?.activeWorkspaceId === userData.activeWorkspaceId) return prev;
               return userData;
@@ -63,27 +66,46 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           isUpdatingRef.current = false;
         }
       };
-      fetchProfile();
+
+      // Debounce fetch slightly to avoid race with initialUser effect
+      const timer = setTimeout(fetchProfile, 100);
+      return () => clearTimeout(timer);
     } else if (!authUser && localUser) {
       // User logged out
       setLocalUser(null);
     }
-  }, [authUser, localUser?.id, localUser?.activeWorkspaceId, isAuthLoading, initialUser]);
+  }, [authUser, isAuthLoading, initialUser]); // Removed localUser from deps to break loop
+
+  // Track last bootstrapped user to avoid reset loops
+  const bootstrappedUserRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Reset per-session tracking when user or workspace changes
+    const currentUserKey = localUser ? `${localUser.id}-${localUser.activeWorkspaceId}` : 'null';
+
+    if (bootstrappedUserRef.current === currentUserKey && presenceBootstrapDone) {
+      // Already bootstrapped for this user, skip.
+      return;
+    }
+
+    // Reset per-session tracking when user or workspace updates
     sessionOnlineSinceRef.current = null;
     setUseApiFallback(false);
-    setPresenceBootstrapDone(false);
+
+    // Only reset done flag if strictly necessary (different user)
+    if (bootstrappedUserRef.current !== currentUserKey) {
+      setPresenceBootstrapDone(false);
+    }
 
     const loadExistingPresence = async () => {
-      // Don't bootstrap if we aren't confirmed logged in yet (or if localUser is missing)
       if (isAuthLoading) return;
-
       if (!localUser?.id || !localUser.activeWorkspaceId) {
         setPresenceBootstrapDone(true);
+        bootstrappedUserRef.current = currentUserKey; // Mark processed
         return;
       }
+
+      bootstrappedUserRef.current = currentUserKey; // Mark processed early to block re-entry
+
       try {
         const { data, error } = await supabase
           .from('user_workspace_presence')

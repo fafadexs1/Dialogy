@@ -618,7 +618,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                   {chat.teamName}
                 </Badge>
               )}
-              {chat.tag && (
+              {chat.tag && chat.status !== 'atendimentos' && (
                 <Badge
                   style={{
                     backgroundColor: chat.color || 'rgba(255,255,255,0.1)',

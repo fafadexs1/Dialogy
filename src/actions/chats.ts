@@ -656,6 +656,7 @@ async function fetchChats({
     ownership?: 'mine' | 'everyone';
     statuses?: Chat['status'][];
 }): Promise<ChatRow[]> {
+    const startTime = performance.now();
     const params: any[] = [workspaceId, limit];
     let queryIndex = 3;
 
@@ -796,6 +797,10 @@ async function fetchChats({
         `,
         params
     );
+    const endTime = performance.now();
+    if (process.env.NODE_ENV === 'development') {
+        console.log(`[PERF] fetchChats took ${(endTime - startTime).toFixed(2)}ms for limit ${limit}`);
+    }
     return rows as ChatRow[];
 }
 
@@ -861,7 +866,14 @@ export const getInitialChatsData = withDebug(
                 statuses: ['encerrados']
             });
 
-            const [activeChatRows, closedChatRows] = await Promise.all([activeChatsPromise, closedChatsPromise]);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout ao buscar chats')), 15000)
+            );
+
+            const [activeChatRows, closedChatRows] = await Promise.race([
+                Promise.all([activeChatsPromise, closedChatsPromise]),
+                timeoutPromise
+            ]) as [ChatRow[], ChatRow[]];
 
             const allChatRows = [...activeChatRows, ...closedChatRows];
 

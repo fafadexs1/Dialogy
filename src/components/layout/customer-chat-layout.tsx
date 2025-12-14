@@ -235,9 +235,17 @@ export default function CustomerChatLayout({
   const buildMismatchTriggeredRef = useRef(false);
   const prefetchedHistoryRef = useRef<Set<string>>(new Set());
 
+  const isHydratedRef = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
+
   useEffect(() => {
-    useInboxStore.getState().reset();
-    console.log('[NOTIFICATION] Layout mounted. Waiting for inbox data...');
+    // Strict Mode Safety: Only reset if we haven't successfully hydrated in this mount cycle.
+    // This prevents double-fetching or clearing valid data on dev hot-reloads/strict mode remounts.
+    if (!isHydratedRef.current) {
+      useInboxStore.getState().reset();
+      isHydratedRef.current = false;
+      console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+    }
   }, []);
 
   useEffect(() => {
@@ -678,12 +686,32 @@ export default function CustomerChatLayout({
     } catch (error: any) {
       console.error('[INITIAL_CHATS] Error:', error);
       const message = error.message || 'Não foi possível buscar os dados do chat.';
-      toast({ title: 'Erro ao carregar conversas', description: message, variant: 'destructive' });
-      setFetchError(message);
+      // Auto-retry once for network blips
+      if (retryCount < 1) {
+        console.log('[INITIAL_CHATS] Retrying initialization in 1s...');
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+        }, 1000);
+      } else {
+        toast({ title: 'Erro ao carregar conversas', description: message, variant: 'destructive' });
+        setFetchError(message);
+        setIsLoading(false);
+      }
     } finally {
-      setIsLoading(false);
+      if (retryCount >= 1 || !fetchError) {
+        // Only mark hydrated if success or out of retries
+        isHydratedRef.current = true;
+      }
+      if (retryCount >= 1) setIsLoading(false);
     }
-  }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath]);
+  }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath, retryCount, fetchError]);
+
+  // Effect to trigger retry
+  useEffect(() => {
+    if (retryCount > 0 && isLoading) {
+      initializeInbox();
+    }
+  }, [retryCount, initializeInbox, isLoading]);
 
   const runDeltaSync = useCallback(async () => {
     if (!initialUser?.activeWorkspaceId) return;
@@ -830,8 +858,16 @@ export default function CustomerChatLayout({
     let isPolling = true;
     let errorCount = 0;
 
+
     const poll = async () => {
       if (!isPolling) return;
+
+      // Wait for hydration before polling
+      if (!isHydratedRef.current) {
+        console.log('[POLLING] Waiting for hydration...');
+        timeoutId = setTimeout(poll, 1000);
+        return;
+      }
 
       try {
         await runDeltaSync();
@@ -985,7 +1021,17 @@ export default function CustomerChatLayout({
 
         useInboxStore.getState().upsertChats([chatUpdate as Chat]);
       },
-      onStatusChange: (status) => console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`),
+      onStatusChange: (status) => {
+        console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[REALTIME] Connection lost (${status}). Suggesting manual refresh via toast if persistent.`);
+          // Only show toast if it's not a temporary disconnect (simple logic: check visibility)
+          if (document.visibilityState === 'visible') {
+            // Could act more aggressively here, e.g. force runDeltaSync
+            runDeltaSync();
+          }
+        }
+      },
     });
 
     realtimeChatsChannelRef.current = channel;
@@ -1016,6 +1062,7 @@ export default function CustomerChatLayout({
       setSelectedChatId(initialData.selectedChatId);
       selectedChatIdRef.current = initialData.selectedChatId ?? null;
       updateSelectedChatPath(initialData.selectedChatId ?? null);
+      isHydratedRef.current = true;
       setIsLoading(false);
       return;
     }
@@ -1023,6 +1070,7 @@ export default function CustomerChatLayout({
     if (initialUser) {
       initializeInbox();
     } else {
+      isHydratedRef.current = true;
       setIsLoading(false);
     }
   }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
@@ -1156,16 +1204,16 @@ export default function CustomerChatLayout({
             showFullHistory={showFullHistory}
             setShowFullHistory={setShowFullHistory}
             tabId={tabIdRef.current}
-          onLoadOlderMessages={loadOlderMessages}
-          canLoadOlder={hasMoreHistory}
-          workspaceTimezone={workspaceTimezone}
-          onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
-          onForwardMessage={handleForwardMessage}
-          highContrast={highContrast}
-          onToggleHighContrast={() => setHighContrast((v) => !v)}
-          isRTL={isRTL}
-          onToggleRTL={() => setIsRTL((v) => !v)}
-        />
+            onLoadOlderMessages={loadOlderMessages}
+            canLoadOlder={hasMoreHistory}
+            workspaceTimezone={workspaceTimezone}
+            onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
+            onForwardMessage={handleForwardMessage}
+            highContrast={highContrast}
+            onToggleHighContrast={() => setHighContrast((v) => !v)}
+            isRTL={isRTL}
+            onToggleRTL={() => setIsRTL((v) => !v)}
+          />
         </ErrorBoundary>
         {isContactPanelOpen && !isForwarding && (
           <ContactPanel

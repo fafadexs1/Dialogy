@@ -32,6 +32,9 @@ export default function Error({
                 <Button variant="outline" onClick={() => window.location.reload()}>
                     Recarregar Página
                 </Button>
+                <Button variant="ghost" className='text-white/50 hover:text-white' onClick={() => window.open('/status', '_blank')}>
+                    Verificar Status
+                </Button>
             </div>
         </div>
     );
