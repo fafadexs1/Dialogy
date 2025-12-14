@@ -7,6 +7,7 @@ import ContactPanel from '../chat/contact-panel';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
+import type { InitialChatsPayload } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -28,6 +29,8 @@ import {
   subscribeToWorkspaceChatUpdates,
   teardownChannel,
 } from '@/lib/realtime/chat-subscriptions';
+import ErrorBoundary from '@/components/layout/error-boundary';
+import { reportClientMetric } from '@/lib/observability/client';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -142,9 +145,45 @@ function LoadingSkeleton() {
   );
 }
 
+function ChatListSkeleton() {
+  return (
+    <div className="flex w-[360px] flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+      <Skeleton className="h-6 w-32 bg-white/5" />
+      <Skeleton className="h-10 w-full bg-white/5" />
+      <div className="space-y-2 mt-2">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Skeleton key={index} className="h-14 w-full bg-white/5" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ThreadSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col min-w-0 bg-transparent">
+      <Skeleton className="h-16 w-full bg-white/5" />
+      <div className="flex-1 p-6 space-y-4">
+        <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+        <Skeleton className="h-10 w-1/2 bg-white/5" />
+        <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+      </div>
+      <Skeleton className="h-24 w-full bg-white/5" />
+    </div>
+  );
+}
 
 
-export default function CustomerChatLayout({ initialUser, chatId: initialChatId }: { initialUser: User | null, chatId: string | null }) {
+
+export default function CustomerChatLayout({
+  initialUser,
+  chatId: initialChatId,
+  initialData,
+}: {
+  initialUser: User | null;
+  chatId: string | null;
+  initialData?: InitialChatsPayload | null;
+}) {
   const router = useRouter();
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
@@ -158,6 +197,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [selectedForwardingChatIds, setSelectedForwardingChatIds] = useState<Set<string>>(new Set());
   const [isForwarding, setIsForwarding] = useState(false);
+  const [highContrast, setHighContrast] = useState(false);
+  const [isRTL, setIsRTL] = useState(false);
 
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
@@ -175,11 +216,16 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const incrementUnread = useInboxStore((state) => state.incrementUnread);
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
 
-  const selectedChatIdRef = useRef<string | null>(initialChatId);
+  const handleBoundaryError = useCallback((error: Error) => {
+    console.error('[INBOX_UI_ERROR]', error);
+  }, []);
+
+  const selectedChatIdRef = useRef<string | null>(initialData?.selectedChatId ?? initialChatId);
   const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
     queue: null,
     attending: null,
   });
+  const jumpChatByOffsetRef = useRef<((delta: number) => void) | null>(null);
   const tabIdRef = useRef<string>('');
   const audioUnlockRequestedRef = useRef(false);
   const unreadCountsRef = useRef<Record<string, number>>({});
@@ -187,11 +233,29 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
+  const prefetchedHistoryRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     useInboxStore.getState().reset();
     console.log('[NOTIFICATION] Layout mounted. Waiting for inbox data...');
   }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dir = isRTL ? 'rtl' : 'ltr';
+    return () => {
+      document.documentElement.dir = 'ltr';
+    };
+  }, [isRTL]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (highContrast) {
+      (document.documentElement as HTMLElement).dataset.highContrast = 'true';
+    } else {
+      delete (document.documentElement as HTMLElement).dataset.highContrast;
+    }
+  }, [highContrast]);
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     // Safe UUID generation fallback
@@ -478,6 +542,7 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
   const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
+    const startedAt = performance.now();
     try {
       const result = await getChatMessagesWindow({
         chatId,
@@ -485,7 +550,6 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         limit: 50,
         timezone: workspaceTimezone
       });
-      // result.error does not exist on the return type of getChatMessagesWindow
       if (before) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
       } else {
@@ -497,6 +561,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
     } catch (error: any) {
       console.error('[LOAD_MESSAGES] Error:', error);
       toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!before });
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
@@ -524,11 +590,57 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
 
     if (selectedChatIdRef.current === chat.id) return; // Prevent duplicate navigation
     selectedChatIdRef.current = chat.id;
-    setSelectedChatId(chat.id);
-    setShowFullHistory(false);
+    React.startTransition(() => {
+      setSelectedChatId(chat.id);
+      setShowFullHistory(false);
+    });
     updateSelectedChatPath(chat.id);
     void ensureMessagesForChat(chat.id);
   }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+
+  const jumpChatByOffset = useCallback((delta: number) => {
+    if (!chats.length) return;
+    const currentIndex = chats.findIndex((c) => c.id === selectedChatIdRef.current);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + chats.length) % chats.length;
+    const nextChat = chats[nextIndex];
+    if (nextChat) {
+      handleSetSelectedChat(nextChat);
+    }
+  }, [chats, handleSetSelectedChat]);
+
+  useEffect(() => {
+    jumpChatByOffsetRef.current = jumpChatByOffset;
+  }, [jumpChatByOffset]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'ArrowDown') {
+        event.preventDefault();
+        jumpChatByOffsetRef.current?.(1);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'ArrowUp') {
+        event.preventDefault();
+        jumpChatByOffsetRef.current?.(-1);
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedChatId) return;
+    const state = useInboxStore.getState();
+    const hasMessages = state.messagesByChat[selectedChatId]?.length;
+    if (!hasMessages) return;
+    if (prefetchedHistoryRef.current.has(selectedChatId)) return;
+    const hasMore = state.hasMoreHistoryByChat[selectedChatId];
+    const before = state.oldestMessageDateByChat[selectedChatId];
+    if (hasMore && before) {
+      prefetchedHistoryRef.current.add(selectedChatId);
+      loadChatMessages(selectedChatId, before).catch((err) => console.error('[PREFETCH_HISTORY]', err));
+    }
+  }, [selectedChatId, loadChatMessages]);
 
   const initializeInbox = useCallback(async () => {
     if (!initialUser?.activeWorkspaceId) {
@@ -542,6 +654,8 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
       const result = await getInitialChatsData({
         workspaceId: initialUser.activeWorkspaceId,
         selectedChatId: initialChatId,
+        userIdOverride: initialUser.id,
+        workspaceTimezone: initialUser.activeWorkspaceTimezone,
       });
       if (result.error) throw new Error(result.error);
       setWorkspaceTimezone(result.timezone || FALLBACK_TIMEZONE);
@@ -886,12 +1000,32 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   }, [initialUser?.activeWorkspaceId, initialUser?.id]);
 
   useEffect(() => {
+    if (initialData) {
+      setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
+      setInitialData({
+        chats: initialData.chats,
+        selectedChatId: initialData.selectedChatId,
+        messages: initialData.messages,
+        lastSyncChats: initialData.lastSyncChats,
+        lastSyncMessageForSelected: initialData.lastSyncMessageForSelected,
+        oldestMessageDate: initialData.oldestMessageDate,
+        hasMoreHistory: initialData.hasMoreHistory,
+        hasMoreChats: initialData.hasMoreChats,
+      });
+      setFetchError(initialData.error ?? null);
+      setSelectedChatId(initialData.selectedChatId);
+      selectedChatIdRef.current = initialData.selectedChatId ?? null;
+      updateSelectedChatPath(initialData.selectedChatId ?? null);
+      setIsLoading(false);
+      return;
+    }
+
     if (initialUser) {
       initializeInbox();
     } else {
       setIsLoading(false);
     }
-  }, [initialUser, initializeInbox]);
+  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -972,7 +1106,10 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
   } : null;
 
   return (
-    <div className="relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-black selection:bg-blue-500/30">
+    <div
+      className={`relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-black selection:bg-blue-500/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+      dir={isRTL ? 'rtl' : 'ltr'}
+    >
       {/* Background Effects */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
@@ -995,33 +1132,41 @@ export default function CustomerChatLayout({ initialUser, chatId: initialChatId 
         )}
         <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
         <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-        <ChatList
-          chats={chats}
-          selectedChat={enrichedSelectedChat}
-          setSelectedChat={handleSetSelectedChat}
-          currentUser={initialUser}
-          onUpdate={handleDataMutation}
-          isForwarding={isForwarding}
-          selectedForwardingChatIds={selectedForwardingChatIds}
-          onToggleForwardSelection={handleToggleForwardSelection}
-          onConfirmForward={handleConfirmForward}
-          onCancelForward={handleCancelForward}
-        />
-        <ChatPanel
-          key={selectedChat?.id}
-          chat={enrichedSelectedChat}
-          currentUser={initialUser}
-          onActionSuccess={handleDataMutation}
-          closeReasons={closeReasons}
-          showFullHistory={showFullHistory}
-          setShowFullHistory={setShowFullHistory}
-          tabId={tabIdRef.current}
+        <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+          <ChatList
+            chats={chats}
+            selectedChat={enrichedSelectedChat}
+            setSelectedChat={handleSetSelectedChat}
+            currentUser={initialUser}
+            onUpdate={handleDataMutation}
+            isForwarding={isForwarding}
+            selectedForwardingChatIds={selectedForwardingChatIds}
+            onToggleForwardSelection={handleToggleForwardSelection}
+            onConfirmForward={handleConfirmForward}
+            onCancelForward={handleCancelForward}
+          />
+        </ErrorBoundary>
+        <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+          <ChatPanel
+            key={selectedChat?.id}
+            chat={enrichedSelectedChat}
+            currentUser={initialUser}
+            onActionSuccess={handleDataMutation}
+            closeReasons={closeReasons}
+            showFullHistory={showFullHistory}
+            setShowFullHistory={setShowFullHistory}
+            tabId={tabIdRef.current}
           onLoadOlderMessages={loadOlderMessages}
           canLoadOlder={hasMoreHistory}
           workspaceTimezone={workspaceTimezone}
           onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
           onForwardMessage={handleForwardMessage}
+          highContrast={highContrast}
+          onToggleHighContrast={() => setHighContrast((v) => !v)}
+          isRTL={isRTL}
+          onToggleRTL={() => setIsRTL((v) => !v)}
         />
+        </ErrorBoundary>
         {isContactPanelOpen && !isForwarding && (
           <ContactPanel
             chat={enrichedSelectedChat}

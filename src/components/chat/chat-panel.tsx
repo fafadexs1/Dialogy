@@ -47,7 +47,9 @@ import {
     Lock,
     MapPin,
     FileText,
-    Brain
+    Brain,
+    Contrast,
+    Languages
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
@@ -62,10 +64,10 @@ import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
-import { closeChatAction, assignChatToSelfAction, getContactMessages, toggleChatAutopilot } from '@/actions/chats';
+import { getContactMessages, toggleChatAutopilot } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendAgentMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
 import { getAutopilotConfig, addDocumentToKnowledgeBase } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
 import { generateChatHtml } from '@/lib/chat-export';
@@ -94,6 +96,9 @@ import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { reportClientMetric } from '@/lib/observability/client';
+import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
 
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
@@ -113,6 +118,10 @@ interface ChatPanelProps {
     workspaceTimezone: string;
     onToggleContactPanel: () => void;
     onForwardMessage: (message: Message) => void;
+    highContrast: boolean;
+    onToggleHighContrast: () => void;
+    isRTL: boolean;
+    onToggleRTL: () => void;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
@@ -125,15 +134,15 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     const show = isOpen !== undefined ? isOpen : internalIsOpen;
     const setShow = onOpenChange || setInternalIsOpen;
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        const result = await closeChatAction(chat.id, reasonTagId, notes);
-        if (result.success) {
-            toast({ title: "Atendimento encerrado com sucesso!" });
-            setShow(false);
-            onActionSuccess();
-        } else {
+        const handleSubmit = async (e: React.FormEvent) => {
+            e.preventDefault();
+            setIsSubmitting(true);
+            const result = await guardedCloseChat(chat.id, reasonTagId, notes);
+            if (result.success) {
+                toast({ title: "Atendimento encerrado com sucesso!" });
+                setShow(false);
+                onActionSuccess();
+            } else {
             toast({ title: "Erro ao encerrar", description: result.error, variant: 'destructive' });
         }
         setIsSubmitting(false);
@@ -196,20 +205,61 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
             !disabled && !pending
                 ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20"
                 : "bg-white/5 text-muted-foreground hover:bg-white/10"
-        )} disabled={pending || disabled}>
+        )} disabled={pending || disabled} aria-label="Enviar mensagem">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
         </Button>
     )
+}
+
+function MeasuredMessageRow({ children, messageId, onHeightChange }: { children: React.ReactNode; messageId: string; onHeightChange: (id: string, height: number) => void }) {
+    const ref = useRef<HTMLDivElement | null>(null);
+
+    useLayoutEffect(() => {
+        if (!ref.current) return;
+        const measure = () => {
+            if (ref.current) {
+                onHeightChange(messageId, ref.current.getBoundingClientRect().height);
+            }
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(ref.current);
+        return () => observer.disconnect();
+    }, [messageId, onHeightChange]);
+
+    return (
+        <div ref={ref} className="py-1">
+            {children}
+        </div>
+    );
 }
 
 
 
 
 
-export default function ChatPanel({ chat, currentUser, onActionSuccess, closeReasons, showFullHistory, setShowFullHistory, tabId, onLoadOlderMessages, canLoadOlder, workspaceTimezone, onToggleContactPanel, onForwardMessage }: ChatPanelProps) {
+export default function ChatPanel({
+    chat,
+    currentUser,
+    onActionSuccess,
+    closeReasons,
+    showFullHistory,
+    setShowFullHistory,
+    tabId,
+    onLoadOlderMessages,
+    canLoadOlder,
+    workspaceTimezone,
+    onToggleContactPanel,
+    onForwardMessage,
+    highContrast,
+    onToggleHighContrast,
+    isRTL,
+    onToggleRTL,
+}: ChatPanelProps) {
 
     const updateChat = useInboxStore(state => state.updateChat);
     const [newMessage, setNewMessage] = useState('');
+    const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
     const [isAiAgentActive, setIsAiAgentActive] = useState(chat?.is_autopilot_active ?? false);
     const [isInternalNote, setIsInternalNote] = useState(false);
@@ -218,6 +268,13 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     const canLoadOlderRef = useRef(canLoadOlder);
     const [allContactMessages, setAllContactMessages] = useState<Message[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [sendState, setSendState] = useState<'idle' | 'sending' | 'error'>('idle');
+    const [lastSendError, setLastSendError] = useState<string | null>(null);
+    const lastSendDraftRef = useRef<{ text: string; media: MediaFileType[]; isNote: boolean } | null>(null);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [viewportHeight, setViewportHeight] = useState(0);
+    const messageHeightsRef = useRef<Map<string, number>>(new Map());
+    const [averageMessageHeight, setAverageMessageHeight] = useState(120);
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -334,20 +391,28 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     }, [onLoadOlderMessages, showFullHistory]);
 
     useEffect(() => {
-        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
+        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
         if (!viewport) return;
 
         const handleScroll = () => {
-            const { scrollTop, scrollHeight, clientHeight } = viewport;
-            const isScrolledUp = scrollHeight - scrollTop - clientHeight > 100;
+            const { scrollTop: currentTop, scrollHeight, clientHeight } = viewport;
+            setScrollTop(currentTop);
+            setViewportHeight(clientHeight);
+            const isScrolledUp = scrollHeight - currentTop - clientHeight > 100;
             userScrolledUpRef.current = isScrolledUp;
-            if (scrollTop < 120) {
+            if (currentTop < 120) {
                 tryLoadOlder();
             }
         };
 
+        handleScroll();
         viewport.addEventListener('scroll', handleScroll);
-        return () => viewport.removeEventListener('scroll', handleScroll);
+        const resizeObserver = new ResizeObserver(() => setViewportHeight(viewport.clientHeight));
+        resizeObserver.observe(viewport);
+        return () => {
+            viewport.removeEventListener('scroll', handleScroll);
+            resizeObserver.disconnect();
+        };
     }, [tryLoadOlder]);
 
 
@@ -361,6 +426,12 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     useEffect(() => {
         setAllContactMessages([]);
     }, [chat?.contact?.id]);
+
+    useEffect(() => {
+        messageHeightsRef.current.clear();
+        setAverageMessageHeight(120);
+        setScrollTop(0);
+    }, [chat?.id]);
 
     useEffect(() => {
         if (isProtocolScoped) return;
@@ -411,6 +482,26 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         previousScrollHeightRef.current = currentScrollHeight;
         previousFirstMessageIdRef.current = currentFirstMessageId || null;
     }, [messagesToRender]);
+
+    const registerMessageHeight = useCallback((id: string, height: number) => {
+        const current = messageHeightsRef.current.get(id);
+        if (current !== height) {
+            messageHeightsRef.current.set(id, height);
+            const values = Array.from(messageHeightsRef.current.values());
+            const avg = values.reduce((sum, h) => sum + h, 0) / values.length;
+            setAverageMessageHeight(Math.max(80, Math.min(200, Math.round(avg))));
+        }
+    }, []);
+
+    const estimateHeight = averageMessageHeight || 120;
+    const totalHeight = messagesToRender.reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
+    const virtualViewport = viewportHeight || estimateHeight * 8;
+    const startIndex = Math.max(0, Math.floor(scrollTop / estimateHeight) - 5);
+    const endIndex = Math.min(messagesToRender.length, Math.ceil((scrollTop + virtualViewport) / estimateHeight) + 5);
+    const visibleMessages = messagesToRender.slice(startIndex, endIndex);
+    const padTop = messagesToRender.slice(0, startIndex).reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
+    const renderedHeight = visibleMessages.reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
+    const padBottom = Math.max(0, totalHeight - padTop - renderedHeight);
 
     const runAiAgent = useCallback(async () => {
         const lastMessage = chat?.messages?.length ? chat.messages[chat.messages.length - 1] : null;
@@ -672,14 +763,21 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             : Math.random().toString(36).slice(2);
 
     const handleFormSubmit = async () => {
-        if (!chat) return;
+        if (!chat || sendState === 'sending') return;
+        setSendState('sending');
+        setLastSendError(null);
+        const sendStart = performance.now();
 
         const currentMessageText = htmlToWhatsappMarkdown(newMessage);
         const currentMediaFiles = [...mediaFiles];
         const isTextOnly = currentMediaFiles.length === 0;
 
-        if (isTextOnly && !currentMessageText.trim()) return;
+        if (isTextOnly && !currentMessageText.trim()) {
+            setSendState('idle');
+            return;
+        }
 
+        lastSendDraftRef.current = { text: currentMessageText, media: currentMediaFiles, isNote: isInternalNote };
         setNewMessage('');
         setMediaFiles([]);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
@@ -687,8 +785,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         let optimisticId: string | null = null;
         if (isTextOnly) {
             const now = new Date();
-            // Use UUID for text messages to ensure deduplication with real message
-            optimisticId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `optimistic-${Date.now()}`;
+            optimisticId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'optimistic-' + Date.now();
 
             const optimisticMessage: Message = {
                 id: optimisticId,
@@ -715,18 +812,17 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             };
             appendMessagesToChat(chat.id, [optimisticMessage]);
         } else {
-            // Optimistic updates for media
             const now = new Date();
             const optimisticMediaMessages = currentMediaFiles.map(mf => {
                 return {
-                    id: `optimistic-${generateOptimisticId()}`,
+                    id: 'optimistic-' + generateOptimisticId(),
                     chat_id: chat.id,
                     workspace_id: chat.workspace_id,
                     content: mf.name,
                     type: mf.mediatype,
                     status: 'default',
                     metadata: {
-                        mediaUrl: `data:${mf.type};base64,${mf.base64}`,
+                        mediaUrl: 'data:' + mf.type + ';base64,' + mf.base64,
                         mimetype: mf.type,
                         fileName: mf.name,
                         thumbnail: mf.thumbnail,
@@ -754,23 +850,22 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         try {
             let result: { success: boolean; error?: string };
             if (!isTextOnly) {
-                // Upload files first to get a public URL
                 const uploadedFiles = await Promise.all(currentMediaFiles.map(async (mf) => {
                     const extension = mf.name.split('.').pop() || 'dat';
-                    const fileName = `${Date.now()}_${crypto.randomUUID()}.${extension}`;
+                    const fileName = Date.now() + '_' + crypto.randomUUID() + '.' + extension;
                     const { publicUrl, error } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
 
                     if (error || !publicUrl) {
                         toast({
-                            title: `Erro ao enviar ${mf.name}`,
+                            title: 'Erro ao enviar ' + mf.name,
                             description: error || 'Falha no upload',
                             variant: 'destructive'
                         });
-                        throw new Error(`Falha no upload de ${mf.name}`);
+                        throw new Error('Falha no upload de ' + mf.name);
                     }
 
                     return {
-                        base64: publicUrl, // We pass the URL in the base64 field as expectations downstream handle it as a source
+                        base64: publicUrl,
                         mimetype: mf.type,
                         filename: mf.name,
                         mediatype: mf.mediatype,
@@ -782,8 +877,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             } else if (isInternalNote) {
                 result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
             } else {
-                // Pass the optimisticId (UUID) to the action so the DB uses the same ID
-                result = await sendAgentMessageAction(chat.id, currentMessageText, tabId, optimisticId || undefined);
+                result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
             }
 
             if (result.error) {
@@ -791,17 +885,35 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                 if (optimisticId) {
                     removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
                 }
+                setSendState('error');
+                setLastSendError(result.error);
+            } else {
+                setSendState('idle');
+                setLastSendError(null);
+                lastSendDraftRef.current = null;
             }
         } catch (error) {
-            console.error("Error during message submission:", error);
-            toast({ title: 'Erro Crítico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
+            console.error('Error during message submission:', error);
+            toast({ title: 'Erro Critico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
             if (optimisticId) {
                 removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
             }
+            setSendState('error');
+            setLastSendError(error instanceof Error ? error.message : 'Falha ao enviar mensagem');
+            const draft = lastSendDraftRef.current;
+            if (draft) {
+                setNewMessage(draft.text);
+                setMediaFiles(draft.media);
+                if (contentEditableRef.current) {
+                    contentEditableRef.current.innerHTML = draft.text;
+                }
+            }
+        } finally {
+            reportClientMetric('send_message', performance.now() - sendStart, { chatId: chat.id, media: !isTextOnly });
         }
     };
 
-    const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
+const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
         if (!chat) return;
 
         // Upload to Supabase Storage
@@ -855,7 +967,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
             e.preventDefault();
             handleFormSubmit();
         }
@@ -870,15 +982,18 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
 
     const filteredShortcuts = useMemo(() => {
         if (!showShortcutSuggestions) return [];
-        const command = newMessage.substring(newMessage.lastIndexOf('/') + 1).toLowerCase();
+        const command = debouncedMessageInput.substring(debouncedMessageInput.lastIndexOf('/') + 1).toLowerCase();
         return shortcuts.filter(s => s.name.toLowerCase().startsWith(command));
-    }, [newMessage, shortcuts, showShortcutSuggestions]);
+    }, [debouncedMessageInput, shortcuts, showShortcutSuggestions]);
 
     const handleMessageChange = (e: React.FormEvent<HTMLDivElement>) => {
         const text = e.currentTarget.innerHTML;
         setNewMessage(text);
-        setShowShortcutSuggestions(text.includes('/'));
     };
+
+    useEffect(() => {
+        setShowShortcutSuggestions(debouncedMessageInput.includes('/'));
+    }, [debouncedMessageInput]);
 
     const handleShortcutSelect = (shortcut: Shortcut) => {
         if (contentEditableRef.current) {
@@ -1022,6 +1137,34 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                             </TooltipTrigger>
                             <TooltipContent><p>Treinar Agente</p></TooltipContent>
                         </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant={highContrast ? "secondary" : "ghost"}
+                                    size="icon"
+                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    onClick={onToggleHighContrast}
+                                    aria-label="Alternar alto contraste"
+                                >
+                                    <Contrast className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Alto contraste</p></TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant={isRTL ? "secondary" : "ghost"}
+                                    size="icon"
+                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    onClick={onToggleRTL}
+                                    aria-label="Alternar direcao RTL"
+                                >
+                                    <Languages className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Texto da direita para esquerda</p></TooltipContent>
+                        </Tooltip>
 
                         {isChatOpen && isChatAssignedToMe && (
                             <Tooltip>
@@ -1045,24 +1188,39 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto relative" >
                 <ScrollArea className="h-full" ref={scrollAreaRef}>
-                    <div className="space-y-1 p-6 pb-4">
+                    <div
+                        className="relative p-6 pb-4"
+                        style={{ minHeight: virtualViewport || 320, height: Math.max(totalHeight, virtualViewport || 320) }}
+                    >
                         {isLoadingOlderMessages && canLoadOlder && (
-                            <div className="flex justify-center py-4 text-white/50 text-xs">
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-white/50 text-xs flex items-center gap-2">
                                 <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Carregando mensagens anteriores...</span>
                             </div>
                         )}
-                        {messagesToRender.map((message, index) => (
-                            <MessageItem
-                                key={message.id}
-                                message={message}
-                                prevMessage={messagesToRender[index - 1]}
-                                workspaceTimezone={workspaceTimezone}
-                                onDelete={handleDeleteMessage}
-                                currentUserId={currentUser.id}
-                                instanceName={chat.instance_name}
-                                onForward={handleForwardMessage}
-                            />
-                        ))}
+                        <div style={{ paddingTop: padTop, paddingBottom: padBottom }} className="space-y-1">
+                            {visibleMessages.map((message, index) => {
+                                const absoluteIndex = startIndex + index;
+                                const prevMessage = absoluteIndex > 0 ? messagesToRender[absoluteIndex - 1] : undefined;
+                                return (
+                                    <MeasuredMessageRow
+                                        key={message.id}
+                                        messageId={message.id}
+                                        onHeightChange={registerMessageHeight}
+                                    >
+                                        <MessageItem
+                                            message={message}
+                                            prevMessage={prevMessage}
+                                            workspaceTimezone={workspaceTimezone}
+                                            onDelete={handleDeleteMessage}
+                                            currentUserId={currentUser.id}
+                                            instanceName={chat.instance_name}
+                                            onForward={handleForwardMessage}
+                                        />
+                                    </MeasuredMessageRow>
+                                );
+                            })}
+                        </div>
                     </div>
                 </ScrollArea>
 
@@ -1107,7 +1265,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                 <div className="flex gap-1 pb-1">
                                     <Popover>
                                         <PopoverTrigger asChild>
-                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl" disabled={isAiTyping}>
+                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl" disabled={isAiTyping} aria-label="Abrir emojis">
                                                 <Smile className="h-5 w-5" />
                                             </Button>
                                         </PopoverTrigger>
@@ -1123,6 +1281,7 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                         className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
                                         disabled={isAiTyping}
                                         onClick={() => fileInputRef.current?.click()}
+                                        aria-label="Enviar anexo"
                                     >
                                         <Paperclip className="h-5 w-5" />
                                     </Button>
@@ -1138,7 +1297,8 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                         )}
                                         disabled={isAiTyping}
                                         onClick={() => setIsInternalNote(!isInternalNote)}
-                                        title="Nota Interna (não enviada ao cliente)"
+                                        title="Nota interna (nao enviada ao cliente)"
+                                        aria-label="Alternar nota interna"
                                     >
                                         <StickyNote className="h-5 w-5" />
                                     </Button>
@@ -1148,13 +1308,14 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                             <Button
                                                 type="button"
                                                 variant="ghost"
-                                                size="icon"
-                                                className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
-                                                disabled={isAiTyping}
-                                                title="Atalhos"
-                                            >
-                                                <MessageSquareQuote className="h-5 w-5" />
-                                            </Button>
+                                            size="icon"
+                                            className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
+                                            disabled={isAiTyping}
+                                            title="Atalhos"
+                                            aria-label="Atalhos de resposta"
+                                        >
+                                            <MessageSquareQuote className="h-5 w-5" />
+                                        </Button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-80 p-0 bg-black/90 border-white/10 backdrop-blur-xl text-white max-h-96 overflow-y-auto" align="start">
                                             <div className="p-2 space-y-1">
@@ -1216,11 +1377,25 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
                                     {newMessage.trim() === "" && mediaFiles.length === 0 ? (
                                         <AudioRecorder onSend={handleSendAudio} />
                                     ) : (
-                                        <SendMessageButton disabled={isAiTyping} />
+                                        <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
                                     )}
                                 </div>
                             </div>
                         </form>
+                        {sendState === 'sending' && (
+                            <div className="text-xs text-blue-300 flex items-center gap-2 pl-1">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>Enviando...</span>
+                            </div>
+                        )}
+                        {sendState === 'error' && (
+                            <div className="text-xs text-red-300 flex items-center gap-2 pl-1">
+                                <span>{lastSendError || 'Falha ao enviar. Tente novamente.'}</span>
+                                <Button variant="link" size="sm" className="px-1 h-auto text-red-200" onClick={handleFormSubmit}>
+                                    Reenviar
+                                </Button>
+                            </div>
+                        )}
 
                         <div className="flex flex-wrap items-center gap-3 px-2">
                             <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5">
@@ -1273,3 +1448,4 @@ export default function ChatPanel({ chat, currentUser, onActionSuccess, closeRea
         </div>
     );
 }
+

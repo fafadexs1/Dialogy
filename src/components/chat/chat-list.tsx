@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -28,7 +28,8 @@ import { Label } from '../ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { startNewConversation } from '@/actions/messages';
-import { closeChatAction, closeMultipleChatsAction } from '@/actions/chats';
+import { closeMultipleChatsAction } from '@/actions/chats';
+import { guardedAssignChat, guardedCloseChat } from '@/actions/chat-guards';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { buildChatProtocol, cn } from '@/lib/utils';
@@ -37,6 +38,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 
 import { SearchDetailsDialog } from './search-details-dialog';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
@@ -406,10 +408,14 @@ interface ChatListItemProps {
   isBulkMode?: boolean;
   isSelectedForBulk?: boolean;
   onToggleBulkSelection?: (chatId: string) => void;
+  snoozedUntil?: number;
+  onSnooze?: (chatId: string) => void;
+  onUnsnooze?: (chatId: string) => void;
+  onAssign?: (chat: Chat) => Promise<void> | void;
 }
 
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, isBulkMode, isSelectedForBulk, onToggleBulkSelection }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, isBulkMode, isSelectedForBulk, onToggleBulkSelection, snoozedUntil, onSnooze, onUnsnooze, onAssign }) => {
   const isMarketingChat = chat.messages.some((m: any) => (m.metadata as any)?.isMarketing);
   const visibleMessages = React.useMemo(() => {
     if (showMarketing) return chat.messages;
@@ -419,6 +425,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
+  const canAssign = chat.status === 'gerais';
+  const canSnooze = chat.status === 'atendimentos';
+  const canTag = false;
+  const isSnoozed = !!snoozedUntil && snoozedUntil > Date.now();
+  const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
+  const statusTone = chat.status === 'encerrados'
+    ? 'bg-red-500/20 text-red-200'
+    : chat.status === 'atendimentos'
+      ? 'bg-emerald-500/20 text-emerald-100'
+      : 'bg-blue-500/20 text-blue-100';
 
   const handleSelect = (e?: React.MouseEvent) => {
     if (isBulkMode && onToggleBulkSelection) {
@@ -441,7 +457,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       onSelect(null);
     }
     setIsClosing(true);
-    const result = await closeChatAction(chat.id, null, null, false);
+    const result = await guardedCloseChat(chat.id, null, null, false);
     if (result.success) {
       toast({ title: 'Atendimento encerrado' });
       onUpdate();
@@ -451,17 +467,46 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     setIsClosing(false);
   };
 
+  const handleAssign = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onAssign) {
+      await onAssign(chat);
+    }
+  };
+
+  const handleSnoozeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isSnoozed) {
+      onUnsnooze?.(chat.id);
+    } else {
+      onSnooze?.(chat.id);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleSelect();
+    }
+  };
+
   return (
     <div
       className={cn(
-        "relative flex items-center gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent",
+        "relative flex items-center gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60",
         isSelected && !isForwarding && !isBulkMode
           ? "bg-white/10 border-white/10 shadow-lg"
           : "hover:bg-white/5 hover:border-white/5",
-        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-blue-500/10 border-blue-500/30" : ""
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-blue-500/10 border-blue-500/30" : "",
+        isSnoozed ? "opacity-60" : ""
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="option"
+      aria-selected={isSelected}
+      aria-label={`Conversa com ${chat.contact.name}${isSnoozed ? ' adiada' : ''}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
         <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
@@ -548,13 +593,108 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className='flex-1 min-w-0'>
-            <p className={cn("font-semibold truncate text-sm", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
-              {chat.contact.name.split(' ').slice(0, 3).join(' ')}
-            </p>
+            <div className="flex items-center gap-2 min-w-0 flex-nowrap">
+              <p className={cn("font-semibold truncate text-sm whitespace-nowrap max-w-[60%]", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
+                {chat.contact.name.split(' ').slice(0, 3).join(' ')}
+              </p>
+              {chat.status === 'encerrados' && (
+                <Badge className={cn("text-[10px] border-0 px-1.5 py-0.5 flex-shrink-0", statusTone)}>
+                  {statusLabel}
+                </Badge>
+              )}
+              {chat.teamName && chat.status === 'atendimentos' && (
+                <Badge
+                  style={{
+                    backgroundColor: chat.teamColor || 'rgba(255,255,255,0.1)',
+                    color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
+                    borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
+                  }}
+                  className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 border flex-shrink-0"
+                  title={chat.teamName}
+                >
+                  <Users className="h-3 w-3" />
+                  {chat.teamName}
+                </Badge>
+              )}
+              {chat.tag && (
+                <Badge
+                  style={{
+                    backgroundColor: chat.color || 'rgba(255,255,255,0.1)',
+                    color: chat.color ? (chat.color.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
+                    borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
+                  }}
+                  className="text-[10px] border px-1.5 py-0.5 flex-shrink-0"
+                  title={chat.tag}
+                >
+                  {chat.tag}
+                </Badge>
+              )}
+              {isSnoozed && (
+                <Badge className="text-[10px] px-1.5 py-0 bg-amber-500/30 text-amber-100 border-amber-500/40 flex-shrink-0" title="Conversa adiada temporariamente">
+                  Snooze
+                </Badge>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 flex-nowrap justify-end">
+            <div className="flex items-center gap-1 flex-wrap">
+              {canAssign && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-white/60 hover:text-white"
+                        aria-label="Assumir conversa"
+                        onClick={handleAssign}
+                      >
+                        <UserCheck className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Assumir</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {canSnooze && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("h-7 w-7", isSnoozed ? "text-amber-300" : "text-white/60 hover:text-white")}
+                        aria-label={isSnoozed ? "Retomar conversa adiada" : "Adiantar conversa por 15 minutos"}
+                        onClick={handleSnoozeClick}
+                      >
+                        <BellOff className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{isSnoozed ? 'Retomar agora' : 'Soneca de 15 min'}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {canTag && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-white/60 hover:text-white"
+                        aria-label="Etiquetar conversa"
+                        onClick={(e) => { e.stopPropagation(); setIsTagDialogOpen(true); }}
+                      >
+                        <TagIcon className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Aplicar tag</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
             {canQuickClose && (
               <TooltipProvider>
                 <Tooltip>
@@ -581,7 +721,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
           {isMarketingChat && (
             <Badge
               variant="secondary"
@@ -591,32 +731,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               Marketing
             </Badge>
           )}
-          {chat.tag && chat.color && chat.status !== 'atendimentos' && (
-            <Badge
-              style={{
-                backgroundColor: chat.color,
-                color: chat.color?.toLowerCase?.().startsWith('#fe') ? '#000' : '#fff'
-              }}
-              className="border-transparent text-[10px] px-1.5 py-0 rounded-md shadow-sm"
-              title={chat.tag}
-            >
-              {chat.tag}
-            </Badge>
-          )}
-
-          {chat.teamName && chat.status === 'atendimentos' && (
-            <Badge
-              variant="secondary"
-              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 bg-white/10 text-white hover:bg-white/20 border-white/5"
-              title={chat.teamName}
-            >
-              <Users className="h-3 w-3" />
-              {chat.teamName}
-            </Badge>
-          )}
         </div>
 
-        <div className="mt-1 flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex-1 min-w-0">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
           </div>
@@ -672,6 +789,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
+  const [snoozedUntilMap, setSnoozedUntilMap] = useState<Record<string, number>>({});
 
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const appendChats = useInboxStore((state) => state.appendChats);
@@ -686,12 +804,27 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const debouncedSearch = useDebouncedValue(searchQuery, 220);
 
   const toggleBulkMode = () => {
     setIsBulkMode(!isBulkMode);
     setSelectedBulkChats(new Set());
     // If we're entering bulk mode, maybe we want to select the current filtered list?
     // No, usually user selects manually.
+  };
+
+  const handleSnooze = (chatId: string) => {
+    const until = Date.now() + 15 * 60 * 1000;
+    setSnoozedUntilMap((prev) => ({ ...prev, [chatId]: until }));
+    toast({ title: 'Conversa adiada', description: 'Voltaremos a mostrar esse chat em 15 minutos.' });
+  };
+
+  const handleUnsnooze = (chatId: string) => {
+    setSnoozedUntilMap((prev) => {
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
   };
 
   const handleToggleBulkSelection = (chatId: string) => {
@@ -757,6 +890,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
 
     setIsBulkSubmitting(false);
+  };
+
+  const handleAssignChat = async (chat: Chat) => {
+    const result = await guardedAssignChat(chat.id);
+    if (result.success) {
+      toast({ title: 'Assumiu atendimento', description: `${chat.contact.name} agora est\u00e1 com voc\u00ea.` });
+      onUpdate();
+    } else {
+      toast({ title: 'N\u00e3o foi poss\u00edvel assumir', description: result.error, variant: 'destructive' });
+    }
   };
 
   const selectedChatIdRef = React.useRef(selectedChat?.id);
@@ -853,6 +996,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const filterChatByControls = useCallback(
     (chat: Chat) => {
+      const now = Date.now();
       const visibleMessages = showMarketing
         ? chat.messages
         : chat.messages.filter(m => !(m.metadata as any)?.isMarketing);
@@ -879,9 +1023,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
       const matchesUnassigned = !showUnassignedOnly || !chat.agent;
+      const snoozedUntil = snoozedUntilMap[chat.id];
+      const matchesSnooze = !snoozedUntil || snoozedUntil <= now;
 
       // Search Logic
-      const query = searchQuery.toLowerCase();
+      const query = debouncedSearch.toLowerCase();
       const protocol = chat.protocol || buildChatProtocol(chat.id);
       const matchesSearch =
         !query ||
@@ -891,9 +1037,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (chat.id || '').toLowerCase().includes(query) ||
         visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
 
-      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch;
+      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, searchQuery, showMarketing]
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearch, showMarketing, snoozedUntilMap]
   );
 
   const filteredChats = useMemo(() => {
@@ -1055,6 +1201,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             className="pl-9 bg-white/5 border-white/10 focus:border-blue-500/50 focus:bg-white/10 focus:ring-1 focus:ring-blue-500/50 transition-all rounded-xl text-white placeholder:text-muted-foreground"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Pesquisar conversas"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && searchQuery.trim()) {
                 e.preventDefault();
@@ -1220,6 +1367,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     isBulkMode={isBulkMode}
                     isSelectedForBulk={selectedBulkChats.has(chat.id)}
                     onToggleBulkSelection={handleToggleBulkSelection}
+                    snoozedUntil={snoozedUntilMap[chat.id]}
+                    onSnooze={() => handleSnooze(chat.id)}
+                    onUnsnooze={() => handleUnsnooze(chat.id)}
+                    onAssign={handleAssignChat}
                   />
                 ))}
                 {hasMoreChats && activeTab === 'encerrados' && (

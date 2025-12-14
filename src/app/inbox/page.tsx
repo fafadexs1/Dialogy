@@ -1,13 +1,12 @@
 
 
-import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
-import { getCurrentUser } from '@/actions/user';
+import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
 export default async function InboxRootPage() {
-  const user = await getCurrentUser();
+  const { user, initialData } = await getInboxBootstrap(null);
 
   if (!user) {
     return redirect('/login');
@@ -20,6 +19,6 @@ export default async function InboxRootPage() {
 
   // Render the chat layout without a pre-selected chat.
   return (
-    <CustomerChatLayout initialUser={user} chatId={null} />
+    <CustomerChatLayout initialUser={user} chatId={initialData?.selectedChatId ?? null} initialData={initialData} />
   )
 }

@@ -9,12 +9,16 @@ import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { sendAutomatedMessageAction } from './messages';
-import { withDebug } from '@/lib/observability/logger';
+import { logAction, withDebug } from '@/lib/observability/logger';
 import { buildChatProtocol } from '@/lib/utils';
 import { randomUUID } from 'crypto';
+import { consumeRateLimit } from '@/lib/ratelimit';
+import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
+import { reportServerError } from '@/lib/observability/errors';
 
 // Fallback timezone
 const defaultTimeZone = 'America/Sao_Paulo';
+const workspaceTimezoneCache = new Map<string, string>();
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -563,6 +567,7 @@ type ChatRow = {
     contact_id: string | null;
     agent_id: string | null;
     team_name: string | null;
+    team_color: string | null;
     instance_name: string | null;
     instance_type: Chat['instance_type'];
     source: string | null;
@@ -625,8 +630,13 @@ type MessageRow = {
 };
 
 async function getWorkspaceTimezone(workspaceId: string): Promise<string> {
+    if (workspaceTimezoneCache.has(workspaceId)) {
+        return workspaceTimezoneCache.get(workspaceId)!;
+    }
     const workspaceRes = await db.query('SELECT timezone FROM workspaces WHERE id = $1', [workspaceId]);
-    return workspaceRes.rows[0]?.timezone || defaultTimeZone;
+    const timezone = workspaceRes.rows[0]?.timezone || defaultTimeZone;
+    workspaceTimezoneCache.set(workspaceId, timezone);
+    return timezone;
 }
 
 async function fetchChats({
@@ -748,6 +758,7 @@ async function fetchChats({
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
             ), 0) AS unread_count,
             t.name AS team_name,
+            t.color AS team_color,
             eai.type AS instance_type,
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
@@ -794,48 +805,56 @@ export const getInitialChatsData = withDebug(
         workspaceId,
         selectedChatId,
         ownership = 'mine',
+        userIdOverride,
+        workspaceTimezone,
     }: {
         workspaceId: string;
         selectedChatId: string | null;
         ownership?: 'mine' | 'everyone';
+        userIdOverride?: string;
+        workspaceTimezone?: string | null;
     }): Promise<InitialChatsPayload> {
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
+        let userId = userIdOverride;
 
-        if (!user) {
-            return {
-                chats: [],
-                messages: [],
-                selectedChatId: null,
-                lastSyncChats: null,
-                lastSyncMessageForSelected: null,
-                oldestMessageDate: null,
-                hasMoreHistory: false,
-                hasMoreChats: false,
-                timezone: defaultTimeZone,
-                error: "Usuário não autenticado."
-            };
+        if (!userId) {
+            const supabase = await createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+
+            if (!user) {
+                return {
+                    chats: [],
+                    messages: [],
+                    selectedChatId: null,
+                    lastSyncChats: null,
+                    lastSyncMessageForSelected: null,
+                    oldestMessageDate: null,
+                    hasMoreHistory: false,
+                    hasMoreChats: false,
+                    timezone: defaultTimeZone,
+                    error: "Usuario nao autenticado."
+                };
+            }
+
+            userId = user.id;
         }
 
         try {
-            const timezone = await getWorkspaceTimezone(workspaceId);
+            const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
 
-            // 1. Fetch Active Chats (Gerais + Atendimentos) - High limit to show all
             const activeChatsLimit = 1000;
             const activeChatsPromise = fetchChats({
                 workspaceId,
-                userId: user.id,
+                userId,
                 limit: activeChatsLimit,
                 includeChatId: selectedChatId,
                 ownership,
                 statuses: ['gerais', 'atendimentos']
             });
 
-            // 2. Fetch Closed Chats (Encerrados) - Standard pagination limit
             const closedChatsLimit = 20;
             const closedChatsPromise = fetchChats({
                 workspaceId,
-                userId: user.id,
+                userId,
                 limit: closedChatsLimit,
                 includeChatId: null,
                 ownership,
@@ -846,10 +865,8 @@ export const getInitialChatsData = withDebug(
 
             const allChatRows = [...activeChatRows, ...closedChatRows];
 
-            // Deduplicate if necessary
             const uniqueChatRows = Array.from(new Map(allChatRows.map(c => [c.id, c])).values());
 
-            // Sort combined result
             uniqueChatRows.sort((a, b) => {
                 const timeA = new Date(a.chat_activity_at || 0).getTime();
                 const timeB = new Date(b.chat_activity_at || 0).getTime();
@@ -889,8 +906,8 @@ export const getInitialChatsData = withDebug(
                 timezone,
             };
 
-        } catch (error: any) {
-            console.error("[GET_INITIAL_CHATS] Error:", error);
+        } catch (error) {
+            console.error('[GET_INITIAL_CHATS] Error:', error);
             return {
                 chats: [],
                 messages: [],
@@ -901,7 +918,7 @@ export const getInitialChatsData = withDebug(
                 hasMoreHistory: false,
                 hasMoreChats: false,
                 timezone: defaultTimeZone,
-                error: `Falha ao carregar dados iniciais: ${error.message}`
+                error: 'Falha ao carregar dados iniciais: ' + (error instanceof Error ? error.message : 'erro desconhecido')
             };
         }
     },
@@ -1049,7 +1066,8 @@ export const searchChatsAndContacts = withDebug(
                         cont.email AS contact_email,
                         cont.phone_number_jid AS contact_phone_number_jid,
                         cont.address AS contact_address,
-                        t.name AS team_name
+                        t.name AS team_name,
+                        t.color AS team_color
                     FROM chats c
                     LEFT JOIN contacts cont ON c.contact_id = cont.id
                     LEFT JOIN team_members tm ON c.agent_id = tm.user_id
@@ -1093,6 +1111,7 @@ export const searchChatsAndContacts = withDebug(
                     tag: row.tag,
                     color: row.color,
                     teamName: row.team_name,
+                    teamColor: row.team_color || undefined,
                     protocol: row.protocol,
                     protocolScoped: true,
                 };
@@ -1173,6 +1192,7 @@ export const searchChatsAndContacts = withDebug(
                     cont.phone_number_jid AS contact_phone_number_jid,
                     cont.address AS contact_address,
                     t.name AS team_name,
+                    t.color AS team_color,
                     (
                         SELECT json_build_object(
                             'id', m.id,
@@ -1243,7 +1263,8 @@ export const searchChatsAndContacts = withDebug(
                     unreadCount: 0,
                     tag: row.tag,
                     color: row.color,
-                    teamName: row.team_name
+                    teamName: row.team_name,
+                    teamColor: row.team_color || undefined
                     ,
                     protocol: row.protocol || buildChatProtocol(row.id),
                 };
@@ -1611,6 +1632,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             assigned_at: row.assigned_at || undefined,
             unreadCount: Number(row.unread_count || 0),
             teamName: row.team_name || undefined,
+            teamColor: row.team_color || undefined,
             tag: row.tag || undefined,
             color: row.color || undefined,
             protocol: row.protocol || buildChatProtocol(row.id),

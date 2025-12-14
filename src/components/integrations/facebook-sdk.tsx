@@ -24,9 +24,12 @@ export function FacebookSDK({
     xfbml = true,
 }: FacebookSDKProps) {
     const isLoaded = useRef(false);
+    const canCheckLoginStatus = () => {
+        if (typeof window === 'undefined') return false;
+        return window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+    };
 
     useEffect(() => {
-        // Definir o callback de inicialização
         window.fbAsyncInit = function () {
             window.FB.init({
                 appId: appId,
@@ -39,10 +42,13 @@ export function FacebookSDK({
                 window.FB.AppEvents.logPageView();
             }
 
-            // Check login status on init
-            window.FB.getLoginStatus(function (response: any) {
-                console.log('Facebook SDK Initialized. Login Status:', response.status);
-            });
+            if (canCheckLoginStatus()) {
+                window.FB.getLoginStatus(function (response: any) {
+                    console.log('Facebook SDK Initialized. Login Status:', response.status);
+                });
+            } else {
+                console.warn('Skipping FB.getLoginStatus because page is not served over HTTPS.');
+            }
 
             isLoaded.current = true;
         };
@@ -54,9 +60,8 @@ export function FacebookSDK({
             src="https://connect.facebook.net/en_US/sdk.js"
             strategy="afterInteractive"
             onLoad={() => {
-                // Fallback case: if cached or loaded by other means
+                if (typeof window === 'undefined') return;
                 if (window.FB && !isLoaded.current) {
-                    // Force re-init if needed or just mark as loaded
                     isLoaded.current = true;
                 }
             }}
@@ -64,13 +69,14 @@ export function FacebookSDK({
     );
 }
 
-// Helper para verificar status globalmente se necessário
 export const checkLoginState = (callback?: (response: any) => void) => {
-    if (typeof window !== 'undefined' && window.FB) {
+    const canCheckLoginStatus = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'localhost');
+    if (canCheckLoginStatus && typeof window !== 'undefined' && window.FB) {
         window.FB.getLoginStatus((response: any) => {
             if (callback) callback(response);
         });
     } else {
-        console.warn('Facebook SDK not loaded yet.');
+        console.warn('Facebook SDK not loaded yet or login status not available over HTTP.');
     }
 };
+

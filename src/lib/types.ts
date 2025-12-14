@@ -39,6 +39,7 @@ export type User = {
   workspaces?: Workspace[];
   activeWorkspaceId?: string;
   last_active_workspace_id?: string;
+  activeWorkspaceTimezone?: string;
   is_superadmin?: boolean;
   firstName: string;
   lastName: string;
@@ -199,6 +200,7 @@ export type Chat = {
   instance_type?: 'baileys' | 'wa_cloud';
   unreadCount?: number;
   teamName?: string;
+  teamColor?: string;
   tag?: string;
   color?: string;
   is_autopilot_active?: boolean;
@@ -616,4 +618,3 @@ export interface Segment {
   created_at: string;
   updated_at: string;
 }
-

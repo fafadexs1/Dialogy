@@ -1,11 +1,10 @@
 
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
-import { getCurrentUser } from '@/actions/user';
+import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
 interface InboxPageProps {
   params: Promise<{ chatId?: string }>;
@@ -13,7 +12,7 @@ interface InboxPageProps {
 
 export default async function InboxPage({ params }: InboxPageProps) {
   const { chatId } = await params;
-  const user = await getCurrentUser();
+  const { user, initialData } = await getInboxBootstrap(chatId || null);
 
   if (!user) {
     return redirect('/login');
@@ -27,6 +26,6 @@ export default async function InboxPage({ params }: InboxPageProps) {
   // Otherwise, show the main chat interface.
   // We pass the chatId from the URL to the layout component.
   return (
-    <CustomerChatLayout initialUser={user} chatId={chatId || null} />
+    <CustomerChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
   )
 }

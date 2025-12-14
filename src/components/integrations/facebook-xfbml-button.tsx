@@ -12,7 +12,7 @@ declare global {
 interface FacebookXFBMLButtonProps {
     onLogin?: (response: any) => void;
     size?: 'small' | 'medium' | 'large' | 'xlarge';
-    buttonText?: string; // Note: XFBML button text is somewhat fixed but layout can change
+    buttonText?: string;
     layout?: 'rounded' | 'button' | 'icon' | 'box_count' | 'button_count';
     autoLogoutLink?: boolean;
     useContinueAs?: boolean;
@@ -27,8 +27,14 @@ export function FacebookXFBMLButton({
 }: FacebookXFBMLButtonProps) {
 
     useEffect(() => {
-        // Definir callback global esperado pelo atributo onlogin do botão XFBML
+        if (typeof window === 'undefined') return;
+        const canCheckLoginStatus = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+
         window.checkLoginState = () => {
+            if (!canCheckLoginStatus) {
+                console.warn('Skipping FB.getLoginStatus on non-HTTPS environment.');
+                return;
+            }
             if (window.FB) {
                 window.FB.getLoginStatus((response: any) => {
                     console.log('XFBML Content Login Status:', response);
@@ -39,8 +45,7 @@ export function FacebookXFBMLButton({
             }
         };
 
-        // Reparse XFBML content when component mounts (in case SDK loaded before this component)
-        if (window.FB) {
+        if (canCheckLoginStatus && window.FB) {
             window.FB.XFBML.parse();
         }
     }, [onLogin]);
@@ -59,3 +64,4 @@ export function FacebookXFBMLButton({
         </div>
     );
 }
+

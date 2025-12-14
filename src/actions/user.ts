@@ -6,6 +6,9 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
+import { cache } from 'react';
+
+const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
 /**
  * Persist workspace-level presence so that server-side flows (e.g., load-balancing)
@@ -139,8 +142,6 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     return { success: true, error: null };
 }
 
-import { cache } from 'react';
-
 export const getCurrentUser = cache(async function getCurrentUser(): Promise<User | null> {
     const supabase = await createClient();
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -173,6 +174,13 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             roleName: r.role_name
         }));
 
+        const activeWorkspaceId = dbUser.last_active_workspace_id || workspaces[0]?.id || null;
+        let activeWorkspaceTimezone: string | undefined;
+        if (activeWorkspaceId) {
+            const tzRes = await db.query('SELECT timezone FROM workspaces WHERE id = $1 LIMIT 1', [activeWorkspaceId]);
+            activeWorkspaceTimezone = tzRes.rows[0]?.timezone || FALLBACK_TIMEZONE;
+        }
+
         return {
             id: dbUser.id,
             name: dbUser.full_name,
@@ -181,7 +189,8 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             avatar: dbUser.avatar_url || '',
             email: dbUser.email,
             workspaces,
-            activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
+            activeWorkspaceId,
+            activeWorkspaceTimezone,
         };
 
     } catch (error) {

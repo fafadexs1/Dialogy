@@ -38,7 +38,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <div className="w-full max-w-md relative z-10 px-6">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-2 group">
-            <Image src="/logo.png" alt="Dialogy" width={300} height={80} className="h-24 w-auto" />
+            <Image src="/logo.png" alt="Dialogy" width={180} height={56} className="h-12 w-auto" />
           </Link>
 
           <h1 className="text-3xl font-bold mb-2 tracking-tight">Bem-vindo de volta</h1>
