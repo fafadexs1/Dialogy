@@ -23,6 +23,8 @@ interface IntegrationCardProps {
     onEditSuccess?: () => void;
 }
 
+const INTEGRATION_ICON_FALLBACK = '/integration-fallback.svg';
+
 
 function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { integration: Integration, onSave: () => void, isOpen: boolean, setIsOpen: (open: boolean) => void }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -139,7 +141,13 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
                     <CardHeader className="flex-row items-start justify-between gap-4 pb-2 z-10 relative">
                         <div className="p-2 bg-muted/30 rounded-xl border border-border/50 group-hover:bg-background group-hover:shadow-sm transition-all duration-300">
                             <Avatar className="w-10 h-10 rounded-lg">
-                                <AvatarImage src={integration.icon_url} alt={integration.name} data-ai-hint="logo" className="object-cover" />
+                                <AvatarImage
+                                    src={integration.icon_url}
+                                    alt={integration.name}
+                                    data-ai-hint="logo"
+                                    className="object-cover"
+                                    fallbackSrc={INTEGRATION_ICON_FALLBACK}
+                                />
                                 <AvatarFallback className="rounded-lg">{integration.name.slice(0, 2)}</AvatarFallback>
                             </Avatar>
                         </div>

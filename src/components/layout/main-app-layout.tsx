@@ -14,7 +14,7 @@ import { useAuth } from '@/providers/auth-provider';
 export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const user = useCurrentUser();
-  const { isLoading: authLoading } = useAuth();
+  const { user: authUser, isLoading: authLoading } = useAuth();
 
   const noSidebarPrefixes = [
     '/login',
@@ -33,9 +33,9 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const isNoSidebarRoute = noSidebarPrefixes.some(prefix => pathname.startsWith(prefix));
 
   // Show sidebar if:
-  // 1. We have a user AND it's a sidebar-compatible route
-  // 2. OR if we are still loading authentication (to prevent layout shift, show skeleton/empty sidebar space)
-  const shouldShowSidebar = (user || authLoading) && !isRoot && !isNoSidebarRoute;
+  // 1. We have a user (either full profile or raw auth) AND it's a sidebar-compatible route
+  // 2. OR if we are still loading authentication
+  const shouldShowSidebar = (user || authUser || authLoading) && !isRoot && !isNoSidebarRoute;
   const transitionKey = pathname.split('?')[0];
 
   return (

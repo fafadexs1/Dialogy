@@ -116,7 +116,7 @@ function DraggableSoundTester({
 function LoadingSkeleton() {
   return (
     <div className="flex flex-1 w-full min-h-0 h-full bg-black/20 backdrop-blur-xl">
-      <div className="flex w-[360px] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+      <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
         <Skeleton className="h-12 w-full bg-white/5" />
         <Skeleton className="h-10 w-full bg-white/5" />
         <Skeleton className="h-10 w-full bg-white/5" />
@@ -147,7 +147,7 @@ function LoadingSkeleton() {
 
 function ChatListSkeleton() {
   return (
-    <div className="flex w-[360px] flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
+    <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
       <Skeleton className="h-6 w-32 bg-white/5" />
       <Skeleton className="h-10 w-full bg-white/5" />
       <div className="space-y-2 mt-2">

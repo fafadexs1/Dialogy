@@ -846,7 +846,7 @@ export const getInitialChatsData = withDebug(
         try {
             const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
 
-            const activeChatsLimit = 1000;
+            const activeChatsLimit = 100000; // Effectively unlimited for active queues
             const activeChatsPromise = fetchChats({
                 workspaceId,
                 userId,

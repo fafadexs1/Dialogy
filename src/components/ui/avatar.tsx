@@ -5,7 +5,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 type AvatarProps = React.ComponentPropsWithoutRef<"div">
-type AvatarImageProps = React.ImgHTMLAttributes<HTMLImageElement>
+type AvatarImageProps = React.ImgHTMLAttributes<HTMLImageElement> & { fallbackSrc?: string }
 type AvatarFallbackProps = React.ComponentPropsWithoutRef<"span">
 
 const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
@@ -13,7 +13,7 @@ const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
     <div
       ref={ref}
       className={cn(
-        "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full",
+        "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full [&_img:not(.hidden)~*]:hidden",
         className
       )}
       {...props}
@@ -23,16 +23,16 @@ const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
 Avatar.displayName = "Avatar"
 
 const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
-  ({ className, src, alt, onError, onLoad, ...props }, ref) => {
+  ({ className, src, alt, onError, onLoad, fallbackSrc, ...props }, ref) => {
     const [isLoaded, setIsLoaded] = React.useState<boolean>(false)
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
-      src as string | undefined
+      (src as string | undefined) || fallbackSrc
     )
 
     React.useEffect(() => {
-      setCurrentSrc(src as string | undefined)
+      setCurrentSrc((src as string | undefined) || fallbackSrc)
       setIsLoaded(false)
-    }, [src])
+    }, [src, fallbackSrc])
 
     return currentSrc ? (
       <img
@@ -50,6 +50,10 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         }}
         onError={(e) => {
           setIsLoaded(false)
+          if (fallbackSrc && currentSrc !== fallbackSrc) {
+            setCurrentSrc(fallbackSrc)
+            return
+          }
           onError?.(e)
         }}
         {...props}

@@ -415,11 +415,16 @@ interface ChatListItemProps {
 }
 
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, isBulkMode, isSelectedForBulk, onToggleBulkSelection, snoozedUntil, onSnooze, onUnsnooze, onAssign }) => {
-  const isMarketingChat = chat.messages.some((m: any) => (m.metadata as any)?.isMarketing);
+const isMarketingMessage = (message: Message) => {
+  const meta = message.metadata as any;
+  return Boolean(meta?.isMarketing || meta?.event === 'marketing_auto_close');
+};
+
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign }) => {
+  const isMarketingChat = chat.messages.some((m: any) => isMarketingMessage(m as Message));
   const visibleMessages = React.useMemo(() => {
     if (showMarketing) return chat.messages;
-    return chat.messages.filter(m => !(m.metadata as any)?.isMarketing);
+    return chat.messages.filter(m => !isMarketingMessage(m));
   }, [chat.messages, showMarketing]);
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
@@ -435,6 +440,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     : chat.status === 'atendimentos'
       ? 'bg-emerald-500/20 text-emerald-100'
       : 'bg-blue-500/20 text-blue-100';
+  const hasTag = Boolean(chat.tag);
+  const tagLabel = hasTag ? chat.tag : 'Sem tag';
 
   const handleSelect = (e?: React.MouseEvent) => {
     if (isBulkMode && onToggleBulkSelection) {
@@ -493,7 +500,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex items-center gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60",
+        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 h-[112px] overflow-hidden",
         isSelected && !isForwarding && !isBulkMode
           ? "bg-white/10 border-white/10 shadow-lg"
           : "hover:bg-white/5 hover:border-white/5",
@@ -592,9 +599,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         )}
       </div>
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
-          <div className='flex-1 min-w-0'>
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
               <p className={cn("font-semibold truncate text-sm whitespace-nowrap max-w-[60%]", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
                 {chat.contact.name.split(' ').slice(0, 3).join(' ')}
@@ -602,33 +609,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               {chat.status === 'encerrados' && (
                 <Badge className={cn("text-[10px] border-0 px-1.5 py-0.5 flex-shrink-0", statusTone)}>
                   {statusLabel}
-                </Badge>
-              )}
-              {chat.teamName && chat.status === 'atendimentos' && (
-                <Badge
-                  style={{
-                    backgroundColor: chat.teamColor || 'rgba(255,255,255,0.1)',
-                    color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                    borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
-                  }}
-                  className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 border flex-shrink-0"
-                  title={chat.teamName}
-                >
-                  <Users className="h-3 w-3" />
-                  {chat.teamName}
-                </Badge>
-              )}
-              {chat.tag && chat.status !== 'atendimentos' && (
-                <Badge
-                  style={{
-                    backgroundColor: chat.color || 'rgba(255,255,255,0.1)',
-                    color: chat.color ? (chat.color.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                    borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
-                  }}
-                  className="text-[10px] border px-1.5 py-0.5 flex-shrink-0"
-                  title={chat.tag}
-                >
-                  {chat.tag}
                 </Badge>
               )}
               {isSnoozed && (
@@ -639,7 +619,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0 flex-nowrap justify-end">
-            <div className="flex items-center gap-1 flex-wrap">
+            <div className="flex items-center gap-1 flex-nowrap">
               {canAssign && (
                 <TooltipProvider>
                   <Tooltip>
@@ -721,7 +701,36 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
+        <div className="flex items-center gap-2 min-h-[20px] flex-wrap">
+          {chat.status === 'atendimentos' && chat.teamName ? (
+            <Badge
+              style={{
+                backgroundColor: chat.teamColor || 'rgba(255,255,255,0.1)',
+                color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
+                borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
+              }}
+              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 border flex-shrink-0"
+              title={chat.teamName}
+            >
+              <Users className="h-3 w-3" />
+              {chat.teamName}
+            </Badge>
+          ) : (
+            <Badge
+              style={hasTag ? {
+                backgroundColor: chat.color || 'rgba(255,255,255,0.1)',
+                color: chat.color ? (chat.color.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
+                borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
+              } : undefined}
+              className={cn(
+                "text-[10px] border px-1.5 py-0.5 flex-shrink-0",
+                hasTag ? "" : "bg-white/5 border-white/15 text-white/60"
+              )}
+              title={hasTag ? chat.tag : 'Sem tag'}
+            >
+              {tagLabel}
+            </Badge>
+          )}
           {isMarketingChat && (
             <Badge
               variant="secondary"
@@ -733,7 +742,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           )}
         </div>
 
-        <div className="mt-1 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex-1 min-w-0">
             {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
           </div>
@@ -999,7 +1008,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const now = Date.now();
       const visibleMessages = showMarketing
         ? chat.messages
-        : chat.messages.filter(m => !(m.metadata as any)?.isMarketing);
+        : chat.messages.filter(m => !isMarketingMessage(m));
       if (!showMarketing && visibleMessages.length === 0) {
         return false;
       }
@@ -1080,7 +1089,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   };
 
   return (
-    <div className="flex h-full w-[clamp(320px,24vw,400px)] flex-shrink-0 flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl min-h-0 lg:w-[clamp(330px,26vw,420px)]">
+    <div className="flex h-full min-h-0 min-w-0 flex-[0_1_clamp(320px,24vw,400px)] max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl lg:flex-[0_1_clamp(330px,26vw,420px)]">
       {/* Header */}
       <div className="p-4 xl:p-5 flex-shrink-0 border-b border-white/10 space-y-4">
         <div className="flex items-center justify-between">

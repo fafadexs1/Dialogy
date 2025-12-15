@@ -414,7 +414,7 @@ export interface EvolutionInstance {
   instance_name: string;
   display_name: string;
   status: 'connected' | 'disconnected' | 'pending';
-  type: 'baileys' | 'wa_cloud';
+  type: 'baileys' | 'wa_cloud' | 'mercadolivre';
   cluster_id: string;
   qrCode?: string;
   webhook_url?: string;

@@ -38,6 +38,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 
+const INTEGRATION_ICON_FALLBACK = '/integration-fallback.svg';
+
 
 function formatCurrency(value: number) {
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -176,7 +178,11 @@ function PlanIntegrationsManager({ plan, allIntegrations, onUpdate }: { plan: Pl
                              <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-10 w-10 border rounded-md">
-                                        <AvatarImage src={integration.icon_url} />
+                                        <AvatarImage
+                                            src={integration.icon_url}
+                                            alt={integration.name}
+                                            fallbackSrc={INTEGRATION_ICON_FALLBACK}
+                                        />
                                         <AvatarFallback>{integration.name.charAt(0)}</AvatarFallback>
                                     </Avatar>
                                     <div>

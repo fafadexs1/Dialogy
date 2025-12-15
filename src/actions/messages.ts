@@ -280,6 +280,79 @@ async function internalSendMessage(
             );
         }
 
+        // Check for Mercado Livre
+        if (chatInfo.source === 'mercadolivre') {
+            try {
+                // 1. Get Account
+                const accountRes = await client.query(
+                    'SELECT id, workspace_id, user_id, access_token, refresh_token FROM mercadolivre_accounts WHERE workspace_id = $1 LIMIT 1',
+                    [workspaceId] // Assuming one account per workspace or we need to link chat to account more explicitly?
+                    // Ideally, chat should track which account it belongs to if multiple.
+                    // But for now, let's assume one active integration.
+                );
+
+                if ((accountRes.rowCount ?? 0) > 0) {
+                    const { MercadoLivreMessagingService } = await import('@/services/mercadolivre/messaging-service');
+                    const service = new MercadoLivreMessagingService(accountRes.rows[0]);
+
+                    // 2. Determine if we are replying to a Question or Message
+                    // We need the last received message metadata to know what we are replying to.
+                    // Or just the chat context.
+                    // If the last message was a Question, we answer it.
+                    const lastMsgRes = await client.query(
+                        `SELECT metadata, message_id_from_api FROM messages 
+                          WHERE chat_id = $1 AND from_me = FALSE 
+                          ORDER BY created_at DESC LIMIT 1`,
+                        [chatId]
+                    );
+
+                    const lastMetadata = lastMsgRes.rows[0]?.metadata || {};
+                    const isQuestion = lastMetadata.isQuestion;
+
+                    let apiResponse: any;
+
+                    if (isQuestion) {
+                        const questionId = lastMetadata.questionId || lastMsgRes.rows[0]?.message_id_from_api;
+                        if (questionId) {
+                            apiResponse = await service.answerQuestion(questionId, content);
+                        } else {
+                            throw new Error('Não foi possível identificar a pergunta para responder.');
+                        }
+                    } else {
+                        // Post-sale message
+                        const packId = lastMetadata.packId; // Order ID
+                        const buyerId = lastMetadata.buyerId || remoteJid; // We stored buyerId in remoteJid too
+                        apiResponse = await service.sendMessage(packId, buyerId, content);
+                    }
+
+                    // 3. Persist
+                    const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
+                    await client.query(
+                        `INSERT INTO messages (
+                            workspace_id, chat_id, type, content, from_me, 
+                            metadata, is_read, ${senderColumn}, created_at
+                        ) VALUES ($1, $2, 'text', $3, true, $4, true, $5, NOW())`,
+                        [
+                            workspaceId, chatId, content,
+                            {
+                                sentBy: metadata?.sentBy || 'agent',
+                                platform: 'mercadolivre',
+                                isQuestionReply: !!isQuestion
+                            },
+                            senderId
+                        ]
+                    );
+
+                    await client.query('COMMIT');
+                    return { success: true };
+                }
+            } catch (mlErr: any) {
+                await client.query('ROLLBACK');
+                console.error('[SEND_MESSAGE_ACTION][ML]', mlErr);
+                return { success: false, error: mlErr.message || 'Falha ao enviar resposta ao Mercado Livre' };
+            }
+        }
+
         // Tenta contexto Meta (Instagram/Messenger)
         const metaCtx = await resolveMetaSendContext(chatId, client);
         if (metaCtx) {
