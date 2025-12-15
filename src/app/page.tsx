@@ -14,7 +14,7 @@ import { Navbar } from "@/components/landing/navbar";
 import { Footer } from "@/components/landing/footer";
 import {
   Section, Badge, CTAButton, GradientOrb,
-  primary, secondary, accent, darkBg, glass
+  primary, secondary, accent, glass
 } from "@/components/landing/ui";
 
 // --- Local Components (Page Specific) ---
@@ -30,11 +30,11 @@ function FeatureCard({ icon: Icon, title, description, delay = 0 }: { icon: any,
     >
       <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
       <div className="relative z-10">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-          <Icon className="w-6 h-6 text-blue-400" />
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+          <Icon className="w-6 h-6 text-primary" />
         </div>
         <h3 className="text-xl font-bold text-white mb-3">{title}</h3>
-        <p className="text-white/60 leading-relaxed">{description}</p>
+        <p className="text-white/70 leading-relaxed">{description}</p>
       </div>
     </motion.div>
   );
@@ -72,33 +72,33 @@ function PricingCard({ plan, popular = false, delay = 0 }: { plan: any, popular?
       </div>
 
       <ul className="space-y-4 mb-8 flex-1">
-        <li className="flex items-center gap-3 text-white/80">
-          <Check className="w-5 h-5 text-green-400 shrink-0" />
+        <li className="flex items-center gap-3 text-white/70">
+          <Check className="w-5 h-5 text-green-500 shrink-0" />
           <span>{isEnterprise ? 'Usuários Sob Demanda' : `${plan.limits.users} Usuário${plan.limits.users > 1 ? 's' : ''}`}</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          <Check className="w-5 h-5 text-green-400 shrink-0" />
+        <li className="flex items-center gap-3 text-muted-foreground">
+          <Check className="w-5 h-5 text-green-500 shrink-0" />
           <span>{isEnterprise ? 'WhatsApp Sob Demanda' : `${plan.limits.whatsapp} WhatsApp${plan.limits.whatsapp > 1 ? 's' : ''}`}</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          <Check className="w-5 h-5 text-green-400 shrink-0" />
+        <li className="flex items-center gap-3 text-muted-foreground">
+          <Check className="w-5 h-5 text-green-500 shrink-0" />
           <span>{isEnterprise ? 'Histórico Sob Demanda' : `${plan.limits.history_months} Meses de Histórico`}</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          {plan.limits.departments ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
-          <span className={plan.limits.departments ? '' : 'text-white/30'}>Departamentos</span>
+        <li className="flex items-center gap-3 text-muted-foreground">
+          {plan.limits.departments ? <Check className="w-5 h-5 text-green-500 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.departments ? '' : 'text-muted-foreground/50'}>Departamentos</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          {plan.limits.api ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
-          <span className={plan.limits.api ? '' : 'text-white/30'}>API de Desenvolvedor</span>
+        <li className="flex items-center gap-3 text-muted-foreground">
+          {plan.limits.api ? <Check className="w-5 h-5 text-green-500 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.api ? '' : 'text-muted-foreground/50'}>API de Desenvolvedor</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          {plan.limits.transcription ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
-          <span className={plan.limits.transcription ? '' : 'text-white/30'}>Transcrição de Áudio</span>
+        <li className="flex items-center gap-3 text-muted-foreground">
+          {plan.limits.transcription ? <Check className="w-5 h-5 text-green-500 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.transcription ? '' : 'text-muted-foreground/50'}>Transcrição de Áudio</span>
         </li>
-        <li className="flex items-center gap-3 text-white/80">
-          {plan.limits.campaigns ? <Check className="w-5 h-5 text-green-400 shrink-0" /> : <div className="w-5 h-5" />}
-          <span className={plan.limits.campaigns ? '' : 'text-white/30'}>
+        <li className="flex items-center gap-3 text-muted-foreground">
+          {plan.limits.campaigns ? <Check className="w-5 h-5 text-green-500 shrink-0" /> : <div className="w-5 h-5" />}
+          <span className={plan.limits.campaigns ? '' : 'text-muted-foreground/50'}>
             Disparos em Massa {typeof plan.limits.campaigns === 'string' ? `(${plan.limits.campaigns === 'high' ? 'CSV' : 'Contatos'})` : ''}
           </span>
         </li>
@@ -141,26 +141,26 @@ export default function DialogyLanding() {
   }, []);
 
   return (
-    <div className={`min-h-screen w-full bg-[${darkBg}] selection:bg-blue-500/30 selection:text-white overflow-x-hidden`}>
+    <div className={`min-h-screen w-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#0f1729] via-[#020617] to-black selection:bg-indigo-500/30 selection:text-indigo-200 overflow-x-hidden`}>
 
       {/* Progress Bar */}
       <motion.div
-        className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 origin-left z-50"
+        className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 origin-left z-50"
         style={{ scaleX }}
       />
 
       {/* Background Effects */}
       <div className="fixed inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
-        <GradientOrb className="w-[50vw] h-[50vw] -top-[10%] -left-[10%]" color={primary} />
-        <GradientOrb className="w-[40vw] h-[40vw] top-[20%] -right-[10%]" color={secondary} />
-        <GradientOrb className="w-[30vw] h-[30vw] bottom-[10%] left-[20%]" color={accent} />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-25" />
+        <GradientOrb className="w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] -top-[20%] -left-[10%] opacity-30" color="#4F46E5" /> {/* Indigo */}
+        <GradientOrb className="w-[50vw] h-[50vw] max-w-[600px] max-h-[600px] top-[10%] -right-[20%] opacity-20" color="#EC4899" /> {/* Pink */}
+        <GradientOrb className="w-[40vw] h-[40vw] max-w-[500px] max-h-[500px] bottom-[20%] left-[20%] opacity-20" color="#06B6D4" /> {/* Cyan */}
       </div>
 
       <Navbar />
 
       {/* Hero Section */}
-      <header className="relative pt-32 pb-20 md:pt-48 md:pb-32 overflow-hidden">
+      <header className="relative pt-24 pb-16 md:pt-32 md:pb-24 overflow-hidden">
         <Section className="text-center">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -171,12 +171,12 @@ export default function DialogyLanding() {
 
             <h1 className="text-5xl md:text-7xl lg:text-8xl font-extrabold tracking-tight text-white mb-8 leading-[1.1]">
               O Futuro da <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-violet-400 to-pink-400 animate-gradient-x">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-white/90 to-rose-300 animate-gradient-x drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
                 IA Conversacional
               </span>
             </h1>
 
-            <p className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10 leading-relaxed">
+            <p className="text-lg md:text-xl text-white/70 max-w-2xl mx-auto mb-10 leading-relaxed">
               Unifique todos os seus canais de atendimento em um único inbox inteligente.
               Automatize o suporte, impulsione vendas e encante usuários com a plataforma de chatbot mais avançada do mundo.
             </p>
@@ -198,7 +198,7 @@ export default function DialogyLanding() {
             transition={{ duration: 1, delay: 0.2, type: "spring" }}
             className="mt-20 relative mx-auto max-w-5xl perspective-1000"
           >
-            <div className={`relative rounded-xl border border-white/10 bg-[#0f172a]/80 backdrop-blur-xl p-2 shadow-2xl shadow-blue-500/10`}>
+            <div className={`relative rounded-xl border border-white/10 bg-black/40 backdrop-blur-2xl p-2 shadow-2xl shadow-blue-500/10`}>
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
               <div className="rounded-lg overflow-hidden bg-[#030712] aspect-[16/9] relative">
                 {/* Mock UI */}
@@ -237,7 +237,7 @@ export default function DialogyLanding() {
       </header>
 
       {/* Stats Section */}
-      <Section className="py-20 border-y border-white/5 bg-white/[0.02]">
+      <Section className="py-20 border-y border-white/10 bg-white/5 backdrop-blur-sm">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-12">
           <Stat value={stats.messages > 0 ? stats.messages.toLocaleString() : "..."} label="Mensagens Processadas" />
           <Stat value="99.9%" label="SLA de Uptime" />
@@ -249,7 +249,7 @@ export default function DialogyLanding() {
       <Section id="features" className="py-32">
         <div className="text-center max-w-3xl mx-auto mb-20">
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">Tudo o que você precisa para escalar</h2>
-          <p className="text-lg text-white/60">
+          <p className="text-lg text-white/70">
             Ferramentas poderosas projetadas para desenvolvedores, equipes de suporte e growth hackers.
           </p>
         </div>
@@ -298,7 +298,7 @@ export default function DialogyLanding() {
       <Section id="pricing" className="py-32">
         <div className="text-center max-w-3xl mx-auto mb-20">
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">Planos que cabem no seu bolso</h2>
-          <p className="text-lg text-white/60">
+          <p className="text-lg text-muted-foreground">
             Comece grátis e escale conforme sua empresa cresce. Sem surpresas no fim do mês.
           </p>
         </div>

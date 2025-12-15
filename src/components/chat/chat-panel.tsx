@@ -134,15 +134,22 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     const show = isOpen !== undefined ? isOpen : internalIsOpen;
     const setShow = onOpenChange || setInternalIsOpen;
 
-        const handleSubmit = async (e: React.FormEvent) => {
-            e.preventDefault();
-            setIsSubmitting(true);
-            const result = await guardedCloseChat(chat.id, reasonTagId, notes);
-            if (result.success) {
-                toast({ title: "Atendimento encerrado com sucesso!" });
-                setShow(false);
-                onActionSuccess();
-            } else {
+    const filteredReasons = useMemo(() => {
+        return reasons.filter(reason => {
+            if (!reason.team_ids || reason.team_ids.length === 0) return true;
+            return chat.team_id && reason.team_ids.includes(chat.team_id);
+        });
+    }, [reasons, chat.team_id]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const result = await guardedCloseChat(chat.id, reasonTagId, notes);
+        if (result.success) {
+            toast({ title: "Atendimento encerrado com sucesso!" });
+            setShow(false);
+            onActionSuccess();
+        } else {
             toast({ title: "Erro ao encerrar", description: result.error, variant: 'destructive' });
         }
         setIsSubmitting(false);
@@ -173,7 +180,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
                                     <SelectValue placeholder="Selecione um motivo..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {reasons.map(reason => (
+                                    {filteredReasons.map(reason => (
                                         <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -203,8 +210,8 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
         <Button type="submit" size="icon" className={cn(
             "h-10 w-10 rounded-xl transition-all duration-200",
             !disabled && !pending
-                ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20"
-                : "bg-white/5 text-muted-foreground hover:bg-white/10"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
         )} disabled={pending || disabled} aria-label="Enviar mensagem">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
         </Button>
@@ -431,6 +438,8 @@ export default function ChatPanel({
         messageHeightsRef.current.clear();
         setAverageMessageHeight(120);
         setScrollTop(0);
+        userScrolledUpRef.current = false;
+        previousScrollHeightRef.current = 0;
     }, [chat?.id]);
 
     useEffect(() => {
@@ -794,104 +803,115 @@ export default function ChatPanel({
                 content: currentMessageText,
                 type: 'text',
                 status: 'default',
-                metadata: {},
-                transcription: null,
-                timestamp: formatOptimisticTimestamp(now),
-                createdAt: now.toISOString(),
-                formattedDate: 'Hoje',
-                sender: {
-                    id: currentUser.id,
-                    name: currentUser.name,
-                    avatar: currentUser.avatar_url || currentUser.avatar,
-                    type: 'user',
-                },
                 from_me: true,
+                createdAt: now.toISOString(),
                 is_read: true,
-                optimistic: true,
-                sentByTab: tabId,
+                // timestamp and formatting for UI
+                timestamp: now.toISOString(),
+                formattedDate: formatInTimeZone(now, workspaceTimezone, "dd/MM/yyyy HH:mm", { locale: ptBR }),
+                transcription: null,
+                metadata: isInternalNote ? { isInternalNote: true } : {},
+                api_message_status: 'PENDING',
+                instance_name: chat.instance_name || undefined
             };
             appendMessagesToChat(chat.id, [optimisticMessage]);
-        } else {
-            const now = new Date();
-            const optimisticMediaMessages = currentMediaFiles.map(mf => {
-                return {
-                    id: 'optimistic-' + generateOptimisticId(),
-                    chat_id: chat.id,
-                    workspace_id: chat.workspace_id,
-                    content: mf.name,
-                    type: mf.mediatype,
-                    status: 'default',
-                    metadata: {
-                        mediaUrl: 'data:' + mf.type + ';base64,' + mf.base64,
-                        mimetype: mf.type,
-                        fileName: mf.name,
-                        thumbnail: mf.thumbnail,
-                        mediatype: mf.mediatype
-                    },
-                    transcription: null,
-                    timestamp: formatOptimisticTimestamp(now),
-                    createdAt: now.toISOString(),
-                    formattedDate: 'Hoje',
-                    sender: {
-                        id: currentUser.id,
-                        name: currentUser.name,
-                        avatar: currentUser.avatar_url || currentUser.avatar,
-                        type: 'user',
-                    },
-                    from_me: true,
-                    is_read: true,
-                    optimistic: true,
-                    sentByTab: tabId,
-                } as Message;
-            });
-            appendMessagesToChat(chat.id, optimisticMediaMessages);
+            // Scroll to bottom
+            if (scrollAreaRef.current) {
+                const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]') as HTMLElement;
+                if (viewport) {
+                    viewport.scrollTop = viewport.scrollHeight;
+                }
+            }
         }
 
         try {
-            let result: { success: boolean; error?: string };
             if (!isTextOnly) {
-                const uploadedFiles = await Promise.all(currentMediaFiles.map(async (mf) => {
-                    const extension = mf.name.split('.').pop() || 'dat';
-                    const fileName = Date.now() + '_' + crypto.randomUUID() + '.' + extension;
-                    const { publicUrl, error } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
+                // SEQUENTIAL SENDING LOGIC
+                // We process files one by one. If one fails, we stop and keep the remaining in the list.
 
-                    if (error || !publicUrl) {
+                let captionToSend = currentMessageText;
+                const totalFiles = currentMediaFiles.length;
+
+                for (let i = 0; i < totalFiles; i++) {
+                    const mf = currentMediaFiles[i];
+
+                    try {
+                        const extension = mf.name.split('.').pop() || 'dat';
+                        const fileName = Date.now() + '_' + crypto.randomUUID() + '.' + extension;
+
+                        // 1. Upload
+                        const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
+
+                        if (uploadError || !publicUrl) {
+                            throw new Error(`Falha no upload de ${mf.name}: ${uploadError}`);
+                        }
+
+                        // 2. Send Action (Single File)
+                        const filePayload = [{
+                            base64: publicUrl,
+                            mimetype: mf.type,
+                            filename: mf.name,
+                            mediatype: mf.mediatype,
+                            thumbnail: mf.thumbnail,
+                        }];
+
+                        // Attach caption only to the first file (or as user prefers, usually first)
+                        // If user typed text, we send it with the first image. 
+                        // Subsequent images go without text.
+                        const currentCaption = i === 0 ? captionToSend : '';
+
+                        const result = await sendMediaAction(chat.id, currentCaption, filePayload, tabId);
+
+                        if (result.error) {
+                            throw new Error(result.error);
+                        }
+
+                        // 3. Success: Remove this file from the UI list
+                        setMediaFiles(prev => prev.filter(f => f.id !== mf.id));
+
+                        // Add a small delay between sends to prevent overwhelming the server/API if needed
+                        // await new Promise(r => setTimeout(r, 500));
+
+                    } catch (fileErr: any) {
+                        console.error(`Error sending file ${mf.name}:`, fileErr);
                         toast({
                             title: 'Erro ao enviar ' + mf.name,
-                            description: error || 'Falha no upload',
+                            description: fileErr.message || 'Falha no envio.',
                             variant: 'destructive'
                         });
-                        throw new Error('Falha no upload de ' + mf.name);
+                        // Stop processing further files so user can see what failed
+                        setSendState('error');
+                        setLastSendError(`Erro ao enviar ${mf.name}`);
+                        // Restore the caption if it wasn't sent with the first file yet? 
+                        // Actually, better to just let the user retry.
+                        if (i === 0) {
+                            setNewMessage(currentMessageText); // Restore text if first failed
+                            if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessageText;
+                        }
+                        return; // Exit function, don't clear draft ref completely yet
                     }
-
-                    return {
-                        base64: publicUrl,
-                        mimetype: mf.type,
-                        filename: mf.name,
-                        mediatype: mf.mediatype,
-                        thumbnail: mf.thumbnail,
-                    };
-                }));
-
-                result = await sendMediaAction(chat.id, currentMessageText, uploadedFiles as any, tabId);
-            } else if (isInternalNote) {
-                result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
-            } else {
-                result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
-            }
-
-            if (result.error) {
-                toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
-                if (optimisticId) {
-                    removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
                 }
-                setSendState('error');
-                setLastSendError(result.error);
+
+                // If loop finishes, all good
+                setSendState('idle');
+                setLastSendError(null);
+                lastSendDraftRef.current = null;
+                onActionSuccess(); // Trigger update
+
+            } else if (isInternalNote) {
+                const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
+                if (result.error) throw new Error(result.error);
+                setSendState('idle');
+                setLastSendError(null);
+                lastSendDraftRef.current = null;
             } else {
+                const result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
+                if (result.error) throw new Error(result.error);
                 setSendState('idle');
                 setLastSendError(null);
                 lastSendDraftRef.current = null;
             }
+
         } catch (error) {
             console.error('Error during message submission:', error);
             toast({ title: 'Erro Critico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
@@ -900,20 +920,28 @@ export default function ChatPanel({
             }
             setSendState('error');
             setLastSendError(error instanceof Error ? error.message : 'Falha ao enviar mensagem');
-            const draft = lastSendDraftRef.current;
-            if (draft) {
-                setNewMessage(draft.text);
-                setMediaFiles(draft.media);
-                if (contentEditableRef.current) {
-                    contentEditableRef.current.innerHTML = draft.text;
+
+            // Only restore draft if we didn't partially succeed in the loop above (handled inside)
+            // But for text/note errors, we restore here.
+            if (isTextOnly || isInternalNote) {
+                const draft = lastSendDraftRef.current;
+                if (draft) {
+                    setNewMessage(draft.text);
+                    setMediaFiles(draft.media);
+                    if (contentEditableRef.current) {
+                        contentEditableRef.current.innerHTML = draft.text;
+                    }
                 }
             }
         } finally {
+            if (sendState !== 'error') {
+                // report metric only if flow completed? 
+            }
             reportClientMetric('send_message', performance.now() - sendStart, { chatId: chat.id, media: !isTextOnly });
         }
     };
 
-const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
+    const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
         if (!chat) return;
 
         // Upload to Supabase Storage
@@ -1010,12 +1038,12 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
     if (!chat) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
-                <div className="text-center space-y-4 p-8 rounded-3xl bg-black/20 border border-white/5 backdrop-blur-xl shadow-2xl">
-                    <div className="h-20 w-20 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-white/10">
-                        <MessageSquare className="h-10 w-10 text-blue-400" />
+                <div className="text-center space-y-4 p-8 rounded-3xl bg-card/40 border border-border backdrop-blur-xl shadow-2xl">
+                    <div className="h-20 w-20 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-border">
+                        <MessageSquare className="h-10 w-10 text-primary" />
                     </div>
-                    <h2 className="text-2xl font-bold text-white">Bem-vindo ao Dialogy</h2>
-                    <p className="text-white/50 max-w-md">
+                    <h2 className="text-2xl font-bold text-foreground">Bem-vindo ao Dialogy</h2>
+                    <p className="text-muted-foreground max-w-md">
                         Selecione uma conversa na lista ao lado para iniciar o atendimento ou visualizar o histórico.
                     </p>
                 </div>
@@ -1036,22 +1064,23 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
     return (
         <div className="flex-1 flex flex-col bg-transparent min-w-0 relative h-full">
             {/* Header */}
-            <header className="flex h-16 items-center justify-between border-b border-white/10 bg-black/20 backdrop-blur-xl px-6 flex-shrink-0 z-20">
+            {/* Header */}
+            <header className="flex h-16 items-center justify-between border-b border-border dark:border-white/10 bg-background/50 dark:bg-black/60 backdrop-blur-xl px-6 flex-shrink-0 z-20">
                 <div className="flex items-center gap-3">
-                    <Avatar className="h-10 w-10 border border-white/10 ring-2 ring-white/5">
+                    <Avatar className="h-10 w-10 border border-border ring-2 ring-background">
                         <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
-                        <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
+                        <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div>
-                        <h2 className="font-semibold text-white flex items-center gap-2">
+                        <h2 className="font-semibold text-foreground flex items-center gap-2">
                             {chat.contact.name}
                             {chat.status === 'atendimentos' && (
-                                <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/20 text-[10px] px-1.5 h-5">
+                                <Badge variant="secondary" className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/20 text-[10px] px-1.5 h-5">
                                     Em atendimento
                                 </Badge>
                             )}
                         </h2>
-                        <p className="text-xs text-white/50 flex items-center gap-1">
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
                             {chat.instance_name && (
                                 <span className="flex items-center gap-1">
                                     <FaWhatsapp className="h-3 w-3 text-green-500" />
@@ -1061,7 +1090,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                             <span className="mx-1">•</span>
                             <span>{chat.contact.phone}</span>
                             <span className="mx-1">•</span>
-                            <span className="text-[10px] opacity-50">ID: {chat.id}</span>
+                            <span className="text-[10px] opacity-70">ID: {chat.id}</span>
                         </p>
                     </div>
                 </div>
@@ -1069,14 +1098,14 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-white hover:bg-white/10">
+                                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground hover:bg-muted">
                                     <Phone className="h-4 w-4" />
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
                         </Tooltip>
 
-                        <div className="w-px h-6 bg-white/10 mx-1" />
+                        <div className="w-px h-6 bg-border mx-1" />
 
                         {isChatOpen && isChatAssignedToMe && (
                             <>
@@ -1090,14 +1119,14 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                             </>
                         )}
 
-                        <div className="w-px h-6 bg-white/10 mx-1" />
+                        <div className="w-px h-6 bg-border mx-1" />
 
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
                                     onClick={() => {
                                         onToggleContactPanel();
                                     }}
@@ -1108,14 +1137,14 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                             <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
                         </Tooltip>
 
-                        <div className="w-px h-6 bg-white/10 mx-1" />
+                        <div className="w-px h-6 bg-border mx-1" />
 
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
                                     onClick={handleExportChat}
                                 >
                                     <FileText className="h-4 w-4" />
@@ -1129,7 +1158,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="text-white/50 hover:text-purple-400 hover:bg-purple-500/10"
+                                    className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
                                     onClick={handleTrainAgent}
                                 >
                                     <Brain className="h-4 w-4" />
@@ -1142,7 +1171,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                 <Button
                                     variant={highContrast ? "secondary" : "ghost"}
                                     size="icon"
-                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
                                     onClick={onToggleHighContrast}
                                     aria-label="Alternar alto contraste"
                                 >
@@ -1156,7 +1185,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                 <Button
                                     variant={isRTL ? "secondary" : "ghost"}
                                     size="icon"
-                                    className="text-white/50 hover:text-white hover:bg-white/10"
+                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
                                     onClick={onToggleRTL}
                                     aria-label="Alternar direcao RTL"
                                 >
@@ -1192,8 +1221,9 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                         className="relative p-6 pb-4"
                         style={{ minHeight: virtualViewport || 320, height: Math.max(totalHeight, virtualViewport || 320) }}
                     >
+
                         {isLoadingOlderMessages && canLoadOlder && (
-                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-white/50 text-xs flex items-center gap-2">
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-muted-foreground text-xs flex items-center gap-2">
                                 <Loader2 className="h-4 w-4 animate-spin" />
                                 <span>Carregando mensagens anteriores...</span>
                             </div>
@@ -1230,15 +1260,15 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
             {isChatOpen ? (
                 <footer className="p-4 bg-transparent z-20">
                     {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                        <div className="mb-2 p-2 border border-white/10 rounded-xl bg-black/60 backdrop-blur-xl max-h-40 overflow-y-auto shadow-xl">
+                        <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-xl max-h-40 overflow-y-auto shadow-xl">
                             {filteredShortcuts.map(shortcut => (
                                 <button
                                     key={shortcut.id}
-                                    className="w-full text-left p-2 rounded-lg hover:bg-white/10 text-sm text-white transition-colors"
+                                    className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors"
                                     onClick={() => handleShortcutSelect(shortcut)}
                                 >
-                                    <span className="font-bold text-blue-400">/{shortcut.name}</span>
-                                    <span className="text-white/70 ml-2 truncate">{shortcut.message}</span>
+                                    <span className="font-bold text-primary">/{shortcut.name}</span>
+                                    <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
                                 </button>
                             ))}
                         </div>
@@ -1261,11 +1291,11 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                         <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                             <input type="hidden" name="chatId" value={chat.id} />
 
-                            <div className="bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-2 shadow-2xl flex items-end gap-2 relative flex-1">
+                            <div className="bg-background/60 dark:bg-zinc-900/60 backdrop-blur-xl border border-border/50 dark:border-white/10 rounded-2xl p-2 shadow-sm flex items-end gap-2 relative flex-1 transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500/50 focus-within:shadow-lg focus-within:shadow-blue-500/10">
                                 <div className="flex gap-1 pb-1">
                                     <Popover>
                                         <PopoverTrigger asChild>
-                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl" disabled={isAiTyping} aria-label="Abrir emojis">
+                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95" disabled={isAiTyping} aria-label="Abrir emojis">
                                                 <Smile className="h-5 w-5" />
                                             </Button>
                                         </PopoverTrigger>
@@ -1278,7 +1308,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                         type="button"
                                         variant="ghost"
                                         size="icon"
-                                        className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
+                                        className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
                                         disabled={isAiTyping}
                                         onClick={() => fileInputRef.current?.click()}
                                         aria-label="Enviar anexo"
@@ -1290,10 +1320,10 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                         variant="ghost"
                                         size="icon"
                                         className={cn(
-                                            "h-9 w-9 rounded-xl transition-colors",
+                                            "h-9 w-9 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95",
                                             isInternalNote
-                                                ? "text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20"
-                                                : "text-white/50 hover:text-yellow-400 hover:bg-yellow-500/10"
+                                                ? "text-yellow-600 dark:text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20"
+                                                : "text-muted-foreground hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-yellow-500/10"
                                         )}
                                         disabled={isAiTyping}
                                         onClick={() => setIsInternalNote(!isInternalNote)}
@@ -1308,39 +1338,39 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                             <Button
                                                 type="button"
                                                 variant="ghost"
-                                            size="icon"
-                                            className="h-9 w-9 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl"
-                                            disabled={isAiTyping}
-                                            title="Atalhos"
-                                            aria-label="Atalhos de resposta"
-                                        >
-                                            <MessageSquareQuote className="h-5 w-5" />
-                                        </Button>
+                                                size="icon"
+                                                className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                disabled={isAiTyping}
+                                                title="Atalhos"
+                                                aria-label="Atalhos de resposta"
+                                            >
+                                                <MessageSquareQuote className="h-5 w-5" />
+                                            </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-80 p-0 bg-black/90 border-white/10 backdrop-blur-xl text-white max-h-96 overflow-y-auto" align="start">
+                                        <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-xl text-foreground max-h-96 overflow-y-auto" align="start">
                                             <div className="p-2 space-y-1">
-                                                <h4 className="text-xs font-medium text-white/50 px-2 py-1">Atalhos Disponíveis</h4>
+                                                <h4 className="text-xs font-medium text-muted-foreground px-2 py-1">Atalhos Disponíveis</h4>
                                                 {shortcuts.length === 0 ? (
-                                                    <p className="text-sm text-white/50 px-2 py-2">Nenhum atalho encontrado.</p>
+                                                    <p className="text-sm text-muted-foreground px-2 py-2">Nenhum atalho encontrado.</p>
                                                 ) : (
                                                     shortcuts.map(shortcut => (
                                                         <button
                                                             key={shortcut.id}
-                                                            className="w-full text-left p-2 rounded-lg hover:bg-white/10 text-sm text-white transition-colors flex flex-col gap-1 group"
+                                                            className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors flex flex-col gap-1 group"
                                                             onClick={() => {
                                                                 handleShortcutSelect(shortcut);
                                                                 setIsShortcutsOpen(false);
                                                             }}
                                                         >
                                                             <div className="flex items-center justify-between w-full">
-                                                                <span className="font-bold text-blue-400 flex items-center gap-2">
+                                                                <span className="font-bold text-primary flex items-center gap-2">
                                                                     /{shortcut.name}
-                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-white/30" />}
-                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-white/30" />}
-                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-white/30" />}
+                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
+                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
+                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
                                                                 </span>
                                                             </div>
-                                                            <span className="text-white/70 truncate w-full text-xs">{shortcut.message}</span>
+                                                            <span className="text-muted-foreground truncate w-full text-xs">{shortcut.message}</span>
                                                         </button>
                                                     ))
                                                 )}
@@ -1365,7 +1395,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                             disabled={isAiTyping}
                                             onChange={handleMessageChange}
                                             onPaste={handlePaste}
-                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-white placeholder:text-white/30 resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto"
+                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-foreground placeholder:text-muted-foreground resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto"
                                             tagName="div"
                                             onKeyUp={saveCursorPosition}
                                             onClick={saveCursorPosition}
@@ -1374,10 +1404,14 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                 </div>
 
                                 <div className="pb-1 pr-1">
-                                    {newMessage.trim() === "" && mediaFiles.length === 0 ? (
-                                        <AudioRecorder onSend={handleSendAudio} />
+                                    {newMessage.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === "" && mediaFiles.length === 0 ? (
+                                        <div className="animate-in zoom-in duration-300">
+                                            <AudioRecorder onSend={handleSendAudio} />
+                                        </div>
                                     ) : (
-                                        <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
+                                        <div className="animate-in zoom-in duration-300">
+                                            <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -1398,14 +1432,14 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                         )}
 
                         <div className="flex flex-wrap items-center gap-3 px-2">
-                            <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5">
-                                <Bot className="h-4 w-4 text-blue-400" />
+                            <div className="flex items-center space-x-2 bg-muted/30 backdrop-blur-md px-3 py-1.5 rounded-full border border-border">
+                                <Bot className="h-4 w-4 text-primary" />
                                 <Switch
                                     id="ai-agent-switch"
                                     checked={isAiAgentActive}
                                     onCheckedChange={handleAiSwitchChange}
                                     disabled={isAiTyping || (!autopilotConfig && autopilotAgents.length === 0)}
-                                    className="data-[state=checked]:bg-blue-600"
+                                    className="data-[state=checked]:bg-primary"
                                 />
                                 {autopilotAgents.length > 1 ? (
                                     <Select
@@ -1413,7 +1447,7 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                         onValueChange={handleAgentChange}
                                         disabled={!isAiAgentActive}
                                     >
-                                        <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-white focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0">
+                                        <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-foreground focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0">
                                             <SelectValue placeholder="Agente" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1423,24 +1457,24 @@ const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: stri
                                         </SelectContent>
                                     </Select>
                                 ) : (
-                                    <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-white cursor-pointer">Agente de IA</Label>
+                                    <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-foreground cursor-pointer">Agente de IA</Label>
                                 )}
-                                {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-blue-400 ml-1" />}
+                                {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-primary ml-1" />}
                             </div>
                             {autopilotConfig && (
-                                <span className="text-[10px] text-white/30">
+                                <span className="text-[10px] text-muted-foreground">
                                     {(autopilotConfig.knowledge_base_documents?.length || 0)} docs · {autopilotRules.filter(rule => rule.enabled).length} regras ativas
                                 </span>
                             )}
-                            <Link href="/autopilot" className="text-[10px] font-medium text-blue-400 hover:text-blue-300 hover:underline ml-auto">
+                            <Link href="/autopilot" className="text-[10px] font-medium text-primary hover:text-primary/80 hover:underline ml-auto">
                                 Treinar agente
                             </Link>
                         </div>
                     </div>
                 </footer>
             ) : (
-                <footer className="p-4 flex-shrink-0 text-center bg-black/20 backdrop-blur-xl border-t border-white/10">
-                    <p className='text-sm font-medium text-white/50'>
+                <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-xl border-t border-border">
+                    <p className='text-sm font-medium text-muted-foreground'>
                         Este atendimento foi encerrado.
                     </p>
                 </footer>

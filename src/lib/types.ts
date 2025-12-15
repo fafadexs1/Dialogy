@@ -196,6 +196,7 @@ export type Chat = {
   workspace_id: string;
   assigned_at?: string;
   source?: string;
+  team_id?: string;
   instance_name?: string;
   instance_type?: 'baileys' | 'wa_cloud';
   unreadCount?: number;
@@ -246,6 +247,7 @@ export interface Tag {
   label: string;
   color: string;
   is_close_reason: boolean;
+  team_ids?: string[];
 }
 
 

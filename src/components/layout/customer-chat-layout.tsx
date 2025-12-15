@@ -95,7 +95,7 @@ function DraggableSoundTester({
 
   return ReactDOM.createPortal(
     <div
-      className="fixed z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md cursor-move"
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md cursor-move"
       style={{ left: pos.x, top: pos.y }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -115,31 +115,31 @@ function DraggableSoundTester({
 
 function LoadingSkeleton() {
   return (
-    <div className="flex flex-1 w-full min-h-0 h-full bg-black/20 backdrop-blur-xl">
-      <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
-        <Skeleton className="h-12 w-full bg-white/5" />
-        <Skeleton className="h-10 w-full bg-white/5" />
-        <Skeleton className="h-10 w-full bg-white/5" />
+    <div className="flex flex-1 w-full min-h-0 h-full bg-background/20 backdrop-blur-xl">
+      <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
+        <Skeleton className="h-12 w-full bg-muted" />
+        <Skeleton className="h-10 w-full bg-muted" />
+        <Skeleton className="h-10 w-full bg-muted" />
         <div className="space-y-2 mt-4">
-          <Skeleton className="h-16 w-full bg-white/5" />
-          <Skeleton className="h-16 w-full bg-white/5" />
-          <Skeleton className="h-16 w-full bg-white/5" />
-          <Skeleton className="h-16 w-full bg-white/5" />
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
         </div>
       </div>
       <div className="flex-1 flex flex-col min-w-0 bg-transparent">
-        <Skeleton className="h-16 w-full bg-white/5" />
+        <Skeleton className="h-16 w-full bg-muted" />
         <div className="flex-1 p-6 space-y-4">
-          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
-          <Skeleton className="h-10 w-1/2 bg-white/5" />
-          <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+          <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
+          <Skeleton className="h-10 w-1/2 bg-muted" />
+          <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
         </div>
-        <Skeleton className="h-24 w-full bg-white/5" />
+        <Skeleton className="h-24 w-full bg-muted" />
       </div>
-      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4">
-        <Skeleton className="h-16 w-full bg-white/5" />
-        <Skeleton className="h-24 w-full bg-white/5" />
-        <Skeleton className="h-32 w-full bg-white/5" />
+      <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
+        <Skeleton className="h-16 w-full bg-muted" />
+        <Skeleton className="h-24 w-full bg-muted" />
+        <Skeleton className="h-32 w-full bg-muted" />
       </div>
     </div>
   );
@@ -147,12 +147,12 @@ function LoadingSkeleton() {
 
 function ChatListSkeleton() {
   return (
-    <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
-      <Skeleton className="h-6 w-32 bg-white/5" />
-      <Skeleton className="h-10 w-full bg-white/5" />
+    <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
+      <Skeleton className="h-6 w-32 bg-muted" />
+      <Skeleton className="h-10 w-full bg-muted" />
       <div className="space-y-2 mt-2">
         {Array.from({ length: 5 }).map((_, index) => (
-          <Skeleton key={index} className="h-14 w-full bg-white/5" />
+          <Skeleton key={index} className="h-14 w-full bg-muted" />
         ))}
       </div>
     </div>
@@ -162,13 +162,13 @@ function ChatListSkeleton() {
 function ThreadSkeleton() {
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-transparent">
-      <Skeleton className="h-16 w-full bg-white/5" />
+      <Skeleton className="h-16 w-full bg-muted" />
       <div className="flex-1 p-6 space-y-4">
-        <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
-        <Skeleton className="h-10 w-1/2 bg-white/5" />
-        <Skeleton className="h-10 w-1/2 ml-auto bg-white/5" />
+        <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
+        <Skeleton className="h-10 w-1/2 bg-muted" />
+        <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
       </div>
-      <Skeleton className="h-24 w-full bg-white/5" />
+      <Skeleton className="h-24 w-full bg-muted" />
     </div>
   );
 }
@@ -503,6 +503,13 @@ export default function CustomerChatLayout({
   const handleRealtimeMessage = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
     const message = mapRealtimePayload(payload);
     if (!message) return;
+
+    // Ensure from_me is correctly set for Realtime messages
+    // We cast to any because sender_user_id is in the DB payload but not strictly in the frontend Message type yet
+    const rawMessage = message as any;
+    if (initialUser && rawMessage.sender_user_id) {
+      message.from_me = rawMessage.sender_user_id === initialUser.id;
+    }
 
     console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
 
@@ -1155,19 +1162,17 @@ export default function CustomerChatLayout({
 
   return (
     <div
-      className={`relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-black selection:bg-blue-500/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+      className={`relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-background/50 dark:bg-black selection:bg-primary/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
       dir={isRTL ? 'rtl' : 'ltr'}
     >
       {/* Background Effects */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
-        <div className="absolute -left-[10%] top-[20%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[100px]" />
-        <div className="absolute -right-[10%] bottom-[20%] w-[40%] h-[40%] rounded-full bg-purple-500/10 blur-[100px]" />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-50 dark:opacity-20 [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
       </div>
 
       <div className="relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px]">
         {needsAudioUnlock && (
-          <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
+          <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
             <span>Habilite o som de novas mensagens</span>
             <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
           </div>

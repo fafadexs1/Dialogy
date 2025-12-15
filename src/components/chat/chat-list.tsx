@@ -24,6 +24,16 @@ import {
   DialogTrigger,
   DialogClose
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from '../ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Textarea } from '../ui/textarea';
@@ -190,22 +200,22 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-white">Iniciar Nova Conversa</DialogTitle>
-          <DialogDescription className="text-white/60">
+          <DialogTitle className="text-foreground">Iniciar Nova Conversa</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
             Envie uma mensagem para um novo número para iniciar um atendimento.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-2 pb-4">
             <div className="space-y-2">
-              <Label htmlFor="instanceName" className="text-white/80">Instância de Envio</Label>
+              <Label htmlFor="instanceName" className="text-muted-foreground">Instância de Envio</Label>
               <Select name="instanceName" required value={selectedInstanceName} onValueChange={setSelectedInstanceName}>
-                <SelectTrigger id="instanceName" className="bg-white/5 border-white/10 text-white">
+                <SelectTrigger id="instanceName" className="bg-muted/50 border-input text-foreground">
                   <SelectValue placeholder="Selecione a instância..." />
                 </SelectTrigger>
-                <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                <SelectContent className="bg-popover border-border text-popover-foreground">
                   {isLoading ? (
                     <div className="p-4 text-center text-sm text-white/50">Carregando...</div>
                   ) : (
@@ -219,7 +229,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-white/80">Número do WhatsApp (JID)</Label>
+              <Label htmlFor="phoneNumber" className="text-muted-foreground">Número do WhatsApp (JID)</Label>
               <Input
                 id="phoneNumber"
                 name="phoneNumber"
@@ -227,7 +237,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 required
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
-                className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+                className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50"
               />
               <p className="text-xs text-white/40">
                 Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
@@ -235,14 +245,14 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
             </div>
 
             {isCloud ? (
-              <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-white/5 p-2 rounded-r-md">
+              <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-muted/30 p-2 rounded-r-md">
                 <div className="space-y-2">
-                  <Label className="text-white/80">Selecionar Template (Cloud API)</Label>
+                  <Label className="text-muted-foreground">Selecionar Template (Cloud API)</Label>
                   <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
-                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                    <SelectTrigger className="bg-muted/50 border-input text-foreground">
                       <SelectValue placeholder={loadingTemplates ? "Carregando templates..." : "Selecione um template..."} />
                     </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 border-white/10 text-white max-h-[200px]">
+                    <SelectContent className="bg-popover border-border text-popover-foreground max-h-[200px]">
                       {loadingTemplates ? (
                         <div className="p-2 text-center text-xs text-muted-foreground">Carregando...</div>
                       ) : templates.length === 0 ? (
@@ -255,7 +265,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                     </SelectContent>
                   </Select>
                   {selectedTemplate && (
-                    <p className="text-xs text-white/50 italic mt-1 bg-black/20 p-2 rounded">
+                    <p className="text-xs text-muted-foreground italic mt-1 bg-muted p-2 rounded">
                       "{(selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '')}"
                     </p>
                   )}
@@ -282,13 +292,13 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="message" className="text-white/80">Mensagem</Label>
+                <Label htmlFor="message" className="text-muted-foreground">Mensagem</Label>
                 <Textarea
                   id="message"
                   name="message"
                   placeholder="Olá! Gostaria de falar sobre..."
                   required={!isCloud}
-                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[100px]"
+                  className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50 min-h-[100px]"
                 />
               </div>
             )}
@@ -296,7 +306,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="ghost" className="text-white/70 hover:text-white hover:bg-white/10">
+              <Button type="button" variant="ghost" className="text-muted-foreground hover:text-foreground">
                 Cancelar
               </Button>
             </DialogClose>
@@ -388,7 +398,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-white/60 overflow-hidden">
+    <div className="flex items-start gap-1.5 text-sm text-muted-foreground overflow-hidden">
       <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
       <p className="truncate">{getTextContent()}</p>
     </div>
@@ -500,12 +510,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 h-[112px] overflow-hidden",
+        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 h-[112px] overflow-hidden",
         isSelected && !isForwarding && !isBulkMode
-          ? "bg-white/10 border-white/10 shadow-lg"
-          : "hover:bg-white/5 hover:border-white/5",
-        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-blue-500/10 border-blue-500/30" : "",
-        isSnoozed ? "opacity-60" : ""
+          ? "bg-sidebar-accent dark:bg-white/10 dark:border-white/10 shadow-sm"
+          : "hover:bg-muted/50 dark:hover:bg-white/5",
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
+        isSnoozed ? "opacity-60 grayscale" : ""
       )}
       onClick={handleSelect}
       onDoubleClick={() => setIsTagDialogOpen(true)}
@@ -516,16 +526,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       aria-label={`Conversa com ${chat.contact.name}${isSnoozed ? ' adiada' : ''}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+        <div className="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-full shadow-glow-primary"></div>
       )}
 
       {/* Bulk Mode Checkbox */}
       {isBulkMode && (
         <div className={cn(
           "h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all flex-shrink-0 mt-1",
-          isSelectedForBulk ? "bg-blue-500 border-blue-500" : "border-white/30 group-hover:border-white/50"
+          isSelectedForBulk ? "bg-primary border-primary" : "border-muted-foreground/30 group-hover:border-muted-foreground/50"
         )}>
-          {isSelectedForBulk && <Check className="h-3 w-3 text-white" />}
+          {isSelectedForBulk && <Check className="h-3 w-3 text-primary-foreground" />}
         </div>
       )}
 
@@ -533,9 +543,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       {isForwarding && (
         <div className={cn(
           "h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0 mt-1",
-          isSelectedForForwarding ? "bg-blue-500 border-blue-500" : "border-white/30 group-hover:border-white/50"
+          isSelectedForForwarding ? "bg-primary border-primary" : "border-muted-foreground/30 group-hover:border-muted-foreground/50"
         )}>
-          {isSelectedForForwarding && <Check className="h-3 w-3 text-white" />}
+          {isSelectedForForwarding && <Check className="h-3 w-3 text-primary-foreground" />}
         </div>
       )}
 
@@ -548,9 +558,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       />
 
       <div className="relative flex-shrink-0">
-        <Avatar className="h-10 w-10 border border-white/10">
+        <Avatar className="h-10 w-10 border border-border">
           <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-          <AvatarFallback className="bg-zinc-800 text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
+          <AvatarFallback className="bg-muted text-muted-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
         {(() => {
           const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
@@ -575,9 +585,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     {icon}
                   </div>
                 </TooltipTrigger>
-                <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
+                <TooltipContent className="bg-popover border-border text-popover-foreground">
                   <p>Canal: {label}</p>
-                  {chat.instance_name && <p>Inst?ncia: {chat.instance_name}</p>}
+                  {chat.instance_name && <p>Instância: {chat.instance_name}</p>}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -591,7 +601,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                   <Megaphone size={10} />
                 </div>
               </TooltipTrigger>
-              <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
+              <TooltipContent className="bg-popover border-border text-popover-foreground">
                 <p>Campanha de Marketing</p>
               </TooltipContent>
             </Tooltip>
@@ -603,7 +613,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
-              <p className={cn("font-semibold truncate text-sm whitespace-nowrap max-w-[60%]", isSelected ? "text-white" : "text-white/90")} title={chat.contact.name}>
+              <p className={cn("font-semibold truncate text-sm whitespace-nowrap max-w-[60%]", "text-foreground")} title={chat.contact.name}>
                 {chat.contact.name.split(' ').slice(0, 3).join(' ')}
               </p>
               {chat.status === 'encerrados' && (
@@ -627,7 +637,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-white/60 hover:text-white"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         aria-label="Assumir conversa"
                         onClick={handleAssign}
                       >
@@ -645,7 +655,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className={cn("h-7 w-7", isSnoozed ? "text-amber-300" : "text-white/60 hover:text-white")}
+                        className={cn("h-7 w-7", isSnoozed ? "text-amber-500" : "text-muted-foreground hover:text-foreground")}
                         aria-label={isSnoozed ? "Retomar conversa adiada" : "Adiantar conversa por 15 minutos"}
                         onClick={handleSnoozeClick}
                       >
@@ -663,7 +673,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-white/60 hover:text-white"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         aria-label="Etiquetar conversa"
                         onClick={(e) => { e.stopPropagation(); setIsTagDialogOpen(true); }}
                       >
@@ -682,7 +692,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 text-white/70 hover:text-white"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
                       onClick={handleQuickClose}
                       disabled={isClosing}
                     >
@@ -724,7 +734,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               } : undefined}
               className={cn(
                 "text-[10px] border px-1.5 py-0.5 flex-shrink-0",
-                hasTag ? "" : "bg-white/5 border-white/15 text-white/60"
+                hasTag ? "" : "bg-muted/50 border-input text-muted-foreground"
               )}
               title={hasTag ? chat.tag : 'Sem tag'}
             >
@@ -750,7 +760,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             const unread = chat.unreadCount ?? 0;
             if (unread <= 0) return null;
             return (
-              <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-gradient-to-r from-blue-600 to-purple-600 text-white border-0 shadow-md text-[10px]">
+              <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-blue-600 text-white border-0 shadow-md shadow-blue-500/20 text-[10px] font-bold">
                 {unread}
               </Badge>
             );
@@ -814,6 +824,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
   const debouncedSearch = useDebouncedValue(searchQuery, 220);
+
+  // Assign Confirmation State
+  const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
 
   const toggleBulkMode = () => {
     setIsBulkMode(!isBulkMode);
@@ -901,14 +914,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     setIsBulkSubmitting(false);
   };
 
-  const handleAssignChat = async (chat: Chat) => {
-    const result = await guardedAssignChat(chat.id);
+  const handleAssignChat = (chat: Chat) => {
+    setChatToAssign(chat);
+  };
+
+  const confirmAssignChat = async () => {
+    if (!chatToAssign) return;
+
+    const result = await guardedAssignChat(chatToAssign.id);
     if (result.success) {
-      toast({ title: 'Assumiu atendimento', description: `${chat.contact.name} agora est\u00e1 com voc\u00ea.` });
+      toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact.name} agora está com você.` });
       onUpdate();
     } else {
-      toast({ title: 'N\u00e3o foi poss\u00edvel assumir', description: result.error, variant: 'destructive' });
+      toast({ title: 'Não foi possível assumir', description: result.error, variant: 'destructive' });
     }
+    setChatToAssign(null);
   };
 
   const selectedChatIdRef = React.useRef(selectedChat?.id);
@@ -1089,19 +1109,19 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-[0_1_clamp(320px,24vw,400px)] max-w-full flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl lg:flex-[0_1_clamp(330px,26vw,420px)]">
+    <div className="flex h-full min-h-0 min-w-0 flex-[0_1_clamp(320px,24vw,400px)] max-w-full flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 lg:flex-[0_1_clamp(330px,26vw,420px)]">
       {/* Header */}
-      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-white/10 space-y-4">
+      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border dark:border-white/10 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg md:text-xl font-bold text-white tracking-tight">Conversas</h2>
+          <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
           <div className="flex items-center gap-2">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Filtros" className="h-8 w-8 text-muted-foreground hover:text-white hover:bg-white/10">
+                <Button variant="ghost" size="icon" aria-label="Filtros" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted">
                   <Filter className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 p-4 space-y-4 bg-black/90 border-white/10 backdrop-blur-xl text-white">
+              <PopoverContent align="end" className="w-72 p-4 space-y-4 bg-popover border-border text-popover-foreground">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Responsável</p>
                   <RadioGroup
@@ -1110,12 +1130,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className="mt-2 space-y-2"
                   >
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="mine" id="owner-mine" className="border-white/20 text-blue-500" />
-                      <Label htmlFor="owner-mine" className="cursor-pointer text-white/80">Somente minhas conversas</Label>
+                      <RadioGroupItem value="mine" id="owner-mine" className="border-border text-blue-500" />
+                      <Label htmlFor="owner-mine" className="cursor-pointer text-foreground">Somente minhas conversas</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="everyone" id="owner-all" className="border-white/20 text-blue-500" />
-                      <Label htmlFor="owner-all" className="cursor-pointer text-white/80">Todos os atendentes</Label>
+                      <RadioGroupItem value="everyone" id="owner-all" className="border-border text-blue-500" />
+                      <Label htmlFor="owner-all" className="cursor-pointer text-foreground">Todos os atendentes</Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -1128,16 +1148,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className="mt-2 space-y-2"
                   >
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="all" id="status-all" className="border-white/20 text-blue-500" />
-                      <Label htmlFor="status-all" className="cursor-pointer text-white/80">Todos</Label>
+                      <RadioGroupItem value="all" id="status-all" className="border-border text-blue-500" />
+                      <Label htmlFor="status-all" className="cursor-pointer text-foreground">Todos</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="open" id="status-open" className="border-white/20 text-blue-500" />
-                      <Label htmlFor="status-open" className="cursor-pointer text-white/80">Abertos (Fila + Atendendo)</Label>
+                      <RadioGroupItem value="open" id="status-open" className="border-border text-blue-500" />
+                      <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Fila + Atendendo)</Label>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="closed" id="status-closed" className="border-white/20 text-blue-500" />
-                      <Label htmlFor="status-closed" className="cursor-pointer text-white/80">Encerrados</Label>
+                      <RadioGroupItem value="closed" id="status-closed" className="border-border text-blue-500" />
+                      <Label htmlFor="status-closed" className="cursor-pointer text-foreground">Encerrados</Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -1145,21 +1165,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-white">Somente não lidas</p>
+                      <p className="text-sm font-medium text-foreground">Somente não lidas</p>
                       <p className="text-xs text-muted-foreground">Priorize contatos aguardando resposta</p>
                     </div>
                     <Switch checked={onlyUnread} onCheckedChange={setOnlyUnread} className="data-[state=checked]:bg-blue-600" />
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-white">Somente sem responsável</p>
+                      <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
                       <p className="text-xs text-muted-foreground">Ótimo para dividir a fila com o time</p>
                     </div>
                     <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-white">Mostrar mensagens de Marketing</p>
+                      <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
                       <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
                     </div>
                     <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
@@ -1207,7 +1227,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
           <Input
             placeholder="Pesquisar por nome, telefone ou mensagem..."
-            className="pl-9 bg-white/5 border-white/10 focus:border-blue-500/50 focus:bg-white/10 focus:ring-1 focus:ring-blue-500/50 transition-all rounded-xl text-white placeholder:text-muted-foreground"
+            className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Pesquisar conversas"
@@ -1232,7 +1252,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       />
 
       {/* Online agents */}
-      <div className="px-4 py-3 flex-shrink-0 border-b border-white/10 bg-white/5">
+      <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/30 dark:bg-black dark:border-white/10">
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Agentes Online ({onlineAgents.length})
         </h3>
@@ -1245,14 +1265,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className="relative cursor-pointer hover:opacity-80 transition-opacity"
                     onClick={() => setSelectedAgent(agent.user)}
                   >
-                    <Avatar className="h-8 w-8 border-2 border-black ring-2 ring-green-500/50">
+                    <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-green-500/50">
                       <AvatarImage src={agent.user.avatar} />
-                      <AvatarFallback className="bg-zinc-800 text-xs">{agent.user.name.charAt(0)}</AvatarFallback>
+                      <AvatarFallback className="bg-muted text-foreground text-xs">{agent.user.name.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black"></span>
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background"></span>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent className="bg-black/80 border-white/10 backdrop-blur-md text-white">
+                <TooltipContent className="bg-popover border-border text-popover-foreground">
                   <AgentTooltipContent agent={agent} />
                 </TooltipContent>
               </Tooltip>
@@ -1272,8 +1292,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       />
 
       {/* Tabs */}
-      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-white/10">
-        <div className="flex items-center bg-black/40 rounded-lg p-1 border border-white/5">
+      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-border dark:border-white/10">
+        <div className="flex items-center bg-muted/50 rounded-lg p-1 border border-border dark:bg-black/40 dark:border-white/5">
           {TABS.map((tab) => {
             const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
             return (
@@ -1283,8 +1303,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 text-xs font-medium py-1.5 rounded-md transition-all duration-200',
                   activeTab === tab.id
-                    ? 'bg-white/10 text-white shadow-sm border border-white/5'
-                    : 'text-muted-foreground hover:text-white hover:bg-white/5'
+                    ? 'bg-white shadow-sm text-foreground dark:bg-white/10 dark:text-white'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/5'
                 )}
               >
                 <span>{tab.label}</span>
@@ -1294,7 +1314,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       'px-1.5 h-4 text-[10px] min-w-[16px] justify-center',
                       activeTab === tab.id
                         ? 'bg-blue-500 text-white'
-                        : 'bg-white/10 text-muted-foreground'
+                        : 'bg-muted text-muted-foreground'
                     )}
                   >
                     {filteredCount}
@@ -1307,53 +1327,55 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </div>
 
       {/* Bulk Action Bar */}
-      {isBulkMode && (
-        <div className="p-2 border-b border-white/10 bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
-          <div className="flex items-center gap-2 px-2">
-            <p className="text-sm font-medium text-blue-100">{selectedBulkChats.size} selecionado(s)</p>
-            <Button variant="link" size="sm" className="h-auto p-0 text-blue-300" onClick={handleSelectAllBulk}>
-              {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
-            </Button>
-          </div>
-          <div className="flex items-center gap-1">
-            <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
-                  Encerrar
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
-                <DialogHeader>
-                  <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
-                  <DialogDescription className="text-white/60">
-                    Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                  <Label htmlFor="bulk-message" className="text-white/80 mb-2 block">Mensagem de Encerramento (opcional)</Label>
-                  <Textarea
-                    id="bulk-message"
-                    placeholder="Ex: Agradecemos o contato!"
-                    className="bg-white/5 border-white/10 text-white min-h-[100px]"
-                    value={bulkMessage}
-                    onChange={(e) => setBulkMessage(e.target.value)}
-                  />
-                  <p className="text-xs text-white/40 mt-2">
-                    Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
-                  <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
-                    {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Confirmar Encerramento
+      {
+        isBulkMode && (
+          <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 px-2">
+              <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
+              <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
+                {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
+              </Button>
+            </div>
+            <div className="flex items-center gap-1">
+              <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
+                    Encerrar
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </DialogTrigger>
+                <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
+                    <DialogDescription className="text-muted-foreground">
+                      Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
+                    <Textarea
+                      id="bulk-message"
+                      placeholder="Ex: Agradecemos o contato!"
+                      className="bg-muted/50 border-border text-foreground min-h-[100px]"
+                      value={bulkMessage}
+                      onChange={(e) => setBulkMessage(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
+                    <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                      {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Confirmar Encerramento
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Chat list */}
       <div className="flex-1 overflow-hidden relative">
@@ -1389,7 +1411,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       size="sm"
                       onClick={handleLoadMore}
                       disabled={isLoadingMore}
-                      className="text-muted-foreground hover:text-white"
+                      className="text-muted-foreground hover:text-foreground"
                     >
                       {isLoadingMore ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1410,7 +1432,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
                       </div>
                     </div>
-                    <h3 className="font-semibold text-white">Nenhuma conversa</h3>
+                    <h3 className="font-semibold text-foreground">Nenhuma conversa</h3>
                     <p className="text-sm text-muted-foreground max-w-[200px]">
                       Você não é responsável por nenhuma conversa no momento
                     </p>
@@ -1420,7 +1442,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                           workspaceId={currentUser.activeWorkspaceId}
                           onActionSuccess={onUpdate}
                           trigger={
-                            <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                            <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-600 hover:text-blue-700">
                               <PlusCircle className="h-4 w-4" />
                               Nova Conversa
                             </Button>
@@ -1428,11 +1450,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         />
                       </div>
                     )}
-
                   </>
                 ) : (
                   <>
-                    <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
+                    <MessageSquare className="h-12 w-12 text-muted-foreground/30" />
                     <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
                     {hasMoreChats && activeTab === 'encerrados' && (
                       <div className="pt-4">
@@ -1441,7 +1462,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                           size="sm"
                           onClick={handleLoadMore}
                           disabled={isLoadingMore}
-                          className="text-muted-foreground hover:text-white"
+                          className="text-muted-foreground hover:text-foreground"
                         >
                           {isLoadingMore ? (
                             <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1457,21 +1478,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               </div>
             )}
           </div>
-        </ScrollArea >
+        </ScrollArea>
       </div>
 
       {/* Forwarding Footer */}
       {isForwarding && (
-        <div className="p-4 border-t border-white/10 bg-black/40 backdrop-blur-md">
+        <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-white font-medium">
+            <span className="text-sm text-foreground font-medium">
               {selectedForwardingChatIds?.size || 0} selecionados
             </span>
           </div>
           <div className="flex gap-2">
             <Button
               variant="outline"
-              className="flex-1 border-white/10 hover:bg-white/10"
+              className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
               onClick={onCancelForward}
             >
               Cancelar
@@ -1486,6 +1507,25 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         </div>
       )}
+
+
+      {/* Assign Confirmation Dialog */}
+      <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
+        <AlertDialogContent className="bg-background border-border text-foreground">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Assumir este atendimento?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              Você será definido como o responsável pela conversa com <strong>{chatToAssign?.contact.name}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border hover:bg-muted text-foreground">Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmAssignChat} className="bg-blue-600 hover:bg-blue-700 text-white border-0">
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

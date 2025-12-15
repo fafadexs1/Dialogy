@@ -21,7 +21,8 @@ import {
     Globe,
     MessageSquarePlus,
     BarChart3,
-    Hash
+    Hash,
+    ArrowRightLeft
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -95,15 +96,15 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" disabled={disabled} className="bg-white/5 border-white/10 hover:bg-white/10 text-white">
-                    <Send className="mr-2 h-4 w-4" />
+                <Button variant="outline" size="sm" className="bg-muted/50 border-input text-foreground hover:bg-muted/80">
+                    <ArrowRightLeft className="h-4 w-4 mr-2" />
                     Transferir
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-md bg-black/90 border-white/10 text-white">
+            <DialogContent className="max-w-md bg-popover border-border text-foreground">
                 <DialogHeader>
                     <DialogTitle>Transferir Atendimento</DialogTitle>
-                    <DialogDescription className="text-white/50">
+                    <DialogDescription className="text-muted-foreground">
                         Envie esta conversa para outra equipe ou agente.
                     </DialogDescription>
                 </DialogHeader>
@@ -119,30 +120,30 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
                         </Button>
                         <div className="relative my-4">
                             <div className="absolute inset-0 flex items-center">
-                                <span className="w-full border-t border-white/10" />
+                                <span className="w-full border-t border-border" />
                             </div>
                             <div className="relative flex justify-center text-xs uppercase">
-                                <span className="bg-black/90 px-2 text-white/50">Ou transferir para</span>
+                                <span className="bg-popover px-2 text-muted-foreground">Ou transferir para</span>
                             </div>
                         </div>
                     </div>
                 )}
                 <Tabs defaultValue="team" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 bg-white/5">
-                        <TabsTrigger value="team" className="data-[state=active]:bg-white/10 data-[state=active]:text-white">Para Equipe</TabsTrigger>
-                        <TabsTrigger value="agent" className="data-[state=active]:bg-white/10 data-[state=active]:text-white">Para Agente</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-2 bg-muted/50">
+                        <TabsTrigger value="team" className="data-[state=active]:bg-background data-[state=active]:text-foreground">Para Equipe</TabsTrigger>
+                        <TabsTrigger value="agent" className="data-[state=active]:bg-background data-[state=active]:text-foreground">Para Agente</TabsTrigger>
                     </TabsList>
                     <TabsContent value="team">
                         <ScrollArea className="h-64">
                             <div className="p-1 space-y-2">
-                                {loading ? <Loader2 className="mx-auto my-10 h-6 w-6 animate-spin text-blue-400" /> :
+                                {loading ? <Loader2 className="mx-auto my-10 h-6 w-6 animate-spin text-primary" /> :
                                     teams.map(team => (
-                                        <div key={team.id} className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
+                                        <div key={team.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
                                             <div className="flex items-center gap-3">
-                                                <span className="h-3 w-3 rounded-full flex-shrink-0 ring-2 ring-white/10" style={{ backgroundColor: team.color }}></span>
+                                                <span className="h-3 w-3 rounded-full flex-shrink-0 ring-2 ring-border" style={{ backgroundColor: team.color }}></span>
                                                 <div>
-                                                    <p className="font-medium text-white">{team.name}</p>
-                                                    <p className="text-xs text-white/50">{team.onlineMembersCount} agente(s) online</p>
+                                                    <p className="font-medium text-foreground">{team.name}</p>
+                                                    <p className="text-xs text-muted-foreground">{team.onlineMembersCount} agente(s) online</p>
                                                 </div>
                                             </div>
                                             <Button size="sm" onClick={() => handleTransfer({ teamId: team.id })} disabled={isTransferring || team.onlineMembersCount === 0} className="bg-blue-600 hover:bg-blue-500 text-white">
@@ -158,26 +159,26 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
                         <ScrollArea className="h-64">
                             <div className="p-1 space-y-2">
                                 {availableAgents.length > 0 ? availableAgents.map(agent => (
-                                    <div key={agent.user.id} className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
+                                    <div key={agent.user.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
                                         <div className="flex items-center gap-3">
-                                            <Avatar className="h-8 w-8 border border-white/10">
+                                            <Avatar className="h-8 w-8 border border-border">
                                                 <AvatarImage src={agent.user.avatar} />
-                                                <AvatarFallback className="bg-zinc-800 text-white">{agent.user.name.charAt(0)}</AvatarFallback>
+                                                <AvatarFallback className="bg-muted text-foreground">{agent.user.name.charAt(0)}</AvatarFallback>
                                             </Avatar>
-                                            <p className="font-medium text-white">{agent.user.name}</p>
+                                            <p className="font-medium text-foreground">{agent.user.name}</p>
                                         </div>
                                         <Button size="sm" onClick={() => handleTransfer({ agentId: agent.user.id })} disabled={isTransferring} className="bg-blue-600 hover:bg-blue-500 text-white">
                                             {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                             Transferir
                                         </Button>
                                     </div>
-                                )) : <p className="text-sm text-white/50 text-center pt-10">Nenhum outro agente online.</p>}
+                                )) : <p className="text-sm text-muted-foreground text-center pt-10">Nenhum outro agente online.</p>}
                             </div>
                         </ScrollArea>
                     </TabsContent>
                 </Tabs>
             </DialogContent>
-        </Dialog>
+        </Dialog >
     )
 }
 
@@ -327,15 +328,15 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-white/5 border-white/10 text-white hover:bg-white/10">
+                <Button variant="outline" size="sm" className="bg-muted/50 border-input text-foreground hover:bg-muted/80">
                     <MessageSquarePlus className="mr-2 h-4 w-4" />
                     Nova conversa
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg bg-black/90 border-white/10 text-white max-h-[85vh] overflow-y-auto">
+            <DialogContent className="max-w-lg bg-popover border-border text-foreground max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Reabrir atendimento</DialogTitle>
-                    <DialogDescription className="text-white/60">
+                    <DialogDescription className="text-muted-foreground">
                         Inicie um novo tópico com este contato sem perder o histórico.
                     </DialogDescription>
                 </DialogHeader>
@@ -343,7 +344,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                     <div className="space-y-2">
                         <Label>Instância</Label>
                         <Select value={selectedInstance} onValueChange={setSelectedInstance} disabled={isLoadingInstances || instances.length === 0}>
-                            <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                            <SelectTrigger className="bg-muted/50 border-input text-foreground">
                                 <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instância'} />
                             </SelectTrigger>
                             <SelectContent>
@@ -362,19 +363,19 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
                             placeholder="5511999999999"
-                            className="bg-white/5 border-white/10 text-white"
+                            className="bg-muted/50 border-input text-foreground"
                         />
                     </div>
 
                     {isCloud ? (
-                        <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-white/5 p-2 rounded-r-md">
+                        <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-muted/30 p-2 rounded-r-md">
                             <div className="space-y-2">
-                                <Label className="text-white/80">Selecionar Template (Cloud API)</Label>
+                                <Label className="text-muted-foreground">Selecionar Template (Cloud API)</Label>
                                 <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
-                                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                                    <SelectTrigger className="bg-muted/50 border-input text-foreground">
                                         <SelectValue placeholder={loadingTemplates ? "Carregando templates..." : "Selecione um template..."} />
                                     </SelectTrigger>
-                                    <SelectContent className="bg-zinc-900 border-white/10 text-white max-h-[200px]">
+                                    <SelectContent className="bg-popover border-border text-foreground max-h-[200px]">
                                         {loadingTemplates ? (
                                             <div className="p-2 text-center text-xs text-muted-foreground">Carregando...</div>
                                         ) : templates.length === 0 ? (
@@ -387,7 +388,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                                     </SelectContent>
                                 </Select>
                                 {selectedTemplate && (
-                                    <p className="text-xs text-white/50 italic mt-1 bg-black/20 p-2 rounded">
+                                    <p className="text-xs text-muted-foreground italic mt-1 bg-muted p-2 rounded">
                                         "{(selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '')}"
                                     </p>
                                 )}
@@ -401,7 +402,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                                             <Label htmlFor={`var-${key}`} className="text-xs text-white/70">Variável {`{{${key}}}`}</Label>
                                             <Input
                                                 id={`var-${key}`}
-                                                className="bg-zinc-950/50 border-white/10 h-8 text-sm"
+                                                className="bg-muted/50 border-input h-8 text-sm"
                                                 placeholder={`Valor para {{${key}}}`}
                                                 value={templateVariables[key] || ''}
                                                 onChange={(e) => setTemplateVariables(prev => ({ ...prev, [key]: e.target.value }))}
@@ -415,7 +416,7 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
                     ) : (
                         <div className="space-y-2">
                             <Label>Mensagem inicial</Label>
-                            <Textarea value={message} onChange={(e) => setMessage(e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
+                            <Textarea value={message} onChange={(e) => setMessage(e.target.value)} className="bg-muted/50 border-input text-foreground" rows={3} />
                         </div>
                     )}
 
@@ -455,16 +456,16 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl">
-                <div className="flex h-16 items-center border-b border-white/10 px-4 xl:px-6">
-                    <h3 className="font-semibold text-white">Informações do Contato</h3>
+            <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 bg-background/30 backdrop-blur-xl border-l border-border/50 dark:bg-black dark:border-white/10">
+                <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
+                    <h3 className="font-semibold text-foreground">Informações do Contato</h3>
                 </div>
                 <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-                    <div className="h-20 w-20 bg-white/5 rounded-full flex items-center justify-center mb-4 ring-1 ring-white/10">
-                        <UserIcon className="h-10 w-10 text-white/30" />
+                    <div className="h-20 w-20 bg-muted rounded-full flex items-center justify-center mb-4 ring-1 ring-border">
+                        <UserIcon className="h-10 w-10 text-muted-foreground" />
                     </div>
-                    <h4 className="font-medium text-white">Detalhes do Contato</h4>
-                    <p className="text-sm text-white/50 mt-2 max-w-[200px]">
+                    <h4 className="font-medium text-foreground">Detalhes do Contato</h4>
+                    <p className="text-sm text-muted-foreground mt-2 max-w-[200px]">
                         Selecione uma conversa para ver os detalhes.
                     </p>
                 </div>
@@ -496,16 +497,16 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         || null;
 
     return (
-        <div className="hidden lg:flex lg:flex-col lg:w-[clamp(320px,25vw,420px)] lg:min-w-[320px] lg:flex-shrink-0 border-l border-white/10 bg-black/20 backdrop-blur-xl h-full">
-            <div className="flex h-16 items-center justify-between border-b border-white/10 px-4 xl:px-6 flex-shrink-0">
-                <h3 className="font-semibold text-base xl:text-lg text-white">Detalhes</h3>
+        <div className="hidden lg:flex lg:flex-col lg:w-[clamp(320px,25vw,420px)] lg:min-w-[320px] lg:flex-shrink-0 border-l border-border/50 bg-background/30 backdrop-blur-md h-full dark:bg-black dark:border-white/10">
+            <div className="flex h-16 items-center justify-between border-b border-border dark:border-white/10 px-4 xl:px-6 flex-shrink-0">
+                <h3 className="font-semibold text-base xl:text-lg text-foreground">Detalhes</h3>
                 <div className="flex items-center gap-2">
                     {chat.status === 'encerrados' && (
                         <ResumeConversationDialog chat={chat} currentUser={currentUser} onSuccess={onContactUpdate} />
                     )}
                     <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
                         <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10">
+                            <Button variant="ghost" size="sm" className="text-blue-500 hover:text-blue-400 hover:bg-blue-500/10">
                                 <Edit className="mr-2 h-4 w-4" />
                                 Editar
                             </Button>
@@ -526,12 +527,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             <ScrollArea className="flex-1">
                 <div className="p-4 xl:p-6 space-y-6">
                     <div className="flex flex-col items-center text-center">
-                        <Avatar className="h-24 w-24 shrink-0 border-2 border-white/10 ring-4 ring-white/5 shadow-xl">
+                        <Avatar className="h-24 w-24 shrink-0 border-2 border-border ring-4 ring-muted shadow-xl">
                             <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} data-ai-hint="person" />
                             <AvatarFallback className="text-3xl bg-gradient-to-br from-blue-600 to-violet-600 text-white">{contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="mt-4 space-y-1">
-                            <h2 className="font-bold text-lg xl:text-xl text-white">{contact.name}</h2>
+                            <h2 className="font-bold text-lg xl:text-xl text-foreground">{contact.name}</h2>
                             {chat.tag && chat.color && (
                                 <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent shadow-sm">
                                     {chat.tag}
@@ -540,58 +541,58 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                         </div>
                     </div>
 
-                    <Separator className="bg-white/10" />
+                    <Separator className="bg-border" />
 
                     <div className="space-y-4">
-                        <h4 className="font-medium text-white/70 text-sm uppercase tracking-wider">Informações de Contato</h4>
+                        <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider">Informações de Contato</h4>
                         <div className="space-y-3 text-sm">
                             {contact.email && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <Mail className="h-4 w-4 text-blue-400" />
+                                <div className="flex items-center gap-3 text-foreground group">
+                                    <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                                        <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                                     </div>
-                                    <span className="truncate">{contact.email}</span>
+                                    <span className="truncate text-foreground/80">{contact.email}</span>
                                 </div>
                             )}
                             {contact.phone_number_jid && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <Smartphone className="h-4 w-4 text-green-400" />
+                                <div className="flex items-center gap-3 text-foreground/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                                        <Smartphone className="h-4 w-4 text-green-600 dark:text-green-400" />
                                     </div>
-                                    <span>{contact.phone_number_jid}</span>
+                                    <span className="text-foreground/80">{contact.phone_number_jid}</span>
                                 </div>
                             )}
                             {(chat.protocol || chat.id) && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <Hash className="h-4 w-4 text-indigo-400" />
+                                <div className="flex items-center gap-3 text-foreground/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-indigo-500/10 flex items-center justify-center group-hover:bg-indigo-500/20 transition-colors">
+                                        <Hash className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                                     </div>
                                     <div className="flex flex-col leading-tight">
-                                        <span className="text-[11px] uppercase tracking-wide text-white/50">Protocolo</span>
-                                        <span className="font-mono text-sm text-white">{chat.protocol || buildChatProtocol(chat.id)}</span>
+                                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Protocolo</span>
+                                        <span className="font-mono text-sm text-foreground">{chat.protocol || buildChatProtocol(chat.id)}</span>
                                     </div>
                                 </div>
                             )}
                             {chat.instance_name && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <Server className="h-4 w-4 text-purple-400" />
+                                <div className="flex items-center gap-3 text-foreground/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                                        <Server className="h-4 w-4 text-purple-600 dark:text-purple-400" />
                                     </div>
-                                    <span>{chat.instance_name} <span className="text-white/40 text-xs">({instanceTypeDisplay})</span></span>
+                                    <span className="text-foreground/80">{chat.instance_name} <span className="opacity-50 text-xs">({instanceTypeDisplay})</span></span>
                                 </div>
                             )}
                             {externalId && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <UserIcon className="h-4 w-4 text-blue-400" />
+                                <div className="flex items-center gap-3 text-foreground/80 group">
+                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+                                        <UserIcon className="h-4 w-4 text-blue-500" />
                                     </div>
-                                    <span>ID externo: {externalId}</span>
+                                    <span className="text-foreground/80">ID externo: {externalId}</span>
                                 </div>
                             )}
                             {contact.address && (
-                                <div className="flex items-center gap-3 text-white/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                        <MapPin className="h-4 w-4 text-red-400" />
+                                <div className="flex items-center gap-3 text-foreground group">
+                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+                                        <MapPin className="h-4 w-4 text-red-500" />
                                     </div>
                                     <span>{contact.address}</span>
                                 </div>
@@ -599,12 +600,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                         </div>
                     </div>
 
-                    <Separator className="bg-white/10" />
+                    <Separator className="bg-border" />
 
                     {customFields.length > 0 && (
                         <>
                             <div className="space-y-4">
-                                <h4 className="font-medium text-white/70 text-sm uppercase tracking-wider">Informações Adicionais</h4>
+                                <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider">Informações Adicionais</h4>
                                 <div className="space-y-3 text-sm">
                                     {customFields.map(field => {
                                         const value = contact.custom_fields?.[field.id];
@@ -617,11 +618,11 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         }
 
                                         return (
-                                            <div key={field.id} className="flex flex-col gap-1 text-white/80 group">
-                                                <span className="text-xs text-white/50">{field.label}</span>
+                                            <div key={field.id} className="flex flex-col gap-1 text-foreground group">
+                                                <span className="text-xs text-muted-foreground">{field.label}</span>
                                                 <div className="flex items-center gap-3">
-                                                    <div className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                                                        <Briefcase className="h-4 w-4 text-yellow-400" />
+                                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+                                                        <Briefcase className="h-4 w-4 text-yellow-500" />
                                                     </div>
                                                     <span className="truncate">{displayValue}</span>
                                                 </div>
@@ -629,50 +630,50 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         );
                                     })}
                                     {customFields.every(f => !contact.custom_fields?.[f.id]) && (
-                                        <p className="text-white/30 italic text-xs">Nenhuma informação adicional preenchida.</p>
+                                        <p className="text-muted-foreground italic text-xs">Nenhuma informação adicional preenchida.</p>
                                     )}
                                 </div>
                             </div>
-                            <Separator className="bg-white/10" />
+                            <Separator className="bg-border" />
                         </>
                     )}
 
                     <div className="space-y-4">
                         <div className="flex justify-between items-center">
-                            <h4 className="font-medium text-white/70 flex items-center gap-2 text-sm uppercase tracking-wider">
+                            <h4 className="font-medium text-muted-foreground flex items-center gap-2 text-sm uppercase tracking-wider">
                                 Atendente Responsável
                             </h4>
                         </div>
 
-                        <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                        <div className="bg-muted/30 border border-border rounded-xl p-4">
                             {agent && agent.id !== 'unknown' ? (
                                 <div className="flex items-center gap-3">
-                                    <Avatar className="h-10 w-10 border border-white/10">
+                                    <Avatar className="h-10 w-10 border border-border">
                                         <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
-                                        <AvatarFallback className="bg-zinc-800 text-white">{agent.name.charAt(0)}</AvatarFallback>
+                                        <AvatarFallback className="bg-muted text-foreground">{agent.name.charAt(0)}</AvatarFallback>
                                     </Avatar>
                                     <div className="flex-1 min-w-0">
-                                        <p className="font-medium text-white truncate">{agent.name}</p>
-                                        {chat.assigned_at && <p className="text-xs text-white/50">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>}
+                                        <p className="font-medium text-foreground truncate">{agent.name}</p>
+                                        {chat.assigned_at && <p className="text-xs text-muted-foreground">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>}
                                     </div>
                                     <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
                                 </div>
                             ) : (
                                 <div className="flex flex-col items-center text-center py-2">
-                                    <p className="text-white/50 text-sm mb-3">Nenhum atendente atribuído.</p>
+                                    <p className="text-muted-foreground text-sm mb-3">Nenhum atendente atribuído.</p>
                                     <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    <Separator className="bg-white/10" />
+                    <Separator className="bg-border" />
 
                     <div className="space-y-4">
-                        <h4 className="font-medium text-white/70 text-sm uppercase tracking-wider mb-2">CRM & Tarefas</h4>
+                        <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider mb-2">CRM & Tarefas</h4>
 
                         <Card
-                            className="bg-white/5 border-white/10 shadow-none hover:bg-white/10 transition-colors cursor-pointer group"
+                            className="bg-card border-border shadow-none hover:bg-muted/50 transition-colors cursor-pointer group"
                             onClick={() => setIsStatsOpen(true)}
                         >
                             <CardContent className="p-4 flex items-center justify-between">
@@ -680,29 +681,29 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
                                         <BarChart3 className="h-4 w-4" />
                                     </div>
-                                    <span className="font-medium text-white">Estatísticas</span>
+                                    <span className="font-medium text-foreground">Estatísticas</span>
                                 </div>
-                                <Badge variant="secondary" className="bg-white/10 text-white group-hover:bg-white/20">Ver</Badge>
+                                <Badge variant="secondary" className="bg-muted text-foreground group-hover:bg-muted/80">Ver</Badge>
                             </CardContent>
                         </Card>
 
-                        <Card className="bg-white/5 border-white/10 shadow-none hover:bg-white/10 transition-colors cursor-pointer group">
+                        <Card className="bg-card border-border shadow-none hover:bg-muted/50 transition-colors cursor-pointer group">
                             <CardContent className="p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="h-8 w-8 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400">
                                         <CheckSquare className="h-4 w-4" />
                                     </div>
-                                    <span className="font-medium text-white">Tarefas</span>
+                                    <span className="font-medium text-foreground">Tarefas</span>
                                 </div>
-                                <Badge variant="secondary" className="bg-white/10 text-white group-hover:bg-white/20">0</Badge>
+                                <Badge variant="secondary" className="bg-muted text-foreground group-hover:bg-muted/80">0</Badge>
                             </CardContent>
                         </Card>
                     </div>
 
-                    <Separator className="bg-white/10" />
+                    <Separator className="bg-border" />
 
                     <Link href="/crm" className="block">
-                        <Button variant="outline" className="w-full bg-transparent border-white/10 text-white hover:bg-white/5 hover:text-white">
+                        <Button variant="outline" className="w-full bg-transparent border-input text-foreground hover:bg-muted hover:text-foreground">
                             Ver Perfil Completo no CRM
                         </Button>
                     </Link>

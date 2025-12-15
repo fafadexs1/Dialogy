@@ -566,6 +566,7 @@ type ChatRow = {
     protocol: string | null;
     contact_id: string | null;
     agent_id: string | null;
+    team_id: string | null;
     team_name: string | null;
     team_color: string | null;
     instance_name: string | null;
@@ -627,6 +628,9 @@ type MessageRow = {
     contact_email?: string | null;
     contact_phone_number_jid?: string | null;
     contact_address?: string | null;
+    team_id?: string | null;
+    team_name?: string | null;
+    team_color?: string | null;
 };
 
 async function getWorkspaceTimezone(workspaceId: string): Promise<string> {
@@ -758,6 +762,7 @@ async function fetchChats({
                 SELECT COUNT(*) FROM messages m
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
             ), 0) AS unread_count,
+            t.id AS team_id,
             t.name AS team_name,
             t.color AS team_color,
             eai.type AS instance_type,
@@ -1644,6 +1649,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             assigned_at: row.assigned_at || undefined,
             unreadCount: Number(row.unread_count || 0),
             teamName: row.team_name || undefined,
+            team_id: row.team_id || undefined,
             teamColor: row.team_color || undefined,
             tag: row.tag || undefined,
             color: row.color || undefined,

@@ -64,7 +64,7 @@ function LocationMessage({ message }: { message: Message }) {
 
     return (
         <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-blue-400/40 transition-all max-w-[320px] shadow-lg shadow-black/20">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-all max-w-[320px] shadow-sm dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/40 dark:shadow-lg dark:shadow-black/20">
                 {thumbnailSrc ? (
                     <div className="relative">
                         <Image
@@ -87,13 +87,13 @@ function LocationMessage({ message }: { message: Message }) {
                     </div>
                 )}
                 <div className="p-3 space-y-1">
-                    <p className="text-sm font-semibold text-white flex items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground flex items-center gap-2 dark:text-white">
                         <MapPin className="h-4 w-4 text-blue-300" />
                         <span className="line-clamp-2">{title}</span>
                     </p>
-                    {subtitle && <p className="text-xs text-white/70">{subtitle}</p>}
+                    {subtitle && <p className="text-xs text-muted-foreground dark:text-white/70">{subtitle}</p>}
                     {hasCoords && (
-                        <p className="text-[11px] text-white/50">
+                        <p className="text-[11px] text-muted-foreground/70 dark:text-white/50">
                             {latitude?.toFixed(5)}, {longitude?.toFixed(5)}
                         </p>
                     )}
@@ -178,14 +178,19 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                 href={urlToUse}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-white/10 p-3 rounded-lg hover:bg-white/20 transition-colors max-w-[300px]"
+                // Use text-inherit to allow parent text color (white for sent, black for received) to propagate
+                // But muted-foreground is specific. 
+                // We should condition on isFromMe usually, but here we are inside renderMedia which doesn't know isFromMe easy?
+                // Actually MessageItem knows isFromMe. But renderMessageContent logic...
+                // Let's use robust classes.
+                className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"
             >
-                <FileIcon className="h-8 w-8 text-white/70 flex-shrink-0" />
-                <div className='min-w-0'>
-                    <p className="font-medium truncate text-white">{fileName || 'Documento'}</p>
-                    <p className="text-xs text-white/50">Clique para abrir ou baixar</p>
+                <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
+                <div className='min-w-0 flex-1'>
+                    <p className="font-medium truncate opacity-90">{fileName || 'Documento'}</p>
+                    <p className="text-xs opacity-70">Clique para abrir ou baixar</p>
                 </div>
-                <Download className="h-5 w-5 text-white/50 ml-auto flex-shrink-0" />
+                <Download className="h-5 w-5 opacity-70 ml-auto flex-shrink-0" />
             </a>
         );
     };
@@ -257,139 +262,148 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
             {showDateSeparator && (
                 <div className="relative my-6">
                     <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-white/10"></div>
+                        <div className="w-full border-t border-border/50"></div>
                     </div>
                     <div className="relative flex justify-center">
-                        <span className="bg-black/40 backdrop-blur-md px-3 py-1 text-xs font-medium text-white/50 rounded-full border border-white/5">{message.formattedDate}</span>
+                        <span className="bg-muted/80 backdrop-blur-md px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border shadow-sm dark:bg-white/5 dark:text-white/60 dark:border-white/10">{message.formattedDate}</span>
                     </div>
                 </div>
             )}
-            {message.type === 'system' ? (
-                <div className="flex justify-center items-center my-6">
-                    <div className="flex items-center gap-2 text-xs text-white/50 bg-white/5 rounded-full px-3 py-1 border border-white/5">
-                        <Info className="h-3.5 w-3.5" />
-                        <span>{message.content}</span>
-                        <span>-</span>
-                        <span>{message.timestamp}</span>
+            {
+                message.type === 'system' ? (
+                    <div className="flex justify-center items-center my-6">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-full px-3 py-1 border border-border dark:text-white/60 dark:bg-white/5 dark:border-white/10">
+                            <Info className="h-3.5 w-3.5" />
+                            <span>{message.content}</span>
+                            <span>-</span>
+                            <span>{message.timestamp}</span>
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <div
-                    className={`group flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300 ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
-                    style={{ willChange: 'transform, opacity', backfaceVisibility: 'hidden' }}
-                >
-                    {message.sender && (
-                        <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
-                            <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url} alt={message.sender.name || ''} data-ai-hint="person" />
-                            <AvatarFallback className="bg-zinc-800 text-white/70 text-xs">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
-                        </Avatar>
-                    )}
-                    <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                        <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
-                            <div
-                                className={cn("break-words rounded-2xl p-3 max-w-lg shadow-lg relative",
-                                    isDeleted
-                                        ? 'bg-white/5 text-white/50 italic border border-white/10'
-                                        : isInternalNote
-                                            ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-200'
-                                            : (isFromMe
-                                                ? 'bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-tr-sm border border-white/10'
-                                                : 'bg-white/10 backdrop-blur-md border border-white/10 text-white rounded-tl-sm')
-                                )}
-                            >
-                                {isInternalNote && (
-                                    <div className="flex items-center gap-1 text-xs text-yellow-500/70 mb-1 font-medium uppercase tracking-wider">
-                                        <StickyNote className="h-3 w-3" /> Nota Interna
+                ) : (
+                    <div
+                        className={`group flex items-start gap-3 ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
+                    >
+                        {message.sender && (
+                            <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
+                                <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url} alt={message.sender.name || ''} data-ai-hint="person" />
+                                <AvatarFallback className="bg-muted text-muted-foreground text-xs dark:bg-white/10 dark:text-white/70">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
+                            </Avatar>
+                        )}
+                        <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
+                            <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                                <div
+                                    className={cn("break-words rounded-2xl p-3 max-w-lg shadow-lg relative",
+                                        isDeleted
+                                            ? 'bg-muted/30 text-muted-foreground italic border border-border/50 dark:bg-white/5 dark:text-white/50 dark:border-white/10'
+                                            : isInternalNote
+                                                ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-200'
+                                                : (isFromMe
+                                                    ? 'bg-blue-600 text-white rounded-tr-sm shadow-md dark:bg-gradient-to-br dark:from-blue-600 dark:to-violet-600 dark:border dark:border-white/10'
+                                                    : 'bg-white dark:bg-white/10 backdrop-blur-md border border-border/50 dark:border-white/10 text-foreground dark:text-white rounded-tl-sm shadow-sm')
+                                    )}
+                                >
+                                    {isInternalNote && (
+                                        <div className="flex items-center gap-1 text-xs text-yellow-500/70 mb-1 font-medium uppercase tracking-wider">
+                                            <StickyNote className="h-3 w-3" /> Nota Interna
+                                        </div>
+                                    )}
+                                    {isDeleted ? (
+                                        <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Mensagem apagada</span>
+                                    ) : (
+                                        <TooltipProvider>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <div className="cursor-default">
+                                                        {renderMessageContent(message, isFromMe)}
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="bg-popover border-border text-popover-foreground text-xs dark:bg-black/90 dark:border-white/10 dark:text-white">
+                                                    {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </TooltipProvider>
+                                    )}
+                                </div>
+                                {!isDeleted && (
+                                    <div className="flex-shrink-0 self-start">
+                                        <AlertDialog>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:text-white/50 dark:hover:text-white dark:hover:bg-white/10">
+                                                        <MoreVertical className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent className="bg-popover border-border text-popover-foreground dark:bg-black/90 dark:border-white/10 dark:text-white">
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer focus:bg-accent focus:text-accent-foreground dark:hover:bg-white/10 dark:focus:bg-white/10"
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(message.content || '');
+                                                            toast({ title: 'Mensagem copiada!' });
+                                                        }}
+                                                    >
+                                                        <Copy className="mr-2 h-4 w-4" />
+                                                        Copiar
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer focus:bg-accent focus:text-accent-foreground dark:hover:bg-white/10 dark:focus:bg-white/10"
+                                                        onClick={() => onForward && onForward(message)}
+                                                    >
+                                                        <ArrowRightLeft className="mr-2 h-4 w-4" />
+                                                        Encaminhar
+                                                    </DropdownMenuItem>
+                                                    {isFromMe && (
+                                                        <AlertDialogTrigger asChild>
+                                                            <DropdownMenuItem className="text-red-400 focus:bg-red-500/20 focus:text-red-300 cursor-pointer" onSelect={e => e.preventDefault()}>
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Apagar para todos
+                                                            </DropdownMenuItem>
+                                                        </AlertDialogTrigger>
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                            <AlertDialogContent className="bg-background border-border text-foreground dark:bg-black/90 dark:border-white/10 dark:text-white">
+                                                <AlertDialogHeader>
+                                                    <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
+                                                    <AlertDialogDescription className="text-muted-foreground dark:text-white/70">
+                                                        Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
+                                                    </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                    <AlertDialogCancel className="bg-muted border-input text-muted-foreground hover:bg-accent hover:text-accent-foreground dark:bg-white/10 dark:border-white/10 dark:text-white dark:hover:bg-white/20">Cancelar</AlertDialogCancel>
+                                                    <AlertDialogAction onClick={() => onDelete(message.id, instanceName)} className="bg-red-600 hover:bg-red-700 text-white border-none">Apagar</AlertDialogAction>
+                                                </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                        </AlertDialog>
                                     </div>
                                 )}
-                                {isDeleted ? (
-                                    <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Mensagem apagada</span>
-                                ) : (
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <div className="cursor-default">
-                                                    {renderMessageContent(message, isFromMe)}
-                                                </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent className="bg-black/90 border-white/10 text-white text-xs">
-                                                {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
+                            </div>
+                            <div
+                                className={cn("flex items-center text-[10px] text-muted-foreground/60 mt-1.5 dark:text-white/40", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}
+                                title={message.api_message_status || 'Sem status'}
+                            >
+                                <span className="mx-1">
+                                    {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, 'HH:mm', { locale: ptBR })}
+                                </span>
+                                {message.from_me && !isDeleted && (
+                                    (() => {
+                                        const status = message.api_message_status?.toUpperCase();
+                                        // Case-insensitive pending check
+                                        if (status === 'PENDING') return <Clock className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
+
+                                        if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />;
+                                        if (status === 'DELIVERED') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
+                                        // SENT: WhatsApp Single Check (Sent to Server)
+                                        // DELIVERED: WhatsApp Double Check (Delivered to Recipient)
+                                        // Fallback/Sent -> Check (Single)
+                                        return <Check className="h-3 w-3" />;
+                                    })()
                                 )}
                             </div>
-                            {!isDeleted && (
-                                <div className="flex-shrink-0 self-start">
-                                    <AlertDialog>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-white/50 hover:text-white hover:bg-white/10">
-                                                    <MoreVertical className="h-4 w-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent className="bg-black/90 border-white/10 text-white">
-                                                <DropdownMenuItem
-                                                    className="cursor-pointer hover:bg-white/10 focus:bg-white/10"
-                                                    onClick={() => {
-                                                        navigator.clipboard.writeText(message.content || '');
-                                                        toast({ title: 'Mensagem copiada!' });
-                                                    }}
-                                                >
-                                                    <Copy className="mr-2 h-4 w-4" />
-                                                    Copiar
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem
-                                                    className="cursor-pointer hover:bg-white/10 focus:bg-white/10"
-                                                    onClick={() => onForward && onForward(message)}
-                                                >
-                                                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                                                    Encaminhar
-                                                </DropdownMenuItem>
-                                                {isFromMe && (
-                                                    <AlertDialogTrigger asChild>
-                                                        <DropdownMenuItem className="text-red-400 focus:bg-red-500/20 focus:text-red-300 cursor-pointer" onSelect={e => e.preventDefault()}>
-                                                            <Trash2 className="mr-2 h-4 w-4" />
-                                                            Apagar para todos
-                                                        </DropdownMenuItem>
-                                                    </AlertDialogTrigger>
-                                                )}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                        <AlertDialogContent className="bg-black/90 border-white/10 text-white">
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
-                                                <AlertDialogDescription className="text-white/70">
-                                                    Esta ação não pode ser desfeita. A mensagem será apagada para todos na conversa.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/20 hover:text-white">Cancelar</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => onDelete(message.id, instanceName)} className="bg-red-600 hover:bg-red-700 text-white border-none">Apagar</AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
-                                </div>
-                            )}
-                        </div>
-                        <div className={cn("flex items-center text-[10px] text-white/40 mt-1.5", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}>
-                            <span className="mx-1">
-                                {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, 'HH:mm', { locale: ptBR })}
-                            </span>
-                            {message.from_me && !isDeleted && (
-                                isPending
-                                    ? <Clock className="h-3 w-3 text-white/40" />
-                                    : message.api_message_status === 'READ'
-                                        ? <CheckCheck className="h-3 w-3 text-blue-400" />
-                                        : message.api_message_status === 'DELIVERED' || message.api_message_status === 'SENT'
-                                            ? <CheckCheck className="h-3 w-3 text-white/40" />
-                                            : <Check className="h-3 w-3" />
-                            )}
                         </div>
                     </div>
-                </div>
-            )}
-        </React.Fragment>
+                )
+            }
+        </React.Fragment >
     );
 });
 

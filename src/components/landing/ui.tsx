@@ -5,12 +5,11 @@ import Link from "next/link";
 import { Sparkles } from "lucide-react";
 
 // --- Design Tokens ---
-export const primary = "#3b82f6"; // Blue 500
-export const secondary = "#8b5cf6"; // Violet 500
-export const accent = "#ec4899"; // Pink 500
-export const darkBg = "#030712"; // Gray 950
+export const primary = "hsl(var(--primary))";
+export const secondary = "hsl(var(--secondary))";
+export const accent = "hsl(var(--accent))";
 
-export const glass = "backdrop-blur-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300";
+export const glass = "backdrop-blur-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 shadow-xl shadow-black/20";
 export const glow = "shadow-[0_0_40px_rgba(59,130,246,0.15)] hover:shadow-[0_0_60px_rgba(139,92,246,0.3)]";
 
 // --- Components ---
@@ -21,8 +20,8 @@ export function Section({ id, children, className = "" }: { id?: string; childre
 
 export function Badge({ children, className = "" }: { children: React.ReactNode, className?: string }) {
     return (
-        <span className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs md:text-sm font-medium border border-white/10 bg-white/5 text-white/90 ${className}`}>
-            <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> {children}
+        <span className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs md:text-sm font-medium border border-border bg-muted/50 text-foreground/90 ${className}`}>
+            <Sparkles className="w-3.5 h-3.5 text-yellow-500" /> {children}
         </span>
     );
 }
@@ -53,10 +52,10 @@ export function CTAButton({
     const classes = variant === "outline"
         ? `${base} border border-white/20 text-white hover:bg-white/10 ${className}`
         : variant === "ghost"
-            ? `${base} text-white/70 hover:text-white hover:bg-white/5 ${className}`
-            : `${base} text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 ${className}`;
+            ? `${base} text-muted-foreground hover:text-foreground hover:bg-muted/50 ${className}`
+            : `${base} text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-500/20 ${className}`;
 
-    const style = variant === "primary" ? { background: `linear-gradient(135deg, ${primary}, ${secondary})` } : {};
+    const style = {};
 
     if (onClick || !href) {
         return (

@@ -52,17 +52,17 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
           {user ? (
             <Sidebar user={user} />
           ) : (
-            <div className="h-full w-20 flex flex-col items-center bg-zinc-950 p-4 border-r border-white/10 animate-pulse">
+            <div className="h-full w-20 flex flex-col items-center bg-sidebar p-4 border-r border-sidebar-border animate-pulse">
               {/* Logo Skeleton */}
-              <div className="h-12 w-12 rounded-xl bg-white/10 mb-6 flex-shrink-0" />
+              <div className="h-12 w-12 rounded-xl bg-sidebar-accent mb-6 flex-shrink-0" />
               {/* Nav Items Skeleton */}
               <div className="flex-1 flex flex-col gap-4 w-full items-center justify-center">
-                <div className="h-12 w-12 rounded-2xl bg-white/5" />
-                <div className="h-12 w-12 rounded-2xl bg-white/5" />
-                <div className="h-12 w-12 rounded-2xl bg-white/5" />
-                <div className="h-12 w-12 rounded-2xl bg-white/5" />
+                <div className="h-12 w-12 rounded-2xl bg-sidebar-accent/50" />
+                <div className="h-12 w-12 rounded-2xl bg-sidebar-accent/50" />
+                <div className="h-12 w-12 rounded-2xl bg-sidebar-accent/50" />
+                <div className="h-12 w-12 rounded-2xl bg-sidebar-accent/50" />
               </div>
-              <div className="h-10 w-10 rounded-full bg-white/10 mt-auto" />
+              <div className="h-10 w-10 rounded-full bg-sidebar-accent mt-auto" />
             </div>
           )}
         </aside>

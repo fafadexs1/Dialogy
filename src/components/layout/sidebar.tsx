@@ -13,6 +13,7 @@ import {
   Monitor,
   Puzzle,
   Rocket,
+  Send,
   Settings,
   ShieldAlert,
   User as UserIcon,
@@ -26,11 +27,12 @@ import { WorkspaceSwitcher } from "./workspace-switcher";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/actions/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const mainNavItems = [
   { href: "/inbox", icon: MessageSquare, label: "Chat", exact: false },
   { href: "/crm", icon: Users, label: "CRM", exact: false },
-  { href: "/campaigns", icon: MessageSquare, label: "Campanhas", exact: false },
+  { href: "/campaigns", icon: Send, label: "Campanhas", exact: false },
   { href: "/analytics", icon: BarChart2, label: "Analytics", exact: false },
   { href: "/integrations", icon: Puzzle, label: "Integrações", exact: false },
   { href: "/support", icon: HelpCircle, label: "Suporte", exact: false },
@@ -88,7 +90,7 @@ interface SidebarProps {
 
 function SidebarTooltip({ label }: { label: string }) {
   return (
-    <span className="pointer-events-none absolute left-12 top-1/2 -translate-y-1/2 whitespace-nowrap rounded-lg bg-[#0f1117]/95 px-3 py-1.5 text-xs text-white/90 opacity-0 shadow-xl ring-1 ring-white/10 backdrop-blur transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-1">
+    <span className="pointer-events-none absolute left-12 top-1/2 -translate-y-1/2 whitespace-nowrap rounded-lg bg-sidebar px-3 py-1.5 text-xs text-sidebar-foreground opacity-0 shadow-xl ring-1 ring-sidebar-border backdrop-blur transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-1">
       {label}
     </span>
   );
@@ -175,9 +177,9 @@ function FlyoutMenu({
       <SidebarTooltip label={label} />
 
       {isOpen && (
-        <div className="absolute left-14 top-1/2 z-50 w-72 -translate-y-1/2 rounded-xl border border-white/10 bg-[#0f1117]/95 shadow-2xl backdrop-blur p-2 space-y-1">
+        <div className="absolute left-14 top-1/2 z-50 w-72 -translate-y-1/2 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl p-2 space-y-1">
           <div className="px-2 py-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               {label}
             </p>
           </div>
@@ -185,16 +187,16 @@ function FlyoutMenu({
             <Link
               key={item.href}
               href={item.href}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-white/5 transition-colors group"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-sidebar-accent transition-colors group"
               onClick={onClose}
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-md border border-white/5 bg-white/5 text-blue-300">
+              <span className="flex h-9 w-9 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-primary">
                 <item.icon className="h-4 w-4" />
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{item.label}</p>
+                <p className="text-sm font-medium text-sidebar-foreground truncate">{item.label}</p>
                 {item.description ? (
-                  <p className="text-[11px] text-white/50 truncate">{item.description}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{item.description}</p>
                 ) : null}
               </div>
             </Link>
@@ -229,10 +231,10 @@ function AccountMenu({
         aria-expanded={isOpen}
         aria-label="Conta"
       >
-        <div className="absolute inset-0 blur-xl opacity-20 bg-blue-500/40" />
-        <Avatar className="relative h-10 w-10 border border-white/10 bg-zinc-900">
+        <div className="absolute inset-0 blur-xl opacity-20 bg-primary/40" />
+        <Avatar className="relative h-10 w-10 border border-sidebar-border bg-sidebar-accent">
           {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} /> : null}
-          <AvatarFallback className="bg-zinc-800 text-xs font-semibold text-white">
+          <AvatarFallback className="bg-muted text-xs font-semibold text-sidebar-foreground">
             {user.name?.charAt(0).toUpperCase() || "?"}
           </AvatarFallback>
         </Avatar>
@@ -240,17 +242,17 @@ function AccountMenu({
       <SidebarTooltip label={user.name || "Sua conta"} />
 
       {isOpen && (
-        <div className="absolute left-14 bottom-0 z-50 w-72 rounded-xl border border-white/10 bg-[#0f1117]/95 shadow-2xl backdrop-blur p-3 space-y-2">
-          <div className="flex items-center gap-3 rounded-lg border border-white/5 bg-white/5 px-3 py-2.5">
-            <Avatar className="h-10 w-10 border border-white/10">
+        <div className="absolute left-14 bottom-0 z-50 w-72 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl p-3 space-y-2">
+          <div className="flex items-center gap-3 rounded-lg border border-sidebar-border bg-sidebar-accent/50 px-3 py-2.5">
+            <Avatar className="h-10 w-10 border border-sidebar-border">
               {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} /> : null}
-              <AvatarFallback className="bg-zinc-800 text-white">
+              <AvatarFallback className="bg-muted text-sidebar-foreground">
                 {user.name?.charAt(0).toUpperCase() || "?"}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-white truncate">{user.name || "Usuário"}</p>
-              <p className="text-xs text-white/50 truncate">{user.email}</p>
+              <p className="text-sm font-semibold text-sidebar-foreground truncate">{user.name || "Usuário"}</p>
+              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
             </div>
           </div>
 
@@ -290,9 +292,9 @@ function AccountLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/80 transition hover:bg-white/5 hover:text-white"
+      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-md border border-white/5 bg-white/5 text-white/80">
+      <span className="flex h-9 w-9 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80">
         <Icon className="h-4 w-4" />
       </span>
       <span>{label}</span>
@@ -376,16 +378,16 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   return (
-    <aside className="relative z-50 flex h-full w-[78px] flex-col items-center gap-6 border-r border-white/10 bg-[#0f1117]/70 px-2 py-4 shadow-2xl backdrop-blur-xl">
+    <aside className="relative z-50 flex h-full w-[78px] flex-col items-center gap-6 border-r border-sidebar-border bg-sidebar dark:bg-black px-2 py-4 shadow-2xl">
       <div className="flex flex-col items-center gap-4">
         <Link
           href="/inbox"
-          className="group relative flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-600/10 text-blue-500 ring-1 ring-blue-500/20 transition-all duration-300 hover:from-blue-500/20 hover:to-blue-600/20 hover:shadow-[0_0_20px_-4px_rgba(59,130,246,0.45)]"
+          className="group relative flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-all duration-300 hover:bg-primary/20 hover:shadow-[0_0_20px_-4px_rgba(var(--primary),0.45)]"
           aria-label="Inbox"
         >
           <DialogyLogo />
         </Link>
-        <div className="h-px w-8 bg-white/10" />
+        <div className="h-px w-8 bg-sidebar-border" />
         <WorkspaceSwitcher user={user} />
       </div>
 
@@ -395,7 +397,7 @@ export function Sidebar({ user }: SidebarProps) {
             <SidebarIconLink key={item.href} item={item} isActive={isActive(item)} />
           ))}
 
-          <div className="h-px w-8 bg-white/10 my-1.5" />
+          <div className="h-px w-8 bg-sidebar-border my-1.5" />
 
           <FlyoutMenu
             label="Equipe"
@@ -423,7 +425,9 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       <div className="flex w-full flex-col items-center gap-3 pb-1">
-
+        <div className="flex items-center justify-center w-full">
+          <ThemeToggle />
+        </div>
         <AccountMenu
           user={user}
           isOpen={openMenu === "account"}

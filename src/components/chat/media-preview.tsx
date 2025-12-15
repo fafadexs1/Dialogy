@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { File as FileIcon, X, Video, Image as ImageIcon } from 'lucide-react';
 
 export interface MediaFileType {
@@ -39,56 +39,72 @@ export default function MediaPreview({ mediaFiles, setMediaFiles }: MediaPreview
   const getFileIcon = (mediatype: MediaFileType['mediatype']) => {
     switch (mediatype) {
       case 'image':
-        return <ImageIcon className="h-8 w-8 text-muted-foreground" />;
+        return <ImageIcon className="h-8 w-8 text-primary/70" />;
       case 'video':
-        return <Video className="h-8 w-8 text-muted-foreground" />;
+        return <Video className="h-8 w-8 text-primary/70" />;
       default:
-        return <FileIcon className="h-8 w-8 text-muted-foreground" />;
+        return <FileIcon className="h-8 w-8 text-primary/70" />;
     }
   };
 
   return (
-    <Card className="mb-2 p-2 border-dashed">
-      <ScrollArea className="h-40">
-        <div className="p-2 space-y-3">
+    <div className="w-full relative group/scroll">
+      <ScrollArea className="w-full whitespace-nowrap rounded-xl border border-border/40 bg-background/20 backdrop-blur-sm pb-2">
+        <div className="flex w-max space-x-3 p-3">
           {mediaFiles.map(file => (
-            <div key={file.id} className="flex items-center gap-3 p-2 border rounded-lg bg-background">
-              <div className="flex-shrink-0 h-12 w-12 rounded-md bg-secondary flex items-center justify-center overflow-hidden">
+            <div
+              key={file.id}
+              className="relative group flex flex-col w-36 h-40 flex-shrink-0 rounded-xl border border-border bg-background/50 overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 hover:ring-2 hover:ring-primary/20"
+            >
+              {/* Preview Area */}
+              <div className="relative h-24 w-full bg-secondary/30 flex items-center justify-center overflow-hidden">
                 {file.mediatype === 'image' || (file.mediatype === 'video' && file.thumbnail) ? (
                   <Image
                     src={file.thumbnail || URL.createObjectURL(file.file)}
                     alt={file.name}
-                    width={48}
-                    height={48}
-                    className="object-cover h-full w-full"
+                    fill
+                    className="object-cover transition-transform duration-500 group-hover:scale-110"
                     onLoad={e => { if (file.mediatype === 'image') URL.revokeObjectURL(e.currentTarget.src) }}
                   />
                 ) : (
-                  getFileIcon(file.mediatype)
+                  <div className="transform transition-transform duration-300 group-hover:scale-110">
+                    {getFileIcon(file.mediatype)}
+                  </div>
                 )}
+
+                {/* Remove Button (Overlay) */}
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-md rounded-full"
+                  onClick={() => handleRemoveFile(file.id)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
               </div>
-              <div className="flex-1 min-w-0 space-y-1">
+
+              {/* Footer Info */}
+              <div className="flex-1 p-2 flex flex-col justify-between bg-background/60 backdrop-blur-md">
                 <Input
                   value={file.name}
                   onChange={e => handleNameChange(file.id, e.target.value)}
-                  className="h-7 text-sm"
+                  className="h-6 text-[10px] px-1 bg-transparent border-transparent hover:border-border focus:border-border focus:bg-background transition-colors truncate"
+                  title={file.name}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {(file.file.size / 1024).toFixed(1)} KB
-                </p>
+                <div className="flex items-center justify-between px-1 mt-1">
+                  <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wider">
+                    {file.mediatype}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground tabular-nums">
+                    {(file.file.size / 1024).toFixed(0)}KB
+                  </span>
+                </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => handleRemoveFile(file.id)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
             </div>
           ))}
         </div>
+        <ScrollBar orientation="horizontal" className="opacity-0 group-hover/scroll:opacity-100 transition-opacity" />
       </ScrollArea>
-    </Card>
+    </div>
   );
 }

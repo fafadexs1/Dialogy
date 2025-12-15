@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { CustomFieldDefinition, SelectableOption, Tag, User } from '@/lib/types';
+import type { CustomFieldDefinition, SelectableOption, Tag, Team, User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,7 +15,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Trash2, Palette, Loader2 } from 'lucide-react';
+import { PlusCircle, Trash2, Palette, Loader2, Edit2 } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
@@ -30,39 +30,76 @@ import { Checkbox } from '../ui/checkbox';
 import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Textarea } from '../ui/textarea';
-import { getTags, createTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
+import { getTags, createTag, updateTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
+import { getTeams } from '@/actions/teams';
 import { toast } from '@/hooks/use-toast';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({
     title,
     options,
+    teams,
     onAdd,
-    onRemove
+    onRemove,
+    onUpdate // Added onUpdate prop
 }: {
     title: string,
     options: Tag[],
-    onAdd: (label: string, color: string, isCloseReason: boolean) => Promise<any>,
-    onRemove: (id: string) => Promise<any>
+    teams?: Team[],
+    onAdd: (label: string, color: string, isCloseReason: boolean, teamIds: string[]) => Promise<any>,
+    onRemove: (id: string) => Promise<any>,
+    onUpdate?: (id: string, label: string, color: string, isCloseReason: boolean, teamIds: string[]) => Promise<any>
 }) {
     const [newItemLabel, setNewItemLabel] = useState('');
     const [newItemColor, setNewItemColor] = useState('#cccccc');
     const [isCloseReason, setIsCloseReason] = useState(false);
+    const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editingItem, setEditingItem] = useState<Tag | null>(null); // State for editing
+
+    useEffect(() => {
+        if (editingItem) {
+            setNewItemLabel(editingItem.label);
+            setNewItemColor(editingItem.color);
+            setIsCloseReason(editingItem.is_close_reason);
+            setSelectedTeamIds(editingItem.team_ids || []);
+        } else {
+            setNewItemLabel('');
+            setNewItemColor('#cccccc');
+            setIsCloseReason(false);
+            setSelectedTeamIds([]);
+        }
+    }, [editingItem]);
+
+    const handleCancelEdit = () => {
+        setEditingItem(null);
+    };
 
     const handleAddItem = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newItemLabel.trim()) return;
 
         setIsSubmitting(true);
-        const result = await onAdd(newItemLabel, newItemColor, isCloseReason);
-        if (result.success) {
-            setNewItemLabel('');
-            setNewItemColor('#cccccc');
-            setIsCloseReason(false);
-            toast({ title: 'Etiqueta Adicionada!' })
+
+        if (editingItem && onUpdate) {
+            const result = await onUpdate(editingItem.id, newItemLabel, newItemColor, isCloseReason, selectedTeamIds);
+            if (result.success) {
+                toast({ title: 'Etiqueta Atualizada!' });
+                setEditingItem(null);
+            } else {
+                toast({ title: 'Erro ao Atualizar', description: result.error, variant: 'destructive' });
+            }
         } else {
-            toast({ title: 'Erro ao Adicionar', description: result.error, variant: 'destructive' })
+            const result = await onAdd(newItemLabel, newItemColor, isCloseReason, selectedTeamIds);
+            if (result.success) {
+                setNewItemLabel('');
+                setNewItemColor('#cccccc');
+                setIsCloseReason(false);
+                setSelectedTeamIds([]);
+                toast({ title: 'Etiqueta Adicionada!' })
+            } else {
+                toast({ title: 'Erro ao Adicionar', description: result.error, variant: 'destructive' })
+            }
         }
         setIsSubmitting(false);
     };
@@ -74,6 +111,15 @@ function OptionsManager({
         } else {
             toast({ title: 'Erro ao Remover', description: result.error, variant: 'destructive' })
         }
+    };
+
+    // Toggle team selection
+    const toggleTeam = (teamId: string) => {
+        setSelectedTeamIds(prev =>
+            prev.includes(teamId)
+                ? prev.filter(id => id !== teamId)
+                : [...prev, teamId]
+        );
     };
 
     return (
@@ -107,26 +153,56 @@ function OptionsManager({
                                 />
                             </div>
                         </div>
-                        <Button type="submit" size="sm" className='h-9' disabled={isSubmitting}>
-                            {isSubmitting && <Loader2 className='h-4 w-4 animate-spin mr-2' />}
-                            Adicionar
-                        </Button>
                     </div>
-                    {title === "Etiquetas (Tags)" && (
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id={`is-close-reason-${title}`}
-                                checked={isCloseReason}
-                                onCheckedChange={(checked) => setIsCloseReason(!!checked)}
-                            />
-                            <label
-                                htmlFor={`is-close-reason-${title}`}
-                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                            >
-                                Usar como motivo de encerramento de chat
-                            </label>
+
+                    {/* Team Selection UI */}
+                    {title === "Etiquetas (Tags)" && teams && teams.length > 0 && (
+                        <div className="space-y-2">
+                            <Label className="text-xs">Restringir a Equipes (Opcional - Vazio = Todas)</Label>
+                            <div className="flex flex-wrap gap-2">
+                                {teams.map(team => (
+                                    <div key={team.id} className="flex items-center space-x-1">
+                                        <Checkbox
+                                            id={`team-${team.id}`}
+                                            checked={selectedTeamIds.includes(team.id)}
+                                            onCheckedChange={() => toggleTeam(team.id)}
+                                        />
+                                        <label htmlFor={`team-${team.id}`} className="text-xs cursor-pointer select-none">
+                                            {team.name}
+                                        </label>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
+
+                    <div className="flex justify-between items-center">
+                        {title === "Etiquetas (Tags)" && (
+                            <div className="flex items-center space-x-2">
+                                <Checkbox
+                                    id={`is-close-reason-${title}`}
+                                    checked={isCloseReason}
+                                    onCheckedChange={(checked) => setIsCloseReason(!!checked)}
+                                />
+                                <label
+                                    htmlFor={`is-close-reason-${title}`}
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                >
+                                    Usar como motivo de encerramento
+                                </label>
+                            </div>
+                        )}
+                        {editingItem && (
+                            <Button type="button" variant="outline" size="sm" className='h-9 mr-2' onClick={handleCancelEdit}>
+                                Cancelar
+                            </Button>
+                        )}
+                        <Button type="submit" size="sm" className='h-9' disabled={isSubmitting}>
+                            {isSubmitting && <Loader2 className='h-4 w-4 animate-spin mr-2' />}
+                            {editingItem ? 'Salvar' : 'Adicionar'}
+                        </Button>
+                    </div>
+
                 </form>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                     {options.map(option => (
@@ -139,12 +215,23 @@ function OptionsManager({
                                     {option.is_close_reason && (
                                         <span className='text-xs text-blue-500 font-semibold'>Motivo de Encerramento</span>
                                     )}
+                                    {option.team_ids && option.team_ids.length > 0 && teams && (
+                                        <span className='text-[10px] text-muted-foreground'>
+                                            Equipes: {option.team_ids.map(tid => teams.find(t => t.id === tid)?.name).filter(Boolean).join(', ')}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
-                            <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => handleRemoveItem(option)}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                                <span className="sr-only">Remover</span>
-                            </Button>
+                            <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => setEditingItem(option)}>
+                                    <Edit2 className="h-3 w-3 text-muted-foreground" />
+                                    <span className="sr-only">Editar</span>
+                                </Button>
+                                <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => handleRemoveItem(option)}>
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                    <span className="sr-only">Remover</span>
+                                </Button>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -162,18 +249,21 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
     const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
 
     const [tags, setTags] = useState<Tag[]>([]);
+    const [teams, setTeams] = useState<Team[]>([]);
     const [loading, setLoading] = useState(true);
 
     const fetchAllData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
-        const [tagsResult, fieldsResult] = await Promise.all([
+        const [tagsResult, fieldsResult, teamsResult] = await Promise.all([
             getTags(user.activeWorkspaceId),
-            getCustomFieldDefinitions(user.activeWorkspaceId)
+            getCustomFieldDefinitions(user.activeWorkspaceId),
+            getTeams(user.activeWorkspaceId)
         ]);
 
         if (!tagsResult.error) setTags(tagsResult.tags || []);
         if (!fieldsResult.error) setFields(fieldsResult.fields || []);
+        if (!teamsResult.error) setTeams(teamsResult.teams || []);
 
         setLoading(false);
     }, [user?.activeWorkspaceId]);
@@ -184,11 +274,20 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
         }
     }, [user, fetchAllData]);
 
-    const handleAddTag = async (label: string, color: string, isCloseReason: boolean) => {
+    const handleAddTag = async (label: string, color: string, isCloseReason: boolean, teamIds: string[]) => {
         if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
-        const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason);
+        const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason, teamIds);
         if (result.success) {
             fetchAllData(); // Re-fetch all data
+        }
+        return result;
+    }
+
+    const handleUpdateTag = async (id: string, label: string, color: string, isCloseReason: boolean, teamIds: string[]) => {
+        if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
+        const result = await updateTag(id, label, color, isCloseReason, teamIds);
+        if (result.success) {
+            fetchAllData();
         }
         return result;
     }
@@ -377,7 +476,9 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                                                 <OptionsManager
                                                     title="Etiquetas (Tags)"
                                                     options={tags}
+                                                    teams={teams} // Pass teams to OptionsManager
                                                     onAdd={handleAddTag}
+                                                    onUpdate={handleUpdateTag}
                                                     onRemove={handleRemoveTag}
                                                 />
                                             )}

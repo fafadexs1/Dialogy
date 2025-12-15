@@ -272,7 +272,7 @@ export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null
     if (!user) return { tags: null, error: "Usuário não autenticado." };
 
     try {
-        const res = await db.query('SELECT id, label, value, color, is_close_reason FROM tags WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
+        const res = await db.query('SELECT id, label, value, color, is_close_reason, team_ids FROM tags WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
         return { tags: res.rows };
     } catch (error) {
         console.error("[GET_TAGS] Error:", error);
@@ -286,7 +286,8 @@ export const createTag = withDebug(
         workspaceId: string,
         label: string,
         color: string,
-        isCloseReason: boolean
+        isCloseReason: boolean,
+        teamIds: string[] = []
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -301,8 +302,8 @@ export const createTag = withDebug(
 
         try {
             await db.query(
-                'INSERT INTO tags (workspace_id, label, value, color, is_close_reason) VALUES ($1, $2, $3, $4, $5)',
-                [workspaceId, label, value, color, isCloseReason]
+                'INSERT INTO tags (workspace_id, label, value, color, is_close_reason, team_ids) VALUES ($1, $2, $3, $4, $5, $6)',
+                [workspaceId, label, value, color, isCloseReason, teamIds]
             );
             revalidatePath('/crm');
             return { success: true };
@@ -323,7 +324,8 @@ export const updateTag = withDebug(
         tagId: string,
         label: string,
         color: string,
-        isCloseReason: boolean
+        isCloseReason: boolean,
+        teamIds: string[] = []
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -341,8 +343,8 @@ export const updateTag = withDebug(
             const value = label.trim().toLowerCase().replace(/\s+/g, '_');
 
             await db.query(
-                'UPDATE tags SET label = $1, value = $2, color = $3, is_close_reason = $4 WHERE id = $5',
-                [label, value, color, isCloseReason, tagId]
+                'UPDATE tags SET label = $1, value = $2, color = $3, is_close_reason = $4, team_ids = $5 WHERE id = $6',
+                [label, value, color, isCloseReason, teamIds, tagId]
             );
             revalidatePath('/crm');
             return { success: true };

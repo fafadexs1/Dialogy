@@ -12,10 +12,10 @@ export function Navbar() {
     const isHome = pathname === '/';
 
     return (
-        <nav className="fixed top-0 w-full z-40 backdrop-blur-md border-b border-white/5 bg-[#030712]/50">
+        <nav className="fixed top-0 w-full z-40 backdrop-blur-md border-b border-white/5 bg-black/50">
             <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-3 group">
-                    <Image src="/logo.png" alt="Dialogy" width={150} height={48} className="h-10 w-auto" />
+                    <Image src="/logo.png" alt="Dialogy" width={120} height={38} className="h-7 w-auto" />
                 </Link>
 
                 {isHome ? (

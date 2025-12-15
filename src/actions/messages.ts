@@ -577,7 +577,7 @@ async function internalSendMedia(
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
                 [
                     workspaceId, chatId, dbMessageType, caption, true,
-                    apiResponse?.key?.id, apiResponse?.status || 'SENT', instanceName,
+                    apiResponse?.key?.id, 'SENT', instanceName,
                     dbMetadata, true, senderId, tabId
                 ]
             );
