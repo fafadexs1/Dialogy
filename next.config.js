@@ -11,8 +11,10 @@ const nextConfig = {
       bodySizeLimit: '100mb',
     },
     // Renamed from middlewareClientMaxBodySize
+    // Renamed from middlewareClientMaxBodySize
     proxyClientMaxBodySize: '100mb',
   },
+  transpilePackages: ['@supabase/node-fetch', '@radix-ui/react-slot', 'class-variance-authority'],
   typescript: {
     // Evita que erros de tipo parem o build.
     ignoreBuildErrors: true,
@@ -29,28 +31,27 @@ const nextConfig = {
       },
     ],
   },
-  ...(enableWebpackOverrides && {
-    webpack: (config, { isServer, dev }) => {
-      // Evita que modulos nativos sejam empacotados para o cliente.
-      if (!isServer) {
-        config.resolve.fallback = {
-          ...config.resolve.fallback,
-          async_hooks: false,
-          fs: false,
-        };
-      }
-
-      // Fix for OneDrive/Windows file locking issues and "Big strings" warning
-      // Using memory cache avoids writing to the synced folder during dev
-      if (dev) {
+  /*
+    ...(enableWebpackOverrides && {
+      webpack: (config, { isServer, dev }) => {
+        // Evita que modulos nativos sejam empacotados para o cliente.
+        if (!isServer) {
+          config.resolve.fallback = {
+            ...config.resolve.fallback,
+            async_hooks: false,
+            fs: false,
+          };
+        }
+  
+        // Disable disk cache for all environments to avoid OneDrive/FS issues
         config.cache = {
           type: 'memory',
         };
-      }
-
-      return config;
-    },
-  }),
+  
+        return config;
+      },
+    }),
+  */
   async headers() {
     return [
       {

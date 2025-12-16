@@ -1,8 +1,22 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { toZonedTime } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+export function formatMessageDate(date: Date, timezone: string): string {
+  const zonedDate = toZonedTime(date, timezone);
+  if (isToday(zonedDate)) {
+    return `Hoje`;
+  }
+  if (isYesterday(zonedDate)) {
+    return `Ontem`;
+  }
+  return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
 export function buildChatProtocol(chatId: string): string {

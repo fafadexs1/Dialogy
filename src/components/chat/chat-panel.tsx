@@ -89,7 +89,7 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MediaPreview, { type MediaFileType } from './media-preview';
-import { cn, formatWhatsappText } from '@/lib/utils';
+import { cn, formatWhatsappText, formatMessageDate } from '@/lib/utils';
 import MessageItem from './message-item';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
@@ -808,7 +808,13 @@ export default function ChatPanel({
                 is_read: true,
                 // timestamp and formatting for UI
                 timestamp: now.toISOString(),
-                formattedDate: formatInTimeZone(now, workspaceTimezone, "dd/MM/yyyy HH:mm", { locale: ptBR }),
+                formattedDate: formatMessageDate(now, workspaceTimezone),
+                sender: {
+                    id: currentUser.id,
+                    name: currentUser.name,
+                    avatar: currentUser.avatar || currentUser.avatar_url,
+                    type: 'user'
+                },
                 transcription: null,
                 metadata: isInternalNote ? { isInternalNote: true } : {},
                 api_message_status: 'PENDING',

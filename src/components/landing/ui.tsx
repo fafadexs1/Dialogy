@@ -8,6 +8,7 @@ import { Sparkles } from "lucide-react";
 export const primary = "hsl(var(--primary))";
 export const secondary = "hsl(var(--secondary))";
 export const accent = "hsl(var(--accent))";
+export const darkBg = "#020817";
 
 export const glass = "backdrop-blur-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 shadow-xl shadow-black/20";
 export const glow = "shadow-[0_0_40px_rgba(59,130,246,0.15)] hover:shadow-[0_0_60px_rgba(139,92,246,0.3)]";

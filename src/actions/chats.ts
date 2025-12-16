@@ -10,7 +10,7 @@ import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { sendAutomatedMessageAction } from './messages';
 import { logAction, withDebug } from '@/lib/observability/logger';
-import { buildChatProtocol } from '@/lib/utils';
+import { buildChatProtocol, formatMessageDate } from '@/lib/utils';
 import { randomUUID } from 'crypto';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
@@ -531,16 +531,7 @@ export const closeMultipleChatsAction = withDebug(
     }
 );
 
-function formatMessageDate(date: Date, timezone: string): string {
-    const zonedDate = toZonedTime(date, timezone);
-    if (isToday(zonedDate)) {
-        return `Hoje`;
-    }
-    if (isYesterday(zonedDate)) {
-        return `Ontem`;
-    }
-    return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
-}
+
 
 
 export type InitialChatsPayload = {

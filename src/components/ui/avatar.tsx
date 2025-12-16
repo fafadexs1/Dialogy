@@ -25,6 +25,7 @@ Avatar.displayName = "Avatar"
 const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
   ({ className, src, alt, onError, onLoad, fallbackSrc, ...props }, ref) => {
     const [isLoaded, setIsLoaded] = React.useState<boolean>(false)
+    const [hasError, setHasError] = React.useState<boolean>(false)
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
       (src as string | undefined) || fallbackSrc
     )
@@ -32,6 +33,7 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
     React.useEffect(() => {
       setCurrentSrc((src as string | undefined) || fallbackSrc)
       setIsLoaded(false)
+      setHasError(false)
     }, [src, fallbackSrc])
 
     return currentSrc ? (
@@ -41,7 +43,7 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         alt={alt ?? ""}
         className={cn(
           "aspect-square h-full w-full object-cover",
-          !isLoaded && "hidden",
+          hasError && "hidden",
           className
         )}
         onLoad={(e) => {
@@ -50,8 +52,10 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         }}
         onError={(e) => {
           setIsLoaded(false)
+          setHasError(true)
           if (fallbackSrc && currentSrc !== fallbackSrc) {
             setCurrentSrc(fallbackSrc)
+            setHasError(false)
             return
           }
           onError?.(e)
