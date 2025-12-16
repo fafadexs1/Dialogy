@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,6 +15,8 @@ import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 import { TagSelectionDialog } from './tag-selection-dialog';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -42,7 +45,7 @@ import { closeMultipleChatsAction } from '@/actions/chats';
 import { guardedAssignChat, guardedCloseChat } from '@/actions/chat-guards';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
-import { buildChatProtocol, cn } from '@/lib/utils';
+import { buildChatProtocol } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
@@ -796,7 +799,7 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 // ... existing imports ...
 
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward }: ChatListProps) {
-  const onlineAgents = usePresence();
+  const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
@@ -1253,35 +1256,95 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       {/* Online agents */}
       <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/30 dark:bg-black dark:border-white/10">
-        <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
           Agentes Online ({onlineAgents.length})
+          {isOffline && (
+            <Badge variant="destructive" className="h-4 text-[10px] px-1 animate-pulse">
+              Offline - Reconectando...
+            </Badge>
+          )}
         </h3>
-        <TooltipProvider>
-          <div className="flex flex-wrap items-center gap-2">
-            {onlineAgents.map((agent) => (
-              <Tooltip key={agent.user.id}>
-                <TooltipTrigger>
-                  <div
-                    className="relative cursor-pointer hover:opacity-80 transition-opacity"
-                    onClick={() => setSelectedAgent(agent.user)}
-                  >
-                    <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-green-500/50">
-                      <AvatarImage src={agent.user.avatar} />
-                      <AvatarFallback className="bg-muted text-foreground text-xs">{agent.user.name.charAt(0)}</AvatarFallback>
-                    </Avatar>
-                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background"></span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="bg-popover border-border text-popover-foreground">
-                  <AgentTooltipContent agent={agent} />
-                </TooltipContent>
-              </Tooltip>
-            ))}
+        <HoverCard openDelay={200}>
+          <div className={cn("flex flex-wrap items-center gap-2 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
+            {onlineAgents.length === 0 ? (
+              <div className="flex gap-2">
+                <Skeleton className="h-8 w-8 rounded-full" />
+                <Skeleton className="h-8 w-8 rounded-full" />
+                <Skeleton className="h-8 w-8 rounded-full" />
+              </div>
+            ) : (
+              onlineAgents.map((agent) => (
+                <HoverCard key={agent.user.id}>
+                  <HoverCardTrigger asChild>
+                    <div
+                      className="relative cursor-pointer hover:scale-110 transition-transform duration-200"
+                      onClick={() => setSelectedAgent(agent.user)}
+                    >
+                      <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.3)]">
+                        <AvatarImage src={agent.user.avatar} className="object-cover" />
+                        <AvatarFallback className="bg-gradient-to-br from-green-600 to-emerald-800 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></span>
+                    </div>
+                  </HoverCardTrigger>
+                  <HoverCardContent className="w-80 p-0 border-border bg-popover text-popover-foreground shadow-2xl rounded-xl overflow-hidden">
+                    <div className="relative h-20 bg-gradient-to-r from-green-600/20 to-emerald-900/20 p-4">
+                      <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10" />
+                      <div className="flex items-center gap-3 relative z-10">
+                        <Avatar className="h-12 w-12 border-2 border-white/10 shadow-lg">
+                          <AvatarImage src={agent.user.avatar} />
+                          <AvatarFallback className="bg-green-700 text-white font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-bold text-lg leading-tight">{agent.user.name}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                            Online agora
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Cargo</span>
+                        {agent.user.is_superadmin ? (
+                          <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">Admin</Badge>
+                        ) : (agent.user.role?.name === 'Owner' || agent.user.role?.name === 'Proprietário') ? (
+                          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">Proprietário</Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">Agente</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Equipe</span>
+                        {/* Assuming team is not readily available on OnlineAgent type, showing default or hidden */}
+                        <span className="font-medium text-foreground">Suporte</span>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white font-medium"
+                        onClick={() => {
+                          // Close hover card by clicking body or something, but mainly trigger action
+                          setSelectedAgent(agent.user);
+                        }}
+                      >
+                        <UserCheck className="w-4 h-4 mr-2" />
+                        Ver Perfil / Transferir
+                      </Button>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              ))
+            )}
             {onlineAgents.length === 0 && (
-              <p className="text-xs text-muted-foreground italic">Nenhum outro agente online</p>
+              // This case only happens if we are sure nobody is online, but skeleton handles "loading" effectively.
+              // We might want a "no agents" state if we are done loading.
+              // For now, let's keep the skeleton logic as "loading" or empty state.
+              <p className="text-xs text-muted-foreground italic sr-only">Nenhum agente online</p>
             )}
           </div>
-        </TooltipProvider>
+        </HoverCard>
       </div>
 
       <AgentProfileSheet

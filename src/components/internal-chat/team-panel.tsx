@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 
 export default function TeamPanel() {
-  const onlineAgents = useOnlineStatus();
+  const { onlineAgents } = useOnlineStatus();
   const [selectedMember, setSelectedMember] = useState<any>(null);
   const onlineAgentIds = new Set(onlineAgents.map(a => a.user.id));
 

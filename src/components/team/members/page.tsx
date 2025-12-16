@@ -181,7 +181,7 @@ export default function ManageMembersPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const { toast } = useToast();
-    const onlineAgents = usePresence();
+    const { onlineAgents } = usePresence();
     const onlineAgentIds = new Set(onlineAgents.map(a => a.user.id));
 
     useEffect(() => {

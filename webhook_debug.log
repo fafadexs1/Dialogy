@@ -184,3 +184,40 @@ Stack: error: column "plan" of relation "workspaces" does not exist
 [2025-12-12T17:09:54.873Z] Received webhook body length: 843
 [2025-12-12T17:09:54.874Z] Secret found: true, Signature present: true
 [2025-12-12T17:09:54.903Z] Event constructed: invoice_payment.paid
+[2025-12-16T05:22:31.338Z] Received webhook body length: 1679
+[2025-12-16T05:22:31.339Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.373Z] Received webhook body length: 3810
+[2025-12-16T05:22:31.374Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.380Z] Received webhook body length: 5842
+[2025-12-16T05:22:31.380Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.385Z] Received webhook body length: 1982
+[2025-12-16T05:22:31.386Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.390Z] Received webhook body length: 3958
+[2025-12-16T05:22:31.391Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.395Z] Received webhook body length: 2198
+[2025-12-16T05:22:31.396Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.409Z] Received webhook body length: 5767
+[2025-12-16T05:22:31.410Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.416Z] Received webhook body length: 5769
+[2025-12-16T05:22:31.417Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.516Z] Event constructed: payment_intent.created
+[2025-12-16T05:22:31.519Z] Event constructed: charge.succeeded
+[2025-12-16T05:22:31.524Z] Received webhook body length: 5764
+[2025-12-16T05:22:31.524Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.526Z] Event constructed: payment_intent.succeeded
+[2025-12-16T05:22:31.527Z] Event constructed: checkout.session.completed
+[2025-12-16T05:22:31.529Z] Checkout Session Completed: ID=cs_test_b1A0S4VhS3KR2lxXA0kR9l2GiNj7McOq0I7dSMBtJP1iN1IusGvmMpmCK4, Metadata={"workspaceId":"ea40385c-f9a4-437c-bd7e-dee0046cdf21","userId":"8ea16d6b-7eda-40b4-90a5-898766abaea7","planId":"pro"}
+[2025-12-16T05:22:31.529Z] Processing update for Workspace: ea40385c-f9a4-437c-bd7e-dee0046cdf21, Plan: pro
+[2025-12-16T05:22:31.530Z] Event constructed: customer.subscription.created
+[2025-12-16T05:22:31.532Z] Event constructed: payment_method.attached
+[2025-12-16T05:22:31.539Z] Event constructed: invoice.created
+[2025-12-16T05:22:31.540Z] Event constructed: invoice.finalized
+[2025-12-16T05:22:31.546Z] Event constructed: invoice.paid
+[2025-12-16T05:22:31.554Z] Updating custom_limits for workspace
+[2025-12-16T05:22:31.560Z] Received webhook body length: 5777
+[2025-12-16T05:22:31.561Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:31.577Z] Success: Plan activated for workspace ea40385c-f9a4-437c-bd7e-dee0046cdf21
+[2025-12-16T05:22:31.584Z] Event constructed: invoice.payment_succeeded
+[2025-12-16T05:22:35.921Z] Received webhook body length: 843
+[2025-12-16T05:22:35.921Z] Secret found: true, Signature present: true
+[2025-12-16T05:22:35.943Z] Event constructed: invoice_payment.paid

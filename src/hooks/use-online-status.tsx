@@ -6,11 +6,11 @@ import { createClient } from '@/lib/supabase/client';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/auth-provider';
 
-const PresenceContext = createContext<{ onlineAgents: OnlineAgent[], currentUser: User | null }>({ onlineAgents: [], currentUser: null });
+const PresenceContext = createContext<{ onlineAgents: OnlineAgent[], currentUser: User | null, isOffline: boolean }>({ onlineAgents: [], currentUser: null, isOffline: false });
 
 export const usePresence = () => {
-  const { onlineAgents } = useContext(PresenceContext);
-  return onlineAgents;
+  const { onlineAgents, isOffline } = useContext(PresenceContext);
+  return { onlineAgents, isOffline };
 };
 
 export const useCurrentUser = () => {
@@ -24,13 +24,30 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [useApiFallback, setUseApiFallback] = useState(false);
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const sessionOnlineSinceRef = useRef<string | null>(null);
   const supabase = useMemo(() => createClient(), []);
 
   // Ref to track if we are currently updating to avoid loop
   const isUpdatingRef = useRef(false);
 
-  // Sync AuthUser with LocalUser (fetch profile if needed)
+  // Monitor online/offline status
+  useEffect(() => {
+    // Initial check
+    setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Sync AuthUser with LocalUser (fetch profile if needed)
   useEffect(() => {
     // 1. Initial User Sync (Server -> Client)
@@ -350,8 +367,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   const contextValue = useMemo(() => ({
     onlineAgents,
-    currentUser: localUser
-  }), [onlineAgents, localUser]);
+    currentUser: localUser,
+    isOffline
+  }), [onlineAgents, localUser, isOffline]);
 
   return (
     <PresenceContext.Provider value={contextValue}>

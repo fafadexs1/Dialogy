@@ -56,7 +56,7 @@ interface ContactPanelProps {
 }
 
 function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean }) {
-    const allOnlineAgents = usePresence();
+    const { onlineAgents: allOnlineAgents } = usePresence();
     const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
     const [loading, setLoading] = useState(true);
     const [isTransferring, setIsTransferring] = useState(false);

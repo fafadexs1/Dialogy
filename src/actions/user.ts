@@ -56,12 +56,16 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 u.full_name,
                 u.avatar_url,
                 u.email,
+                u.is_superadmin,
                 uwp.online_since,
-                t.name as team_name
+                t.name as team_name,
+                r.name as role_name
             FROM user_workspace_presence uwp
             JOIN users u ON u.id = uwp.user_id
             LEFT JOIN team_members tm ON u.id = tm.user_id
             LEFT JOIN teams t ON tm.team_id = t.id AND t.workspace_id = uwp.workspace_id
+            LEFT JOIN user_workspace_roles uwr ON u.id = uwr.user_id AND uwr.workspace_id = uwp.workspace_id
+            LEFT JOIN roles r ON uwr.role_id = r.id
             WHERE uwp.workspace_id = $1 
             AND uwp.is_online = TRUE
             AND uwp.last_seen > NOW() - INTERVAL '45 seconds'
@@ -75,10 +79,12 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
                 name: row.full_name,
                 email: row.email,
                 avatar_url: row.avatar_url,
-                avatar: row.avatar_url, // Map to avatar for UI compatibility
+                avatar: row.avatar_url,
+                is_superadmin: row.is_superadmin,
                 firstName: row.full_name?.split(' ')[0] ?? row.full_name,
                 lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
                 team: row.team_name || undefined,
+                role: row.role_name ? { name: row.role_name } as any : undefined,
             },
             joined_at: row.online_since ?? new Date().toISOString(),
         }));
