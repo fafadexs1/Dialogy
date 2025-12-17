@@ -89,6 +89,22 @@ export async function getIntegrations(): Promise<{ integrations: Integration[] |
             } as Integration);
         }
 
+        // Inject NexusFlow if missing
+        if (!enrichedIntegrations.find((i: Integration) => i.tag === 'NexusFlow')) {
+            enrichedIntegrations.push({
+                id: 'nexusflow-integration',
+                name: 'NexusFlow',
+                description: 'Configure a conta mestre unificada para automação avançada de fluxos.',
+                icon_url: 'https://cdn-icons-png.flaticon.com/512/8637/8637089.png', // Temporary generic automation icon
+                href: '/integrations/nexusflow', // Points to our new page
+                status: 'active',
+                tag: 'NexusFlow',
+                tag_type: 'primary',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            } as Integration);
+        }
+
         return { integrations: enrichedIntegrations };
     } catch (error: any) {
         console.error('[GET_INTEGRATIONS_ACTION]', error);

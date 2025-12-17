@@ -22,6 +22,7 @@ model Workspace {
   owner_id      String
   owner         User     @relation(fields: [owner_id], references: [id])
   custom_limits Json?
-  
+  nexus_settings Json? // { "email": "..." }
+
   @@map("workspaces")
 }

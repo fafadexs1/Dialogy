@@ -308,6 +308,8 @@ export default function WorkspaceSettingsPage() {
                             </Card>
                         </div>
 
+
+
                         <Card className="border-none shadow-sm bg-card/50">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5 text-green-500" /> Mensagens Globais</CardTitle>

@@ -16,6 +16,7 @@ import {
   Send,
   Settings,
   ShieldAlert,
+  Sparkles,
   User as UserIcon,
   Users,
   Users2,
@@ -36,6 +37,7 @@ const mainNavItems = [
   { href: "/analytics", icon: BarChart2, label: "Analytics", exact: false },
   { href: "/integrations", icon: Puzzle, label: "Integrações", exact: false },
   { href: "/support", icon: HelpCircle, label: "Suporte", exact: false },
+  { href: "/nexus", icon: Sparkles, label: "NexusFlow", exact: false },
 ];
 
 const teamNavItems = [
@@ -299,6 +301,15 @@ export function Sidebar({ user }: SidebarProps) {
   const automationRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
+  // Filter Nav Items based on configuration
+  const activeWorkspace = user.workspaces?.find(w => w.id === user.activeWorkspaceId);
+  const hasNexusConfig = !!activeWorkspace?.nexus_settings?.email;
+
+  const filteredNavItems = mainNavItems.filter(item => {
+    if (item.href === '/nexus' && !hasNexusConfig) return false;
+    return true;
+  });
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (!openMenu) return;
@@ -381,7 +392,7 @@ export function Sidebar({ user }: SidebarProps) {
 
       <div className="flex-1 flex flex-col items-center justify-center w-full gap-2 overflow-visible">
         <nav className="flex flex-col items-center gap-2 w-full overflow-visible">
-          {mainNavItems.map((item) => (
+          {filteredNavItems.map((item) => (
             <SidebarIconLink key={item.href} item={item} isActive={isActive(item)} />
           ))}
 

@@ -165,7 +165,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const dbUser = userRes.rows[0];
 
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url, w.owner_id, r.name as role_name
+            SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, r.name as role_name
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
             LEFT JOIN roles r ON uwr.role_id = r.id
@@ -177,7 +177,8 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             name: r.name,
             avatar: r.avatar_url || '',
             isOwner: r.owner_id === authUser.id,
-            roleName: r.role_name
+            roleName: r.role_name,
+            nexus_settings: r.nexus_settings || {}
         }));
 
         const activeWorkspaceId = dbUser.last_active_workspace_id || workspaces[0]?.id || null;

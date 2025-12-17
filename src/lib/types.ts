@@ -13,6 +13,7 @@ export type Workspace = {
   roleName?: string;
   isOwner?: boolean;
   plan?: string;
+  nexus_settings?: { email?: string; }; // Shared NexusFlow credentials
 }
 
 export type Permission = {

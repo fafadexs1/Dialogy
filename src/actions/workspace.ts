@@ -130,6 +130,20 @@ export async function updateWorkspaceAction(
     if (normalized !== null) {
       fieldsToUpdate.marketing_auto_close_seconds = normalized;
     }
+    if (normalized !== null) {
+      fieldsToUpdate.marketing_auto_close_seconds = normalized;
+    }
+  }
+
+  const nexusEmail = formData.get('nexusEmail') as string;
+  if (nexusEmail !== undefined) {
+    // If empty string, we might want to plain null or empty object. 
+    // Let's store object { email: ... }
+    if (nexusEmail.trim() === '') {
+      fieldsToUpdate.nexus_settings = {};
+    } else {
+      fieldsToUpdate.nexus_settings = { email: nexusEmail.trim() };
+    }
   }
 
   if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
