@@ -1,5 +1,7 @@
 'use server';
 
+import { v4 as uuidv4 } from 'uuid';
+
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument, Workspace } from '@/lib/types';
@@ -449,7 +451,7 @@ export async function addDocumentToKnowledgeBase(
                 : [];
 
         const newDoc: KnowledgeBaseDocument = {
-            id: crypto.randomUUID(),
+            id: uuidv4(),
             name: title,
             content: content,
             uploaded_at: new Date().toISOString(),

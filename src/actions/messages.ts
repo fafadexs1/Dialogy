@@ -557,7 +557,8 @@ async function internalSendMedia(
             const resolvedMediaUrl =
                 apiResponse?.message?.mediaUrl ||
                 messageDetails?.url ||
-                (apiResponse as any)?.tempMediaPublicUrl;
+                (apiResponse as any)?.tempMediaPublicUrl ||
+                (file.base64?.startsWith('http') ? file.base64 : undefined);
 
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),

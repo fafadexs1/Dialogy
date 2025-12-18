@@ -20,3 +20,7 @@ export async function getNexusConfig(workspaceId: string) {
         return null;
     }
 }
+
+export async function getNexusUrl() {
+    return process.env.NEXT_PUBLIC_NEXUS_URL || "http://localhost:3000";
+}

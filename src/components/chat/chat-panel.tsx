@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import Image from 'next/image';
@@ -766,10 +767,7 @@ export default function ChatPanel({
     const formatOptimisticTimestamp = (date: Date) =>
         date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-    const generateOptimisticId = () =>
-        typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : Math.random().toString(36).slice(2);
+    const generateOptimisticId = () => uuidv4();
 
     const handleFormSubmit = async () => {
         if (!chat || sendState === 'sending') return;
@@ -794,7 +792,7 @@ export default function ChatPanel({
         let optimisticId: string | null = null;
         if (isTextOnly) {
             const now = new Date();
-            optimisticId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'optimistic-' + Date.now();
+            optimisticId = uuidv4();
 
             const optimisticMessage: Message = {
                 id: optimisticId,
@@ -843,7 +841,7 @@ export default function ChatPanel({
 
                     try {
                         const extension = mf.name.split('.').pop() || 'dat';
-                        const fileName = Date.now() + '_' + crypto.randomUUID() + '.' + extension;
+                        const fileName = Date.now() + '_' + uuidv4() + '.' + extension;
 
                         // 1. Upload
                         const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);

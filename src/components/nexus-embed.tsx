@@ -4,21 +4,28 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/providers/auth-provider';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Loader2 } from 'lucide-react';
-import { getNexusConfig } from '@/actions/nexus';
+import { getNexusConfig, getNexusUrl } from '@/actions/nexus';
 
-export function NexusEmbed() {
+export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const { session } = useAuth();
     const user = useCurrentUser();
     const [loading, setLoading] = useState(true);
     const [authPayload, setAuthPayload] = useState<string | null>(null);
+    const [nexusUrl, setNexusUrl] = useState<string>(propNexusUrl || '');
 
-    // 1. Prepare Auth Payload (Check for Shared Credentials)
+    // 1. Prepare Auth Payload & Fetch URL (if not provided)
     useEffect(() => {
-        async function prepareAuth() {
+        async function init() {
             if (!user) return;
 
             try {
+                // If URL passed via props, preserve it. Else fetch or fallback
+                if (!nexusUrl) {
+                    const url = await getNexusUrl();
+                    setNexusUrl(url);
+                }
+
                 let targetUser = user;
 
                 // If user belongs to a workspace, check for shared credentials.
@@ -40,17 +47,26 @@ export function NexusEmbed() {
                     }
                 }
 
-                const payload = encodeURIComponent(btoa(JSON.stringify({
+                // Unicode-safe Base64 Encoding
+                // 1. JSON stringify
+                const jsonStr = JSON.stringify({
                     user: targetUser,
                     session: { ...session, access_token: 'iframe-token' }
-                })));
+                });
+                // 2. URI Encode to handle Unicode (accents)
+                const uriEncoded = encodeURIComponent(jsonStr);
+                // 3. btoa (safe now as it's all ASCII)
+                const base64 = btoa(uriEncoded);
+                // 4. URL component encode for the query param
+                const payload = encodeURIComponent(base64);
+
                 setAuthPayload(payload);
             } catch (err) {
                 console.error('[NexusEmbed] Error preparing auth:', err);
             }
         }
-        prepareAuth();
-    }, [user, session]);
+        init();
+    }, [user, session, nexusUrl]); // Added nexusUrl dependency to satisfy linter, logic handles stability
 
 
     // 2. Handle Handshake & PostMessage (Legacy + Backup)
@@ -86,7 +102,7 @@ export function NexusEmbed() {
     }, [authPayload]);
 
 
-    if (!user || !authPayload) {
+    if (!user || !authPayload || !nexusUrl) {
         return (
             <div className="w-full h-[calc(100vh-20px)] relative rounded-2xl overflow-hidden border border-border shadow-2xl bg-black flex items-center justify-center">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -105,7 +121,7 @@ export function NexusEmbed() {
             )}
             <iframe
                 ref={iframeRef}
-                src={`${process.env.NEXT_PUBLIC_NEXUS_URL || "http://localhost:3000"}?auth=${authPayload}`}
+                src={`${nexusUrl}?auth=${authPayload}`}
                 className="w-full h-full border-none bg-background/50"
                 allow="clipboard-write"
                 title="NexusFlow"

@@ -1,4 +1,5 @@
 ﻿'use client';
+import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import ChatList from '../chat/chat-list';
@@ -267,12 +268,7 @@ export default function CustomerChatLayout({
 
   if (typeof window !== 'undefined' && !tabIdRef.current) {
     // Safe UUID generation fallback
-    const genId = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        try { return crypto.randomUUID(); } catch (e) { }
-      }
-      return Math.random().toString(36).substring(2) + Date.now().toString(36);
-    };
+    const genId = () => uuidv4();
     tabIdRef.current = genId();
     console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
