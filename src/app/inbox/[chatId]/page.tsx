@@ -3,6 +3,7 @@
 
 import { redirect } from 'next/navigation';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
+import MobileChatLayout from '@/components/layout/mobile-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
@@ -26,6 +27,13 @@ export default async function InboxPage({ params }: InboxPageProps) {
   // Otherwise, show the main chat interface.
   // We pass the chatId from the URL to the layout component.
   return (
-    <CustomerChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
+    <>
+      <div className="hidden md:flex w-full h-full">
+        <CustomerChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
+      </div>
+      <div className="flex md:hidden w-full h-full">
+        <MobileChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
+      </div>
+    </>
   )
 }

@@ -47,7 +47,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     >
       <BuildVersionWatcher />
       {shouldShowSidebar && (
-        <aside className="w-auto shrink-0 bg-background">
+        <aside className="hidden md:block w-auto shrink-0 bg-background">
           {/* If user is loaded, show Sidebar. If still loading, show an empty placeholder of same width to prevent CLS */}
           {user ? (
             <Sidebar user={user} />

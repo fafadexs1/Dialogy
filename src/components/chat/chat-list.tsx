@@ -531,10 +531,13 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-3 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 h-[112px] overflow-hidden",
+        "relative flex items-start gap-2.5 md:gap-3 px-3 py-2.5 md:p-3 cursor-pointer group transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        "mx-0 my-0 rounded-none border-b border-border/40 hover:bg-muted/30", // Mobile: Native list feel
+        "md:mx-3 md:my-1 md:rounded-xl md:border-transparent md:hover:bg-muted/50", // Desktop: Card feel
+        "min-h-[76px] md:h-[112px]", // Height adjustment
         isSelected && !isForwarding && !isBulkMode
           ? "bg-sidebar-accent dark:bg-white/10 dark:border-white/10 shadow-sm"
-          : "hover:bg-muted/50 dark:hover:bg-white/5",
+          : "dark:hover:bg-white/5",
         (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
         isSnoozed ? "opacity-60 grayscale" : ""
       )}
@@ -581,7 +584,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       />
 
       <div className="relative flex-shrink-0">
-        <Avatar className="h-10 w-10 border border-border">
+        <Avatar className="h-12 w-12 md:h-10 md:w-10 border border-border">
           <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
           <AvatarFallback className="bg-muted text-muted-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
         </Avatar>
@@ -636,8 +639,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
-              <p className={cn("font-semibold truncate text-sm whitespace-nowrap max-w-[60%]", "text-foreground")} title={chat.contact.name}>
-                {chat.contact.name.split(' ').slice(0, 3).join(' ')}
+              <p className={cn("font-semibold truncate whitespace-nowrap max-w-[70%] md:max-w-[60%]", "text-base md:text-sm text-foreground")} title={chat.contact.name}>
+                {chat.contact.name}
               </p>
               {chat.status === 'encerrados' && (
                 <Badge className={cn("text-[10px] border-0 px-1.5 py-0.5 flex-shrink-0", statusTone)}>
@@ -806,6 +809,7 @@ interface ChatListProps {
   onConfirmForward?: () => void;
   onCancelForward?: () => void;
   onPrefetch?: (chatId: string) => void;
+  className?: string;
 }
 
 import { useInboxStore } from '@/hooks/use-inbox-store';
@@ -819,7 +823,7 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 
 // ... existing imports ...
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1145,8 +1149,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   return (
     <div
-      className="flex h-full shrink-0 flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 transition-none"
-      style={{ width: '450px', minWidth: '450px', maxWidth: '450px' }}
+      className={cn(
+        "flex h-full shrink-0 flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 transition-none",
+        "w-full md:w-[450px] md:min-w-[450px] md:max-w-[450px]",
+        className
+      )}
     >
       {/* Header */}
       <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border dark:border-white/10 space-y-4">
@@ -1476,9 +1483,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       }
 
       {/* Chat list */}
-      <div className="flex-1 overflow-hidden relative">
-        <ScrollArea className="h-full flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          <div className="space-y-1 p-3">
+      <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
+          <div className="space-y-0 md:space-y-1 p-0 md:p-3">
             {filteredChats.length > 0 ? (
               <>
                 {filteredChats.map((chat) => (
@@ -1577,7 +1584,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       {/* Forwarding Footer */}
@@ -1607,7 +1614,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
       )}
 
-
       {/* Assign Confirmation Dialog */}
       <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
         <AlertDialogContent className="bg-background border-border text-foreground">
@@ -1627,4 +1633,4 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </AlertDialog>
     </div>
   );
-}
+};

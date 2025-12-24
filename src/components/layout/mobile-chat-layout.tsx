@@ -1,0 +1,1523 @@
+﻿'use client';
+import { v4 as uuidv4 } from 'uuid';
+
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import ChatList from '../chat/chat-list';
+import ChatPanel from '../chat/chat-panel';
+import ContactPanel from '../chat/contact-panel';
+import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
+import { getTags } from '@/actions/crm';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
+import type { InitialChatsPayload } from '@/actions/chats';
+import { Skeleton } from '../ui/skeleton';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle, RefreshCw, MessageSquare, Users, Settings, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '../ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { Switch } from '../ui/switch';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { ptBR } from 'date-fns/locale';
+import { replaceChatPath } from '@/lib/chat-navigation';
+import { useRouter } from 'next/navigation';
+import { useInboxStore } from '@/hooks/use-inbox-store';
+import { usePresence } from '@/hooks/use-online-status';
+import ReactDOM from 'react-dom';
+import {
+  buildChatMessageChannelName,
+  buildWorkspaceChatChannelName,
+  subscribeToChatMessages,
+  subscribeToWorkspaceChatUpdates,
+  teardownChannel,
+} from '@/lib/realtime/chat-subscriptions';
+import ErrorBoundary from '@/components/layout/error-boundary';
+import { reportClientMetric } from '@/lib/observability/client';
+
+// Notification sounds served from public assets
+const SOUND_SOURCES = {
+  queue: '/sounds/new-message.mp3',
+  attending: '/sounds/message-incoming-02-199577.mp3',
+} as const;
+const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+function DraggableSoundTester({
+  debugCounter,
+  onPlay,
+}: {
+  debugCounter: number;
+  onPlay: (kind: keyof typeof SOUND_SOURCES) => void;
+}) {
+  const [pos, setPos] = React.useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 16, y: 16 };
+    const saved = localStorage.getItem('soundTesterPos');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed;
+        }
+      } catch { /* ignore */ }
+    }
+    return { x: 16, y: 16 };
+  });
+
+  const dragData = React.useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const savePos = (next: { x: number; y: number }) => {
+    setPos(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soundTesterPos', JSON.stringify(next));
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragData.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: pos.x,
+      originY: pos.y,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    const dx = e.clientX - dragData.current.startX;
+    const dy = e.clientY - dragData.current.startY;
+    savePos({ x: Math.max(8, dragData.current.originX + dx), y: Math.max(8, dragData.current.originY + dy) });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragData.current) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    dragData.current = null;
+  };
+
+  return ReactDOM.createPortal(
+    <div
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md cursor-move"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <span>Som</span>
+      <Button size="sm" variant="outline" onClick={() => onPlay('queue')}>
+        Fila ({debugCounter})
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => onPlay('attending')}>
+        Atend. ({debugCounter})
+      </Button>
+    </div>,
+    document.body
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="flex flex-1 w-full min-h-0 h-full bg-background/20 backdrop-blur-md">
+      <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-md p-4 gap-4">
+        <Skeleton className="h-12 w-full bg-muted" />
+        <Skeleton className="h-10 w-full bg-muted" />
+        <Skeleton className="h-10 w-full bg-muted" />
+        <div className="space-y-2 mt-4">
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
+          <Skeleton className="h-16 w-full bg-muted" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatListSkeleton() {
+  return (
+    <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-md p-4 gap-4">
+      <Skeleton className="h-6 w-32 bg-muted" />
+      <Skeleton className="h-10 w-full bg-muted" />
+      <div className="space-y-2 mt-2">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Skeleton key={index} className="h-14 w-full bg-muted" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ThreadSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col min-w-0 bg-transparent">
+      <Skeleton className="h-16 w-full bg-muted" />
+      <div className="flex-1 p-6 space-y-4">
+        <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
+        <Skeleton className="h-10 w-1/2 bg-muted" />
+        <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
+      </div>
+      <Skeleton className="h-24 w-full bg-muted" />
+    </div>
+  );
+}
+
+type MobileStatTone = 'primary' | 'info' | 'neutral';
+
+const MOBILE_STAT_TONES: Record<MobileStatTone, { icon: string; ring: string }> = {
+  primary: {
+    icon: 'bg-primary/15 text-primary',
+    ring: 'ring-primary/20',
+  },
+  info: {
+    icon: 'bg-blue-500/15 text-blue-500',
+    ring: 'ring-blue-500/20',
+  },
+  neutral: {
+    icon: 'bg-muted/60 text-muted-foreground',
+    ring: 'ring-border/60',
+  },
+};
+
+function MobileStatCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: MobileStatTone;
+}) {
+  const toneStyles = MOBILE_STAT_TONES[tone];
+
+  return (
+    <div
+      className={cn(
+        'min-w-[150px] flex items-center gap-3 rounded-2xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-md ring-1',
+        toneStyles.ring
+      )}
+    >
+      <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center', toneStyles.icon)}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div>
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="text-lg font-semibold text-foreground">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+
+
+export default function MobileChatLayout({
+  initialUser,
+  chatId: initialChatId,
+  initialData,
+}: {
+  initialUser: User | null;
+  chatId: string | null;
+  initialData?: InitialChatsPayload | null;
+}) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'chats' | 'crm' | 'settings'>('chats');
+  const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
+  const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
+  const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
+  const [debugCounter, setDebugCounter] = useState(0);
+  const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [selectedForwardingChatIds, setSelectedForwardingChatIds] = useState<Set<string>>(new Set());
+  const [isForwarding, setIsForwarding] = useState(false);
+  const [highContrast, setHighContrast] = useState(false);
+  const [isRTL, setIsRTL] = useState(false);
+
+  const chats = useInboxStore((state) => state.chats);
+  const selectedChatId = useInboxStore((state) => state.selectedChatId);
+  const messagesByChat = useInboxStore((state) => state.messagesByChat);
+  const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
+  const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
+  const setInitialData = useInboxStore((state) => state.setInitialData);
+  const setSelectedChatId = useInboxStore((state) => state.setSelectedChatId);
+  const upsertChats = useInboxStore((state) => state.upsertChats);
+  const setMessagesForChat = useInboxStore((state) => state.setMessagesForChat);
+  const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
+  const prependMessagesToChat = useInboxStore((state) => state.prependMessagesToChat);
+  const updateChatContact = useInboxStore((state) => state.updateChatContact);
+  const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
+  const incrementUnread = useInboxStore((state) => state.incrementUnread);
+  const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+  const { isOffline } = usePresence();
+
+  const mobileStats = useMemo(() => {
+    return chats.reduce(
+      (acc, chat) => {
+        if (chat.status === 'gerais') acc.queue += 1;
+        if (chat.status === 'atendimentos') acc.active += 1;
+        if (chat.status === 'encerrados') acc.closed += 1;
+        acc.unread += chat.unreadCount || 0;
+        return acc;
+      },
+      { queue: 0, active: 0, closed: 0, unread: 0 }
+    );
+  }, [chats]);
+
+  const headerTitle = activeTab === 'chats'
+    ? 'Inbox'
+    : activeTab === 'crm'
+      ? 'CRM'
+      : 'Preferencias';
+
+  const headerSubtitle = activeTab === 'chats'
+    ? 'Conversas em tempo real'
+    : activeTab === 'crm'
+      ? 'Contatos, funil e segmentacao'
+      : 'Conta, atalhos e acessos';
+
+  const handleBoundaryError = useCallback((error: Error) => {
+    console.error('[INBOX_UI_ERROR]', error);
+  }, []);
+
+  const selectedChatIdRef = useRef<string | null>(initialData?.selectedChatId ?? initialChatId);
+  const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
+    queue: null,
+    attending: null,
+  });
+  const jumpChatByOffsetRef = useRef<((delta: number) => void) | null>(null);
+  const tabIdRef = useRef<string>('');
+  const audioUnlockRequestedRef = useRef(false);
+  const unreadCountsRef = useRef<Record<string, number>>({});
+  const unreadWatchInitializedRef = useRef(false);
+  const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
+  const initialBuildIdRef = useRef<string>('');
+  const buildMismatchTriggeredRef = useRef(false);
+  const prefetchedHistoryRef = useRef<Set<string>>(new Set());
+
+  const isHydratedRef = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+
+
+  useEffect(() => {
+    // Strict Mode Safety: Only reset if we haven't successfully hydrated in this mount cycle.
+    // This prevents double-fetching or clearing valid data on dev hot-reloads/strict mode remounts.
+    if (!isHydratedRef.current) {
+      useInboxStore.getState().reset();
+      isHydratedRef.current = false;
+      console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dir = isRTL ? 'rtl' : 'ltr';
+    return () => {
+      document.documentElement.dir = 'ltr';
+    };
+  }, [isRTL]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (highContrast) {
+      (document.documentElement as HTMLElement).dataset.highContrast = 'true';
+    } else {
+      delete (document.documentElement as HTMLElement).dataset.highContrast;
+    }
+  }, [highContrast]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.classList.add('mobile-app');
+    document.body.classList.add('mobile-app');
+    return () => {
+      document.documentElement.classList.remove('mobile-app');
+      document.body.classList.remove('mobile-app');
+    };
+  }, []);
+
+  if (typeof window !== 'undefined' && !tabIdRef.current) {
+    // Safe UUID generation fallback
+    const genId = () => uuidv4();
+    tabIdRef.current = genId();
+    console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
+  }
+
+  useEffect(() => {
+    const supabase = createClient();
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' && !session) {
+        router.replace('/login');
+      }
+    });
+
+    console.log('[NOTIFICATION] Auth listener registered');
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  const updateSelectedChatPath = useCallback((chatId?: string | null) => {
+    replaceChatPath(chatId);
+  }, []);
+
+  const handleBackToList = useCallback(() => {
+    setSelectedChatId(null);
+    updateSelectedChatPath(null);
+    setShowFullHistory(false);
+  }, [setSelectedChatId, updateSelectedChatPath]);
+
+  const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId]);
+  const currentChatMessages = selectedChatId ? messagesByChat[selectedChatId] || [] : [];
+  const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
+  const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
+
+  const formatMessageDay = useCallback((date: Date) => {
+    const zonedDate = toZonedTime(date, workspaceTimezone);
+    if (isToday(zonedDate)) return 'Hoje';
+    if (isYesterday(zonedDate)) return 'Ontem';
+    return formatDate(zonedDate, 'dd/MM/yyyy', { locale: ptBR });
+  }, [workspaceTimezone]);
+
+  const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {
+    const data = payload.new as any;
+    if (!data) return null;
+    try {
+      const createdAt = new Date(data.created_at);
+      const timestamp = formatInTimeZone(createdAt, workspaceTimezone, 'HH:mm', { locale: ptBR });
+      const formattedDate = formatMessageDay(createdAt);
+      let metadata;
+      if (data.metadata) {
+        metadata = typeof data.metadata === 'object' ? data.metadata : JSON.parse(data.metadata);
+      }
+      const chat = useInboxStore.getState().chats.find((c) => c.id === data.chat_id);
+      let sender = undefined;
+
+      // Helper to determine if message is from an automated agent
+      const isSystemAgent = data.sender_system_agent_id || metadata?.sentBy === 'system_agent' || metadata?.sentBy === 'autopilot';
+
+      if (data.from_me) {
+        if (isSystemAgent) {
+          // Use a generic agent profile or the chat's agent if available (but explicitly mark as system/bot if needed)
+          sender = {
+            id: data.sender_system_agent_id || 'system_agent',
+            name: 'Assistente Virtual', // Or use a reliable way to get the agent name if possible
+            avatar: chat?.agent?.avatar_url || undefined, // Fallback to chat agent avatar
+            type: 'user'
+          } as const;
+        } else if (data.sender_user_id === initialUser?.id && initialUser) {
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
+        } else if (chat?.agent && (!data.sender_user_id || data.sender_user_id === chat.agent.id)) {
+          // If sender_id matches chat agent or is missing (legacy), use chat agent
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url ?? undefined, type: 'user' } as const;
+        } else if (initialUser) {
+          // Fallback to current user if nothing else matches (e.g. optimistic without ID persistence yet)
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
+        }
+      } else if (chat?.contact) {
+        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url ?? undefined, type: 'contact' } as const;
+      }
+      return {
+        id: data.id,
+        chat_id: data.chat_id,
+        workspace_id: data.workspace_id,
+        content: data.content || '',
+        type: data.type,
+        status: data.content === 'Mensagem apagada' ? 'deleted' : 'default',
+        metadata,
+        transcription: data.transcription,
+        timestamp,
+        createdAt: createdAt.toISOString(),
+        updatedAt: data.updated_at ? new Date(data.updated_at).toISOString() : createdAt.toISOString(),
+        formattedDate,
+        sender,
+        instance_name: data.instance_name,
+        source_from_api: data.source_from_api,
+        api_message_status: data.api_message_status,
+        message_id_from_api: data.message_id_from_api,
+        from_me: data.from_me,
+        is_read: data.is_read,
+        sentByTab: data.sent_by_tab ?? null,
+      };
+    } catch (error) {
+      console.error('[REALTIME] Failed to parse payload', error);
+      return null;
+    }
+  }, [chats, formatMessageDay, workspaceTimezone, initialUser]);
+
+  const unlockAudio = useCallback(async () => {
+    const refs = [audioRefs.current.queue, audioRefs.current.attending];
+    let unlocked = false;
+    for (const audio of refs) {
+      if (!audio) continue;
+      try {
+        audio.muted = true;
+        audio.currentTime = 0;
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        unlocked = true;
+      } catch (err) {
+        console.warn('[NOTIFICATION] Audio unlock failed for one source, still blocked by browser', err);
+      }
+    }
+    setNeedsAudioUnlock(!unlocked);
+    if (unlocked) {
+      console.log('[NOTIFICATION] Audio unlocked by user gesture');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleGesture = () => {
+      unlockAudio();
+    };
+    window.addEventListener('pointerdown', handleGesture, { once: true });
+    window.addEventListener('keydown', handleGesture, { once: true });
+    window.addEventListener('touchstart', handleGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+      window.removeEventListener('touchstart', handleGesture);
+    };
+  }, [unlockAudio]);
+
+  useEffect(() => {
+    console.log('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
+  }, [needsAudioUnlock]);
+
+  const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
+    const readFlag = (key: string, fallback = true): boolean => {
+      const stored = localStorage.getItem(key);
+      if (stored === null) return fallback;
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return fallback;
+      }
+    };
+
+    const isGlobalEnabled = readFlag('notificationSoundEnabled', true);
+    const isQueueEnabled = readFlag('notificationSoundQueueEnabled', true);
+    const isAttendingEnabled = readFlag('notificationSoundAttendingEnabled', true);
+    const isSoundEnabled = isGlobalEnabled && (kind === 'queue' ? isQueueEnabled : isAttendingEnabled);
+
+    const audio = audioRefs.current[kind];
+    const src = SOUND_SOURCES[kind];
+    console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
+    if (!isSoundEnabled) return;
+
+    const tryPlay = async () => {
+      if (!audio) return;
+      audio.muted = false;
+      audio.volume = 1;
+      audio.currentTime = 0;
+      await audio.play();
+      console.log('[NOTIFICATION] Sound played successfully (ref)', kind);
+    };
+
+    tryPlay().catch(async (e) => {
+      console.error('[NOTIFICATION] Error playing notification sound (ref):', e);
+      if (e?.name === 'NotAllowedError' && !audioUnlockRequestedRef.current) {
+        setNeedsAudioUnlock(true);
+        audioUnlockRequestedRef.current = true;
+      }
+      try {
+        console.log('[NOTIFICATION] Trying fallback Audio() playback');
+        const fallback = new Audio(src);
+        fallback.volume = 1;
+        await fallback.play();
+        console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
+      } catch (fallbackError) {
+        console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!unreadWatchInitializedRef.current) {
+      unreadCountsRef.current = Object.fromEntries(chats.map((c) => [c.id, c.unreadCount || 0]));
+      unreadWatchInitializedRef.current = true;
+      return;
+    }
+
+    chats.forEach((chat) => {
+      const prev = unreadCountsRef.current[chat.id] ?? 0;
+      const current = chat.unreadCount || 0;
+      if (current > prev) {
+        if (chat.status === 'gerais') {
+          console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
+          playNotificationSound('queue');
+        } else if (chat.status === 'atendimentos') {
+          // Only play attending sound if the chat belongs to the current user
+          if (chat.agent?.id === initialUser?.id) {
+            console.log('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
+            playNotificationSound('attending');
+          }
+        }
+      }
+      unreadCountsRef.current[chat.id] = current;
+    });
+  }, [chats, playNotificationSound]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    (window as any).__playNotificationTest = (kind: keyof typeof SOUND_SOURCES = 'queue') => {
+      console.log('[NOTIFICATION] Manual test trigger', kind);
+      playNotificationSound(kind);
+    };
+    return () => {
+      delete (window as any).__playNotificationTest;
+    };
+  }, [playNotificationSound]);
+
+  const handleRealtimeMessage = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
+    const message = mapRealtimePayload(payload);
+    if (!message) return;
+
+    // Ensure from_me is correctly set for Realtime messages
+    // We cast to any because sender_user_id is in the DB payload but not strictly in the frontend Message type yet
+    const rawMessage = message as any;
+    if (initialUser && rawMessage.sender_user_id) {
+      message.from_me = rawMessage.sender_user_id === initialUser.id;
+    }
+
+    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
+
+    const snapshot = useInboxStore.getState();
+    const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
+    const isQueueMessage = messageChat?.status === 'gerais';
+    const isAttendingMessage = messageChat?.status === 'atendimentos';
+    const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+    const currentSelectedChatId = snapshot.selectedChatId;
+
+    appendMessagesToChat(message.chat_id, [message], message.updatedAt);
+    if (message.sentByTab && message.sentByTab === tabIdRef.current) {
+      // Only remove optimistic messages that have temporary IDs (start with 'optimistic-')
+      // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
+      // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
+      removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab && m.id.startsWith('optimistic-'));
+    }
+
+    // Optimistic update for read receipts:
+    // If we receive a message update where api_message_status is READ and it's from us,
+    // we assume all previous messages are also read.
+    if (message.from_me && message.api_message_status === 'READ') {
+      snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
+    }
+
+    if (!messageChat && runDeltaSyncRef.current) {
+      runDeltaSyncRef.current();
+    }
+
+    if (!message.from_me) {
+      const shouldTrackUnread = message.chat_id !== currentSelectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
+      if (shouldTrackUnread) {
+        incrementUnread(message.chat_id);
+      }
+
+      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== currentSelectedChatId || isQueueMessage;
+      if (shouldPlay) {
+        if (isQueueMessage || !messageChat) {
+          playNotificationSound('queue');
+        } else if (isOwnAttending) {
+          playNotificationSound('attending');
+        }
+      }
+    }
+  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+
+  const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
+    const startedAt = performance.now();
+    try {
+      const result = await getChatMessagesWindow({
+        chatId,
+        before: before ?? undefined,
+        limit: 50,
+        timezone: workspaceTimezone
+      });
+      if (before) {
+        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
+      } else {
+        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.hasMoreHistory);
+      }
+      if (result.contact) {
+        updateChatContact(result.contact);
+      }
+    } catch (error: any) {
+      console.error('[LOAD_MESSAGES] Error:', error);
+      toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!before });
+    }
+  }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
+
+  const prefetchChat = useCallback((chatId: string) => {
+    // 1. Check if we already have messages
+    const state = useInboxStore.getState();
+    const hasMessages = state.messagesByChat[chatId]?.length > 0;
+    if (hasMessages) return;
+
+    // 2. Check if we already promised (or are fetching) this chat recently
+    if (prefetchedHistoryRef.current.has(chatId)) return;
+
+    // 3. Mark as prefetched to avoid spam
+    prefetchedHistoryRef.current.add(chatId);
+
+    // 4. Trigger fetch
+    console.log('[PREFETCH] Hover prefetch started for:', chatId);
+    loadChatMessages(chatId).catch(err => {
+      console.error('[PREFETCH] Failed to prefetch:', err);
+      // On error, maybe allow retrying later? For now, we leave it in the set to avoid spam loops.
+    });
+  }, [loadChatMessages]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedChatId) return;
+    const before = oldestLoadedMessageDate;
+    if (!before) return;
+    await loadChatMessages(selectedChatId, before);
+  }, [loadChatMessages, oldestLoadedMessageDate, selectedChatId]);
+
+  const ensureMessagesForChat = useCallback(async (chatId: string) => {
+    const currentMessages = useInboxStore.getState().messagesByChat[chatId];
+    if (currentMessages && currentMessages.length) return;
+    await loadChatMessages(chatId);
+  }, [loadChatMessages]);
+
+  const handleSetSelectedChat = useCallback((chat: Chat | null) => {
+    if (!chat) {
+      selectedChatIdRef.current = null;
+      setSelectedChatId(null);
+      setShowFullHistory(false);
+      updateSelectedChatPath(null);
+      return;
+    }
+
+    if (selectedChatIdRef.current === chat.id) return; // Prevent duplicate navigation
+    selectedChatIdRef.current = chat.id;
+    React.startTransition(() => {
+      setSelectedChatId(chat.id);
+      setShowFullHistory(false);
+    });
+    updateSelectedChatPath(chat.id);
+    void ensureMessagesForChat(chat.id);
+  }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+
+  const jumpChatByOffset = useCallback((delta: number) => {
+    if (!chats.length) return;
+    const currentIndex = chats.findIndex((c) => c.id === selectedChatIdRef.current);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + chats.length) % chats.length;
+    const nextChat = chats[nextIndex];
+    if (nextChat) {
+      handleSetSelectedChat(nextChat);
+    }
+  }, [chats, handleSetSelectedChat]);
+
+  useEffect(() => {
+    jumpChatByOffsetRef.current = jumpChatByOffset;
+  }, [jumpChatByOffset]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'ArrowDown') {
+        event.preventDefault();
+        jumpChatByOffsetRef.current?.(1);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'ArrowUp') {
+        event.preventDefault();
+        jumpChatByOffsetRef.current?.(-1);
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedChatId) return;
+    const state = useInboxStore.getState();
+    const hasMessages = state.messagesByChat[selectedChatId]?.length;
+    if (!hasMessages) return;
+    if (prefetchedHistoryRef.current.has(selectedChatId)) return;
+    const hasMore = state.hasMoreHistoryByChat[selectedChatId];
+    const before = state.oldestMessageDateByChat[selectedChatId];
+    if (hasMore && before) {
+      prefetchedHistoryRef.current.add(selectedChatId);
+      loadChatMessages(selectedChatId, before).catch((err) => console.error('[PREFETCH_HISTORY]', err));
+    }
+  }, [selectedChatId, loadChatMessages]);
+
+  const initializeInbox = useCallback(async () => {
+    if (!initialUser?.activeWorkspaceId) {
+      setFetchError('Usuário ou workspace não encontrado.');
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const result = await getInitialChatsData({
+        workspaceId: initialUser.activeWorkspaceId,
+        selectedChatId: initialChatId,
+        userIdOverride: initialUser.id,
+        workspaceTimezone: initialUser.activeWorkspaceTimezone,
+      });
+      if (result.error) throw new Error(result.error);
+      setWorkspaceTimezone(result.timezone || FALLBACK_TIMEZONE);
+      setInitialData({
+        chats: result.chats,
+        selectedChatId: result.selectedChatId,
+        messages: result.messages,
+        lastSyncChats: result.lastSyncChats,
+        lastSyncMessageForSelected: result.lastSyncMessageForSelected,
+        oldestMessageDate: result.oldestMessageDate,
+        hasMoreHistory: result.hasMoreHistory,
+        hasMoreChats: result.hasMoreChats,
+      });
+      if (result.selectedChatId) {
+        selectedChatIdRef.current = result.selectedChatId;
+        updateSelectedChatPath(result.selectedChatId);
+      } else {
+        updateSelectedChatPath(null);
+      }
+    } catch (error: any) {
+      console.error('[INITIAL_CHATS] Error:', error);
+      const message = error.message || 'Não foi possível buscar os dados do chat.';
+      // Auto-retry once for network blips
+      if (retryCount < 1) {
+        console.log('[INITIAL_CHATS] Retrying initialization in 1s...');
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+        }, 1000);
+      } else {
+        toast({ title: 'Erro ao carregar conversas', description: message, variant: 'destructive' });
+        setFetchError(message);
+        setIsLoading(false);
+      }
+    } finally {
+      if (retryCount >= 1 || !fetchError) {
+        // Only mark hydrated if success or out of retries
+        isHydratedRef.current = true;
+      }
+      if (retryCount >= 1) setIsLoading(false);
+    }
+  }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath, retryCount, fetchError]);
+
+  // Effect to trigger retry
+  useEffect(() => {
+    if (retryCount > 0 && isLoading) {
+      initializeInbox();
+    }
+  }, [retryCount, initializeInbox, isLoading]);
+
+  const runDeltaSync = useCallback(async () => {
+    if (!initialUser?.activeWorkspaceId) return;
+    const snapshot = useInboxStore.getState();
+    try {
+      const result = await syncInboxData({
+        workspaceId: initialUser.activeWorkspaceId,
+        lastSyncChats: snapshot.lastSyncChats,
+        chatId: snapshot.selectedChatId,
+        lastSyncMessages: snapshot.selectedChatId ? snapshot.lastSyncMessages[snapshot.selectedChatId] ?? null : null,
+      });
+      if (result.error) {
+        console.error('[SYNC_INBOX] Error:', result.error);
+        return;
+      }
+
+      // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
+      React.startTransition(() => {
+        upsertChats(result.deltaChats, result.lastSyncChats);
+
+        // SHARED POLLING: If the chat list received an update for the currently selected chat,
+        // we immediately push that message to the chat panel as well.
+        // This ensures that "active polling in chatlist" is shared with the chat view.
+        if (snapshot.selectedChatId) {
+          const chatFromList = result.deltaChats.find(c => c.id === snapshot.selectedChatId);
+          if (chatFromList && chatFromList.messages.length > 0) {
+            appendMessagesToChat(snapshot.selectedChatId, chatFromList.messages, undefined);
+          }
+        }
+
+        if (result.updatedContacts.length) {
+          result.updatedContacts.forEach((contact) => updateChatContact(contact));
+        }
+        if (result.deltaMessages.length && snapshot.selectedChatId) {
+          appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
+        }
+      });
+    } catch (error) {
+      console.error('[SYNC_INBOX] Unexpected error:', error);
+    }
+  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
+
+  useEffect(() => {
+    runDeltaSyncRef.current = runDeltaSync;
+  }, [runDeltaSync]);
+
+  const notifyPeers = useCallback(() => {
+    if (!broadcastChannel) return;
+    broadcastChannel.postMessage({ type: 'DELTA_SYNC', sourceTabId: tabIdRef.current });
+  }, [broadcastChannel]);
+
+  const handleDataMutation = useCallback(async () => {
+    await runDeltaSync();
+    notifyPeers();
+  }, [notifyPeers, runDeltaSync]);
+
+  const handleForwardMessage = useCallback((message: Message) => {
+    setForwardingMessage(message);
+    setSelectedForwardingChatIds(new Set());
+    setIsForwarding(true);
+  }, []);
+
+  const handleToggleForwardSelection = useCallback((chatId: string) => {
+    setSelectedForwardingChatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCancelForward = useCallback(() => {
+    setForwardingMessage(null);
+    setSelectedForwardingChatIds(new Set());
+    setIsForwarding(false);
+  }, []);
+
+  const handleConfirmForward = useCallback(async () => {
+    if (!forwardingMessage || selectedForwardingChatIds.size === 0) return;
+
+    const chatIds = Array.from(selectedForwardingChatIds);
+    setIsForwarding(false); // Close UI immediately
+
+    // Import dynamically to avoid circular dependency issues if any, though here it's fine
+    const { forwardMessageAction } = await import('@/actions/messages');
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    toast({ title: 'Encaminhando mensagens...', description: `Enviando para ${chatIds.length} conversas.` });
+
+    // Send in parallel
+    await Promise.all(chatIds.map(async (targetChatId) => {
+      const result = await forwardMessageAction(forwardingMessage, targetChatId, null);
+      if (result.success) successCount++;
+      else errorCount++;
+    }));
+
+    if (errorCount === 0) {
+      toast({ title: 'Sucesso', description: `Mensagem encaminhada para ${successCount} conversas.` });
+    } else {
+      toast({
+        title: 'Encaminhamento concluído com erros',
+        description: `Sucesso: ${successCount}. Falhas: ${errorCount}.`,
+        variant: 'destructive'
+      });
+    }
+
+    setForwardingMessage(null);
+    setSelectedForwardingChatIds(new Set());
+  }, [forwardingMessage, selectedForwardingChatIds]);
+
+  useEffect(() => {
+    if (initialUser?.activeWorkspaceId) {
+      getTags(initialUser.activeWorkspaceId).then(tagsResult => {
+        if (!tagsResult.error && tagsResult.tags) {
+          setCloseReasons(tagsResult.tags.filter(t => t.is_close_reason));
+        }
+      });
+    }
+  }, [initialUser?.activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runDeltaSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
+  // Polling mechanism
+  useEffect(() => {
+    if (!initialUser?.activeWorkspaceId) return;
+
+    let timeoutId: NodeJS.Timeout;
+    let isPolling = true;
+    let errorCount = 0;
+
+
+    const poll = async () => {
+      if (!isPolling) return;
+
+      // Wait for hydration before polling
+      if (!isHydratedRef.current) {
+        console.log('[POLLING] Waiting for hydration...');
+        timeoutId = setTimeout(poll, 1000);
+        return;
+      }
+
+      try {
+        await runDeltaSync();
+        errorCount = 0; // Reset error count on success
+      } catch (error: any) {
+        console.error('[POLLING] Error in delta sync:', error);
+        errorCount++;
+
+        // If we hit too many errors, slow down significantly or stop
+        if (errorCount > 5) {
+          console.warn('[POLLING] Too many errors, slowing down polling.');
+          // Wait 10 seconds before next try if we are having issues
+          timeoutId = setTimeout(poll, 10000);
+          return;
+        }
+      }
+
+      if (isPolling) {
+        const isVisible = document.visibilityState === 'visible';
+        // Interval: 3s if visible, 15s if background. Backoff to 10s+ on error.
+        let interval = isVisible ? 3000 : 15000;
+        if (errorCount > 0) interval = Math.max(interval, 10000);
+
+        timeoutId = setTimeout(poll, interval);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    return () => {
+      isPolling = false;
+      clearTimeout(timeoutId);
+    };
+  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+
+  useEffect(() => {
+    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
+    const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
+
+    if (hasUnread) {
+      markChatAsReadInStore(selectedChatId);
+
+      fetch('/api/chats/mark-as-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: selectedChatId })
+      }).catch(() => {
+        console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+      });
+    }
+  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+
+  const realtimeMessagesChannelRef = useRef<RealtimeChannel | null>(null);
+  const realtimeChatsChannelRef = useRef<RealtimeChannel | null>(null);
+
+  // Ref to keep track of the latest handleRealtimeMessage without re-subscribing
+  const handleRealtimeMessageRef = useRef(handleRealtimeMessage);
+  useEffect(() => {
+    handleRealtimeMessageRef.current = handleRealtimeMessage;
+  }, [handleRealtimeMessage]);
+
+  useEffect(() => {
+    const workspaceId = initialUser?.activeWorkspaceId;
+    if (!workspaceId || !selectedChatId) {
+      if (realtimeMessagesChannelRef.current) {
+        const supabase = createClient();
+        console.info('[REALTIME] Cleaning up messages channel because no chat is selected.');
+        teardownChannel(supabase, realtimeMessagesChannelRef.current);
+        realtimeMessagesChannelRef.current = null;
+      }
+      return;
+    }
+
+    const supabase = createClient();
+    const channelName = buildChatMessageChannelName(workspaceId, selectedChatId);
+
+    if (realtimeMessagesChannelRef.current?.topic === channelName) {
+      return;
+    }
+
+    if (realtimeMessagesChannelRef.current) {
+      console.info(`[REALTIME] Removing old messages channel ${realtimeMessagesChannelRef.current.topic}`);
+      teardownChannel(supabase, realtimeMessagesChannelRef.current);
+      realtimeMessagesChannelRef.current = null;
+    }
+
+    console.info(`[REALTIME] Subscribing to messages channel ${channelName}`);
+    const channel = subscribeToChatMessages({
+      client: supabase,
+      workspaceId,
+      chatId: selectedChatId,
+      onMessage: (payload) => handleRealtimeMessageRef.current(payload),
+      onStatusChange: (status) => console.info(`[REALTIME] Messages channel ${channelName} status: ${status}`),
+    });
+
+    realtimeMessagesChannelRef.current = channel;
+
+    return () => {
+      if (realtimeMessagesChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up messages channel ${channelName}`);
+        teardownChannel(supabase, realtimeMessagesChannelRef.current);
+        realtimeMessagesChannelRef.current = null;
+      }
+    };
+  }, [initialUser?.activeWorkspaceId, selectedChatId]);
+
+  useEffect(() => {
+    const workspaceId = initialUser?.activeWorkspaceId;
+    if (!workspaceId) {
+      if (realtimeChatsChannelRef.current) {
+        const supabase = createClient();
+        console.info('[REALTIME] Cleaning up chats channel because workspace is missing.');
+        teardownChannel(supabase, realtimeChatsChannelRef.current);
+        realtimeChatsChannelRef.current = null;
+      }
+      return;
+    }
+
+    const supabase = createClient();
+    const channelName = buildWorkspaceChatChannelName(workspaceId);
+
+    if (realtimeChatsChannelRef.current?.topic === channelName) {
+      return;
+    }
+
+    if (realtimeChatsChannelRef.current) {
+      console.info(`[REALTIME] Removing old chats channel ${realtimeChatsChannelRef.current.topic}`);
+      teardownChannel(supabase, realtimeChatsChannelRef.current);
+      realtimeChatsChannelRef.current = null;
+    }
+
+    console.info(`[REALTIME] Subscribing to chats channel ${channelName}`);
+    const channel = subscribeToWorkspaceChatUpdates({
+      client: supabase,
+      workspaceId,
+      onChatUpdate: async (payload) => {
+        console.log('[REALTIME] Chat update received:', payload);
+        const newChatData = payload.new as any;
+
+        // 1. Optimistic update (preserving existing fields by merging top-level)
+        const optimisticUpdate: Partial<Chat> = {
+          ...newChatData,
+          agentId: newChatData.agent_id,
+        };
+        // Fix agent object minimally if needed for optimistic update
+        if (newChatData.agent_id === initialUser?.id) {
+          optimisticUpdate.agent = initialUser;
+        } else if (newChatData.agent_id === null) {
+          optimisticUpdate.agent = undefined;
+        }
+        useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
+
+        // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
+        try {
+          // Dynamic import to avoid circular dependency issues if any, though likely safe.
+          // But simpler: just import at top if possible. trying dynamic for safety in this robust component.
+          const { refreshChatAction } = await import('@/actions/chats');
+          const result = await refreshChatAction(newChatData.id);
+          if (result.chat) {
+            useInboxStore.getState().upsertChats([result.chat]);
+          } else {
+            console.warn('[REALTIME] Failed to refresh chat details:', result.error);
+          }
+        } catch (err) {
+          console.error('[REALTIME] Error refreshing chat:', err);
+        }
+      },
+      onStatusChange: (status) => {
+        console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[REALTIME] Connection lost (${status}). Suggesting manual refresh via toast if persistent.`);
+          // Only show toast if it's not a temporary disconnect (simple logic: check visibility)
+          if (document.visibilityState === 'visible') {
+            // Could act more aggressively here, e.g. force runDeltaSync
+            runDeltaSync();
+          }
+        }
+      },
+    });
+
+    realtimeChatsChannelRef.current = channel;
+
+    return () => {
+      if (realtimeChatsChannelRef.current) {
+        console.info(`[REALTIME] Cleaning up chats channel ${channelName}`);
+        teardownChannel(supabase, realtimeChatsChannelRef.current);
+        realtimeChatsChannelRef.current = null;
+      }
+    };
+  }, [initialUser?.activeWorkspaceId, initialUser?.id]);
+
+  useEffect(() => {
+    if (initialData) {
+      setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
+      setInitialData({
+        chats: initialData.chats,
+        selectedChatId: initialData.selectedChatId,
+        messages: initialData.messages,
+        lastSyncChats: initialData.lastSyncChats,
+        lastSyncMessageForSelected: initialData.lastSyncMessageForSelected,
+        oldestMessageDate: initialData.oldestMessageDate,
+        hasMoreHistory: initialData.hasMoreHistory,
+        hasMoreChats: initialData.hasMoreChats,
+      });
+      setFetchError(initialData.error ?? null);
+      setSelectedChatId(initialData.selectedChatId);
+      selectedChatIdRef.current = initialData.selectedChatId ?? null;
+      updateSelectedChatPath(initialData.selectedChatId ?? null);
+      isHydratedRef.current = true;
+      setIsLoading(false);
+      return;
+    }
+
+    if (initialUser) {
+      initializeInbox();
+    } else {
+      isHydratedRef.current = true;
+      setIsLoading(false);
+    }
+  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!initialBuildIdRef.current) {
+      initialBuildIdRef.current = (window as any).__NEXT_DATA__?.buildId || 'dev';
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const checkBuild = async () => {
+      if (cancelled || buildMismatchTriggeredRef.current) return;
+      try {
+        const res = await fetch('/api/build-id', { signal: controller.signal, cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.buildId && data.buildId !== initialBuildIdRef.current) {
+          buildMismatchTriggeredRef.current = true;
+          console.warn('[BUILD_ID] Mismatch detected. Reloading to refresh assets.', {
+            current: initialBuildIdRef.current,
+            server: data.buildId
+          });
+          window.location.reload();
+        }
+      } catch (err) {
+        // Ignore network errors; will retry on next interval.
+        console.debug('[BUILD_ID] Check failed', err);
+      }
+    };
+
+    checkBuild();
+    const interval = setInterval(checkBuild, 60000);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedChatId) {
+      selectedChatIdRef.current = selectedChatId;
+    }
+  }, [selectedChatId]);
+
+  if (!initialUser) {
+    return <LoadingSkeleton />;
+  }
+
+  if (isLoading) {
+    return <LoadingSkeleton />;
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex flex-1 w-full min-h-0 h-full items-center justify-center p-6">
+        <Alert variant="destructive" className="max-w-xl">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Erro Crítico ao Carregar Dados</AlertTitle>
+          <AlertDescription className='break-all'>
+            Não foi possível carregar os dados das conversas. Por favor, verifique o console do servidor para mais detalhes.
+            <p className="mt-2 text-xs font-mono p-2 bg-secondary rounded">Detalhe: {fetchError}</p>
+          </AlertDescription>
+          <Button onClick={() => initializeInbox()} className="mt-4">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Tentar Novamente
+          </Button>
+        </Alert>
+      </div>
+    )
+  }
+
+  const enrichedSelectedChat = selectedChat ? {
+    ...selectedChat,
+    messages: currentChatMessages,
+    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
+  } : null;
+
+  const mobileTabs = [
+    { id: 'chats' as const, label: 'Conversas', icon: MessageSquare, badge: mobileStats.unread },
+    { id: 'crm' as const, label: 'Contatos', icon: Users },
+    { id: 'settings' as const, label: 'Ajustes', icon: Settings },
+  ];
+
+
+
+  // Determine if we are in a specific chat (Full Screen Mode)
+  if (selectedChatId) {
+    return (
+      <div
+        className={cn(
+          'mobile-app-shell fixed inset-0 z-50 flex h-dvh w-full flex-col',
+          highContrast ? 'contrast-125 saturate-150' : ''
+        )}
+        dir={isRTL ? 'rtl' : 'ltr'}
+      >
+        <div className="relative z-10 flex h-full flex-col">
+          <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+            <ChatPanel
+              key={selectedChat?.id}
+              chat={enrichedSelectedChat}
+              currentUser={initialUser}
+              onBack={handleBackToList}
+              onActionSuccess={handleDataMutation}
+              closeReasons={closeReasons}
+              showFullHistory={showFullHistory}
+              setShowFullHistory={setShowFullHistory}
+              tabId={tabIdRef.current}
+              onLoadOlderMessages={loadOlderMessages}
+              canLoadOlder={hasMoreHistory}
+              workspaceTimezone={workspaceTimezone}
+              onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
+              onForwardMessage={handleForwardMessage}
+              highContrast={highContrast}
+              onToggleHighContrast={() => setHighContrast((v) => !v)}
+              isRTL={isRTL}
+              onToggleRTL={() => setIsRTL((v) => !v)}
+            />
+          </ErrorBoundary>
+          <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+          <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
+        </div>
+      </div>
+    );
+  }
+
+  // APP SHELL MODE (Bottom Navigation)
+  return (
+    <div
+      className={cn(
+        'mobile-app-shell fixed inset-0 z-40 flex h-dvh w-full flex-col',
+        highContrast ? 'contrast-125 saturate-150' : ''
+      )}
+      dir={isRTL ? 'rtl' : 'ltr'}
+    >
+      <div className="relative z-10 flex h-full flex-col">
+        <header className="px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-[0.35em] text-muted-foreground">Dialogy Mobile</p>
+              <h1 className="text-2xl font-semibold text-foreground">{headerTitle}</h1>
+              <p className="text-xs text-muted-foreground">{headerSubtitle}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <span className={cn('h-2 w-2 rounded-full', isOffline ? 'bg-red-500' : 'bg-emerald-500')} />
+                {isOffline ? 'Offline' : 'Online'}
+              </div>
+              <Avatar className="h-9 w-9 border border-border/70 shadow-sm">
+                <AvatarImage src={initialUser.avatar_url ?? undefined} alt={initialUser.name ?? 'User'} />
+                <AvatarFallback className="bg-muted text-foreground">{initialUser.name?.charAt(0) ?? 'U'}</AvatarFallback>
+              </Avatar>
+            </div>
+          </div>
+          {activeTab === 'chats' && (
+            <div className="mt-4 flex gap-3 overflow-x-auto pb-1 hide-scrollbar">
+              <MobileStatCard label="Fila" value={mobileStats.queue} icon={MessageSquare} tone="primary" />
+              <MobileStatCard label="Atendimentos" value={mobileStats.active} icon={Users} tone="info" />
+              <MobileStatCard label="Fechados" value={mobileStats.closed} icon={CheckCircle2} tone="neutral" />
+            </div>
+          )}
+        </header>
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-hidden relative w-full">
+          {activeTab === 'chats' && (
+            <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+              <ChatList
+                chats={chats}
+                selectedChat={enrichedSelectedChat}
+                setSelectedChat={handleSetSelectedChat}
+                currentUser={initialUser}
+                onUpdate={handleDataMutation}
+                isForwarding={isForwarding}
+                selectedForwardingChatIds={selectedForwardingChatIds}
+                onToggleForwardSelection={handleToggleForwardSelection}
+                onConfirmForward={handleConfirmForward}
+                onCancelForward={handleCancelForward}
+                onPrefetch={prefetchChat}
+                className="w-full h-full border-r-0 bg-background/70 backdrop-blur-xl pb-0"
+              />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'crm' && (
+            <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
+              <div className="rounded-3xl border border-border/60 bg-background/70 p-5 shadow-sm backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-2xl bg-blue-500/15 text-blue-500 flex items-center justify-center">
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">CRM Mobile</h3>
+                    <p className="text-xs text-muted-foreground">Gerencie contatos, segmentos e funil direto do celular.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Segmentos inteligentes</p>
+                      <p className="text-xs text-muted-foreground">Crie grupos automaticos com filtros rapidos.</p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Pipeline visual</p>
+                      <p className="text-xs text-muted-foreground">Acompanhe cada etapa sem sair do chat.</p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Insights rapidos</p>
+                      <p className="text-xs text-muted-foreground">Veja notas, tags e historico em segundos.</p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {activeTab === 'settings' && (
+            <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
+              <div className="rounded-3xl border border-border/60 bg-background/70 p-5 shadow-sm backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-2xl bg-muted/60 text-foreground flex items-center justify-center">
+                    <Settings className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">Configuracoes</h3>
+                    <p className="text-xs text-muted-foreground">Ajustes rapidos para um uso mais confortavel.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Alto contraste</p>
+                    <p className="text-xs text-muted-foreground">Melhor legibilidade em ambientes claros.</p>
+                  </div>
+                  <Switch checked={highContrast} onCheckedChange={(checked) => setHighContrast(checked)} />
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Direcao RTL</p>
+                    <p className="text-xs text-muted-foreground">Inverta o layout para idiomas RTL.</p>
+                  </div>
+                  <Switch checked={isRTL} onCheckedChange={(checked) => setIsRTL(checked)} />
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Som de notificacao</p>
+                    <p className="text-xs text-muted-foreground">Ative o audio para alertas no mobile.</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      if (needsAudioUnlock) {
+                        unlockAudio();
+                        return;
+                      }
+                      playNotificationSound('queue');
+                    }}
+                  >
+                    {needsAudioUnlock ? 'Ativar' : 'Testar'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Navigation Bar */}
+        <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-2">
+          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-border/60 bg-background/80 p-1 shadow-lg backdrop-blur-md">
+            {mobileTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const Icon = tab.icon;
+              const badge = tab.badge;
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    'relative flex flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200',
+                    isActive
+                      ? 'bg-primary/10 text-primary shadow-[0_10px_30px_-20px_rgba(34,197,94,0.5)]'
+                      : 'text-muted-foreground hover:bg-muted/50'
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span>{tab.label}</span>
+                  {badge ? (
+                    <span className="absolute right-4 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground">
+                      {badge > 99 ? '99+' : badge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Audio logic kept */}
+        {needsAudioUnlock && (
+          <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
+            <span>Habilite</span>
+            <Button size="sm" variant="secondary" onClick={unlockAudio}>Som</Button>
+          </div>
+        )}
+        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
+      </div>
+    </div>
+  );
+}

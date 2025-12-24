@@ -18,6 +18,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
     const [scale, setScale] = useState(1);
 
     const videoRef = React.useRef<HTMLVideoElement>(null);
+    const safeSrc = typeof src === 'string' && src.trim().length > 0 ? src : '';
 
     // Reset state when closed
     useEffect(() => {
@@ -37,8 +38,9 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
 
 
     const handleDownload = async () => {
+        if (!safeSrc) return;
         try {
-            const response = await fetch(src);
+            const response = await fetch(safeSrc);
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -99,14 +101,16 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                 </DialogHeader>
 
                 <div className="relative w-full h-full flex items-center justify-center p-4 md:p-10">
-                    {type === 'image' ? (
+                    {!safeSrc ? (
+                        <p className="text-sm text-white/70">Media unavailable</p>
+                    ) : type === 'image' ? (
                         <div
                             className="relative transition-transform duration-200 ease-out"
                             style={{ transform: `scale(${scale})` }}
                         >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                                src={src}
+                                src={safeSrc}
                                 alt={alt || 'Media content'}
                                 className="max-w-full max-h-[85vh] object-contain rounded-md shadow-2xl"
                             />
@@ -116,7 +120,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                         <div className="relative w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/10">
                             <video
                                 ref={videoRef}
-                                src={src}
+                                src={safeSrc}
                                 className="w-full h-full object-contain"
                                 controls
                                 playsInline

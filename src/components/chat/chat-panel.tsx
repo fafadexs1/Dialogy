@@ -16,7 +16,6 @@ import {
     Smile,
     MoreVertical,
     Bot,
-    Loader2,
     MessageSquare,
     LogOut,
     FileDown,
@@ -38,15 +37,19 @@ import {
     Clock,
     Phone,
     Video,
+    ArrowLeft,
     ArrowRightLeft,
     XCircle,
     X,
     Copy,
     StickyNote,
     MessageSquareQuote,
-    Users,
+    Search,
     Globe,
+    Users,
     Lock,
+    Loader2,
+    Plus,
     Sparkles,
     MapPin,
     FileText,
@@ -79,6 +82,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
+    DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import {
     AlertDialog,
@@ -94,7 +98,7 @@ import {
 import MediaPreview, { type MediaFileType } from './media-preview';
 import { cn, formatWhatsappText, formatMessageDate } from '@/lib/utils';
 import MessageItem from './message-item';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -125,6 +129,7 @@ interface ChatPanelProps {
     onToggleHighContrast: () => void;
     isRTL: boolean;
     onToggleRTL: () => void;
+    onBack?: () => void;
 }
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
@@ -264,6 +269,7 @@ export default function ChatPanel({
     onToggleHighContrast,
     isRTL,
     onToggleRTL,
+    onBack,
 }: ChatPanelProps) {
 
     const updateChat = useInboxStore(state => state.updateChat);
@@ -1078,7 +1084,7 @@ export default function ChatPanel({
     if (!chat) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
-                <div className="text-center space-y-4 p-8 rounded-3xl bg-card/40 border border-border backdrop-blur-xl shadow-2xl">
+                <div className="text-center space-y-4 p-8 rounded-3xl bg-card/40 border border-border backdrop-blur-md shadow-2xl">
                     <div className="h-20 w-20 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-border">
                         <MessageSquare className="h-10 w-10 text-primary" />
                     </div>
@@ -1105,10 +1111,15 @@ export default function ChatPanel({
         <div className="flex-1 flex flex-col bg-transparent min-w-0 relative h-full">
             {/* Header */}
             {/* Header */}
-            <header className="flex h-16 items-center justify-between border-b border-border dark:border-white/10 bg-background/50 dark:bg-black/60 backdrop-blur-xl px-6 flex-shrink-0 z-20">
+            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-border dark:border-white/10 bg-background/50 dark:bg-black/60 backdrop-blur-md px-3 md:px-6 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 md:pt-0 md:pb-0">
                 <div className="flex items-center gap-3">
+                    {onBack && (
+                        <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1">
+                            <ArrowLeft className="h-5 w-5" />
+                        </Button>
+                    )}
                     <Avatar className="h-10 w-10 border border-border ring-2 ring-background">
-                        <AvatarImage src={chat.contact.avatar_url} alt={chat.contact.name} data-ai-hint="person" />
+                        <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
                         <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div>
@@ -1120,146 +1131,197 @@ export default function ChatPanel({
                                 </Badge>
                             )}
                         </h2>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 overflow-hidden">
                             {chat.instance_name && (
-                                <span className="flex items-center gap-1">
+                                <span className="flex items-center gap-1 truncate shrink-0">
                                     <FaWhatsapp className="h-3 w-3 text-green-500" />
                                     {chat.instance_name}
                                 </span>
                             )}
                             <span className="mx-1">•</span>
-                            <span>{chat.contact.phone}</span>
-                            <span className="mx-1">•</span>
-                            <span className="text-[10px] opacity-70">ID: {chat.id}</span>
+                            <span className="truncate">{chat.contact.phone}</span>
+                            <span className="hidden md:inline flex items-center">
+                                <span className="mx-1">•</span>
+                                <span className="text-[10px] opacity-70">ID: {chat.id}</span>
+                            </span>
                         </p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground hover:bg-muted">
-                                    <Phone className="h-4 w-4" />
+                    {/* Dialogs logic - rendered once */}
+                    {isChatOpen && isChatAssignedToMe && (
+                        <CloseChatDialog
+                            chat={chat}
+                            onActionSuccess={onActionSuccess}
+                            reasons={closeReasons}
+                            isOpen={isCloseDialogOpen}
+                            onOpenChange={setIsCloseDialogOpen}
+                        />
+                    )}
+
+                    {/* MOBILE MENU */}
+                    <div className="md:hidden">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="-mr-2">
+                                    <MoreVertical className="h-5 w-5" />
                                 </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
-                        </Tooltip>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border">
+                                <DropdownMenuItem onClick={() => { }} disabled>
+                                    <Phone className="mr-2 h-4 w-4" />
+                                    <span>Ligar (Em breve)</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => onToggleContactPanel()}>
+                                    <ArrowRightLeft className="mr-2 h-4 w-4" />
+                                    <span>Detalhes do Contato</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={handleExportChat}>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    <span>Salvar conversa</span>
+                                </DropdownMenuItem>
 
-                        <div className="w-px h-6 bg-border mx-1" />
+                                <DropdownMenuSeparator />
 
-                        {isChatOpen && isChatAssignedToMe && (
-                            <>
-                                <CloseChatDialog
-                                    chat={chat}
-                                    onActionSuccess={onActionSuccess}
-                                    reasons={closeReasons}
-                                    isOpen={isCloseDialogOpen}
-                                    onOpenChange={setIsCloseDialogOpen}
-                                />
-                            </>
-                        )}
+                                <DropdownMenuItem onClick={onToggleHighContrast}>
+                                    <Contrast className="mr-2 h-4 w-4" />
+                                    <span>Alto Contraste</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={onToggleRTL}>
+                                    <Languages className="mr-2 h-4 w-4" />
+                                    <span>Inverter Lado (RTL)</span>
+                                </DropdownMenuItem>
 
-                        <div className="w-px h-6 bg-border mx-1" />
+                                {isChatOpen && isChatAssignedToMe && (
+                                    <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                            onClick={() => setIsCloseDialogOpen(true)}
+                                            className="text-red-500 focus:text-red-500 focus:bg-red-500/10"
+                                        >
+                                            <XCircle className="mr-2 h-4 w-4" />
+                                            <span>Encerrar Atendimento</span>
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
 
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                    onClick={() => {
-                                        onToggleContactPanel();
-                                    }}
-                                >
-                                    <ArrowRightLeft className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
-                        </Tooltip>
+                    {/* DESKTOP MENU (Original) */}
+                    <div className="hidden md:flex items-center gap-2">
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground hover:bg-muted">
+                                        <Phone className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
+                            </Tooltip>
 
-                        <div className="w-px h-6 bg-border mx-1" />
+                            <div className="w-px h-6 bg-border mx-1" />
 
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                    onClick={handleExportChat}
-                                >
-                                    <FileText className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Salvar como HTML</p></TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
-                                    onClick={handleTrainAgent}
-                                >
-                                    <Brain className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Treinar Agente</p></TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant={highContrast ? "secondary" : "ghost"}
-                                    size="icon"
-                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                    onClick={onToggleHighContrast}
-                                    aria-label="Alternar alto contraste"
-                                >
-                                    <Contrast className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Alto contraste</p></TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant={isRTL ? "secondary" : "ghost"}
-                                    size="icon"
-                                    className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                    onClick={onToggleRTL}
-                                    aria-label="Alternar direcao RTL"
-                                >
-                                    <Languages className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Texto da direita para esquerda</p></TooltipContent>
-                        </Tooltip>
-
-                        {isChatOpen && isChatAssignedToMe && (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        onClick={() => setIsCloseDialogOpen(true)}
-                                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                        onClick={() => {
+                                            onToggleContactPanel();
+                                        }}
                                     >
-                                        <XCircle className="h-4 w-4" />
+                                        <ArrowRightLeft className="h-4 w-4" />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
+                                <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
                             </Tooltip>
-                        )}
-                    </TooltipProvider>
+
+                            <div className="w-px h-6 bg-border mx-1" />
+
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                        onClick={handleExportChat}
+                                    >
+                                        <FileText className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Salvar como HTML</p></TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
+                                        onClick={handleTrainAgent}
+                                    >
+                                        <Brain className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Treinar Agente</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={highContrast ? "secondary" : "ghost"}
+                                        size="icon"
+                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                        onClick={onToggleHighContrast}
+                                        aria-label="Alternar alto contraste"
+                                    >
+                                        <Contrast className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Alto contraste</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={isRTL ? "secondary" : "ghost"}
+                                        size="icon"
+                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                        onClick={onToggleRTL}
+                                        aria-label="Alternar direcao RTL"
+                                    >
+                                        <Languages className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Texto da direita para esquerda</p></TooltipContent>
+                            </Tooltip>
+
+                            {isChatOpen && isChatAssignedToMe && (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => setIsCloseDialogOpen(true)}
+                                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                        >
+                                            <XCircle className="h-4 w-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
+                                </Tooltip>
+                            )}
+                        </TooltipProvider>
+                    </div>
+
                 </div>
             </header>
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto relative" >
-                <ScrollArea className="h-full" ref={scrollAreaRef}>
+                <div className="h-full overflow-y-auto" ref={scrollAreaRef as any}>
                     <div
-                        className="relative p-6 pb-4"
-                    // Virtualização removida, altura automática
+                        className="relative p-2.5 md:p-6 pb-4"
                     >
 
                         {isLoadingOlderMessages && canLoadOlder && (
@@ -1287,15 +1349,15 @@ export default function ChatPanel({
                             })}
                         </div>
                     </div>
-                </ScrollArea>
+                </div>
 
             </div>
 
 
             {isChatOpen ? (
-                <footer className="p-4 bg-transparent z-20">
+                <footer className="p-2 md:p-4 bg-transparent z-20 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-[calc(1rem+env(safe-area-inset-bottom))] transition-[padding] data-[state=open]:p-0">
                     {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                        <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-xl max-h-40 overflow-y-auto shadow-xl">
+                        <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-md max-h-40 overflow-y-auto shadow-xl">
                             {filteredShortcuts.map(shortcut => (
                                 <button
                                     key={shortcut.id}
@@ -1326,7 +1388,12 @@ export default function ChatPanel({
                         <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                             <input type="hidden" name="chatId" value={chat.id} />
 
-                            <div className="bg-background/60 dark:bg-zinc-900/60 backdrop-blur-xl border border-border/50 dark:border-white/10 rounded-2xl p-2 shadow-sm flex items-end gap-2 relative flex-1 transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500/50 focus-within:shadow-lg focus-within:shadow-blue-500/10">
+                            <div className={cn(
+                                "backdrop-blur-md border rounded-[20px] md:rounded-2xl p-1.5 md:p-2 shadow-sm flex items-end gap-2 relative flex-1 transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500/50 focus-within:shadow-lg focus-within:shadow-blue-500/10",
+                                isInternalNote
+                                    ? "bg-yellow-50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-700/30"
+                                    : "bg-background/60 dark:bg-zinc-900/60 border-border/50 dark:border-white/10"
+                            )}>
                                 <div className="flex gap-1 pb-1">
                                     <Popover>
                                         <PopoverTrigger asChild>
@@ -1339,50 +1406,80 @@ export default function ChatPanel({
                                         </PopoverContent>
                                     </Popover>
 
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
-                                        disabled={isAiTyping}
-                                        onClick={() => fileInputRef.current?.click()}
-                                        aria-label="Enviar anexo"
-                                    >
-                                        <Paperclip className="h-5 w-5" />
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className={cn(
-                                            "h-9 w-9 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95",
-                                            isInternalNote
-                                                ? "text-yellow-600 dark:text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20"
-                                                : "text-muted-foreground hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-yellow-500/10"
-                                        )}
-                                        disabled={isAiTyping}
-                                        onClick={() => setIsInternalNote(!isInternalNote)}
-                                        title="Nota interna (nao enviada ao cliente)"
-                                        aria-label="Alternar nota interna"
-                                    >
-                                        <StickyNote className="h-5 w-5" />
-                                    </Button>
-
                                     <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
-                                        <PopoverTrigger asChild>
+                                        <PopoverAnchor className="absolute left-12 bottom-3 h-2 w-2 opacity-0 pointer-events-none" />
+                                        <div className="hidden md:flex items-center gap-1">
                                             <Button
                                                 type="button"
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                onClick={() => fileInputRef.current?.click()}
                                                 disabled={isAiTyping}
-                                                title="Atalhos"
-                                                aria-label="Atalhos de resposta"
+                                                aria-label="Anexar arquivo"
                                             >
-                                                <MessageSquareQuote className="h-5 w-5" />
+                                                <Paperclip className="h-5 w-5" />
                                             </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-xl text-foreground max-h-96 overflow-y-auto" align="start">
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className={cn(
+                                                    "h-9 w-9 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95",
+                                                    isInternalNote
+                                                        ? "text-yellow-600 hover:text-yellow-600 hover:bg-yellow-500/10"
+                                                        : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                                )}
+                                                onClick={() => setIsInternalNote(!isInternalNote)}
+                                                disabled={isAiTyping}
+                                                aria-label="Nota interna"
+                                            >
+                                                <StickyNote className="h-5 w-5" />
+                                            </Button>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                    disabled={isAiTyping}
+                                                    aria-label="Respostas rápidas"
+                                                >
+                                                    <MessageSquareQuote className="h-5 w-5" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                        </div>
+
+                                        <div className="md:hidden">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                        disabled={isAiTyping}
+                                                    >
+                                                        <Plus className="h-5 w-5" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="start" side="top" className="w-48 bg-popover/90 backdrop-blur-md border-border">
+                                                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="cursor-pointer">
+                                                        <Paperclip className="mr-2 h-4 w-4" />
+                                                        <span>Anexar</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)} className={cn("cursor-pointer", isInternalNote ? "text-yellow-600 focus:text-yellow-700" : "")}>
+                                                        <StickyNote className="mr-2 h-4 w-4" />
+                                                        <span>{isInternalNote ? 'Remover Nota' : 'Nota Interna'}</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => setIsShortcutsOpen(true)} className="cursor-pointer">
+                                                        <MessageSquareQuote className="mr-2 h-4 w-4" />
+                                                        <span>Respostas Rápidas</span>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
+                                        <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-md text-foreground max-h-96 overflow-y-auto" align="start" side="top" sideOffset={12}>
                                             <div className="p-2 space-y-1">
                                                 <h4 className="text-xs font-medium text-muted-foreground px-2 py-1">Atalhos Disponíveis</h4>
                                                 {shortcuts.length === 0 ? (
@@ -1412,6 +1509,7 @@ export default function ChatPanel({
                                             </div>
                                         </PopoverContent>
                                     </Popover>
+
                                     <input
                                         type="file"
                                         ref={fileInputRef}
@@ -1466,7 +1564,7 @@ export default function ChatPanel({
                             </div>
                         )}
 
-                        <div className="flex flex-wrap items-center gap-3 px-2">
+                        <div className="hidden md:flex flex-wrap items-center gap-3 px-2">
                             <div className="flex items-center space-x-2 bg-muted/30 backdrop-blur-md px-3 py-1.5 rounded-full border border-border">
                                 <Bot className="h-4 w-4 text-primary" />
                                 <Switch
@@ -1508,7 +1606,7 @@ export default function ChatPanel({
                     </div>
                 </footer>
             ) : (
-                <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-xl border-t border-border">
+                <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-md border-t border-border">
                     <p className='text-sm font-medium text-muted-foreground'>
                         Este atendimento foi encerrado.
                     </p>

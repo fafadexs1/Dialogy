@@ -64,7 +64,7 @@ function LocationMessage({ message }: { message: Message }) {
 
     return (
         <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
-            <div className="overflow-hidden rounded-2xl border border-border bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-all max-w-[320px] shadow-sm dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/40 dark:shadow-lg dark:shadow-black/20">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-all max-w-[85vw] md:max-w-[320px] shadow-sm dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/40 dark:shadow-lg dark:shadow-black/20">
                 {thumbnailSrc ? (
                     <div className="relative">
                         <Image
@@ -118,6 +118,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
     const validUrl = (url: any) => typeof url === 'string' && url.length > 0 ? url : undefined;
     let urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
+    const safeThumbnail = validUrl(thumbnail);
 
     if (!urlToUse) return <p>{message.content || 'Mídia inválida'}</p>;
 
@@ -130,7 +131,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                         alt={message.content || fileName || 'Imagem enviada'}
                         width={300}
                         height={300}
-                        className="rounded-lg object-cover w-full max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
+                        className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
                     />
                 </MediaViewer>
             );
@@ -140,12 +141,12 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
                     <div className="relative group cursor-pointer">
-                        <Image
-                            src={thumbnail || '/placeholder-video.png'}
-                            alt="Vídeo"
-                            width={300}
-                            height={200}
-                            className="rounded-lg object-cover w-full max-w-[300px] h-auto brightness-75 group-hover:brightness-90 transition-all"
+                    <Image
+                        src={safeThumbnail || '/placeholder-video.png'}
+                        alt="Vídeo"
+                        width={300}
+                        height={200}
+                            className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto brightness-75 group-hover:brightness-90 transition-all"
                         />
                         <div className="absolute inset-0 flex items-center justify-center">
                             <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform">
@@ -183,7 +184,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                 // We should condition on isFromMe usually, but here we are inside renderMedia which doesn't know isFromMe easy?
                 // Actually MessageItem knows isFromMe. But renderMessageContent logic...
                 // Let's use robust classes.
-                className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"
+                className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[80vw] md:max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"
             >
                 <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
                 <div className='min-w-0 flex-1'>
@@ -285,14 +286,15 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                     >
                         {message.sender && (
                             <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
-                                <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url} alt={message.sender.name || ''} data-ai-hint="person" />
+                                <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url || undefined} alt={message.sender.name || ''} data-ai-hint="person" />
                                 <AvatarFallback className="bg-muted text-muted-foreground text-xs dark:bg-white/10 dark:text-white/70">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
                             </Avatar>
                         )}
                         <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                             <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
-                                    className={cn("break-words rounded-2xl p-3 max-w-lg shadow-lg relative",
+                                    className={cn(
+                                        "break-words rounded-[22px] md:rounded-2xl p-3 md:p-3 max-w-[85%] md:max-w-lg shadow-sm md:shadow-lg relative",
                                         isDeleted
                                             ? 'bg-muted/30 text-muted-foreground italic border border-border/50 dark:bg-white/5 dark:text-white/50 dark:border-white/10'
                                             : isInternalNote

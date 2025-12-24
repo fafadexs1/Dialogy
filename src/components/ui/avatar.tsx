@@ -26,15 +26,17 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
   ({ className, src, alt, onError, onLoad, fallbackSrc, ...props }, ref) => {
     const [isLoaded, setIsLoaded] = React.useState<boolean>(false)
     const [hasError, setHasError] = React.useState<boolean>(false)
+    const safeSrc = React.useMemo(() => (typeof src === 'string' && src.trim() !== '') ? src : undefined, [src]);
+
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
-      (src as string | undefined) || fallbackSrc
+      safeSrc || fallbackSrc
     )
 
     React.useEffect(() => {
-      setCurrentSrc((src as string | undefined) || fallbackSrc)
+      setCurrentSrc(safeSrc || fallbackSrc)
       setIsLoaded(false)
       setHasError(false)
-    }, [src, fallbackSrc])
+    }, [safeSrc, fallbackSrc])
 
     return currentSrc ? (
       <img

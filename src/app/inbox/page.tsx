@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
+import MobileChatLayout from '@/components/layout/mobile-chat-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
@@ -19,6 +20,13 @@ export default async function InboxRootPage() {
 
   // Render the chat layout without a pre-selected chat.
   return (
-    <CustomerChatLayout initialUser={user} chatId={initialData?.selectedChatId ?? null} initialData={initialData} />
+    <>
+      <div className="hidden md:flex w-full h-full">
+        <CustomerChatLayout initialUser={user} chatId={initialData?.selectedChatId ?? null} initialData={initialData} />
+      </div>
+      <div className="flex md:hidden w-full h-full">
+        <MobileChatLayout initialUser={user} chatId={initialData?.selectedChatId ?? null} initialData={initialData} />
+      </div>
+    </>
   )
 }
