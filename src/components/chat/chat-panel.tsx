@@ -247,33 +247,6 @@ function SendMessageButton({ disabled }: { disabled?: boolean }) {
     )
 }
 
-function MeasuredMessageRow({ children, messageId, onHeightChange }: { children: React.ReactNode; messageId: string; onHeightChange: (id: string, height: number) => void }) {
-    const ref = useRef<HTMLDivElement | null>(null);
-
-    useLayoutEffect(() => {
-        if (!ref.current) return;
-        const measure = () => {
-            if (ref.current) {
-                onHeightChange(messageId, ref.current.getBoundingClientRect().height);
-            }
-        };
-        measure();
-        const observer = new ResizeObserver(measure);
-        observer.observe(ref.current);
-        return () => observer.disconnect();
-    }, [messageId, onHeightChange]);
-
-    return (
-        <div ref={ref} className="py-1">
-            {children}
-        </div>
-    );
-}
-
-
-
-
-
 export default function ChatPanel({
     chat,
     currentUser,
@@ -307,10 +280,9 @@ export default function ChatPanel({
     const [sendState, setSendState] = useState<'idle' | 'sending' | 'error'>('idle');
     const [lastSendError, setLastSendError] = useState<string | null>(null);
     const lastSendDraftRef = useRef<{ text: string; media: MediaFileType[]; isNote: boolean } | null>(null);
-    const [scrollTop, setScrollTop] = useState(0);
-    const [viewportHeight, setViewportHeight] = useState(0);
-    const messageHeightsRef = useRef<Map<string, number>>(new Map());
-    const [averageMessageHeight, setAverageMessageHeight] = useState(120);
+
+    // Virtualization refs/state removed
+    // const messageHeightsRef = useRef<Map<string, number>>(new Map()); 
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
@@ -333,6 +305,7 @@ export default function ChatPanel({
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
     const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
     const replaceOptimisticMessage = useInboxStore((state) => state.replaceOptimisticMessage);
+
     useEffect(() => {
         canLoadOlderRef.current = !((chat as any)?.protocolScoped) && canLoadOlder;
     }, [canLoadOlder, chat]);
@@ -425,7 +398,7 @@ export default function ChatPanel({
                     requestAnimationFrame(tryLoadOlder);
                 }
             });
-    }, [onLoadOlderMessages, showFullHistory]);
+    }, [onLoadOlderMessages, showFullHistory, chat]);
 
     useEffect(() => {
         const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
@@ -433,8 +406,6 @@ export default function ChatPanel({
 
         const handleScroll = () => {
             const { scrollTop: currentTop, scrollHeight, clientHeight } = viewport;
-            setScrollTop(currentTop);
-            setViewportHeight(clientHeight);
             const isScrolledUp = scrollHeight - currentTop - clientHeight > 100;
             userScrolledUpRef.current = isScrolledUp;
             if (currentTop < 120) {
@@ -444,16 +415,12 @@ export default function ChatPanel({
 
         handleScroll();
         viewport.addEventListener('scroll', handleScroll);
-        const resizeObserver = new ResizeObserver(() => setViewportHeight(viewport.clientHeight));
-        resizeObserver.observe(viewport);
         return () => {
             viewport.removeEventListener('scroll', handleScroll);
-            resizeObserver.disconnect();
         };
     }, [tryLoadOlder]);
 
 
-    // Se há histórico anterior, tenta carregar imediatamente (útil quando há poucas mensagens na tela).
     useEffect(() => {
         if (canLoadOlderRef.current) {
             requestAnimationFrame(tryLoadOlder);
@@ -465,9 +432,8 @@ export default function ChatPanel({
     }, [chat?.contact?.id]);
 
     useEffect(() => {
-        messageHeightsRef.current.clear();
-        setAverageMessageHeight(120);
-        setScrollTop(0);
+        // messageHeightsRef.current.clear(); // Removed
+        // setScrollTop(0); // Removed
         userScrolledUpRef.current = false;
         previousScrollHeightRef.current = 0;
     }, [chat?.id]);
@@ -504,43 +470,32 @@ export default function ChatPanel({
         if (!viewport) return;
 
         const currentScrollHeight = viewport.scrollHeight;
-        const previousScrollHeight = previousScrollHeightRef.current;
-        const addedHeight = currentScrollHeight - previousScrollHeight;
         const currentFirstMessageId = messagesToRender[0]?.id;
         const previousFirstMessageId = previousFirstMessageIdRef.current;
+        const previousScrollHeight = previousScrollHeightRef.current;
+        const addedHeight = currentScrollHeight - previousScrollHeight;
 
         if (previousFirstMessageId && currentFirstMessageId !== previousFirstMessageId && addedHeight > 0) {
-            // Se o primeiro ID mudou e a altura aumentou, assumimos que mensagens antigas foram carregadas (prepend)
-            // Mantemos a posição visual ajustando o scrollTop
-            viewport.scrollTop += addedHeight;
+            // Adjust scroll for prepended messages
+            requestAnimationFrame(() => {
+                viewport.scrollTop += addedHeight;
+            });
         } else if (!userScrolledUpRef.current) {
-            // Comportamento padrão: rolar para o final se o usuário não subiu a tela
-            viewport.scrollTop = viewport.scrollHeight;
+            // Auto-scroll to bottom if not manually scrolled up
+            requestAnimationFrame(() => {
+                viewport.scrollTop = viewport.scrollHeight;
+            });
         }
 
         previousScrollHeightRef.current = currentScrollHeight;
         previousFirstMessageIdRef.current = currentFirstMessageId || null;
-    }, [messagesToRender]);
+    }, [messagesToRender, messagesToRender.length]);
 
-    const registerMessageHeight = useCallback((id: string, height: number) => {
-        const current = messageHeightsRef.current.get(id);
-        if (current !== height) {
-            messageHeightsRef.current.set(id, height);
-            const values = Array.from(messageHeightsRef.current.values());
-            const avg = values.reduce((sum, h) => sum + h, 0) / values.length;
-            setAverageMessageHeight(Math.max(80, Math.min(200, Math.round(avg))));
-        }
-    }, []);
-
-    const estimateHeight = averageMessageHeight || 120;
-    const totalHeight = messagesToRender.reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
-    const virtualViewport = viewportHeight || estimateHeight * 8;
-    const startIndex = Math.max(0, Math.floor(scrollTop / estimateHeight) - 5);
-    const endIndex = Math.min(messagesToRender.length, Math.ceil((scrollTop + virtualViewport) / estimateHeight) + 5);
-    const visibleMessages = messagesToRender.slice(startIndex, endIndex);
-    const padTop = messagesToRender.slice(0, startIndex).reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
-    const renderedHeight = visibleMessages.reduce((sum, msg) => sum + (messageHeightsRef.current.get(msg.id) ?? estimateHeight), 0);
-    const padBottom = Math.max(0, totalHeight - padTop - renderedHeight);
+    // VIRTUALIZAÇÃO DESATIVADA DEVIDO A BUGS VISUAIS
+    const visibleMessages = messagesToRender;
+    const startIndex = 0;
+    const padTop = 0;
+    const padBottom = 0;
 
     const runAiAgent = useCallback(async () => {
         const lastMessage = chat?.messages?.length ? chat.messages[chat.messages.length - 1] : null;
@@ -856,7 +811,11 @@ export default function ChatPanel({
                 instance_name: chat.instance_name || undefined
             };
             appendMessagesToChat(chat.id, [optimisticMessage]);
-            // Scroll to bottom
+
+            // Force scroll to bottom by resetting user scroll state
+            userScrolledUpRef.current = false;
+
+            // Attempt immediate scroll (though layout effect handles the main scroll after render)
             if (scrollAreaRef.current) {
                 const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]') as HTMLElement;
                 if (viewport) {
@@ -1300,7 +1259,7 @@ export default function ChatPanel({
                 <ScrollArea className="h-full" ref={scrollAreaRef}>
                     <div
                         className="relative p-6 pb-4"
-                        style={{ minHeight: virtualViewport || 320, height: Math.max(totalHeight, virtualViewport || 320) }}
+                    // Virtualização removida, altura automática
                     >
 
                         {isLoadingOlderMessages && canLoadOlder && (
@@ -1314,21 +1273,16 @@ export default function ChatPanel({
                                 const absoluteIndex = startIndex + index;
                                 const prevMessage = absoluteIndex > 0 ? messagesToRender[absoluteIndex - 1] : undefined;
                                 return (
-                                    <MeasuredMessageRow
+                                    <MessageItem
                                         key={message.id}
-                                        messageId={message.id}
-                                        onHeightChange={registerMessageHeight}
-                                    >
-                                        <MessageItem
-                                            message={message}
-                                            prevMessage={prevMessage}
-                                            workspaceTimezone={workspaceTimezone}
-                                            onDelete={handleDeleteMessage}
-                                            currentUserId={currentUser.id}
-                                            instanceName={chat.instance_name}
-                                            onForward={handleForwardMessage}
-                                        />
-                                    </MeasuredMessageRow>
+                                        message={message}
+                                        prevMessage={prevMessage}
+                                        workspaceTimezone={workspaceTimezone}
+                                        onDelete={handleDeleteMessage}
+                                        currentUserId={currentUser.id}
+                                        instanceName={chat.instance_name}
+                                        onForward={handleForwardMessage}
+                                    />
                                 );
                             })}
                         </div>

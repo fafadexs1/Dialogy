@@ -425,6 +425,7 @@ interface ChatListItemProps {
   onSnooze?: (chatId: string) => void;
   onUnsnooze?: (chatId: string) => void;
   onAssign?: (chat: Chat) => Promise<void> | void;
+  onPrefetch?: (chatId: string) => void;
 }
 
 
@@ -433,7 +434,7 @@ const isMarketingMessage = (message: Message) => {
   return Boolean(meta?.isMarketing || meta?.event === 'marketing_auto_close');
 };
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign, onPrefetch }) => {
   const isMarketingChat = chat.messages.some((m: any) => isMarketingMessage(m as Message));
   const visibleMessages = React.useMemo(() => {
     if (showMarketing) return chat.messages;
@@ -510,6 +511,23 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     }
   };
 
+  const prefetchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = () => {
+    if (!onPrefetch) return;
+    // Debounce prefetch 200ms
+    prefetchTimeoutRef.current = setTimeout(() => {
+      onPrefetch(chat.id);
+    }, 200);
+  };
+
+  const handleMouseLeave = () => {
+    if (prefetchTimeoutRef.current) {
+      clearTimeout(prefetchTimeoutRef.current);
+      prefetchTimeoutRef.current = null;
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -521,6 +539,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         isSnoozed ? "opacity-60 grayscale" : ""
       )}
       onClick={handleSelect}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       onDoubleClick={() => setIsTagDialogOpen(true)}
       onKeyDown={handleKeyDown}
       tabIndex={0}
@@ -785,6 +805,7 @@ interface ChatListProps {
   onToggleForwardSelection?: (chatId: string) => void;
   onConfirmForward?: () => void;
   onCancelForward?: () => void;
+  onPrefetch?: (chatId: string) => void;
 }
 
 import { useInboxStore } from '@/hooks/use-inbox-store';
@@ -798,17 +819,18 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 
 // ... existing imports ...
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
+  const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [showMarketing, setShowMarketing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
   const [snoozedUntilMap, setSnoozedUntilMap] = useState<Record<string, number>>({});
@@ -826,7 +848,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
-  const debouncedSearch = useDebouncedValue(searchQuery, 220);
+  // const debouncedSearch = useDebouncedValue(searchQuery, 220); // Removed, replaced by debouncedSearchTerm
 
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
@@ -1069,7 +1091,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const matchesSnooze = !snoozedUntil || snoozedUntil <= now;
 
       // Search Logic
-      const query = debouncedSearch.toLowerCase();
+      const query = debouncedSearchTerm.toLowerCase(); // Changed to debouncedSearchTerm
       const protocol = chat.protocol || buildChatProtocol(chat.id);
       const matchesSearch =
         !query ||
@@ -1081,7 +1103,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearch, showMarketing, snoozedUntilMap]
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap] // Changed to debouncedSearchTerm
   );
 
   const filteredChats = useMemo(() => {
@@ -1244,11 +1266,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <Input
             placeholder="Pesquisar por nome, telefone ou mensagem..."
             className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchTerm} // Changed to searchTerm
+            onChange={(e) => setSearchTerm(e.target.value)} // Changed to setSearchTerm
             aria-label="Pesquisar conversas"
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && searchQuery.trim()) {
+              if (e.key === 'Enter' && searchTerm.trim()) { // Changed to searchTerm
                 e.preventDefault();
                 e.stopPropagation();
                 setIsSearchDialogOpen(true);
@@ -1261,7 +1283,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       <SearchDetailsDialog
         isOpen={isSearchDialogOpen}
         onOpenChange={setIsSearchDialogOpen}
-        searchQuery={searchQuery}
+        searchQuery={searchTerm} // Changed to searchTerm
         chats={chats}
         workspaceId={currentUser.activeWorkspaceId}
         onSelectChat={setSelectedChat}
@@ -1466,8 +1488,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     isSelected={selectedChat?.id === chat.id}
                     onSelect={setSelectedChat}
                     onUpdate={onUpdate}
-                    showMarketing={showMarketing}
                     currentUser={currentUser}
+                    showMarketing={showMarketing}
                     isForwarding={isForwarding}
                     isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
                     onToggleForwardSelection={onToggleForwardSelection}
@@ -1475,9 +1497,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     isSelectedForBulk={selectedBulkChats.has(chat.id)}
                     onToggleBulkSelection={handleToggleBulkSelection}
                     snoozedUntil={snoozedUntilMap[chat.id]}
-                    onSnooze={() => handleSnooze(chat.id)}
-                    onUnsnooze={() => handleUnsnooze(chat.id)}
-                    onAssign={handleAssignChat}
+                    onSnooze={chat.status === 'atendimentos' ? handleSnooze : undefined}
+                    onUnsnooze={chat.status === 'atendimentos' ? handleUnsnooze : undefined}
+                    onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
+                    onPrefetch={onPrefetch}
                   />
                 ))}
                 {hasMoreChats && activeTab === 'encerrados' && (

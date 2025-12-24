@@ -577,6 +577,26 @@ export default function CustomerChatLayout({
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
+  const prefetchChat = useCallback((chatId: string) => {
+    // 1. Check if we already have messages
+    const state = useInboxStore.getState();
+    const hasMessages = state.messagesByChat[chatId]?.length > 0;
+    if (hasMessages) return;
+
+    // 2. Check if we already promised (or are fetching) this chat recently
+    if (prefetchedHistoryRef.current.has(chatId)) return;
+
+    // 3. Mark as prefetched to avoid spam
+    prefetchedHistoryRef.current.add(chatId);
+
+    // 4. Trigger fetch
+    console.log('[PREFETCH] Hover prefetch started for:', chatId);
+    loadChatMessages(chatId).catch(err => {
+      console.error('[PREFETCH] Failed to prefetch:', err);
+      // On error, maybe allow retrying later? For now, we leave it in the set to avoid spam loops.
+    });
+  }, [loadChatMessages]);
+
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatId) return;
     const before = oldestLoadedMessageDate;
@@ -1208,6 +1228,7 @@ export default function CustomerChatLayout({
             onToggleForwardSelection={handleToggleForwardSelection}
             onConfirmForward={handleConfirmForward}
             onCancelForward={handleCancelForward}
+            onPrefetch={prefetchChat}
           />
         </ErrorBoundary>
         <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>

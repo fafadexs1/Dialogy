@@ -234,7 +234,8 @@ async function internalSendMessage(
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
     messageId?: string, // Opcional: ID da mensagem gerado pelo cliente
-    template?: { name: string; language: string; components: any[] } // New: support for templates
+    template?: { name: string; language: string; components: any[] }, // New: support for templates
+    apiContent?: string // Content to send to API (if different from DB content)
 ): Promise<{ success: boolean; error?: string; apiResponse?: any; message?: Message }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
@@ -321,10 +322,13 @@ async function internalSendMessage(
 
                     let apiResponse: any;
 
+                    // Use apiContent over content if provided
+                    const contentToSend = apiContent || content;
+
                     if (isQuestion) {
                         const questionId = lastMetadata.questionId || lastMsgRes.rows[0]?.message_id_from_api;
                         if (questionId) {
-                            apiResponse = await service.answerQuestion(questionId, content);
+                            apiResponse = await service.answerQuestion(questionId, contentToSend);
                         } else {
                             throw new Error('Não foi possível identificar a pergunta para responder.');
                         }
@@ -332,7 +336,7 @@ async function internalSendMessage(
                         // Post-sale message
                         const packId = lastMetadata.packId; // Order ID
                         const buyerId = lastMetadata.buyerId || remoteJid; // We stored buyerId in remoteJid too
-                        apiResponse = await service.sendMessage(packId, buyerId, content);
+                        apiResponse = await service.sendMessage(packId, buyerId, contentToSend);
                     }
 
                     // 3. Persist
@@ -344,7 +348,7 @@ async function internalSendMessage(
                         ) VALUES ($1, $2, 'text', $3, true, $4, true, $5, NOW())
                         RETURNING *`,
                         [
-                            workspaceId, chatId, content,
+                            workspaceId, chatId, content, // Persist original content
                             {
                                 sentBy: metadata?.sentBy || 'agent',
                                 platform: 'mercadolivre',
@@ -377,7 +381,7 @@ async function internalSendMessage(
                 const apiResponse = await service.sendMessage({
                     recipientId: metaCtx.externalUserId,
                     type: 'text',
-                    text: content,
+                    text: apiContent || content,
                 });
 
                 const persisted = await persistNormalizedMessage({
@@ -386,7 +390,7 @@ async function internalSendMessage(
                     contact: metaCtx.contact,
                     message: {
                         type: 'text',
-                        content,
+                        content: content, // Save original content
                         metadata,
                     },
                     platform: metaCtx.platform,
@@ -394,7 +398,7 @@ async function internalSendMessage(
                     externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
                     externalSenderId: metaCtx.externalUserId,
                     externalChannelId: metaCtx.externalChannelId,
-                    rawPayload: { request: { content }, response: apiResponse },
+                    rawPayload: { request: { content: apiContent || content }, response: apiResponse },
                     fromMe: true,
                     senderUserId: senderId,
                     senderSystemAgentId: metadata?.sentBy === 'system_agent' ? senderId : null,
@@ -433,7 +437,7 @@ async function internalSendMessage(
                 components: template.components
             });
         } else {
-            apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, content);
+            apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, apiContent || content);
         }
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
@@ -634,6 +638,19 @@ export const sendAgentMessageAction = withDebug(
             return { success: false, error: 'Usuário não autenticado.' };
         }
 
+        // Fetch user name for signature
+        let contentWithSignature = content;
+        try {
+            const userRes = await db.query('SELECT full_name FROM users WHERE id = $1', [user.id]);
+            const fullName = userRes.rows[0]?.full_name;
+            if (fullName) {
+                const firstName = fullName.trim().split(' ')[0].toUpperCase();
+                contentWithSignature = `*${firstName}*:\n\n${content}`;
+            }
+        } catch (err) {
+            console.error('[SEND_AGENT_MESSAGE] Falha ao obter nome do usuário para assinatura:', err);
+        }
+
         // Tenta Meta primeiro (Instagram/Messenger)
         const client = await db.connect();
         try {
@@ -648,7 +665,7 @@ export const sendAgentMessageAction = withDebug(
                     const apiResponse = await service.sendMessage({
                         recipientId: metaCtx.externalUserId,
                         type: 'text',
-                        text: content,
+                        text: contentWithSignature,
                     });
 
                     const persisted = await persistNormalizedMessage({
@@ -661,7 +678,7 @@ export const sendAgentMessageAction = withDebug(
                         externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
                         externalSenderId: metaCtx.externalUserId,
                         externalChannelId: metaCtx.externalChannelId,
-                        rawPayload: { request: { content }, response: apiResponse },
+                        rawPayload: { request: { content: contentWithSignature }, response: apiResponse },
                         fromMe: true,
                         senderUserId: user.id,
                         senderSystemAgentId: null,
@@ -679,7 +696,7 @@ export const sendAgentMessageAction = withDebug(
             client.release();
         }
 
-        return internalSendMessage(chatId, content, user.id, tabId, undefined, undefined, messageId);
+        return internalSendMessage(chatId, content, user.id, tabId, undefined, undefined, messageId, undefined, contentWithSignature);
     },
     {
         contextResolver: (chatId, content) => ({ payload: { chatId, content } })

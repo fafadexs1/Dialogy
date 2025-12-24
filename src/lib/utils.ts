@@ -43,9 +43,9 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
   // Then, apply rich text formatting for whatsapp-style markdown
   // Note: Lookbehind support varies, so we use a more compatible approach
   processedText = processedText
-    .replace(/(\s|^)\*(.*?)\*(\s|$)/g, '$1<b>$2</b>$3') // Bold
-    .replace(/(\s|^)_(.*?)_(\s|$)/g, '$1<i>$2</i>$3') // Italic
-    .replace(/(\s|^)~(.*?)~(\s|$)/g, '$1<s>$2</s>$3') // Strikethrough
+    .replace(/(\s|^)\*(.*?)\*(?=\s|$|[.,:;!?])/g, '$1<b>$2</b>') // Bold
+    .replace(/(\s|^)_(.*?)_(?=\s|$|[.,:;!?])/g, '$1<i>$2</i>') // Italic
+    .replace(/(\s|^)~(.*?)~(?=\s|$|[.,:;!?])/g, '$1<s>$2</s>') // Strikethrough
     .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
 
   // Finally, replace URLs with anchor tags
