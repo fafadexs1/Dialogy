@@ -82,7 +82,29 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action
         }));
 
-        return { config: selectedConfig, rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
+        // Fetch Gemini Integration Config
+        const integrationRes = await db.query(`
+            SELECT config, is_active 
+            FROM workspace_integrations 
+            WHERE workspace_id = $1 AND provider = 'gemini'
+        `, [workspaceId]);
+
+        let geminiKeyFromIntegration = null;
+        let transcriptionModelFromIntegration = null;
+
+        if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
+            const intConfig = integrationRes.rows[0].config;
+            geminiKeyFromIntegration = intConfig.apiKey;
+            transcriptionModelFromIntegration = intConfig.transcriptionModel;
+        }
+
+        const mergedConfig = {
+            ...selectedConfig,
+            gemini_api_key: geminiKeyFromIntegration || selectedConfig.gemini_api_key,
+            transcription_model: transcriptionModelFromIntegration || selectedConfig.transcription_model
+        };
+
+        return { config: mergedConfig, rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
 
     } catch (error) {
         console.error(`[GET_AUTOPILOT_CONFIG] Erro ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);

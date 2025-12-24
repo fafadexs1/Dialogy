@@ -43,6 +43,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { AddContactForm } from '../crm/add-contact-form';
 import { ContactStatisticsDialog } from '../crm/contact-statistics-dialog';
 import { buildChatProtocol, cn } from '@/lib/utils';
+import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -84,6 +85,10 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
         if (result.error) {
             toast({ title: "Erro ao transferir", description: result.error, variant: 'destructive' });
         } else {
+            if (result.chat) {
+                // Immediate update of local store with full chat details (tags, colors)
+                useInboxStore.getState().upsertChats([result.chat]);
+            }
             toast({ title: "Atendimento transferido!" });
             onTransferSuccess();
             setIsDialogOpen(false);

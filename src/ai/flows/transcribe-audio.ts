@@ -78,7 +78,7 @@ const transcribeAudioFlow = ai.defineFlow(
             data: base64Audio
           }
         },
-        { text: 'Transcribe this audio. Return ONLY the transcription text, nothing else.' }
+        { text: 'Transcreva este áudio para Português do Brasil (PT-BR). Retorne SOMENTE o texto da transcrição. Se o áudio estiver em outro idioma, traduza para o Português.' }
       ]);
 
       const transcription = result.response.text();

@@ -37,6 +37,7 @@ type InboxState = {
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
   markMessagesAsReadByRecipient: (chatId: string, upToDate: string) => void;
   updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
+  replaceOptimisticMessage: (chatId: string, optimisticId: string, realMessage: Message) => void;
   updateChat: (chatId: string, updates: Partial<Chat>) => void;
   reset: () => void;
 };
@@ -295,6 +296,22 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const updatedMessages = currentMessages.map((msg) =>
         msg.id === messageId ? { ...msg, ...updates } : msg
       );
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: updatedMessages,
+        },
+      };
+    });
+  },
+  replaceOptimisticMessage: (chatId, optimisticId, realMessage) => {
+    set((state) => {
+      const currentMessages = state.messagesByChat[chatId] || [];
+      // Replace the message with the matching optimisticId
+      const updatedMessages = currentMessages.map((msg) =>
+        msg.id === optimisticId ? realMessage : msg
+      );
+
       return {
         messagesByChat: {
           ...state.messagesByChat,

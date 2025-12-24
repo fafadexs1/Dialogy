@@ -10,8 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast';
 import { Loader2, Save, ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
-import { getAutopilotConfig, saveAutopilotConfig, createAutopilotAgent } from '@/actions/autopilot';
-import type { AutopilotConfig } from '@/lib/types';
+import { getIntegrationConfig, saveIntegrationConfig } from '@/actions/integrations';
 import { useCurrentUser } from '@/hooks/use-online-status';
 
 const GEMINI_MODELS = [
@@ -26,7 +25,12 @@ export default function GeminiIntegrationPage() {
     const user = useCurrentUser();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [config, setConfig] = useState<AutopilotConfig | null>(null);
+
+    // We only need the config for the key and model. 
+    // We don't need full AutopilotConfig anymore for this specific page, 
+    // unless we want to keep syncing? 
+    // User asked to separate. So we treat this page as "Global Workspace Gemini Config".
+
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState('gemini-2.0-flash-exp');
     const [customModel, setCustomModel] = useState('');
@@ -37,13 +41,13 @@ export default function GeminiIntegrationPage() {
             if (!user?.activeWorkspaceId) return;
 
             try {
-                const res = await getAutopilotConfig(user.activeWorkspaceId);
+                const { config, isActive } = await getIntegrationConfig(user.activeWorkspaceId, 'gemini');
 
-                if (res.config) {
-                    setConfig(res.config);
-                    setApiKey(res.config.gemini_api_key || '');
+                if (config) {
+                    setApiKey(config.apiKey || '');
+                    setTranscriptionModel(config.transcriptionModel || '');
 
-                    const currentModel = res.config.ai_model || 'gemini-2.0-flash-exp';
+                    const currentModel = config.aiModel || 'gemini-2.0-flash-exp';
                     const isKnownModel = GEMINI_MODELS.some(m => m.value === currentModel);
 
                     if (isKnownModel) {
@@ -51,17 +55,6 @@ export default function GeminiIntegrationPage() {
                     } else {
                         setModel('custom');
                         setCustomModel(currentModel);
-                    }
-                    setTranscriptionModel(res.config.transcription_model || '');
-                } else {
-                    const createRes = await createAutopilotAgent(user.activeWorkspaceId, 'Agente Gemini');
-                    if (createRes.success && createRes.id) {
-                        const newRes = await getAutopilotConfig(user.activeWorkspaceId, createRes.id);
-                        if (newRes.config) {
-                            setConfig(newRes.config);
-                            setApiKey('');
-                            setModel('gemini-2.0-flash-exp');
-                        }
                     }
                 }
             } catch (error) {
@@ -77,20 +70,19 @@ export default function GeminiIntegrationPage() {
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!config) return;
+        if (!user?.activeWorkspaceId) return;
 
         setSaving(true);
         try {
-            const formData = new FormData();
-            formData.append('workspaceId', config.workspace_id);
-            formData.append('configId', config.id);
-            formData.append('geminiApiKey', apiKey);
-
             const finalModel = model === 'custom' ? customModel : model;
-            formData.append('aiModel', finalModel);
-            formData.append('transcriptionModel', transcriptionModel);
 
-            const result = await saveAutopilotConfig(null, formData);
+            const config = {
+                apiKey,
+                aiModel: finalModel,
+                transcriptionModel
+            };
+
+            const result = await saveIntegrationConfig(user.activeWorkspaceId, 'gemini', config, true);
 
             if (result.success) {
                 toast({ title: 'Configurações salvas!', description: 'Sua integração com o Gemini foi atualizada.' });

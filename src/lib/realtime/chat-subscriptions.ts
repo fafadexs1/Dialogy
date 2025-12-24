@@ -39,17 +39,7 @@ export function subscribeToChatMessages({
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `chat_id=eq.${chatId}`,
-      },
-      onMessage,
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
+        event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
         filter: `chat_id=eq.${chatId}`,

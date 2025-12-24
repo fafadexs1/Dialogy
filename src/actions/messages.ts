@@ -24,6 +24,16 @@ import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 
+// Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
+function mapDbMessageToFrontend(row: any): Message {
+    return {
+        ...row,
+        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+        timestamp: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+        updatedAt: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at) : undefined,
+    } as Message;
+}
+
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
 
 async function getMarketingAutoCloseMs(workspaceId: string): Promise<number> {
@@ -225,7 +235,7 @@ async function internalSendMessage(
     instanceNameParam?: string, // Opcional: nome da instância para usar
     messageId?: string, // Opcional: ID da mensagem gerado pelo cliente
     template?: { name: string; language: string; components: any[] } // New: support for templates
-): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
+): Promise<{ success: boolean; error?: string; apiResponse?: any; message?: Message }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
     }
@@ -327,11 +337,12 @@ async function internalSendMessage(
 
                     // 3. Persist
                     const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
-                    await client.query(
+                    const res = await client.query(
                         `INSERT INTO messages (
                             workspace_id, chat_id, type, content, from_me, 
                             metadata, is_read, ${senderColumn}, created_at
-                        ) VALUES ($1, $2, 'text', $3, true, $4, true, $5, NOW())`,
+                        ) VALUES ($1, $2, 'text', $3, true, $4, true, $5, NOW())
+                        RETURNING *`,
                         [
                             workspaceId, chatId, content,
                             {
@@ -344,7 +355,8 @@ async function internalSendMessage(
                     );
 
                     await client.query('COMMIT');
-                    return { success: true };
+                    await client.query('COMMIT');
+                    return { success: true, message: mapDbMessageToFrontend(res.rows[0]) };
                 }
             } catch (mlErr: any) {
                 await client.query('ROLLBACK');
@@ -368,7 +380,7 @@ async function internalSendMessage(
                     text: content,
                 });
 
-                await persistNormalizedMessage({
+                const persisted = await persistNormalizedMessage({
                     channel: metaCtx.channel,
                     chat: metaCtx.chat,
                     contact: metaCtx.contact,
@@ -389,7 +401,7 @@ async function internalSendMessage(
                 });
 
                 await client.query('COMMIT');
-                return { success: true, apiResponse };
+                return { success: true, apiResponse, message: persisted as Message };
             } catch (metaErr) {
                 await client.query('ROLLBACK');
                 console.error('[SEND_MESSAGE_ACTION][META]', metaErr);
@@ -426,13 +438,15 @@ async function internalSendMessage(
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
+        let insertRes;
         if (messageId) {
-            await client.query(
+            insertRes = await client.query(
                 `INSERT INTO messages (
                     id, workspace_id, chat_id, type, content, from_me, 
                     message_id_from_api, api_message_status, instance_name, 
                     metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                RETURNING *`,
                 [
                     messageId, workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
@@ -440,12 +454,13 @@ async function internalSendMessage(
                 ]
             );
         } else {
-            await client.query(
+            insertRes = await client.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me, 
                     message_id_from_api, api_message_status, instance_name, 
                     metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING *`,
                 [
                     workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
@@ -460,7 +475,7 @@ async function internalSendMessage(
         // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
 
-        return { success: true, apiResponse };
+        return { success: true, apiResponse, message: mapDbMessageToFrontend(insertRes.rows[0]) };
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -490,7 +505,7 @@ async function internalSendMedia(
     tabId: string | null,
     metadata?: MessageMetadata,
     instanceNameParam?: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; messages?: Message[] }> {
     if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
     }
@@ -520,6 +535,7 @@ async function internalSendMedia(
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
         // 2. Process each file independently
+        const createdMessages: Message[] = [];
         for (const file of mediaFiles) {
             let apiResponse: any;
             let dbMessageType: Message['type'];
@@ -570,25 +586,28 @@ async function internalSendMedia(
             };
 
             // Insert into DB (Quick operation, grabs connection and releases immediately)
-            await db.query(
+            const insertRes = await db.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me,
                     message_id_from_api, api_message_status, instance_name,
                     metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING *`,
                 [
                     workspaceId, chatId, dbMessageType, caption, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
                     dbMetadata, true, senderId, tabId
                 ]
             );
+            createdMessages.push(mapDbMessageToFrontend(insertRes.rows[0]));
         }
+
 
         // Revalidação manual não é mais necessária com subscriptions.
         // A UI será atualizada via websockets.
         // revalidatePath('/', 'layout');
 
-        return { success: true };
+        return { success: true, messages: createdMessages as Message[] };
 
     } catch (error) {
         console.error('[SEND_MEDIA_ACTION] Erro:', error);
@@ -608,7 +627,7 @@ export const sendAgentMessageAction = withDebug(
         content: string,
         tabId: string | null,
         messageId?: string
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<{ success: boolean; error?: string; message?: Message }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -632,7 +651,7 @@ export const sendAgentMessageAction = withDebug(
                         text: content,
                     });
 
-                    await persistNormalizedMessage({
+                    const persisted = await persistNormalizedMessage({
                         channel: metaCtx.channel,
                         chat: metaCtx.chat,
                         contact: metaCtx.contact,
@@ -648,7 +667,7 @@ export const sendAgentMessageAction = withDebug(
                         senderSystemAgentId: null,
                         id: messageId,
                     });
-                    return { success: true };
+                    return { success: true, message: persisted as Message };
                 } catch (metaErr) {
                     console.error('[SEND_AGENT_MESSAGE][META]', metaErr);
                     return { success: false, error: formatMetaSendError(metaErr) };
@@ -677,7 +696,7 @@ export const sendInternalNoteAction = withDebug(
         chatId: string,
         content: string,
         tabId: string | null
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<{ success: boolean; error?: string; message?: Message }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -698,11 +717,12 @@ export const sendInternalNoteAction = withDebug(
 
             const { workspace_id: workspaceId } = chatInfoRes.rows[0];
 
-            await client.query(
+            const insertRes = await client.query(
                 `INSERT INTO messages (
                 workspace_id, chat_id, type, content, from_me, 
                 api_message_status, metadata, is_read, sender_user_id, sent_by_tab
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *`,
                 [
                     workspaceId, chatId, 'text', content, true,
                     'internal', { isInternalNote: true }, true, user.id, tabId
@@ -710,7 +730,7 @@ export const sendInternalNoteAction = withDebug(
             );
 
             await client.query('COMMIT');
-            return { success: true };
+            return { success: true, message: mapDbMessageToFrontend(insertRes.rows[0]) };
 
         } catch (error) {
             await client.query('ROLLBACK');

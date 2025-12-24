@@ -34,7 +34,7 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
  */
 export const assignChatToSelfAction = withDebug(
     'assign_chat_self',
-    async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string }> {
+    async function assignChatToSelfAction(chatId: string): Promise<{ success: boolean, error?: string, chat?: Chat }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -72,8 +72,27 @@ export const assignChatToSelfAction = withDebug(
             );
 
             console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
+
+            // Fetch updated chat with full details (tags, colors) to return to frontend
+            // This ensures the UI updates immediately with correct colors
+            const updatedRows = await fetchChats({
+                workspaceId,
+                userId: currentAgentId,
+                limit: 1,
+                includeChatId: chatId,
+                ownership: 'everyone',
+                statuses: []
+            });
+
+            let updatedChat: Chat | undefined;
+            if (updatedRows.length > 0) {
+                const timezone = await getWorkspaceTimezone(workspaceId);
+                const { chats } = await hydrateChats(updatedRows, timezone);
+                updatedChat = chats[0];
+            }
+
             // revalidatePath('/', 'layout'); // Removed to prevent page refresh
-            return { success: true };
+            return { success: true, chat: updatedChat };
         } catch (error) {
             console.error("Erro ao atribuir chat a si mesmo:", error);
             return { success: false, error: "Falha no servidor ao tentar assumir o atendimento." };
@@ -91,7 +110,7 @@ export const transferChatAction = withDebug(
         input: { chatId: string; teamId?: string; agentId?: string },
         // Optional parameter to accept a session-like object from an API call
         prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
         const supabase = await createClient();
 
         let sessionToUse = prefetchedSession;
@@ -260,7 +279,25 @@ export const transferChatAction = withDebug(
                 }
             }
             // revalidatePath('/', 'layout'); // Removed to prevent page refresh
-            return { success: true };
+
+            // Fetch updated chat with full details (tags, colors) to return to frontend
+            const updatedRows = await fetchChats({
+                workspaceId,
+                userId: currentAgentId, // Keep view as current agent
+                limit: 1,
+                includeChatId: chatId,
+                ownership: 'everyone',
+                statuses: []
+            });
+
+            let updatedChat: Chat | undefined;
+            if (updatedRows.length > 0) {
+                const timezone = await getWorkspaceTimezone(workspaceId);
+                const { chats } = await hydrateChats(updatedRows, timezone);
+                updatedChat = chats[0];
+            }
+
+            return { success: true, chat: updatedChat };
 
         } catch (error) {
             await client.query('ROLLBACK');
@@ -1361,6 +1398,58 @@ export const searchChatsAndContacts = withDebug(
     {
         contextResolver: (workspaceId, query) => ({ payload: { workspaceId, query } }),
         timeoutMs: 20000 // Increase timeout to 20s for complex search
+    }
+);
+
+export const refreshChatAction = withDebug(
+    'refresh_chat',
+    async function refreshChatAction(chatId: string): Promise<{ chat?: Chat; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { error: "Usuário não autenticado." };
+        }
+
+        try {
+            // 1. Get workspace_id for the chat
+            const chatRes = await db.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
+            if (chatRes.rowCount === 0) {
+                return { error: "Chat não encontrado." };
+            }
+            const workspaceId = chatRes.rows[0].workspace_id;
+
+            // 2. Fetch full chat data with joins
+            const rows = await fetchChats({
+                workspaceId,
+                userId: user.id,
+                limit: 1,
+                includeChatId: chatId,
+                ownership: 'everyone',
+                statuses: [] // no filter
+            });
+
+            if (rows.length === 0) {
+                return { error: "Chat não encontrado ou permissão negada." };
+            }
+
+            // 3. Hydrate to Chat object
+            // Reuse hydrateChats but we need to mock timezone or fetch it?
+            // Ideally we fetch it.
+            const timezone = await getWorkspaceTimezone(workspaceId);
+            const { chats } = await hydrateChats(rows, timezone);
+
+            if (chats.length === 0) return { error: "Erro ao processar dados do chat." };
+
+            return { chat: chats[0] };
+
+        } catch (error: any) {
+            console.error("Erro ao atualizar chat:", error);
+            return { error: "Falha no servidor." };
+        }
+    },
+    {
+        contextResolver: (chatId) => ({ payload: { chatId } })
     }
 );
 

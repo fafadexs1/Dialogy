@@ -117,7 +117,7 @@ function DraggableSoundTester({
 function LoadingSkeleton() {
   return (
     <div className="flex flex-1 w-full min-h-0 h-full bg-background/20 backdrop-blur-xl">
-      <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
+      <div className="flex flex-col w-[450px] shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
         <Skeleton className="h-12 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
@@ -148,7 +148,7 @@ function LoadingSkeleton() {
 
 function ChatListSkeleton() {
   return (
-    <div className="flex flex-[0_1_clamp(320px,24vw,400px)] min-w-0 max-w-full flex-col border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4 lg:flex-[0_1_clamp(330px,26vw,420px)]">
+    <div className="flex flex-col w-[450px] shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
       <Skeleton className="h-6 w-32 bg-muted" />
       <Skeleton className="h-10 w-full bg-muted" />
       <div className="space-y-2 mt-2">
@@ -1007,22 +1007,37 @@ export default function CustomerChatLayout({
     const channel = subscribeToWorkspaceChatUpdates({
       client: supabase,
       workspaceId,
-      onChatUpdate: (payload) => {
+      onChatUpdate: async (payload) => {
         console.log('[REALTIME] Chat update received:', payload);
-        const newChatData = payload.new as any; // Use any to access snake_case properties
+        const newChatData = payload.new as any;
 
-        const chatUpdate: Partial<Chat> = {
+        // 1. Optimistic update (preserving existing fields by merging top-level)
+        const optimisticUpdate: Partial<Chat> = {
           ...newChatData,
           agentId: newChatData.agent_id,
         };
-
+        // Fix agent object minimally if needed for optimistic update
         if (newChatData.agent_id === initialUser?.id) {
-          chatUpdate.agent = initialUser;
+          optimisticUpdate.agent = initialUser;
         } else if (newChatData.agent_id === null) {
-          chatUpdate.agent = undefined;
+          optimisticUpdate.agent = undefined;
         }
+        useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
 
-        useInboxStore.getState().upsertChats([chatUpdate as Chat]);
+        // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
+        try {
+          // Dynamic import to avoid circular dependency issues if any, though likely safe.
+          // But simpler: just import at top if possible. trying dynamic for safety in this robust component.
+          const { refreshChatAction } = await import('@/actions/chats');
+          const result = await refreshChatAction(newChatData.id);
+          if (result.chat) {
+            useInboxStore.getState().upsertChats([result.chat]);
+          } else {
+            console.warn('[REALTIME] Failed to refresh chat details:', result.error);
+          }
+        } catch (err) {
+          console.error('[REALTIME] Error refreshing chat:', err);
+        }
       },
       onStatusChange: (status) => {
         console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`);

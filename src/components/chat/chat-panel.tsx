@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
+import { generateChatSummaryAction } from '@/actions/ai';
 import { v4 as uuidv4 } from 'uuid';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -46,6 +47,7 @@ import {
     Users,
     Globe,
     Lock,
+    Sparkles,
     MapPin,
     FileText,
     Brain,
@@ -131,6 +133,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
     const [notes, setNotes] = React.useState('');
     const { toast } = useToast();
+    const [isGeneratingSummary, setIsGeneratingSummary] = React.useState(false);
 
     const show = isOpen !== undefined ? isOpen : internalIsOpen;
     const setShow = onOpenChange || setInternalIsOpen;
@@ -141,6 +144,18 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
             return chat.team_id && reason.team_ids.includes(chat.team_id);
         });
     }, [reasons, chat.team_id]);
+
+    const handleGenerateSummary = async () => {
+        setIsGeneratingSummary(true);
+        const result = await generateChatSummaryAction(chat.id);
+        if (result.success && result.summary) {
+            setNotes(prev => prev ? `${prev}\n\n[Resumo IA]: ${result.summary}` : `[Resumo IA]: ${result.summary}`);
+            toast({ title: "Resumo gerado!", description: "O resumo foi adicionado às notas." });
+        } else {
+            toast({ title: "Erro ao gerar resumo", description: result.error || "Falha desconhecida.", variant: "destructive" });
+        }
+        setIsGeneratingSummary(false);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -188,8 +203,21 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
-                            <Textarea id="close-notes" placeholder="Adicione uma observação sobre o encerramento..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+                            <div className="flex justify-between items-center">
+                                <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleGenerateSummary}
+                                    disabled={isGeneratingSummary}
+                                    className="h-6 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-400/10"
+                                >
+                                    {isGeneratingSummary ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}
+                                    Gerar Resumo com IA
+                                </Button>
+                            </div>
+                            <Textarea id="close-notes" placeholder="Adicione uma observação sobre o encerramento..." value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[100px]" />
                         </div>
                     </div>
                     <DialogFooter>
@@ -304,6 +332,7 @@ export default function ChatPanel({
     const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
     const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+    const replaceOptimisticMessage = useInboxStore((state) => state.replaceOptimisticMessage);
     useEffect(() => {
         canLoadOlderRef.current = !((chat as any)?.protocolScoped) && canLoadOlder;
     }, [canLoadOlder, chat]);
@@ -696,17 +725,25 @@ export default function ChatPanel({
             let mediatype: MediaFileType['mediatype'] = 'document';
             let thumbnail: string | undefined;
 
+            // Fallback detection by extension
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            const isAudioExt = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'webm'].includes(ext || '');
+
             if (file.type.startsWith('image/')) mediatype = 'image';
-            if (file.type.startsWith('video/')) {
+            else if (file.type.startsWith('video/')) {
                 mediatype = 'video';
                 thumbnail = await generateVideoThumbnail(file);
+            } else if (file.type.startsWith('audio/') || isAudioExt) {
+                mediatype = 'audio' as any;
             }
+
+            const finalMimeType = file.type || (isAudioExt ? 'audio/mpeg' : file.type) || 'application/octet-stream';
 
             return {
                 id: `${file.name}-${file.lastModified}`,
                 file,
                 name: file.name,
-                type: file.type,
+                type: finalMimeType,
                 mediatype,
                 base64,
                 thumbnail,
@@ -835,6 +872,7 @@ export default function ChatPanel({
 
                 let captionToSend = currentMessageText;
                 const totalFiles = currentMediaFiles.length;
+                let lastResult: { success: boolean; error?: string; messages?: Message[] } | null = null;
 
                 for (let i = 0; i < totalFiles; i++) {
                     const mf = currentMediaFiles[i];
@@ -865,6 +903,7 @@ export default function ChatPanel({
                         const currentCaption = i === 0 ? captionToSend : '';
 
                         const result = await sendMediaAction(chat.id, currentCaption, filePayload, tabId);
+                        lastResult = result;
 
                         if (result.error) {
                             throw new Error(result.error);
@@ -902,18 +941,49 @@ export default function ChatPanel({
                 lastSendDraftRef.current = null;
                 onActionSuccess(); // Trigger update
 
+                if (lastResult?.error) throw new Error(lastResult.error);
+
+                if (lastResult?.messages && lastResult.messages.length > 0 && optimisticId) {
+                    replaceOptimisticMessage(chat.id, optimisticId, lastResult.messages[0]);
+                }
             } else if (isInternalNote) {
                 const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
                 if (result.error) throw new Error(result.error);
                 setSendState('idle');
                 setLastSendError(null);
                 lastSendDraftRef.current = null;
+                if (result.message && optimisticId) {
+                    const realMessage = {
+                        ...result.message,
+                        sender: {
+                            id: currentUser.id,
+                            name: currentUser.name,
+                            avatar: currentUser.avatar || currentUser.avatar_url,
+                            type: 'user'
+                        },
+                        formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
+                    } as Message;
+                    replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                }
             } else {
                 const result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
                 if (result.error) throw new Error(result.error);
                 setSendState('idle');
                 setLastSendError(null);
                 lastSendDraftRef.current = null;
+                if (result.message && optimisticId) {
+                    const realMessage = {
+                        ...result.message,
+                        sender: {
+                            id: currentUser.id,
+                            name: currentUser.name,
+                            avatar: currentUser.avatar || currentUser.avatar_url,
+                            type: 'user'
+                        },
+                        formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
+                    } as Message;
+                    replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                }
             }
 
         } catch (error) {
@@ -961,12 +1031,19 @@ export default function ChatPanel({
             base64: publicUrl, // Passing URL instead of base64
             mimetype,
             filename: 'audio_gravado.mp3', // Keep this filename to trigger voice note handling
-            mediatype: 'audio',
+            mediatype: 'audio' as any, // Cast to any to avoid strict type check issue temporarily
             thumbnail: undefined
         }], tabId);
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+        } else if ((result as any).messages && (result as any).messages.length > 0) {
+            // For audio recording, we don't have an optimistic text message to replace,
+            // but we might want to manually append it if we haven't already.
+            // However, sendMediaAction usually handles its own optimistic preview if implemented? 
+            // Actually, audio recorder in this project doesn't seem to add an optimistic row beforehand.
+            // It just uploads and sends. So we can append the REAL message now to make it instant.
+            appendMessagesToChat(chat.id, (result as any).messages);
         }
     };
 

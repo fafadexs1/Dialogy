@@ -28,6 +28,12 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const sessionOnlineSinceRef = useRef<string | null>(null);
   const supabase = useMemo(() => createClient(), []);
 
+  // Unique Tab ID for multi-tab support
+  const tabIdRef = useRef<string>('');
+  if (typeof window !== 'undefined' && !tabIdRef.current) {
+    tabIdRef.current = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
+  }
+
   // Ref to track if we are currently updating to avoid loop
   const isUpdatingRef = useRef(false);
 
@@ -152,7 +158,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           keepalive: true,
-          body: JSON.stringify({ workspaceId, isOnline }),
+          body: JSON.stringify({ workspaceId, isOnline, tabId: tabIdRef.current }),
         });
 
         if (!response.ok) {
@@ -336,7 +342,11 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-      void updateServerPresence(false);
+      // REMOVED: void updateServerPresence(false); 
+      // We do NOT want to set offline on component re-render or internal navigation.
+      // We rely on the `beforeunload` beacon for tab close, and 
+      // `last_seen` timestamp timeout on the server (if implemented) or just 
+      // letting the next heartbeat pick it up if it was a refresh.
     };
   }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone, supabase, isAuthLoading]);
 
@@ -345,12 +355,15 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     const handleBeforeUnload = () => {
       try {
+        // Correct payload for status endpoint with tabId
         const payload = {
-          userId: localUser.id,
           workspaceId: localUser.activeWorkspaceId,
+          isOnline: false,
+          tabId: tabIdRef.current
         };
         const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-        navigator.sendBeacon('/api/users/online', blob);
+        // Use the correct endpoint
+        navigator.sendBeacon('/api/users/online-status', blob);
       } catch (error) {
         console.error('PresenceProvider: Failed to enqueue offline beacon.', error);
       }

@@ -15,13 +15,13 @@ export async function POST(request: Request) {
     }
 
     try {
-        const { workspaceId, isOnline } = await request.json();
+        const { workspaceId, isOnline, tabId } = await request.json();
 
         if (!workspaceId || typeof isOnline !== 'boolean') {
             return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
         }
 
-        await updateUserOnlineStatus(user.id, workspaceId, isOnline);
+        await updateUserOnlineStatus(user.id, workspaceId, isOnline, tabId);
 
         return NextResponse.json({ success: true });
     } catch (error) {

@@ -14,29 +14,171 @@ const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
  * Persist workspace-level presence so that server-side flows (e.g., load-balancing)
  * can reason about which agents are currently online.
  */
-export async function updateUserOnlineStatus(userId: string, workspaceId: string, isOnline: boolean): Promise<void> {
+export async function updateUserOnlineStatus(userId: string, workspaceId: string, isOnline: boolean, tabId?: string): Promise<void> {
     if (!userId || !workspaceId) {
         console.warn('[UPDATE_USER_STATUS] Missing userId or workspaceId.');
         return;
     }
 
     try {
+        // 1. Ensure the 'metadata' column exists for session tracking (Soft Migration)
+        // We use 'metadata' generic column to store active_sessions
+        await db.query(`
+            ALTER TABLE user_workspace_presence ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+        `);
+
+        // 2. Perform Atomic Update with Session Logic
+        // Logic:
+        // - Retrieve current map of { tabId: timestamp } from metadata->'active_sessions'
+        // - Filter out stale sessions (> 45s ago)
+        // - If tabId provided:
+        //    - If isOnline=true: Upsert tabId with NOW()
+        //    - If isOnline=false: Remove tabId
+        // - Determine is_online: count(remaining_sessions) > 0
+
+        const nowIso = new Date().toISOString();
+        const ttlSeconds = 45; // 45 seconds tolerance for heartbeat
+
+        const query = `
+        INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen, metadata)
+        VALUES ($1, $2, $3, CASE WHEN $3 THEN NOW() ELSE NULL END, NOW(), $4)
+        ON CONFLICT (user_id, workspace_id)
+        DO UPDATE SET
+            last_seen = NOW(),
+            metadata = (
+                SELECT 
+                    jsonb_build_object(
+                         'active_sessions',
+                         COALESCE(
+                            (
+                                SELECT jsonb_object_agg(key, value)
+                                FROM jsonb_each_text(COALESCE(user_workspace_presence.metadata->'active_sessions', '{}'::jsonb))
+                                WHERE 
+                                    -- Prune stale sessions (older than TTL)
+                                    (value::timestamp > (NOW() - INTERVAL '${ttlSeconds} seconds'))
+                                    -- AND remove current tabId if setting offline
+                                    AND ($6 = FALSE OR key != $5)
+                            ),
+                            '{}'::jsonb
+                         ) 
+                         || 
+                         -- Add/Update current tabId if Online
+                         CASE 
+                             WHEN $6 = TRUE THEN jsonb_build_object($5, NOW())
+                             ELSE '{}'::jsonb
+                         END
+                    )
+            ),
+            is_online = (
+                SELECT COUNT(*) > 0
+                FROM jsonb_each_text(
+                    COALESCE(
+                        (
+                            SELECT jsonb_object_agg(key, value)
+                            FROM jsonb_each_text(COALESCE(user_workspace_presence.metadata->'active_sessions', '{}'::jsonb))
+                            WHERE 
+                                (value::timestamp > (NOW() - INTERVAL '${ttlSeconds} seconds'))
+                                AND ($6 = FALSE OR key != $5)
+                        ),
+                        '{}'::jsonb
+                    ) 
+                    || 
+                    CASE 
+                         WHEN $6 = TRUE THEN jsonb_build_object($5, NOW())
+                         ELSE '{}'::jsonb
+                    END
+                )
+            ),
+            online_since = CASE
+                -- If it WAS offline and NOW becomes online (based on logic above), set online_since
+                -- Logic: If the NEW is_online state is true and old was false (or null), set NOW().
+                -- Simplification: If resulting is_online is TRUE, keep existing online_since OR set to NOW() if null.
+                -- However, in a complex single query, referencing the "new" value is hard.
+                -- We approximate: If we are adding a session and it was empty effectively, it's a new start.
+                -- For simplicity, we keep existing valid online_since or set new if it was null.
+                WHEN (
+                    SELECT COUNT(*) > 0
+                    FROM jsonb_each_text( ...same logic... ) 
+                    -- (Omitting full repetition for brevity in comments, handled by simple coalesce below)
+                ) THEN COALESCE(user_workspace_presence.online_since, NOW())
+                ELSE NULL
+            END; 
+        `;
+
+        // Simplified Query using a Function or just simpler Logic in JS?
+        // JS Logic is safer and easier to debug than complex SQL JSON manipulation regarding types.
+        // Let's do Read-Modify-Write in a Transaction. It's safe enough for presence (low contention per user).
+
+        await db.query('BEGIN');
+
+        // A. Read current state
+        const readRes = await db.query(
+            `SELECT metadata FROM user_workspace_presence WHERE user_id = $1 AND workspace_id = $2 FOR UPDATE`,
+            [userId, workspaceId]
+        );
+
+        let metadata = readRes.rows[0]?.metadata || {};
+        let activeSessions: Record<string, string> = metadata.active_sessions || {};
+
+        // B. Update Logic
+        const threshold = new Date(Date.now() - ttlSeconds * 1000).getTime();
+
+        // Prune stale
+        const nextSessions: Record<string, string> = {};
+        for (const [tid, ts] of Object.entries(activeSessions)) {
+            if (new Date(ts as string).getTime() > threshold) {
+                nextSessions[tid] = ts as string;
+            }
+        }
+
+        // Handle current Tab
+        if (tabId) {
+            if (isOnline) {
+                nextSessions[tabId] = new Date().toISOString();
+            } else {
+                delete nextSessions[tabId];
+            }
+        } else {
+            // Legacy/Fallback (no tabID): Just force the state logic purely? 
+            // If no tabID, we can't do multi-tab safely. 
+            // We assume "default" session or just rely on pure Heartbeat if we enforce tabId on frontend.
+            // But for safety:
+            if (isOnline) {
+                nextSessions['default'] = new Date().toISOString();
+            } else {
+                // Aggressive offline if no tabId provided (legacy behavior)
+                // Or just remove 'default'
+                delete nextSessions['default'];
+            }
+        }
+
+        const sessionCount = Object.keys(nextSessions).length;
+        const newIsOnline = sessionCount > 0;
+
+        metadata.active_sessions = nextSessions;
+
+        // C. Update DB
         await db.query(
             `
-            INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
-            VALUES ($1, $2, $3, CASE WHEN $3 THEN NOW() ELSE NULL END, NOW())
+            INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen, metadata)
+            VALUES ($1, $2, $3, CASE WHEN $3 THEN NOW() ELSE NULL END, NOW(), $4)
             ON CONFLICT (user_id, workspace_id)
             DO UPDATE SET
-                is_online = EXCLUDED.is_online,
-                online_since = CASE
-                    WHEN EXCLUDED.is_online THEN COALESCE(user_workspace_presence.online_since, NOW())
+                is_online = $3,
+                last_seen = NOW(),
+                metadata = $4,
+                online_since = CASE 
+                    WHEN $3 THEN COALESCE(user_workspace_presence.online_since, NOW())
                     ELSE NULL
-                END,
-                last_seen = NOW();
+                END
             `,
-            [userId, workspaceId, isOnline]
+            [userId, workspaceId, newIsOnline, metadata]
         );
+
+        await db.query('COMMIT');
+
     } catch (error) {
+        await db.query('ROLLBACK').catch(() => { }); // prevent throwing if no tx
         console.error(`[UPDATE_USER_STATUS] Failed to update online status for user ${userId}:`, error);
     }
 }

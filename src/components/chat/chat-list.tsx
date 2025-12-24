@@ -513,7 +513,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-2 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 h-[112px] overflow-hidden",
+        "relative flex items-start gap-3 p-3 cursor-pointer group rounded-xl mx-3 my-1 transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 h-[112px] overflow-hidden",
         isSelected && !isForwarding && !isBulkMode
           ? "bg-sidebar-accent dark:bg-white/10 dark:border-white/10 shadow-sm"
           : "hover:bg-muted/50 dark:hover:bg-white/5",
@@ -924,12 +924,22 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const confirmAssignChat = async () => {
     if (!chatToAssign) return;
 
+    // Call unguarded or guarded? The component calls guarded usually.
+    // guardedAssignChat logic passes through the result from assignChatToSelfAction
     const result = await guardedAssignChat(chatToAssign.id);
+
     if (result.success) {
       toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact.name} agora está com você.` });
+
+      // If we got the full chat back (with updated colors/tags/status), update the store immediately
+      // This prevents the "transparent tag" glitch while waiting for realtime/refresh
+      if ((result as any).chat) {
+        useInboxStore.getState().upsertChats([(result as any).chat]);
+      }
+
       onUpdate();
     } else {
-      toast({ title: 'Não foi possível assumir', description: result.error, variant: 'destructive' });
+      toast({ title: 'Não foi possível assumir', description: result.error || 'Erro desconhecido', variant: 'destructive' });
     }
     setChatToAssign(null);
   };
@@ -1112,7 +1122,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-[0_1_clamp(320px,24vw,400px)] max-w-full flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 lg:flex-[0_1_clamp(330px,26vw,420px)]">
+    <div
+      className="flex h-full shrink-0 flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 transition-none"
+      style={{ width: '450px', minWidth: '450px', maxWidth: '450px' }}
+    >
       {/* Header */}
       <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border dark:border-white/10 space-y-4">
         <div className="flex items-center justify-between">
@@ -1443,7 +1456,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       {/* Chat list */}
       <div className="flex-1 overflow-hidden relative">
         <ScrollArea className="h-full flex-1 min-h-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          <div className="space-y-1 p-2">
+          <div className="space-y-1 p-3">
             {filteredChats.length > 0 ? (
               <>
                 {filteredChats.map((chat) => (

@@ -116,10 +116,28 @@ export async function processAutopilotForChat(
     };
 
     // Prefer the agent key, but fall back to any workspace Gemini key (Integrações > Gemini)
-    const workspaceGeminiApiKey =
+    // Legacy: Check if any agent has a key
+    let workspaceGeminiApiKey =
         (autopilotAgents || [])
             .map(a => a.gemini_api_key)
             .find((k: string | null | undefined) => !!k && k.trim().length > 0) || undefined;
+
+    // New: Check workspace_integrations if not found
+    if (!workspaceGeminiApiKey) {
+        try {
+            const configRes = await db.query(`
+                SELECT config->>'apiKey' as api_key 
+                FROM workspace_integrations 
+                WHERE workspace_id = $1 AND provider = 'gemini' AND is_active = true 
+                LIMIT 1
+            `, [workspaceId]);
+            if (configRes.rows.length > 0) {
+                workspaceGeminiApiKey = configRes.rows[0].api_key;
+            }
+        } catch (e) {
+            console.error('[AUTOPILOT_SERVICE] Failed to fetch integration key:', e);
+        }
+    }
 
     try {
         // 3. Generate Response
