@@ -1587,6 +1587,7 @@ async function fetchChatsDelta({
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
             ), 0) AS unread_count,
             t.name AS team_name,
+            t.id AS team_id,
             eai.type AS instance_type,
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,

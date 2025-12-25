@@ -106,6 +106,8 @@ import { AudioRecorder } from './audio-recorder';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { motion } from 'framer-motion';
 
 import { FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
@@ -273,9 +275,39 @@ export default function ChatPanel({
 }: ChatPanelProps) {
 
     const updateChat = useInboxStore(state => state.updateChat);
+    const drafts = useInboxStore(state => state.drafts);
+    const setDraft = useInboxStore(state => state.setDraft);
     const [newMessage, setNewMessage] = useState('');
     const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
+    const chatRef = useRef(chat?.id);
+
+    // Robust Draft Switching Logic (No Flicker)
+    useLayoutEffect(() => {
+        if (chat?.id !== chatRef.current) {
+            // Save draft for previous chat
+            if (chatRef.current) {
+                setDraft(chatRef.current, newMessage);
+            }
+
+            // Load draft for new chat
+            if (chat?.id) {
+                // Must read drafts from the current render scope
+                setNewMessage(drafts[chat.id] || '');
+                chatRef.current = chat.id;
+            }
+        }
+    }, [chat?.id, drafts, setDraft, newMessage]); // Dependencies for closure freshness
+
+    // Auto-save while typing (Debounced)
+    useEffect(() => {
+        if (!chat?.id) return;
+        const timer = setTimeout(() => {
+            setDraft(chat.id, newMessage);
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [newMessage, chat?.id, setDraft]);
+
     const [isAiAgentActive, setIsAiAgentActive] = useState(chat?.is_autopilot_active ?? false);
     const [isInternalNote, setIsInternalNote] = useState(false);
     const autopilotSwitchTouchedRef = useRef(false);
@@ -298,7 +330,7 @@ export default function ChatPanel({
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
     const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
 
-    const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contentEditableRef = useRef<any>(null);
     const processedMessageIds = useRef(new Set());
@@ -384,13 +416,9 @@ export default function ChatPanel({
     }, [chat?.id, chat?.is_autopilot_active]);
 
     const tryLoadOlder = useCallback(() => {
-        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
-        if (!viewport) return;
+        // Virtuoso calls this when we reach top, so we don't need to check scrollTop manually anymore.
         if ((chat as any)?.protocolScoped) return;
         if (!canLoadOlderRef.current || isFetchingHistoryRef.current || showFullHistory) return;
-        const { scrollTop } = viewport;
-
-        if (scrollTop >= 120) return;
 
         isFetchingHistoryRef.current = true;
         setIsLoadingOlderMessages(true);
@@ -399,37 +427,20 @@ export default function ChatPanel({
             .finally(() => {
                 isFetchingHistoryRef.current = false;
                 setIsLoadingOlderMessages(false);
-                // Se ainda no topo e ainda há histórico, continue puxando.
-                if (viewport.scrollTop < 120 && canLoadOlderRef.current) {
-                    requestAnimationFrame(tryLoadOlder);
-                }
             });
     }, [onLoadOlderMessages, showFullHistory, chat]);
 
     useEffect(() => {
-        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
-        if (!viewport) return;
-
         const handleScroll = () => {
-            const { scrollTop: currentTop, scrollHeight, clientHeight } = viewport;
-            const isScrolledUp = scrollHeight - currentTop - clientHeight > 100;
-            userScrolledUpRef.current = isScrolledUp;
-            if (currentTop < 120) {
-                tryLoadOlder();
-            }
+            // Logic moved to Virtuoso
         };
-
-        handleScroll();
-        viewport.addEventListener('scroll', handleScroll);
-        return () => {
-            viewport.removeEventListener('scroll', handleScroll);
-        };
+        // Removed manual scroll listener
     }, [tryLoadOlder]);
 
 
     useEffect(() => {
-        if (canLoadOlderRef.current) {
-            requestAnimationFrame(tryLoadOlder);
+        if (canLoadOlderRef.current && userScrolledUpRef.current === false) {
+            // Auto-scroll logic handled by Virtuoso followOutput
         }
     }, [tryLoadOlder, showFullHistory]);
 
@@ -471,31 +482,8 @@ export default function ChatPanel({
         return chat?.messages || [];
     }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages]);
 
-    useLayoutEffect(() => {
-        const viewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
-        if (!viewport) return;
-
-        const currentScrollHeight = viewport.scrollHeight;
-        const currentFirstMessageId = messagesToRender[0]?.id;
-        const previousFirstMessageId = previousFirstMessageIdRef.current;
-        const previousScrollHeight = previousScrollHeightRef.current;
-        const addedHeight = currentScrollHeight - previousScrollHeight;
-
-        if (previousFirstMessageId && currentFirstMessageId !== previousFirstMessageId && addedHeight > 0) {
-            // Adjust scroll for prepended messages
-            requestAnimationFrame(() => {
-                viewport.scrollTop += addedHeight;
-            });
-        } else if (!userScrolledUpRef.current) {
-            // Auto-scroll to bottom if not manually scrolled up
-            requestAnimationFrame(() => {
-                viewport.scrollTop = viewport.scrollHeight;
-            });
-        }
-
-        previousScrollHeightRef.current = currentScrollHeight;
-        previousFirstMessageIdRef.current = currentFirstMessageId || null;
-    }, [messagesToRender, messagesToRender.length]);
+    // Layout effect for manual scroll removed as Virtuoso handles it
+    // useLayoutEffect(() => { ... }, [messagesToRender, messagesToRender.length]);
 
     // VIRTUALIZAÇÃO DESATIVADA DEVIDO A BUGS VISUAIS
     const visibleMessages = messagesToRender;
@@ -821,13 +809,10 @@ export default function ChatPanel({
             // Force scroll to bottom by resetting user scroll state
             userScrolledUpRef.current = false;
 
-            // Attempt immediate scroll (though layout effect handles the main scroll after render)
-            if (scrollAreaRef.current) {
-                const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]') as HTMLElement;
-                if (viewport) {
-                    viewport.scrollTop = viewport.scrollHeight;
-                }
-            }
+            // Virtuoso handles auto-scroll via followOutput prop or ref
+            setTimeout(() => {
+                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length, align: 'end', behavior: 'smooth' });
+            }, 50);
         }
 
         try {
@@ -913,26 +898,40 @@ export default function ChatPanel({
                 }
             } else if (isInternalNote) {
                 const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
-                if (result.error) throw new Error(result.error);
-                setSendState('idle');
-                setLastSendError(null);
-                lastSendDraftRef.current = null;
-                if (result.message && optimisticId) {
-                    const realMessage = {
-                        ...result.message,
-                        sender: {
-                            id: currentUser.id,
-                            name: currentUser.name,
-                            avatar: currentUser.avatar || currentUser.avatar_url,
-                            type: 'user'
-                        },
-                        formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
-                    } as Message;
-                    replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                if (result.success) {
+                    reportClientMetric('message_sent', (performance.now() - sendStart));
+                    // Smart Polling: Refresh chat data to confirm status updates (e.g. from 'queue' to 'attending')
+                    onActionSuccess();
+
+                    // Clear draft
+                    setDraft(chat.id, '');
+
+                    if (result.message && optimisticId) {
+                        const realMessage = {
+                            ...result.message,
+                            sender: {
+                                id: currentUser.id,
+                                name: currentUser.name,
+                                avatar: currentUser.avatar || currentUser.avatar_url,
+                                type: 'user'
+                            },
+                            formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
+                        } as Message;
+                        replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                    }
+                } else {
+                    throw new Error(result.error);
                 }
             } else {
                 const result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
                 if (result.error) throw new Error(result.error);
+
+                // Smart Polling: Refresh chat data to confirm status updates
+                onActionSuccess();
+
+                // Clear draft
+                setDraft(chat.id, '');
+
                 setSendState('idle');
                 setLastSendError(null);
                 lastSendDraftRef.current = null;
@@ -1118,10 +1117,12 @@ export default function ChatPanel({
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
-                    <Avatar className="h-10 w-10 border border-border ring-2 ring-background">
-                        <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-                        <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <motion.div layoutId={`avatar-morph-${chat.id}`}>
+                        <Avatar className="h-10 w-10 border border-border ring-2 ring-background">
+                            <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
+                            <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                    </motion.div>
                     <div>
                         <h2 className="font-semibold text-foreground flex items-center gap-2">
                             {chat.contact.name}
@@ -1318,62 +1319,79 @@ export default function ChatPanel({
             </header>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto relative" >
-                <div className="h-full overflow-y-auto" ref={scrollAreaRef as any}>
-                    <div
-                        className="relative p-2.5 md:p-6 pb-4"
-                    >
-
-                        {isLoadingOlderMessages && canLoadOlder && (
-                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-muted-foreground text-xs flex items-center gap-2">
+            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
+                <Virtuoso
+                    ref={virtuosoRef}
+                    style={{ height: '100%', width: '100%' }}
+                    data={visibleMessages}
+                    initialTopMostItemIndex={visibleMessages.length - 1}
+                    followOutput={(isAtBottom) => {
+                        // If user is near bottom, keep sticking to bottom.
+                        // If user scrolled up, don't auto-scroll.
+                        if (isAtBottom || !userScrolledUpRef.current) {
+                            return 'smooth';
+                        }
+                        return false;
+                    }}
+                    atBottomStateChange={(atBottom) => {
+                        userScrolledUpRef.current = !atBottom;
+                    }}
+                    startReached={() => {
+                        if (canLoadOlder && !isLoadingOlderMessages) {
+                            tryLoadOlder();
+                        }
+                    }}
+                    components={{
+                        Header: () => isLoadingOlderMessages ? (
+                            <div className="py-4 flex justify-center text-muted-foreground text-xs gap-2">
                                 <Loader2 className="h-4 w-4 animate-spin" />
                                 <span>Carregando mensagens anteriores...</span>
                             </div>
-                        )}
-                        <div style={{ paddingTop: padTop, paddingBottom: padBottom }} className="space-y-1">
-                            {visibleMessages.map((message, index) => {
-                                const absoluteIndex = startIndex + index;
-                                const prevMessage = absoluteIndex > 0 ? messagesToRender[absoluteIndex - 1] : undefined;
-                                return (
-                                    <MessageItem
-                                        key={message.id}
-                                        message={message}
-                                        prevMessage={prevMessage}
-                                        workspaceTimezone={workspaceTimezone}
-                                        onDelete={handleDeleteMessage}
-                                        currentUserId={currentUser.id}
-                                        instanceName={chat.instance_name}
-                                        onForward={handleForwardMessage}
-                                    />
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-
+                        ) : null,
+                        Footer: () => <div className="h-4" /> // Spacing at bottom
+                    }}
+                    itemContent={(index, message) => {
+                        const prevMessage = index > 0 ? visibleMessages[index - 1] : undefined;
+                        return (
+                            <div className="px-2 md:px-6 py-0.5">
+                                <MessageItem
+                                    key={message.id}
+                                    message={message}
+                                    prevMessage={prevMessage}
+                                    workspaceTimezone={workspaceTimezone}
+                                    onDelete={handleDeleteMessage}
+                                    currentUserId={currentUser.id}
+                                    instanceName={chat.instance_name}
+                                    onForward={handleForwardMessage}
+                                />
+                            </div>
+                        );
+                    }}
+                />
             </div>
 
 
-            {isChatOpen ? (
-                <footer className="p-2 md:p-4 bg-transparent z-20 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-[calc(1rem+env(safe-area-inset-bottom))] transition-[padding] data-[state=open]:p-0">
-                    {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                        <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-md max-h-40 overflow-y-auto shadow-xl">
-                            {filteredShortcuts.map(shortcut => (
-                                <button
-                                    key={shortcut.id}
-                                    className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors"
-                                    onClick={() => handleShortcutSelect(shortcut)}
-                                >
-                                    <span className="font-bold text-primary">/{shortcut.name}</span>
-                                    <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                    {mediaFiles.length > 0 && (
-                        <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
-                    )}
-                    {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
+            {
+                isChatOpen ? (
+                    <footer className="p-2 md:p-4 bg-transparent z-20 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-[calc(1rem+env(safe-area-inset-bottom))] transition-[padding] data-[state=open]:p-0">
+                        {showShortcutSuggestions && filteredShortcuts.length > 0 && (
+                            <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-md max-h-40 overflow-y-auto shadow-xl">
+                                {filteredShortcuts.map(shortcut => (
+                                    <button
+                                        key={shortcut.id}
+                                        className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors"
+                                        onClick={() => handleShortcutSelect(shortcut)}
+                                    >
+                                        <span className="font-bold text-primary">/{shortcut.name}</span>
+                                        <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        {mediaFiles.length > 0 && (
+                            <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
+                        )}
+                        {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
                         <SmartReplies
                             customerMessage={lastCustomerMessage?.content || ''}
                             chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
@@ -1384,235 +1402,236 @@ export default function ChatPanel({
                             }}
                         />
                     )} */}
-                    <div className="space-y-4">
-                        <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
-                            <input type="hidden" name="chatId" value={chat.id} />
+                        <div className="space-y-4">
+                            <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
+                                <input type="hidden" name="chatId" value={chat.id} />
 
-                            <div className={cn(
-                                "backdrop-blur-md border rounded-[20px] md:rounded-2xl p-1.5 md:p-2 shadow-sm flex items-end gap-2 relative flex-1 transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500/50 focus-within:shadow-lg focus-within:shadow-blue-500/10",
-                                isInternalNote
-                                    ? "bg-yellow-50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-700/30"
-                                    : "bg-background/60 dark:bg-zinc-900/60 border-border/50 dark:border-white/10"
-                            )}>
-                                <div className="flex gap-1 pb-1">
-                                    <Popover>
-                                        <PopoverTrigger asChild>
-                                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95" disabled={isAiTyping} aria-label="Abrir emojis">
-                                                <Smile className="h-5 w-5" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                            <EmojiPicker onEmojiClick={onEmojiClick} theme={"dark" as any} />
-                                        </PopoverContent>
-                                    </Popover>
-
-                                    <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
-                                        <PopoverAnchor className="absolute left-12 bottom-3 h-2 w-2 opacity-0 pointer-events-none" />
-                                        <div className="hidden md:flex items-center gap-1">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
-                                                onClick={() => fileInputRef.current?.click()}
-                                                disabled={isAiTyping}
-                                                aria-label="Anexar arquivo"
-                                            >
-                                                <Paperclip className="h-5 w-5" />
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className={cn(
-                                                    "h-9 w-9 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95",
-                                                    isInternalNote
-                                                        ? "text-yellow-600 hover:text-yellow-600 hover:bg-yellow-500/10"
-                                                        : "text-muted-foreground hover:text-primary hover:bg-primary/10"
-                                                )}
-                                                onClick={() => setIsInternalNote(!isInternalNote)}
-                                                disabled={isAiTyping}
-                                                aria-label="Nota interna"
-                                            >
-                                                <StickyNote className="h-5 w-5" />
-                                            </Button>
+                                <div className={cn(
+                                    "backdrop-blur-md border rounded-[20px] md:rounded-2xl p-1.5 md:p-2 shadow-sm flex items-end gap-2 relative flex-1 transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500/50 focus-within:shadow-lg focus-within:shadow-blue-500/10",
+                                    isInternalNote
+                                        ? "bg-yellow-50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-700/30"
+                                        : "bg-background/60 dark:bg-zinc-900/60 border-border/50 dark:border-white/10"
+                                )}>
+                                    <div className="flex gap-1 pb-1">
+                                        <Popover>
                                             <PopoverTrigger asChild>
+                                                <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95" disabled={isAiTyping} aria-label="Abrir emojis">
+                                                    <Smile className="h-5 w-5" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
+                                                <EmojiPicker onEmojiClick={onEmojiClick} theme={"dark" as any} />
+                                            </PopoverContent>
+                                        </Popover>
+
+                                        <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
+                                            <PopoverAnchor className="absolute left-12 bottom-3 h-2 w-2 opacity-0 pointer-events-none" />
+                                            <div className="hidden md:flex items-center gap-1">
                                                 <Button
                                                     type="button"
                                                     variant="ghost"
                                                     size="icon"
                                                     className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                    onClick={() => fileInputRef.current?.click()}
                                                     disabled={isAiTyping}
-                                                    aria-label="Respostas rápidas"
+                                                    aria-label="Anexar arquivo"
                                                 >
-                                                    <MessageSquareQuote className="h-5 w-5" />
+                                                    <Paperclip className="h-5 w-5" />
                                                 </Button>
-                                            </PopoverTrigger>
-                                        </div>
-
-                                        <div className="md:hidden">
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className={cn(
+                                                        "h-9 w-9 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95",
+                                                        isInternalNote
+                                                            ? "text-yellow-600 hover:text-yellow-600 hover:bg-yellow-500/10"
+                                                            : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                                    )}
+                                                    onClick={() => setIsInternalNote(!isInternalNote)}
+                                                    disabled={isAiTyping}
+                                                    aria-label="Nota interna"
+                                                >
+                                                    <StickyNote className="h-5 w-5" />
+                                                </Button>
+                                                <PopoverTrigger asChild>
                                                     <Button
                                                         type="button"
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
                                                         disabled={isAiTyping}
+                                                        aria-label="Respostas rápidas"
                                                     >
-                                                        <Plus className="h-5 w-5" />
+                                                        <MessageSquareQuote className="h-5 w-5" />
                                                     </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" side="top" className="w-48 bg-popover/90 backdrop-blur-md border-border">
-                                                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="cursor-pointer">
-                                                        <Paperclip className="mr-2 h-4 w-4" />
-                                                        <span>Anexar</span>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)} className={cn("cursor-pointer", isInternalNote ? "text-yellow-600 focus:text-yellow-700" : "")}>
-                                                        <StickyNote className="mr-2 h-4 w-4" />
-                                                        <span>{isInternalNote ? 'Remover Nota' : 'Nota Interna'}</span>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => setIsShortcutsOpen(true)} className="cursor-pointer">
-                                                        <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                                        <span>Respostas Rápidas</span>
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </div>
-                                        <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-md text-foreground max-h-96 overflow-y-auto" align="start" side="top" sideOffset={12}>
-                                            <div className="p-2 space-y-1">
-                                                <h4 className="text-xs font-medium text-muted-foreground px-2 py-1">Atalhos Disponíveis</h4>
-                                                {shortcuts.length === 0 ? (
-                                                    <p className="text-sm text-muted-foreground px-2 py-2">Nenhum atalho encontrado.</p>
-                                                ) : (
-                                                    shortcuts.map(shortcut => (
-                                                        <button
-                                                            key={shortcut.id}
-                                                            className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors flex flex-col gap-1 group"
-                                                            onClick={() => {
-                                                                handleShortcutSelect(shortcut);
-                                                                setIsShortcutsOpen(false);
-                                                            }}
-                                                        >
-                                                            <div className="flex items-center justify-between w-full">
-                                                                <span className="font-bold text-primary flex items-center gap-2">
-                                                                    /{shortcut.name}
-                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                </span>
-                                                            </div>
-                                                            <span className="text-muted-foreground truncate w-full text-xs">{shortcut.message}</span>
-                                                        </button>
-                                                    ))
-                                                )}
+                                                </PopoverTrigger>
                                             </div>
-                                        </PopoverContent>
-                                    </Popover>
 
-                                    <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        onChange={handleFileChange}
-                                        className="hidden"
-                                        multiple
-                                        accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
-                                    />
-                                </div>
+                                            <div className="md:hidden">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
+                                                            disabled={isAiTyping}
+                                                        >
+                                                            <Plus className="h-5 w-5" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="start" side="top" className="w-48 bg-popover/90 backdrop-blur-md border-border">
+                                                        <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="cursor-pointer">
+                                                            <Paperclip className="mr-2 h-4 w-4" />
+                                                            <span>Anexar</span>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)} className={cn("cursor-pointer", isInternalNote ? "text-yellow-600 focus:text-yellow-700" : "")}>
+                                                            <StickyNote className="mr-2 h-4 w-4" />
+                                                            <span>{isInternalNote ? 'Remover Nota' : 'Nota Interna'}</span>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => setIsShortcutsOpen(true)} className="cursor-pointer">
+                                                            <MessageSquareQuote className="mr-2 h-4 w-4" />
+                                                            <span>Respostas Rápidas</span>
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                            <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-md text-foreground max-h-96 overflow-y-auto" align="start" side="top" sideOffset={12}>
+                                                <div className="p-2 space-y-1">
+                                                    <h4 className="text-xs font-medium text-muted-foreground px-2 py-1">Atalhos Disponíveis</h4>
+                                                    {shortcuts.length === 0 ? (
+                                                        <p className="text-sm text-muted-foreground px-2 py-2">Nenhum atalho encontrado.</p>
+                                                    ) : (
+                                                        shortcuts.map(shortcut => (
+                                                            <button
+                                                                key={shortcut.id}
+                                                                className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors flex flex-col gap-1 group"
+                                                                onClick={() => {
+                                                                    handleShortcutSelect(shortcut);
+                                                                    setIsShortcutsOpen(false);
+                                                                }}
+                                                            >
+                                                                <div className="flex items-center justify-between w-full">
+                                                                    <span className="font-bold text-primary flex items-center gap-2">
+                                                                        /{shortcut.name}
+                                                                        {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
+                                                                        {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
+                                                                        {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="text-muted-foreground truncate w-full text-xs">{shortcut.message}</span>
+                                                            </button>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </PopoverContent>
+                                        </Popover>
 
-                                <div className="relative flex-1 min-w-0 py-2">
-                                    {showTextInput ? (
-                                        <ContentEditable
-                                            innerRef={contentEditableRef}
-                                            html={newMessage}
-                                            disabled={isAiTyping}
-                                            onChange={handleMessageChange}
-                                            onPaste={handlePaste}
-                                            className="w-full bg-transparent border-0 focus:ring-0 p-0 text-foreground placeholder:text-muted-foreground resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto"
-                                            tagName="div"
-                                            onKeyUp={saveCursorPosition}
-                                            onClick={saveCursorPosition}
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={handleFileChange}
+                                            className="hidden"
+                                            multiple
+                                            accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
                                         />
-                                    ) : null}
-                                </div>
+                                    </div>
 
-                                <div className="pb-1 pr-1">
-                                    {newMessage.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === "" && mediaFiles.length === 0 ? (
-                                        <div className="animate-in zoom-in duration-300">
-                                            <AudioRecorder onSend={handleSendAudio} />
-                                        </div>
-                                    ) : (
-                                        <div className="animate-in zoom-in duration-300">
-                                            <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </form>
-                        {sendState === 'sending' && (
-                            <div className="text-xs text-blue-300 flex items-center gap-2 pl-1">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>Enviando...</span>
-                            </div>
-                        )}
-                        {sendState === 'error' && (
-                            <div className="text-xs text-red-300 flex items-center gap-2 pl-1">
-                                <span>{lastSendError || 'Falha ao enviar. Tente novamente.'}</span>
-                                <Button variant="link" size="sm" className="px-1 h-auto text-red-200" onClick={handleFormSubmit}>
-                                    Reenviar
-                                </Button>
-                            </div>
-                        )}
+                                    <div className="relative flex-1 min-w-0 py-2">
+                                        {showTextInput ? (
+                                            <ContentEditable
+                                                innerRef={contentEditableRef}
+                                                html={newMessage}
+                                                disabled={isAiTyping}
+                                                onChange={handleMessageChange}
+                                                onPaste={handlePaste}
+                                                className="w-full bg-transparent border-0 focus:ring-0 p-0 text-foreground placeholder:text-muted-foreground resize-none max-h-[120px] min-h-[24px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto"
+                                                tagName="div"
+                                                onKeyUp={saveCursorPosition}
+                                                onClick={saveCursorPosition}
+                                            />
+                                        ) : null}
+                                    </div>
 
-                        <div className="hidden md:flex flex-wrap items-center gap-3 px-2">
-                            <div className="flex items-center space-x-2 bg-muted/30 backdrop-blur-md px-3 py-1.5 rounded-full border border-border">
-                                <Bot className="h-4 w-4 text-primary" />
-                                <Switch
-                                    id="ai-agent-switch"
-                                    checked={isAiAgentActive}
-                                    onCheckedChange={handleAiSwitchChange}
-                                    disabled={isAiTyping || (!autopilotConfig && autopilotAgents.length === 0)}
-                                    className="data-[state=checked]:bg-primary"
-                                />
-                                {autopilotAgents.length > 1 ? (
-                                    <Select
-                                        value={chat?.autopilot_config_id || autopilotConfig?.id || (autopilotAgents.find(a => a.is_primary)?.id)}
-                                        onValueChange={handleAgentChange}
-                                        disabled={!isAiAgentActive}
-                                    >
-                                        <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-foreground focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0">
-                                            <SelectValue placeholder="Agente" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {autopilotAgents.map(agent => (
-                                                <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                ) : (
-                                    <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-foreground cursor-pointer">Agente de IA</Label>
-                                )}
-                                {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-primary ml-1" />}
-                            </div>
-                            {autopilotConfig && (
-                                <span className="text-[10px] text-muted-foreground">
-                                    {(autopilotConfig.knowledge_base_documents?.length || 0)} docs · {autopilotRules.filter(rule => rule.enabled).length} regras ativas
-                                </span>
+                                    <div className="pb-1 pr-1">
+                                        {newMessage.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === "" && mediaFiles.length === 0 ? (
+                                            <div className="animate-in zoom-in duration-300">
+                                                <AudioRecorder onSend={handleSendAudio} />
+                                            </div>
+                                        ) : (
+                                            <div className="animate-in zoom-in duration-300">
+                                                <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </form>
+                            {sendState === 'sending' && (
+                                <div className="text-xs text-blue-300 flex items-center gap-2 pl-1">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span>Enviando...</span>
+                                </div>
                             )}
-                            <Link href="/autopilot" className="text-[10px] font-medium text-primary hover:text-primary/80 hover:underline ml-auto">
-                                Treinar agente
-                            </Link>
+                            {sendState === 'error' && (
+                                <div className="text-xs text-red-300 flex items-center gap-2 pl-1">
+                                    <span>{lastSendError || 'Falha ao enviar. Tente novamente.'}</span>
+                                    <Button variant="link" size="sm" className="px-1 h-auto text-red-200" onClick={handleFormSubmit}>
+                                        Reenviar
+                                    </Button>
+                                </div>
+                            )}
+
+                            <div className="hidden md:flex flex-wrap items-center gap-3 px-2">
+                                <div className="flex items-center space-x-2 bg-muted/30 backdrop-blur-md px-3 py-1.5 rounded-full border border-border">
+                                    <Bot className="h-4 w-4 text-primary" />
+                                    <Switch
+                                        id="ai-agent-switch"
+                                        checked={isAiAgentActive}
+                                        onCheckedChange={handleAiSwitchChange}
+                                        disabled={isAiTyping || (!autopilotConfig && autopilotAgents.length === 0)}
+                                        className="data-[state=checked]:bg-primary"
+                                    />
+                                    {autopilotAgents.length > 1 ? (
+                                        <Select
+                                            value={chat?.autopilot_config_id || autopilotConfig?.id || (autopilotAgents.find(a => a.is_primary)?.id)}
+                                            onValueChange={handleAgentChange}
+                                            disabled={!isAiAgentActive}
+                                        >
+                                            <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-foreground focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0">
+                                                <SelectValue placeholder="Agente" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {autopilotAgents.map(agent => (
+                                                    <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-foreground cursor-pointer">Agente de IA</Label>
+                                    )}
+                                    {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-primary ml-1" />}
+                                </div>
+                                {autopilotConfig && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {(autopilotConfig.knowledge_base_documents?.length || 0)} docs · {autopilotRules.filter(rule => rule.enabled).length} regras ativas
+                                    </span>
+                                )}
+                                <Link href="/autopilot" className="text-[10px] font-medium text-primary hover:text-primary/80 hover:underline ml-auto">
+                                    Treinar agente
+                                </Link>
+                            </div>
                         </div>
-                    </div>
-                </footer>
-            ) : (
-                <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-md border-t border-border">
-                    <p className='text-sm font-medium text-muted-foreground'>
-                        Este atendimento foi encerrado.
-                    </p>
-                </footer>
-            )}
-        </div>
+                    </footer>
+                ) : (
+                    <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-md border-t border-border">
+                        <p className='text-sm font-medium text-muted-foreground'>
+                            Este atendimento foi encerrado.
+                        </p>
+                    </footer>
+                )
+            }
+        </div >
     );
 }
 

@@ -2,9 +2,11 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { LayoutGroup } from 'framer-motion';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
+import { CommandPalette } from '../chat/command-palette';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
@@ -1192,75 +1194,79 @@ export default function CustomerChatLayout({
   } : null;
 
   return (
-    <div
-      className={`relative h-full flex-1 w-full min-h-0 flex overflow-hidden bg-background/50 dark:bg-black selection:bg-primary/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
-      dir={isRTL ? 'rtl' : 'ltr'}
-    >
+    <div className="flex h-screen w-full bg-background relative overflow-hidden">
       {/* Background Effects */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-50 dark:opacity-20 [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
       </div>
 
-      <div className="relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px]">
-        {needsAudioUnlock && (
-          <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
-            <span>Habilite o som de novas mensagens</span>
-            <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
-          </div>
-        )}
-        {IS_DEV && (
-          <DraggableSoundTester
-            debugCounter={debugCounter}
-            onPlay={(kind) => { setDebugCounter((n) => n + 1); playNotificationSound(kind); }}
-          />
-        )}
-        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
-        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-        <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
-          <ChatList
-            chats={chats}
-            selectedChat={enrichedSelectedChat}
-            setSelectedChat={handleSetSelectedChat}
-            currentUser={initialUser}
-            onUpdate={handleDataMutation}
-            isForwarding={isForwarding}
-            selectedForwardingChatIds={selectedForwardingChatIds}
-            onToggleForwardSelection={handleToggleForwardSelection}
-            onConfirmForward={handleConfirmForward}
-            onCancelForward={handleCancelForward}
-            onPrefetch={prefetchChat}
-          />
-        </ErrorBoundary>
-        <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
-          <ChatPanel
-            key={selectedChat?.id}
-            chat={enrichedSelectedChat}
-            currentUser={initialUser}
-            onActionSuccess={handleDataMutation}
-            closeReasons={closeReasons}
-            showFullHistory={showFullHistory}
-            setShowFullHistory={setShowFullHistory}
-            tabId={tabIdRef.current}
-            onLoadOlderMessages={loadOlderMessages}
-            canLoadOlder={hasMoreHistory}
-            workspaceTimezone={workspaceTimezone}
-            onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
-            onForwardMessage={handleForwardMessage}
-            highContrast={highContrast}
-            onToggleHighContrast={() => setHighContrast((v) => !v)}
-            isRTL={isRTL}
-            onToggleRTL={() => setIsRTL((v) => !v)}
-          />
-        </ErrorBoundary>
-        {isContactPanelOpen && !isForwarding && (
-          <ContactPanel
-            chat={enrichedSelectedChat}
-            currentUser={initialUser}
-            onTransferSuccess={handleDataMutation}
-            onContactUpdate={handleDataMutation}
-          />
-        )}
-      </div>
+      <LayoutGroup>
+        <div
+          className={`relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px] bg-background/50 dark:bg-black selection:bg-primary/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+          dir={isRTL ? 'rtl' : 'ltr'}
+        >
+          {needsAudioUnlock && (
+            <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
+              <span>Habilite o som de novas mensagens</span>
+              <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
+            </div>
+          )}
+          {IS_DEV && (
+            <DraggableSoundTester
+              debugCounter={debugCounter}
+              onPlay={(kind) => { setDebugCounter((n) => n + 1); playNotificationSound(kind); }}
+            />
+          )}
+          <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+          <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
+          <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+            <ChatList
+              chats={chats}
+              selectedChat={enrichedSelectedChat}
+              setSelectedChat={handleSetSelectedChat}
+              currentUser={initialUser}
+              onUpdate={handleDataMutation}
+              isForwarding={isForwarding}
+              selectedForwardingChatIds={selectedForwardingChatIds}
+              onToggleForwardSelection={handleToggleForwardSelection}
+              onConfirmForward={handleConfirmForward}
+              onCancelForward={handleCancelForward}
+              onPrefetch={prefetchChat}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+            <ChatPanel
+              chat={enrichedSelectedChat}
+              currentUser={initialUser}
+              onActionSuccess={handleDataMutation}
+              closeReasons={closeReasons}
+              showFullHistory={showFullHistory}
+              setShowFullHistory={setShowFullHistory}
+              tabId={tabIdRef.current}
+              onLoadOlderMessages={loadOlderMessages}
+              canLoadOlder={hasMoreHistory}
+              workspaceTimezone={workspaceTimezone}
+              onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
+              onForwardMessage={handleForwardMessage}
+              highContrast={highContrast}
+              onToggleHighContrast={() => setHighContrast((v) => !v)}
+              isRTL={isRTL}
+              onToggleRTL={() => setIsRTL((v) => !v)}
+            />
+          </ErrorBoundary>
+          {isContactPanelOpen && !isForwarding && (
+            <ContactPanel
+              chat={enrichedSelectedChat}
+              currentUser={initialUser}
+              onTransferSuccess={handleDataMutation}
+              onContactUpdate={handleDataMutation}
+            />
+          )}
+        </div>
+
+        <CommandPalette />
+
+      </LayoutGroup>
     </div>
   );
 }

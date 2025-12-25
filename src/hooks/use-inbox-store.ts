@@ -39,6 +39,9 @@ type InboxState = {
   updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
   replaceOptimisticMessage: (chatId: string, optimisticId: string, realMessage: Message) => void;
   updateChat: (chatId: string, updates: Partial<Chat>) => void;
+  removeChat: (chatId: string) => void;
+  drafts: Record<string, string>;
+  setDraft: (chatId: string, text: string) => void;
   reset: () => void;
 };
 
@@ -51,6 +54,7 @@ const baseState = {
   oldestMessageDateByChat: {} as TimestampRecord,
   hasMoreHistoryByChat: {} as BooleanRecord,
   hasMoreChats: false,
+  drafts: {} as Record<string, string>,
 };
 
 const getChatSortValue = (chat: Chat): number => {
@@ -325,6 +329,16 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       chats: state.chats.map((chat) =>
         chat.id === chatId ? { ...chat, ...updates } : chat
       ),
+    }));
+  },
+  removeChat: (chatId) => {
+    set((state) => ({
+      chats: state.chats.filter((chat) => chat.id !== chatId),
+    }));
+  },
+  setDraft: (chatId, text) => {
+    set((state) => ({
+      drafts: { ...state.drafts, [chatId]: text },
     }));
   },
   reset: () =>

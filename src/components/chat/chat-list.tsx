@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -440,6 +441,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     if (showMarketing) return chat.messages;
     return chat.messages.filter(m => !isMarketingMessage(m));
   }, [chat.messages, showMarketing]);
+  const removeChat = useInboxStore(state => state.removeChat);
+  const drafts = useInboxStore(state => state.drafts);
+  const draft = drafts[chat.id];
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -474,18 +478,25 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const handleQuickClose = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isClosing) return;
+
+    // Select null if selected (to clear panel)
     if (isSelected) {
       onSelect(null);
     }
+
+    // Optimistic UI: Remove immediately from store
     setIsClosing(true);
+    removeChat(chat.id);
+    toast({ title: 'Atendimento encerrado' });
+
+    // Async server call
     const result = await guardedCloseChat(chat.id, null, null, false);
-    if (result.success) {
-      toast({ title: 'Atendimento encerrado' });
-      onUpdate();
-    } else {
+
+    if (!result.success) {
+      // Revert/Fix if failed
       toast({ title: 'Erro ao encerrar', description: result.error, variant: 'destructive' });
+      onUpdate(); // Re-sync data to restore chat
     }
-    setIsClosing(false);
   };
 
   const handleAssign = async (e: React.MouseEvent) => {
@@ -583,7 +594,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         user={currentUser}
       />
 
-      <div className="relative flex-shrink-0">
+      <motion.div
+        className="relative flex-shrink-0"
+        layoutId={`avatar-morph-${chat.id}`}
+      >
         <Avatar className="h-12 w-12 md:h-10 md:w-10 border border-border">
           <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
           <AvatarFallback className="bg-muted text-muted-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
@@ -633,7 +647,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Tooltip>
           </TooltipProvider>
         )}
-      </div>
+      </motion.div>
 
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
@@ -780,7 +794,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex-1 min-w-0">
-            {lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />}
+            {draft ? (
+              <p className="text-xs text-red-500 font-medium truncate flex items-center gap-1">
+                <PencilLine className="h-3 w-3" />
+                <span className="font-bold">[Rascunho]:</span> {draft}
+              </p>
+            ) : (
+              lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />
+            )}
           </div>
           {(() => {
             const unread = chat.unreadCount ?? 0;
@@ -793,7 +814,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           })()}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 
@@ -812,6 +833,7 @@ interface ChatListProps {
   className?: string;
 }
 
+import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { loadMoreChatsAction, getInitialChatsData } from '@/actions/chats';
 
@@ -1483,12 +1505,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       }
 
       {/* Chat list */}
-      <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
-        <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
-          <div className="space-y-0 md:space-y-1 p-0 md:p-3">
-            {filteredChats.length > 0 ? (
-              <>
-                {filteredChats.map((chat) => (
+      <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
+        {filteredChats.length > 0 ? (
+          <>
+            <Virtuoso
+              style={{ height: '100%', width: '100%' }}
+              data={filteredChats}
+              itemContent={(index, chat) => (
+                <div className="pb-1 px-3">
                   <ChatListItem
                     key={chat.id}
                     chat={chat}
@@ -1509,110 +1533,107 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
                     onPrefetch={onPrefetch}
                   />
-                ))}
-                {hasMoreChats && activeTab === 'encerrados' && (
-                  <div className="p-2 flex justify-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleLoadMore}
-                      disabled={isLoadingMore}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      {isLoadingMore ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
+                </div>
+              )}
+              endReached={() => {
+                if (hasMoreChats && activeTab === 'encerrados' && !isLoadingMore) {
+                  handleLoadMore();
+                }
+              }}
+              components={{
+                Footer: () => {
+                  return (
+                    <>
+                      {hasMoreChats && activeTab === 'encerrados' && (
+                        <div className="p-2 flex justify-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleLoadMore}
+                            disabled={isLoadingMore}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            {isLoadingMore ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Carregar mais conversas
+                          </Button>
+                        </div>
                       )}
-                      Carregar mais conversas
-                    </Button>
+                    </>
+                  );
+                },
+              }}
+            />
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
+            {activeTab === 'atendimentos' ? (
+              <>
+                <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
+                  <div className="h-8 w-8 text-blue-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+                  </div>
+                </div>
+                <h3 className="font-semibold text-foreground">Nenhuma conversa</h3>
+                <p className="text-sm text-muted-foreground max-w-[200px]">
+                  Você não é responsável por nenhuma conversa no momento
+                </p>
+                {currentUser.activeWorkspaceId && (
+                  <div className="pt-2 opacity-100 pointer-events-auto">
+                    <NewConversationDialog
+                      workspaceId={currentUser.activeWorkspaceId}
+                      onActionSuccess={onUpdate}
+                      trigger={
+                        <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-600 hover:text-blue-700">
+                          <PlusCircle className="h-4 w-4" />
+                          Nova Conversa
+                        </Button>
+                      }
+                    />
                   </div>
                 )}
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
-                {activeTab === 'atendimentos' ? (
-                  <>
-                    <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
-                      <div className="h-8 w-8 text-blue-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
-                      </div>
-                    </div>
-                    <h3 className="font-semibold text-foreground">Nenhuma conversa</h3>
-                    <p className="text-sm text-muted-foreground max-w-[200px]">
-                      Você não é responsável por nenhuma conversa no momento
-                    </p>
-                    {currentUser.activeWorkspaceId && (
-                      <div className="pt-2 opacity-100 pointer-events-auto">
-                        <NewConversationDialog
-                          workspaceId={currentUser.activeWorkspaceId}
-                          onActionSuccess={onUpdate}
-                          trigger={
-                            <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-600 hover:text-blue-700">
-                              <PlusCircle className="h-4 w-4" />
-                              Nova Conversa
-                            </Button>
-                          }
-                        />
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <MessageSquare className="h-12 w-12 text-muted-foreground/30" />
-                    <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
-                    {hasMoreChats && activeTab === 'encerrados' && (
-                      <div className="pt-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleLoadMore}
-                          disabled={isLoadingMore}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          {isLoadingMore ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                          )}
-                          Carregar mais conversas
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
+              <>
+                <MessageSquare className="h-12 w-12 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada nesta seção.</p>
+              </>
             )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Forwarding Footer */}
-      {isForwarding && (
-        <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-foreground font-medium">
-              {selectedForwardingChatIds?.size || 0} selecionados
-            </span>
+      {
+        isForwarding && (
+          <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-foreground font-medium">
+                {selectedForwardingChatIds?.size || 0} selecionados
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
+                onClick={onCancelForward}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
+                onClick={onConfirmForward}
+                disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
+              >
+                Encaminhar
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
-              onClick={onCancelForward}
-            >
-              Cancelar
-            </Button>
-            <Button
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
-              onClick={onConfirmForward}
-              disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
-            >
-              Encaminhar
-            </Button>
-          </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Assign Confirmation Dialog */}
       <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
@@ -1631,6 +1652,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </div >
   );
 };

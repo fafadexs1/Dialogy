@@ -75,7 +75,7 @@ export async function getIntegrationConfig(
     }
 }
 
-export async function getIntegrations(): Promise<{ integrations: any[] }> {
+export async function getIntegrations(): Promise<{ integrations: any[]; error?: string }> {
     const user = await getCurrentUser();
     if (!user?.activeWorkspaceId) {
         return { integrations: [] };
@@ -83,73 +83,78 @@ export async function getIntegrations(): Promise<{ integrations: any[] }> {
 
     const workspaceId = user.activeWorkspaceId;
 
-    // Fetch integration statuses from the new table
-    const statusesRes = await db.query(`
-        SELECT provider, is_active 
-        FROM workspace_integrations 
-        WHERE workspace_id = $1
-    `, [workspaceId]);
+    try {
+        // Fetch integration statuses from the new table
+        const statusesRes = await db.query(`
+            SELECT provider, is_active 
+            FROM workspace_integrations 
+            WHERE workspace_id = $1
+        `, [workspaceId]);
 
-    const activeProviders = new Set(statusesRes.rows.filter(r => r.is_active).map(r => r.provider));
+        const activeProviders = new Set(statusesRes.rows.filter(r => r.is_active).map(r => r.provider));
 
-    const availableIntegrations = [
-        {
-            id: 'gemini',
-            name: 'Google Gemini',
-            description: 'Assistente de IA para resumos e respostas inteligentes.',
-            icon_url: '/icons/gemini.svg',
-            href: '/integrations/gemini',
-            is_active: activeProviders.has('gemini'),
-            provider: 'gemini'
-        },
-        {
-            id: 'evolution-api',
-            name: 'Evolution API (WhatsApp)',
-            description: 'Conecte seus números de WhatsApp via Evolution API.',
-            icon_url: '/icons/whatsapp.svg',
-            href: '/integrations/evolution-api',
-            is_active: activeProviders.has('evolution-api'),
-            provider: 'evolution-api'
-        },
-        {
-            id: 'meta-messenger',
-            name: 'Meta Messenger',
-            description: 'Gerencie mensagens do Facebook Messenger.',
-            icon_url: '/icons/messenger.svg',
-            href: '/integrations/meta-messenger',
-            is_active: activeProviders.has('meta-messenger'),
-            provider: 'meta-messenger'
-        },
-        {
-            id: 'meta-instagram',
-            name: 'Instagram Direct',
-            description: 'Responda DMs do Instagram diretamente.',
-            icon_url: '/icons/instagram.svg',
-            href: '/integrations/meta-instagram',
-            is_active: activeProviders.has('meta-instagram'),
-            provider: 'meta-instagram'
-        },
-        {
-            id: 'mercadolivre',
-            name: 'Mercado Livre',
-            description: 'Responda perguntas e gerencie vendas do Mercado Livre.',
-            icon_url: '/icons/mercadolivre.png',
-            href: '/integrations/mercadolivre',
-            is_active: activeProviders.has('mercadolivre'),
-            provider: 'mercadolivre'
-        },
-        {
-            id: 'nexusflow',
-            name: 'NexusFlow',
-            description: 'Automação de fluxos e chatbots avançados.',
-            icon_url: '/icons/nexusflow.svg',
-            href: '/integrations/nexusflow',
-            is_active: activeProviders.has('nexusflow'),
-            provider: 'nexusflow'
-        }
-    ];
+        const availableIntegrations = [
+            {
+                id: 'gemini',
+                name: 'Google Gemini',
+                description: 'Assistente de IA para resumos e respostas inteligentes.',
+                icon_url: '/icons/gemini.svg',
+                href: '/integrations/gemini',
+                is_active: activeProviders.has('gemini'),
+                provider: 'gemini'
+            },
+            {
+                id: 'evolution-api',
+                name: 'Evolution API (WhatsApp)',
+                description: 'Conecte seus números de WhatsApp via Evolution API.',
+                icon_url: '/icons/whatsapp.svg',
+                href: '/integrations/evolution-api',
+                is_active: activeProviders.has('evolution-api'),
+                provider: 'evolution-api'
+            },
+            {
+                id: 'meta-messenger',
+                name: 'Meta Messenger',
+                description: 'Gerencie mensagens do Facebook Messenger.',
+                icon_url: '/icons/messenger.svg',
+                href: '/integrations/meta-messenger',
+                is_active: activeProviders.has('meta-messenger'),
+                provider: 'meta-messenger'
+            },
+            {
+                id: 'meta-instagram',
+                name: 'Instagram Direct',
+                description: 'Responda DMs do Instagram diretamente.',
+                icon_url: '/icons/instagram.svg',
+                href: '/integrations/meta-instagram',
+                is_active: activeProviders.has('meta-instagram'),
+                provider: 'meta-instagram'
+            },
+            {
+                id: 'mercadolivre',
+                name: 'Mercado Livre',
+                description: 'Responda perguntas e gerencie vendas do Mercado Livre.',
+                icon_url: '/icons/mercadolivre.png',
+                href: '/integrations/mercadolivre',
+                is_active: activeProviders.has('mercadolivre'),
+                provider: 'mercadolivre'
+            },
+            {
+                id: 'nexusflow',
+                name: 'NexusFlow',
+                description: 'Automação de fluxos e chatbots avançados.',
+                icon_url: '/icons/nexusflow.svg',
+                href: '/integrations/nexusflow',
+                is_active: activeProviders.has('nexusflow'),
+                provider: 'nexusflow'
+            }
+        ];
 
-    return { integrations: availableIntegrations };
+        return { integrations: availableIntegrations };
+    } catch (error) {
+        console.error('[GET_INTEGRATIONS_ACTION]', error);
+        return { integrations: [], error: 'Falha ao carregar integrações.' };
+    }
 }
 
 export async function updateIntegration(data: any): Promise<{ success: boolean; error?: string }> {
