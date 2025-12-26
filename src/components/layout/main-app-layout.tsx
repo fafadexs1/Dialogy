@@ -3,7 +3,6 @@
 
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { PageTransition } from '@/components/layout/page-transition';
 import { Sidebar } from '@/components/layout/sidebar';
 import { BuildVersionWatcher } from '@/components/layout/build-version-watcher';
 import type { User } from '@/lib/types';
@@ -69,9 +68,9 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       <main className="min-h-0 min-w-0 flex flex-col flex-1 overflow-y-auto">
-        <PageTransition transitionKey={transitionKey} className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0">
           {children}
-        </PageTransition>
+        </div>
       </main>
     </div>
   );

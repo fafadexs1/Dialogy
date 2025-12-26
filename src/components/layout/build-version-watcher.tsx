@@ -123,8 +123,8 @@ export function BuildVersionWatcher() {
       }
 
       const isServerActionCall = typeof url === 'string' && url.includes('/_next/server-actions');
-      if (isServerActionCall && (response.status === 404 || response.status === 410 || response.status === 500)) {
-        triggerReload('server-action-invalid');
+      if (isServerActionCall && response.status >= 500) {
+        console.warn('[BUILD_WATCHER] Server action failed; skipping auto-reload', { url, status: response.status });
       }
 
       return response;

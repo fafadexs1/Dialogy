@@ -26,3 +26,27 @@ model Workspace {
 
   @@map("workspaces")
 }
+
+model SystemSettings {
+  key        String   @id
+  value      String   // JSON string
+  updated_at DateTime @default(now()) @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  slug        String   @unique // 'starter', 'pro', etc.
+  name        String
+  description String?
+  price       Float
+  limits      Json     // Stores capabilities like { "crm": true, "users": 5 }
+  stripe_price_id String?
+  is_active   Boolean  @default(true)
+  is_default  Boolean  @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("plans")
+}

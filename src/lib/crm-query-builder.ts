@@ -2,7 +2,7 @@
 import { Segment } from "./types";
 
 export type Operator = 'equals' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'is_set' | 'is_not_set';
-export type Field = 'name' | 'email' | 'phone_number_jid' | 'owner_id' | 'tags' | 'last_activity' | 'created_at' | 'status';
+export type Field = 'name' | 'email' | 'phone_number_jid' | 'owner_id' | 'tags' | 'last_activity' | 'created_at' | 'status' | string;
 
 export interface Condition {
     field: Field;
@@ -101,6 +101,42 @@ function processCondition(cond: Condition, values: any[]): string {
     if (cond.field === 'last_activity') {
         // Subquery for max activity date
         field = `(SELECT MAX(date) FROM activities WHERE contact_id = c.id)`;
+    }
+
+    // Custom Fields
+    if (cond.field.startsWith('custom_field_')) {
+        const fieldId = cond.field.replace('custom_field_', '');
+        // Generic subquery for custom fields
+        // EXISTS (SELECT 1 FROM contact_custom_field_values ccfv WHERE ccfv.contact_id = c.id AND ccfv.field_id = '...' AND ccfv.value [OP] ...)
+
+        let valueCondition = '';
+        if (cond.operator === 'is_set') {
+            valueCondition = `ccfv.value IS NOT NULL AND ccfv.value != ''`;
+        } else if (cond.operator === 'is_not_set') {
+            // This is tricky because "not set" usually means no row exists.
+            // OR row exists but value is empty.
+            // NOT EXISTS (...)
+            return `NOT EXISTS (SELECT 1 FROM contact_custom_field_values ccfv WHERE ccfv.contact_id = c.id AND ccfv.field_id = '${fieldId}' AND ccfv.value IS NOT NULL AND ccfv.value != '')`;
+        } else {
+            if (cond.operator === 'equals') {
+                values.push(cond.value);
+                valueCondition = `ccfv.value = $${values.length}`;
+            } else if (cond.operator === 'contains') {
+                values.push(`%${cond.value}%`);
+                valueCondition = `ccfv.value ILIKE $${values.length}`;
+            } else if (cond.operator === 'gt') { // For simplicity treat as string or cast if we knew type
+                values.push(cond.value);
+                valueCondition = `ccfv.value > $${values.length}`;
+            } else if (cond.operator === 'lt') {
+                values.push(cond.value);
+                valueCondition = `ccfv.value < $${values.length}`;
+            }
+        }
+
+        if (valueCondition) {
+            return `EXISTS (SELECT 1 FROM contact_custom_field_values ccfv WHERE ccfv.contact_id = c.id AND ccfv.field_id = '${fieldId}' AND ${valueCondition})`;
+        }
+        return '';
     }
 
     switch (cond.operator) {

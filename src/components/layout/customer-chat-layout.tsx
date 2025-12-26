@@ -298,6 +298,12 @@ export default function CustomerChatLayout({
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
 
+  const enrichedSelectedChat = useMemo(() => selectedChat ? {
+    ...selectedChat,
+    messages: currentChatMessages,
+    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
+  } : null, [selectedChat, currentChatMessages]);
+
   const formatMessageDay = useCallback((date: Date) => {
     const zonedDate = toZonedTime(date, workspaceTimezone);
     if (isToday(zonedDate)) return 'Hoje';
@@ -883,7 +889,6 @@ export default function CustomerChatLayout({
     let isPolling = true;
     let errorCount = 0;
 
-
     const poll = async () => {
       if (!isPolling) return;
 
@@ -896,31 +901,32 @@ export default function CustomerChatLayout({
 
       try {
         await runDeltaSync();
-        errorCount = 0; // Reset error count on success
+        errorCount = 0;
       } catch (error: any) {
         console.error('[POLLING] Error in delta sync:', error);
         errorCount++;
 
-        // If we hit too many errors, slow down significantly or stop
         if (errorCount > 5) {
           console.warn('[POLLING] Too many errors, slowing down polling.');
-          // Wait 10 seconds before next try if we are having issues
-          timeoutId = setTimeout(poll, 10000);
+          timeoutId = setTimeout(poll, 30000); // Backoff to 30s
           return;
         }
       }
 
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
-        // Interval: 3s if visible, 15s if background. Backoff to 10s+ on error.
-        let interval = isVisible ? 3000 : 15000;
+
+        // Simplified Strategy: 10s if visible, 5m if background
+        // This is safe, reduces load (vs original 3s), and avoids complex state dependency
+        let interval = isVisible ? 10000 : 300000;
+
+        // Exponential backoff on errors
         if (errorCount > 0) interval = Math.max(interval, 10000);
 
         timeoutId = setTimeout(poll, interval);
       }
     };
 
-    // Start polling
     poll();
 
     return () => {
@@ -986,7 +992,12 @@ export default function CustomerChatLayout({
       workspaceId,
       chatId: selectedChatId,
       onMessage: (payload) => handleRealtimeMessageRef.current(payload),
-      onStatusChange: (status) => console.info(`[REALTIME] Messages channel ${channelName} status: ${status}`),
+      onStatusChange: (status) => {
+        console.info(`[REALTIME] Messages channel ${channelName} status: ${status}`);
+        // We only consider "connected" if the CHATS channel is also connected, 
+        // but for now let's just use the messages channel status as a proxy or combine them manually if needed.
+        // Actually, let's track connection health mainly via the Chats channel as it is global.
+      },
     });
 
     realtimeMessagesChannelRef.current = channel;
@@ -1067,7 +1078,6 @@ export default function CustomerChatLayout({
           console.warn(`[REALTIME] Connection lost (${status}). Suggesting manual refresh via toast if persistent.`);
           // Only show toast if it's not a temporary disconnect (simple logic: check visibility)
           if (document.visibilityState === 'visible') {
-            // Could act more aggressively here, e.g. force runDeltaSync
             runDeltaSync();
           }
         }
@@ -1187,11 +1197,7 @@ export default function CustomerChatLayout({
     )
   }
 
-  const enrichedSelectedChat = selectedChat ? {
-    ...selectedChat,
-    messages: currentChatMessages,
-    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
-  } : null;
+
 
   return (
     <div className="flex h-screen w-full bg-background relative overflow-hidden">

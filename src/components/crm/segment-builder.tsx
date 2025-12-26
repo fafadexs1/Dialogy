@@ -1,47 +1,65 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Plus, Trash2, Save, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Tag } from '@/lib/types';
+import { Tag, CustomFieldDefinition } from '@/lib/types';
 import { CriteriaGroup, Condition, Field, Operator } from '@/lib/crm-query-builder';
 
 interface SegmentBuilderProps {
     onSave: (criteria: CriteriaGroup, name: string, description: string) => void;
     onCancel: () => void;
     tags: Tag[];
+    customFields: CustomFieldDefinition[];
 }
 
-const FIELDS: { value: Field; label: string; type: 'text' | 'date' | 'select' | 'boolean' }[] = [
+const STATIC_FIELDS: { value: Field; label: string; type: 'text' | 'date' | 'select' | 'boolean' }[] = [
     { value: 'name', label: 'Nome', type: 'text' },
     { value: 'email', label: 'Email', type: 'text' },
     { value: 'phone_number_jid', label: 'Telefone', type: 'text' },
     { value: 'tags', label: 'Tags', type: 'select' },
     { value: 'last_activity', label: 'Última Atividade', type: 'date' },
-    { value: 'owner_id', label: 'Vendedor', type: 'boolean' }, // Simplify to is_set for now or add user select later
 ];
 
 const OPERATORS: { value: Operator; label: string; types: string[] }[] = [
-    { value: 'equals', label: 'Igual a', types: ['text', 'select', 'date'] },
+    { value: 'equals', label: 'Igual a', types: ['text', 'select', 'date', 'number'] },
     { value: 'contains', label: 'Contém', types: ['text'] },
-    { value: 'gt', label: 'Maior que', types: ['date'] },
-    { value: 'lt', label: 'Menor que', types: ['date'] },
-    { value: 'is_set', label: 'Está preenchido', types: ['text', 'select', 'date', 'boolean'] },
-    { value: 'is_not_set', label: 'Não está preenchido', types: ['text', 'select', 'date', 'boolean'] },
+    { value: 'gt', label: 'Maior que', types: ['date', 'number'] },
+    { value: 'lt', label: 'Menor que', types: ['date', 'number'] },
+    { value: 'is_set', label: 'Está preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
+    { value: 'is_not_set', label: 'Não está preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
 ];
 
-export function SegmentBuilder({ onSave, onCancel, tags }: SegmentBuilderProps) {
+export function SegmentBuilder({ onSave, onCancel, tags, customFields }: SegmentBuilderProps) {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [criteria, setCriteria] = useState<CriteriaGroup>({
         operator: 'AND',
         conditions: [{ field: 'name', operator: 'contains', value: '' }]
     });
+
+    const allFields = useMemo(() => {
+        const custom = customFields.map(cf => {
+            let type: 'text' | 'date' | 'select' | 'boolean' | 'number' = 'text';
+            if (cf.type === 'number') type = 'number';
+            else if (cf.type === 'date') type = 'date';
+            else if (cf.type === 'select') type = 'select';
+            // email and tel fall back to 'text'
+
+            return {
+                value: `custom_field_${cf.id}` as Field,
+                label: cf.label,
+                type: type,
+                options: cf.options
+            };
+        });
+        return [...STATIC_FIELDS, ...custom];
+    }, [customFields]);
 
     const addCondition = () => {
         setCriteria({
@@ -104,20 +122,21 @@ export function SegmentBuilder({ onSave, onCancel, tags }: SegmentBuilderProps) 
                     {criteria.conditions.map((condition, index) => {
                         if (!('field' in condition)) return null; // Skip nested groups for simple UI
 
-                        const fieldDef = FIELDS.find(f => f.value === condition.field);
-                        const availableOps = OPERATORS.filter(op => op.types.includes(fieldDef?.type || 'text'));
+                        const fieldDef = allFields.find(f => f.value === condition.field);
+                        const fieldType = fieldDef?.type || 'text';
+                        const availableOps = OPERATORS.filter(op => op.types.includes(fieldType));
 
                         return (
                             <div key={index} className="flex gap-2 items-center">
                                 <Select
-                                    value={condition.field}
+                                    value={condition.field as string}
                                     onValueChange={(val) => updateCondition(index, { field: val as Field, operator: 'is_set', value: '' })}
                                 >
                                     <SelectTrigger className="w-[150px] bg-white/5 border-white/10 text-white">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className="bg-zinc-900 border-white/10 text-white">
-                                        {FIELDS.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+                                        {allFields.map(f => <SelectItem key={f.value as string} value={f.value as string}>{f.label}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
 
@@ -149,9 +168,32 @@ export function SegmentBuilder({ onSave, onCancel, tags }: SegmentBuilderProps) 
                                                     ))}
                                                 </SelectContent>
                                             </Select>
-                                        ) : fieldDef?.type === 'date' ? (
+                                        ) : fieldType === 'select' && (fieldDef as any).options ? (
+                                            <Select
+                                                value={condition.value}
+                                                onValueChange={(val) => updateCondition(index, { value: val })}
+                                            >
+                                                <SelectTrigger className="w-full bg-white/5 border-white/10 text-white">
+                                                    <SelectValue placeholder="Selecione..." />
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                                    {(fieldDef as any).options.map((opt: any) => {
+                                                        const value = typeof opt === 'string' ? opt : opt.value;
+                                                        const label = typeof opt === 'string' ? opt : opt.label;
+                                                        return <SelectItem key={value} value={value}>{label}</SelectItem>;
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
+                                        ) : fieldType === 'date' ? (
                                             <Input
                                                 type="date"
+                                                value={condition.value}
+                                                onChange={(e) => updateCondition(index, { value: e.target.value })}
+                                                className="bg-white/5 border-white/10"
+                                            />
+                                        ) : fieldType === 'number' ? (
+                                            <Input
+                                                type="number"
                                                 value={condition.value}
                                                 onChange={(e) => updateCondition(index, { value: e.target.value })}
                                                 className="bg-white/5 border-white/10"

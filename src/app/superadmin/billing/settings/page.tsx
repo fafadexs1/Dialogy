@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, Save, Key, CreditCard } from 'lucide-react';
 import { toast } from "@/hooks/use-toast";
 import { saveSystemSettingAction, getSystemSettingsAction } from '@/actions/system-settings';
-import { PLANS } from '@/lib/plans';
+import { PLANS } from '@/lib/plans-types';
 
 export default function BillingSettingsPage() {
     const [loading, setLoading] = useState(true);

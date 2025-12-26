@@ -1,98 +1,39 @@
-export type PlanType = 'starter' | 'pro' | 'business' | 'enterprise';
+import { db } from '@/lib/db';
+import { unstable_cache } from 'next/cache';
+import { PlanType, PlanLimits, PlanDetails, PLANS as DEFAULT_PLANS } from './plans-types';
 
-export interface PlanLimits {
-    users: number;
-    whatsapp: number;
-    history_months: number;
-    departments: boolean;
-    campaigns: boolean | 'moderate' | 'high';
-    api: boolean;
-    transcription: boolean;
-    ai_byok: boolean;
-}
+export * from './plans-types'; // Re-export for server-side consumers if needed, but client should use plans-types directly
 
-export interface PlanDetails {
-    id: PlanType;
-    label: string;
-    price: number;
-    limits: PlanLimits;
-    stripePriceId?: string;
-}
+export const getPlan = unstable_cache(
+    async (slug: string) => {
+        const res = await db.query('SELECT * FROM plans WHERE slug = $1', [slug]);
+        if (res.rowCount === 0) return null;
 
-export const PLANS: Record<PlanType, PlanDetails> = {
-    starter: {
-        id: 'starter',
-        label: 'Starter',
-        price: 97,
-        limits: {
-            users: 5,
-            whatsapp: 1,
-            history_months: 3,
-            departments: false,
-            campaigns: false,
-            api: false,
-            transcription: false,
-            ai_byok: true
-        }
+        const plan = res.rows[0];
+        // Ensure limits match the interface structure
+        return {
+            id: plan.slug as PlanType,
+            label: plan.name,
+            price: plan.price,
+            limits: plan.limits as any as PlanLimits,
+            stripePriceId: plan.stripe_price_id
+        } as PlanDetails;
     },
-    pro: {
-        id: 'pro',
-        label: 'Pro',
-        price: 297,
-        limits: {
-            users: 15,
-            whatsapp: 2,
-            history_months: 12,
-            departments: true,
-            campaigns: 'moderate', // Send to existing contacts
-            api: false,
-            transcription: true,
-            ai_byok: true
-        }
-    },
-    business: {
-        id: 'business',
-        label: 'Business',
-        price: 697,
-        limits: {
-            users: 35,
-            whatsapp: 4,
-            history_months: 36,
-            departments: true,
-            campaigns: 'high', // Upload CSV
-            api: true,
-            transcription: true,
-            ai_byok: true
-        }
-    },
-    enterprise: {
-        id: 'enterprise',
-        label: 'Enterprise / Custom',
-        price: 0, // Negotiated
-        limits: {
-            users: 9999,
-            whatsapp: 9999,
-            history_months: 60,
-            departments: true,
-            campaigns: 'high',
-            api: true,
-            transcription: true,
-            ai_byok: true
-        }
-    }
-};
+    ['get-plan-by-slug'],
+    { tags: ['plans'], revalidate: 3600 }
+);
 
-export const ADDONS = {
-    storage_gb: {
-        label: 'Armazenamento Extra (GB)',
-        price: 1.00
+export const getAllPlans = unstable_cache(
+    async () => {
+        const res = await db.query('SELECT * FROM plans WHERE is_active = true ORDER BY price ASC');
+        return res.rows.map(plan => ({
+            id: plan.slug as PlanType,
+            label: plan.name,
+            price: plan.price,
+            limits: plan.limits as any as PlanLimits,
+            stripePriceId: plan.stripe_price_id
+        })) as PlanDetails[];
     },
-    whatsapp_extra: {
-        label: 'WhatsApp Adicional',
-        price: 97.00
-    },
-    user_extra: {
-        label: 'Usuário Adicional',
-        price: 29.90
-    }
-};
+    ['get-all-plans'],
+    { tags: ['plans'], revalidate: 3600 }
+);

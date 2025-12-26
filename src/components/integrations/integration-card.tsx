@@ -188,6 +188,11 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
                                     {integration.tag}
                                 </Badge>
                             )}
+                            {integration.limitStatus && (
+                                <Badge variant={integration.limitStatus.reached ? "destructive" : "outline"} className="text-[10px] h-5 ml-auto">
+                                    {integration.limitStatus.current} / {integration.limitStatus.max}
+                                </Badge>
+                            )}
                         </div>
                     </CardContent>
                     <CardFooter className='mt-auto pt-2 z-10 relative'>

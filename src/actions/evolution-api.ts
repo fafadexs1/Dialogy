@@ -10,14 +10,28 @@ import { randomUUID } from 'crypto';
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
-export async function getEvolutionApiInstances(workspaceId: string): Promise<{ instances: Omit<EvolutionInstance, 'status' | 'qrCode'>[] | null; error?: string }> {
+export async function getEvolutionApiInstances(workspaceId: string): Promise<{ instances: Omit<EvolutionInstance, 'status' | 'qrCode'>[] | null; error?: string; limitStatus?: { reached: boolean, current: number, max: number, plan: string } }> {
     if (!workspaceId) {
         return { instances: null, error: 'Workspace n\u00e3o informado.' };
     }
 
     try {
         const res = await db.query('SELECT id, instance_name, display_name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
-        return { instances: res.rows };
+
+        // --- BILLING Check ---
+        const { checkLimit } = await import('@/lib/billing-logic');
+        const currentCount = res.rowCount || 0;
+        const limitCheck = await checkLimit(workspaceId, 'whatsapp', currentCount);
+
+        const limitStatus = {
+            reached: !limitCheck.allowed,
+            current: currentCount,
+            max: limitCheck.limit,
+            plan: limitCheck.plan
+        };
+        // ---------------------
+
+        return { instances: res.rows, limitStatus };
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
         return { instances: null, error: 'Falha ao buscar inst\u00e2ncias do WhatsApp.' };

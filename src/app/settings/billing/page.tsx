@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { getCurrentPlanAction } from "@/actions/billing-ui";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { PLANS, PlanType } from "@/lib/plans";
+import { PLANS, PlanType } from "@/lib/plans-types";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 

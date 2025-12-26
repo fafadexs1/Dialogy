@@ -286,16 +286,19 @@ export default function ChatPanel({
     useLayoutEffect(() => {
         if (chat?.id !== chatRef.current) {
             // Save draft for previous chat
-            if (chatRef.current) {
-                setDraft(chatRef.current, newMessage);
+            const previousChatId = chatRef.current;
+            if (previousChatId) {
+                setDraft(previousChatId, newMessage);
             }
 
             // Load draft for new chat
             if (chat?.id) {
                 // Must read drafts from the current render scope
                 setNewMessage(drafts[chat.id] || '');
-                chatRef.current = chat.id;
+            } else {
+                setNewMessage('');
             }
+            chatRef.current = chat?.id;
         }
     }, [chat?.id, drafts, setDraft, newMessage]); // Dependencies for closure freshness
 
@@ -1080,6 +1083,10 @@ export default function ChatPanel({
 
 
 
+    const lastCustomerMessage = useMemo(() =>
+        (chat?.messages || []).slice().reverse().find(m => !m.from_me && m.type !== 'system')
+        , [chat?.messages]);
+
     if (!chat) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
@@ -1101,9 +1108,7 @@ export default function ChatPanel({
 
     const showTextInput = !mediaFiles.length;
 
-    const lastCustomerMessage = useMemo(() =>
-        (chat.messages || []).slice().reverse().find(m => !m.from_me && m.type !== 'system')
-        , [chat.messages]);
+
 
 
     return (

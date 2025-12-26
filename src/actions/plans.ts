@@ -40,7 +40,7 @@ export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string
                     const integrationDetails = allIntegrations.find(i => i.id === pi.integration_id);
                     return { ...integrationDetails, ...pi };
                 });
-            
+
             return {
                 ...plan,
                 integrations: planIntegrations
@@ -56,7 +56,7 @@ export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string
 }
 
 
-export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: string }): Promise<{ success: boolean, error?: string, planId?: string }> {
+export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: string, slug?: string, limits?: any }): Promise<{ success: boolean, error?: string, planId?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -64,18 +64,21 @@ export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: 
         return { success: false, error: "Acesso não autorizado." };
     }
 
-    const { name, description, price, is_active, is_default, id } = plan;
+    const { name, description, price, is_active, is_default, id, slug, limits } = plan;
 
     if (!name) {
         return { success: false, error: "O nome do plano é obrigatório." };
     }
-    
+
+    // Generate slug if not provided or if creating new
+    const finalSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
     const client = await db.connect();
     try {
         await client.query('BEGIN');
-        
+
         let planId = id;
-        
+
         // If is_default is true, set all other plans to false
         if (is_default) {
             await client.query('UPDATE plans SET is_default = FALSE WHERE id != $1', [id || null]);
@@ -83,15 +86,15 @@ export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: 
 
         if (id) { // Update
             await client.query(
-                `UPDATE plans SET name = $1, description = $2, price = $3, is_active = $4, is_default = $5, updated_at = NOW()
-                 WHERE id = $6`,
-                [name, description, price, is_active, is_default, id]
+                `UPDATE plans SET name = $1, description = $2, price = $3, is_active = $4, is_default = $5, slug = $6, limits = $7, updated_at = NOW()
+                 WHERE id = $8`,
+                [name, description, price, is_active, is_default, finalSlug, limits || {}, id]
             );
         } else { // Create
             const res = await client.query(
-                `INSERT INTO plans (name, description, price, is_active, is_default)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-                [name, description, price, is_active, is_default]
+                `INSERT INTO plans (name, description, price, is_active, is_default, slug, limits)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [name, description, price, is_active, is_default, finalSlug, limits || {}]
             );
             planId = res.rows[0].id;
         }
@@ -103,6 +106,9 @@ export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: 
     } catch (error: any) {
         await client.query('ROLLBACK');
         console.error('[SAVE_PLAN_ACTION]', error);
+        if (error.code === '23505') { // Unique constraint violation (likely slug)
+            return { success: false, error: 'Já existe um plano com este slug (identificador).' };
+        }
         return { success: false, error: 'Falha ao salvar plano no banco de dados.' };
     } finally {
         client.release();
@@ -116,16 +122,16 @@ export async function deletePlan(planId: string): Promise<{ success: boolean, er
     if (!user || !await checkSuperAdmin(user.id)) {
         return { success: false, error: "Acesso não autorizado." };
     }
-    
+
     try {
         // We might want to check if any workspace is subscribed to this plan first.
         // For now, we'll allow deletion. Deleting a plan will cascade to plan_integrations.
         await db.query('DELETE FROM plans WHERE id = $1', [planId]);
         revalidatePath('/superadmin/plans');
         return { success: true };
-    } catch(error: any) {
-         console.error('[DELETE_PLAN_ACTION]', error);
-         return { success: false, error: "Falha ao excluir o plano." };
+    } catch (error: any) {
+        console.error('[DELETE_PLAN_ACTION]', error);
+        return { success: false, error: "Falha ao excluir o plano." };
     }
 }
 
@@ -138,7 +144,7 @@ export async function savePlanIntegration(data: { planId: string, integrationId:
     }
 
     const { planId, integrationId, includedQuantity, additionalCost, isEnabled } = data;
-    
+
     try {
         await db.query(
             `INSERT INTO plan_integrations (plan_id, integration_id, included_quantity, additional_cost, is_enabled)
@@ -151,7 +157,7 @@ export async function savePlanIntegration(data: { planId: string, integrationId:
         );
         revalidatePath('/superadmin/plans');
         return { success: true };
-    } catch(error: any) {
+    } catch (error: any) {
         console.error('[SAVE_PLAN_INTEGRATION_ACTION]', error);
         return { success: false, error: 'Falha ao salvar configuração da integração.' };
     }

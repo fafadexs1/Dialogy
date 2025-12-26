@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { PLANS, PlanType, PlanLimits } from '@/lib/plans';
+import { getPlan, PlanType, PlanLimits } from '@/lib/plans';
 
 export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: PlanType, limits: PlanLimits }> {
     try {
@@ -19,7 +19,12 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
 
         const { plan, custom_limits } = res.rows[0];
         const planType = (plan as PlanType) || 'starter';
-        const baseLimits = PLANS[planType].limits;
+
+        const planDetails = await getPlan(planType);
+        // Fallback to starter definition if DB lookup fails for some reason
+        const baseLimits = planDetails?.limits || (await getPlan('starter'))?.limits || {
+            users: 5, whatsapp: 1, history_months: 3, departments: false, campaigns: false, api: false, transcription: false, ai_byok: true
+        };
 
         // Merge custom limits if they exist
         const limits: PlanLimits = {
@@ -31,7 +36,10 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
     } catch (error) {
         console.error('[getWorkspaceLimits] Error:', error);
         // Fallback to starter if something explodes, to be safe
-        return { plan: 'starter', limits: PLANS['starter'].limits };
+        return {
+            plan: 'starter',
+            limits: { users: 5, whatsapp: 1, history_months: 3, departments: false, campaigns: false, api: false, transcription: false, ai_byok: true }
+        };
     }
 }
 

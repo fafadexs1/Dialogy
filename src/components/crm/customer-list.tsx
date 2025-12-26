@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Settings, Plus, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, Edit, MoreHorizontal, Loader2, ListFilter, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type Contact, Tag, User, Activity, Segment } from '@/lib/types';
+import { type Contact, Tag, User, Activity, Segment, CustomFieldDefinition } from '@/lib/types';
 import { Button } from '../ui/button';
 import { AddContactForm } from './add-contact-form';
 import { CrmSettings } from './crm-settings';
@@ -17,7 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import CustomerProfile from './customer-profile';
 import { AddActivityForm } from './add-activity-form';
 import { LogAttemptForm } from './log-attempt-form';
-import { getContacts, getTags, getWorkspaceUsers, deleteContactAction, getSegments, createSegment } from '@/actions/crm';
+import { getContacts, getTags, getWorkspaceUsers, deleteContactAction, getSegments, createSegment, deleteSegment, getCustomFieldDefinitions } from '@/actions/crm';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -49,6 +49,7 @@ export default function CustomerList({ user }: { user: User }) {
     const [tags, setTags] = useState<Tag[]>([]);
     const [agents, setAgents] = useState<User[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
+    const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
 
     // UI State
     const [loading, setLoading] = useState(true);
@@ -76,14 +77,16 @@ export default function CustomerList({ user }: { user: User }) {
         try {
             // First load metadata if empty
             if (tags.length === 0 || agents.length === 0 || segments.length === 0) {
-                const [tagsRes, agentsRes, segmentsRes] = await Promise.all([
+                const [tagsRes, agentsRes, segmentsRes, customFieldsRes] = await Promise.all([
                     getTags(user.activeWorkspaceId),
                     getWorkspaceUsers(user.activeWorkspaceId),
-                    getSegments(user.activeWorkspaceId)
+                    getSegments(user.activeWorkspaceId),
+                    getCustomFieldDefinitions(user.activeWorkspaceId)
                 ]);
                 if (tagsRes.tags) setTags(tagsRes.tags);
                 if (agentsRes.users) setAgents(agentsRes.users);
                 if (segmentsRes.segments) setSegments(segmentsRes.segments);
+                if (customFieldsRes.fields) setCustomFields(customFieldsRes.fields);
             }
 
             // Then load contacts with filters
@@ -142,6 +145,24 @@ export default function CustomerList({ user }: { user: User }) {
         }
         setLoading(false);
     };
+
+    const handleDeleteSegment = async (e: React.MouseEvent, segmentId: string) => {
+        e.stopPropagation();
+        if (!confirm('Tem certeza que deseja apagar esta lista? Esta ação não pode ser desfeita.')) return;
+
+        setLoading(true);
+        const res = await deleteSegment(segmentId);
+        if (res.success) {
+            toast({ title: 'Lista apagada com sucesso!' });
+            if (selectedSegmentId === segmentId) setSelectedSegmentId(null);
+            // Refresh segments
+            const segmentsRes = await getSegments(user.activeWorkspaceId!);
+            if (segmentsRes.segments) setSegments(segmentsRes.segments);
+        } else {
+            toast({ title: 'Erro ao apagar lista', description: res.error, variant: 'destructive' });
+        }
+        setLoading(false);
+    }
 
     const handleAction = useCallback(async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
         setSelectedContact(contact);
@@ -210,14 +231,23 @@ export default function CustomerList({ user }: { user: User }) {
                         <Users className="w-4 h-4 mr-2" /> Todos Contatos
                     </Button>
                     {segments.map(seg => (
-                        <Button
-                            key={seg.id}
-                            variant={selectedSegmentId === seg.id ? 'secondary' : 'ghost'}
-                            className={`w-full justify-start ${selectedSegmentId === seg.id ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30' : 'text-white/70'}`}
-                            onClick={() => setSelectedSegmentId(seg.id)}
-                        >
-                            <ListFilter className="w-4 h-4 mr-2" /> {seg.name}
-                        </Button>
+                        <div key={seg.id} className="group relative flex items-center">
+                            <Button
+                                variant={selectedSegmentId === seg.id ? 'secondary' : 'ghost'}
+                                className={`w-full justify-start pr-10 ${selectedSegmentId === seg.id ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30' : 'text-white/70'}`}
+                                onClick={() => setSelectedSegmentId(seg.id)}
+                            >
+                                <ListFilter className="w-4 h-4 mr-2" /> {seg.name}
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute right-1 text-white/30 hover:text-red-400 hover:bg-red-500/10 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => handleDeleteSegment(e, seg.id)}
+                            >
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
                     ))}
                 </div>
             </div>
@@ -380,6 +410,7 @@ export default function CustomerList({ user }: { user: User }) {
                         <div className="w-full max-w-2xl animate-in fade-in zoom-in duration-200">
                             <SegmentBuilder
                                 tags={tags}
+                                customFields={customFields}
                                 onCancel={() => setIsSegmentBuilderOpen(false)}
                                 onSave={handleSaveSegment}
                             />

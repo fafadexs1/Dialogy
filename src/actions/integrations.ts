@@ -93,6 +93,17 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
 
         const activeProviders = new Set(statusesRes.rows.filter(r => r.is_active).map(r => r.provider));
 
+        // Get limits for specific integrations
+        const { checkLimit } = await import('@/lib/billing-logic');
+
+        // Evolution API (WhatsApp) Limit Check
+        const evoCountRes = await db.query(
+            'SELECT COUNT(*) as count FROM evolution_api_instances WHERE workspace_id = $1',
+            [workspaceId]
+        );
+        const evoCurrentCount = parseInt(evoCountRes.rows[0].count, 10);
+        const evoLimitCheck = await checkLimit(workspaceId, 'whatsapp', evoCurrentCount);
+
         const availableIntegrations = [
             {
                 id: 'gemini',
@@ -110,7 +121,13 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
                 icon_url: '/icons/whatsapp.svg',
                 href: '/integrations/evolution-api',
                 is_active: activeProviders.has('evolution-api'),
-                provider: 'evolution-api'
+                provider: 'evolution-api',
+                limitStatus: {
+                    reached: !evoLimitCheck.allowed,
+                    current: evoCurrentCount,
+                    max: evoLimitCheck.limit,
+                    plan: evoLimitCheck.plan
+                }
             },
             {
                 id: 'meta-messenger',

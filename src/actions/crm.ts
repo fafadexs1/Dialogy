@@ -119,6 +119,36 @@ export async function getSegments(workspaceId: string): Promise<{ segments: Segm
     }
 }
 
+export const deleteSegment = withDebug(
+    'delete_segment',
+    async function deleteSegment(segmentId: string): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
+
+        try {
+            const segRes = await db.query('SELECT workspace_id FROM crm_segments WHERE id = $1', [segmentId]);
+            if (segRes.rowCount === 0) return { success: false, error: "Segmento não encontrado." };
+            const workspaceId = segRes.rows[0].workspace_id;
+
+            if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+                return { success: false, error: "Você não tem permissão para excluir segmentos." };
+            }
+
+            await db.query('DELETE FROM crm_segments WHERE id = $1', [segmentId]);
+            revalidatePath('/crm');
+            return { success: true };
+        } catch (error) {
+            console.error("[DELETE_SEGMENT] Error:", error);
+            return { success: false, error: "Falha ao excluir segmento." };
+        }
+    },
+    {
+        contextResolver: (segmentId) => ({ payload: { segmentId } })
+    }
+);
+
+
 
 export const saveContactAction = withDebug(
     'save_contact',

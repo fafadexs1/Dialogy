@@ -290,6 +290,12 @@ export interface Integration {
   tag_type: 'primary' | 'secondary' | 'beta';
   href: string;
   status: 'active' | 'coming_soon';
+  limitStatus?: {
+    reached: boolean;
+    current: number;
+    max: number;
+    plan: string;
+  };
 }
 
 export type MetaChannel = {
@@ -604,9 +610,20 @@ export interface PlanIntegration extends Integration {
 
 export interface Plan {
   id: string;
+  slug?: string;
   name: string;
   description: string;
   price: number;
+  limits?: {
+    users?: number;
+    whatsapp?: number;
+    history_months?: number;
+    departments?: boolean;
+    campaigns?: boolean | 'moderate' | 'high';
+    api?: boolean;
+    transcription?: boolean;
+    ai_byok?: boolean;
+  };
   is_active: boolean;
   is_default: boolean;
   integrations: PlanIntegration[];

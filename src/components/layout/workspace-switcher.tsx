@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import type { User } from '@/lib/types';
 
 import { Crown } from 'lucide-react';
-import { PLANS, PlanType } from '@/lib/plans';
+import { PLANS, PlanType } from '@/lib/plans-types';
 
 interface WorkspaceSwitcherProps {
   className?: string;

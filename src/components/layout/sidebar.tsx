@@ -99,6 +99,7 @@ function SidebarIconLink({
     <div className="relative group w-full flex items-center justify-center">
       <Link
         href={item.href}
+        prefetch={false}
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 relative",
           isActive
@@ -177,6 +178,7 @@ function FlyoutMenu({
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-sidebar-accent transition-colors group"
               onClick={onClose}
             >
@@ -282,6 +284,7 @@ function AccountLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
     >
       <span className="flex h-9 w-9 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80">
@@ -381,6 +384,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="flex flex-col items-center gap-4">
         <Link
           href="/inbox"
+          prefetch={false}
           className="group relative flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-all duration-300 hover:bg-primary/20 hover:shadow-[0_0_20px_-4px_rgba(var(--primary),0.45)]"
           aria-label="Inbox"
         >

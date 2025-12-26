@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save, ArrowLeft, ArrowRight, Lock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
@@ -601,6 +601,7 @@ export default function EvolutionApiPage() {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [initialQrCode, setInitialQrCode] = useState<string | undefined>();
+    const [limitStatus, setLimitStatus] = useState<{ reached: boolean, current: number, max: number, plan: string } | null>(null);
 
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -612,6 +613,9 @@ export default function EvolutionApiPage() {
                 setInstances([]);
             } else {
                 setInstances(result.instances || []);
+                if (result.limitStatus) {
+                    setLimitStatus(result.limitStatus);
+                }
             }
         } catch (error) {
             console.error('[EVO_PAGE] Falha ao buscar inst\u00e2ncias', error);
@@ -649,12 +653,21 @@ export default function EvolutionApiPage() {
                     <p className="text-muted-foreground">Gerencie suas instâncias do WhatsApp para atendimento.</p>
                 </div>
                 <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <PlusCircle className="mr-2 h-4 w-4" />
-                            Criar Instância
-                        </Button>
-                    </DialogTrigger>
+                    {limitStatus?.reached ? (
+                        <div className="flex flex-col items-end gap-1">
+                            <Button variant="ghost" disabled className="bg-destructive/10 text-destructive hover:bg-destructive/20 cursor-not-allowed border border-destructive/20">
+                                <Lock className="mr-2 h-4 w-4" /> Limite Atingido ({limitStatus.current}/{limitStatus.max})
+                            </Button>
+                            <span className="text-[10px] text-muted-foreground mr-1">Faça upgrade do plano {limitStatus.plan}</span>
+                        </div>
+                    ) : (
+                        <DialogTrigger asChild>
+                            <Button>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Criar Instância
+                            </Button>
+                        </DialogTrigger>
+                    )}
                     <DialogContent className="max-w-3xl">
                         <AddInstanceForm workspaceId={user.activeWorkspaceId!} onSuccess={handleSuccess} onClose={() => setIsModalOpen(false)} />
                     </DialogContent>
