@@ -805,7 +805,9 @@ export default function ChatPanel({
                 transcription: null,
                 metadata: isInternalNote ? { isInternalNote: true } : {},
                 api_message_status: 'PENDING',
-                instance_name: chat.instance_name || undefined
+                instance_name: chat.instance_name || undefined,
+                optimistic: true,
+                sentByTab: tabId
             };
             appendMessagesToChat(chat.id, [optimisticMessage]);
 
@@ -900,7 +902,7 @@ export default function ChatPanel({
                     replaceOptimisticMessage(chat.id, optimisticId, lastResult.messages[0]);
                 }
             } else if (isInternalNote) {
-                const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId);
+                const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId, optimisticId || undefined);
                 if (result.success) {
                     reportClientMetric('message_sent', (performance.now() - sendStart));
                     // Smart Polling: Refresh chat data to confirm status updates (e.g. from 'queue' to 'attending')
@@ -922,6 +924,10 @@ export default function ChatPanel({
                         } as Message;
                         replaceOptimisticMessage(chat.id, optimisticId, realMessage);
                     }
+
+                    setSendState('idle');
+                    setLastSendError(null);
+                    lastSendDraftRef.current = null;
                 } else {
                     throw new Error(result.error);
                 }
@@ -1334,7 +1340,7 @@ export default function ChatPanel({
                         // If user is near bottom, keep sticking to bottom.
                         // If user scrolled up, don't auto-scroll.
                         if (isAtBottom || !userScrolledUpRef.current) {
-                            return 'smooth';
+                            return 'auto';
                         }
                         return false;
                     }}
@@ -1430,7 +1436,7 @@ export default function ChatPanel({
                                         </Popover>
 
                                         <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
-                                            <PopoverAnchor className="absolute left-12 bottom-3 h-2 w-2 opacity-0 pointer-events-none" />
+
                                             <div className="hidden md:flex items-center gap-1">
                                                 <Button
                                                     type="button"

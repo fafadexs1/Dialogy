@@ -1097,6 +1097,16 @@ export default function CustomerChatLayout({
 
   useEffect(() => {
     if (initialData) {
+      // FIX: Prevent overwriting client-side state with stale server state during revalidation/server actions.
+      // If we are hydrated, and we have a chat selected in the URL (via replaceState), 
+      // but the server sends "null" (because it re-rendered the /inbox route), we should ignore the update.
+      const isUrlPointingToChat = typeof window !== 'undefined' && window.location.pathname.split('/').length > 2;
+
+      if (isHydratedRef.current && initialData.selectedChatId === null && isUrlPointingToChat) {
+        console.log('[hydrate] Ignoring initialData update (server revalidation) because client URL points to a chat.');
+        return;
+      }
+
       setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
       setInitialData({
         chats: initialData.chats,
@@ -1109,9 +1119,12 @@ export default function CustomerChatLayout({
         hasMoreChats: initialData.hasMoreChats,
       });
       setFetchError(initialData.error ?? null);
+
+      // Only update selection if we accepted the initialData
       setSelectedChatId(initialData.selectedChatId);
       selectedChatIdRef.current = initialData.selectedChatId ?? null;
       updateSelectedChatPath(initialData.selectedChatId ?? null);
+
       isHydratedRef.current = true;
       setIsLoading(false);
       return;

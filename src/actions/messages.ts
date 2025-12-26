@@ -696,7 +696,7 @@ export const sendAgentMessageAction = withDebug(
             client.release();
         }
 
-        return internalSendMessage(chatId, content, user.id, tabId, undefined, undefined, messageId, undefined, contentWithSignature);
+        return internalSendMessage(chatId, content, user.id, tabId, { optimisticId: messageId }, undefined, messageId, undefined, contentWithSignature);
     },
     {
         contextResolver: (chatId, content) => ({ payload: { chatId, content } })
@@ -712,7 +712,8 @@ export const sendInternalNoteAction = withDebug(
     async function sendInternalNoteAction(
         chatId: string,
         content: string,
-        tabId: string | null
+        tabId: string | null,
+        optimisticId?: string
     ): Promise<{ success: boolean; error?: string; message?: Message }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -742,7 +743,7 @@ export const sendInternalNoteAction = withDebug(
             RETURNING *`,
                 [
                     workspaceId, chatId, 'text', content, true,
-                    'internal', { isInternalNote: true }, true, user.id, tabId
+                    'internal', { isInternalNote: true, optimisticId }, true, user.id, tabId
                 ]
             );
 

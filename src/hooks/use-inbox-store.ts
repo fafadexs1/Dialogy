@@ -182,12 +182,16 @@ export const useInboxStore = create<InboxState>((set, get) => ({
               // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
               // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
               if (message.optimistic && message.sentByTab === incoming.sentByTab) {
-                if (message.id.startsWith('optimistic-')) {
-                  return false; // Remove legacy/media optimistic messages
-                }
-                // For UUID messages, we KEEP them here. 
-                // dedupeMessages will handle the merge/overwrite if the IDs match.
-                // If the IDs don't match (different pending message), we definitely want to KEEP it.
+                // Strict ID match: Always replace.
+                if (message.id === incoming.id) return false;
+
+                // Optimistic ID match (via metadata): Logic for when server ID differs but it's the same message.
+                if (incoming.metadata?.optimisticId && message.id === incoming.metadata.optimisticId) return false;
+
+                // Content match: If IDs differ (server ignored client ID), assume same message if content matches.
+                // This prevents "stuck as sending" duplicates while preserving other distinct pending messages.
+                if (message.content === incoming.content) return false;
+
                 return true;
               }
               return true;

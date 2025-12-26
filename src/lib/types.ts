@@ -152,6 +152,7 @@ export type MessageMetadata = {
   authored_by_system_agent_id?: string;
   isMarketing?: boolean;
   is_bulk_action?: boolean;
+  optimisticId?: string;
 }
 
 export type Message = {

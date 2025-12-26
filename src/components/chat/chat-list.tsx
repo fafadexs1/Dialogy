@@ -1376,13 +1376,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         ) : (agent.user.role?.name === 'Owner' || agent.user.role?.name === 'Proprietário') ? (
                           <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">Proprietário</Badge>
                         ) : (
-                          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">Agente</Badge>
+                          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
+                            {agent.user.team || agent.user.role?.name || 'Agente'}
+                          </Badge>
                         )}
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Equipe</span>
-                        {/* Assuming team is not readily available on OnlineAgent type, showing default or hidden */}
-                        <span className="font-medium text-foreground">Suporte</span>
+                        <span className="font-medium text-foreground">{agent.user.team || 'Geral'}</span>
                       </div>
 
                       <Button
