@@ -7,6 +7,9 @@ export class InstagramMessagingService {
 
   private get endpoint(): string {
     const baseId = this.channel.ig_business_id || this.channel.external_page_id;
+    if (!baseId) {
+      throw new Error('ID da conta Instagram Business nao configurado.');
+    }
     return `https://graph.facebook.com/v20.0/${baseId}/messages`;
   }
 
@@ -17,10 +20,7 @@ export class InstagramMessagingService {
         Authorization: `Bearer ${this.channel.access_token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        messaging_type: 'RESPONSE',
-        ...body,
-      }),
+      body: JSON.stringify(body),
     });
 
     const json = await res.json().catch(() => ({}));

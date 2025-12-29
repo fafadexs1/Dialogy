@@ -72,7 +72,7 @@ describe('Realtime subscriptions', () => {
 
     expect(client.channel).toHaveBeenCalledWith(buildChatMessageChannelName(WORKSPACE_ID, 'chat-123'));
     expect(channel.subscribe).toHaveBeenCalled();
-    expect(onCalls).toHaveLength(2);
+    expect(onCalls).toHaveLength(1);
     expect(onCalls.every((call) => call.config.filter === 'chat_id=eq.chat-123')).toBe(true);
 
     teardownChannel(client as any, subscription as any);

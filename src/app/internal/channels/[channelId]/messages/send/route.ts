@@ -61,6 +61,11 @@ export async function POST(
       messagingResponse?.id ||
       null;
 
+    const externalChannelId =
+      channel.type === 'instagram'
+        ? channel.ig_business_id || channel.external_page_id
+        : channel.external_page_id || channel.ig_business_id;
+
     const persisted = await persistNormalizedMessage({
       channel,
       chat,
@@ -74,8 +79,8 @@ export async function POST(
       platform: channel.type,
       direction: 'outgoing',
       externalMessageId,
-      externalSenderId: channel.external_page_id || channel.ig_business_id || null,
-      externalChannelId: channel.external_page_id || channel.ig_business_id || null,
+      externalSenderId: externalChannelId || null,
+      externalChannelId: externalChannelId || null,
       rawPayload: { request: body, response: messagingResponse },
       fromMe: true,
       senderUserId: body.senderUserId,

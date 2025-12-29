@@ -6,7 +6,7 @@ import {
     Check, X, ChevronDown, Shield, Bot
 } from "lucide-react";
 import Link from "next/link";
-import { PLANS } from "@/lib/plans";
+import { PLANS } from "@/lib/plans-types";
 import { Navbar } from "@/components/landing/navbar";
 import { Footer } from "@/components/landing/footer";
 import {

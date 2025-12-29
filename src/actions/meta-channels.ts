@@ -32,6 +32,10 @@ export async function listMetaChannels(
   }));
 }
 
+export async function getMetaVerifyToken(): Promise<string | null> {
+  return process.env.META_VERIFY_TOKEN || null;
+}
+
 export async function createMetaChannel(data: {
   workspaceId: string;
   type: 'messenger' | 'instagram';
@@ -53,17 +57,27 @@ export async function createMetaChannel(data: {
     appSecret,
     igBusinessId
   } = data;
+  const effectiveVerifyToken = process.env.META_VERIFY_TOKEN || verifyToken;
+
+  if (type === 'instagram') {
+    if (!igBusinessId) {
+      throw new Error('ID da conta Instagram Business obrigatorio.');
+    }
+    if (!externalPageId) {
+      throw new Error('Page ID obrigatorio para Instagram.');
+    }
+  }
 
   // Check if already exists
   const existing = await findChannelByExternalId(type, externalPageId);
-  if (existing) {
+  const existingByIg = igBusinessId ? await findChannelByExternalId(type, igBusinessId) : null;
+  if (existing || existingByIg) {
     throw new Error('Canal já conectado com este ID.');
   }
 
   // Determine IDs
-  const pageId = type === 'messenger' ? externalPageId : (externalPageId || null);
-  const igId = type === 'instagram' ? (igBusinessId || externalPageId) : null;
-  // Note: For IG, if igBusinessId is providing, use it. If only externalPageId is provided as "pageId || igBusinessId", we use it as igId if type is instagram.
+  const pageId = externalPageId;
+  const igId = type === 'instagram' ? igBusinessId : null;
 
   const id = randomUUID();
 
@@ -85,7 +99,7 @@ export async function createMetaChannel(data: {
       pageId, // external_page_id
       igId,   // ig_business_id
       accessToken,
-      verifyToken,
+        effectiveVerifyToken,
       appSecret || null
     ]
   );

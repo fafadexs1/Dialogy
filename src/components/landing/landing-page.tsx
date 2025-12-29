@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { getLandingStats } from "@/actions/landing";
-import { PLANS } from "@/lib/plans";
+import { PLANS } from "@/lib/plans-types";
 import { Navbar } from "@/components/landing/navbar";
 import { Footer } from "@/components/landing/footer";
 import {

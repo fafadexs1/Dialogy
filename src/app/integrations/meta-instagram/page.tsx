@@ -1,22 +1,21 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import type { MetaChannel, User } from '@/lib/types';
-import { createMetaChannel, listMetaChannels, deleteMetaChannel, exchangeInstagramToken } from '@/actions/meta-channels';
-import { Loader2, Trash2, Link2, RefreshCw, Wand2, Instagram, Check, Copy, ArrowRight, ShieldCheck, Key, Laptop, Settings, Facebook } from 'lucide-react';
+import type { MetaChannel } from '@/lib/types';
+import { createMetaChannel, listMetaChannels, deleteMetaChannel, getMetaVerifyToken } from '@/actions/meta-channels';
+import { Loader2, Trash2, Link2, RefreshCw, Instagram, Check, Copy, ArrowRight, ShieldCheck, Settings, Facebook } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FacebookLoginButton } from '@/components/integrations/facebook-login-button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from '@/components/ui/separator';
-import { useRouter, useSearchParams } from 'next/navigation';
 
 function useOrigin() {
   return useMemo(() => (typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || ''), []);
@@ -36,12 +35,10 @@ export default function MetaInstagramIntegrationPage() {
   const { toast } = useToast();
   const origin = useOrigin();
   const user = useCurrentUser();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [channels, setChannels] = useState<MetaChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [isExchanging, setIsExchanging] = useState(false);
+  const [verifyTokenSource, setVerifyTokenSource] = useState('');
 
   // Wizard States
   const [step, setStep] = useState(1);
@@ -70,8 +67,36 @@ export default function MetaInstagramIntegrationPage() {
     return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
   };
 
+  const resetForm = (tokenOverride?: string) => {
+    const tokenValue = tokenOverride ?? verifyTokenSource || generateVerifyToken();
+    setForm({
+      name: '',
+      igBusinessId: '',
+      pageId: '',
+      verifyToken: tokenValue,
+      accessToken: '',
+      appSecret: '',
+      fbUserId: '',
+    });
+  };
+
   useEffect(() => {
-    setForm((prev) => ({ ...prev, verifyToken: generateVerifyToken() }));
+    const loadVerifyToken = async () => {
+      try {
+        const token = await getMetaVerifyToken();
+        if (token) {
+          setVerifyTokenSource(token);
+          resetForm(token);
+        } else {
+          resetForm();
+        }
+      } catch (error) {
+        console.error('[META_VERIFY_TOKEN]', error);
+        resetForm();
+      }
+    };
+
+    loadVerifyToken();
   }, []);
 
   const loadChannels = async (workspaceId: string) => {
@@ -92,53 +117,28 @@ export default function MetaInstagramIntegrationPage() {
     }
   }, [user?.activeWorkspaceId]);
 
-  // --- Instagram Login Code Exchange ---
-  useEffect(() => {
-    const code = searchParams.get('code');
-    if (code && user?.activeWorkspaceId && !isExchanging) {
-      const handleExchange = async () => {
-        setIsExchanging(true);
-        toast({ title: 'Conectando...', description: 'Trocando código de autorização...' });
-        try {
-          const currentRedirectUri = `${window.location.origin}/integrations/meta-instagram`;
-          await exchangeInstagramToken(code, user.activeWorkspaceId!, currentRedirectUri);
-          toast({ title: 'Sucesso!', description: 'Instagram conectado com sucesso.' });
-
-          // Clear query params
-          const newUrl = window.location.pathname;
-          window.history.replaceState({}, '', newUrl);
-
-          loadChannels(user.activeWorkspaceId!);
-        } catch (error: any) {
-          console.error(error);
-          toast({ title: 'Erro na conexão', description: error.message || 'Falha ao conectar Instagram.', variant: 'destructive' });
-        } finally {
-          setIsExchanging(false);
-        }
-      };
-
-      handleExchange();
-    }
-  }, [searchParams, user?.activeWorkspaceId]);
-  // -------------------------------------
-
   const handleCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!user?.activeWorkspaceId) return;
+    if (!form.pageId || !form.igBusinessId || !form.accessToken) {
+      toast({ title: 'Dados incompletos', description: 'Informe Page ID, Instagram Business ID e token de acesso.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       await createMetaChannel({
         workspaceId: user.activeWorkspaceId,
         type: 'instagram',
         name: form.name,
-        externalPageId: form.pageId || form.igBusinessId,
+        externalPageId: form.pageId,
+        igBusinessId: form.igBusinessId,
         verifyToken: form.verifyToken,
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
         fbUserId: form.fbUserId,
       });
       toast({ title: 'Instagram Conectado!', description: 'Conexão estabelecida com sucesso.' });
-      setForm({ name: '', igBusinessId: '', pageId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
+      resetForm();
       setSelectedAccountId('');
       setAvailableAccounts([]);
       loadChannels(user.activeWorkspaceId);
@@ -167,7 +167,7 @@ export default function MetaInstagramIntegrationPage() {
     const fbUserId = response.userID;
     // 1. Get Pages first
     try {
-      const pagesRes = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,instagram_business_account{id,name,username,profile_picture_url}`);
+      const pagesRes = await fetch(`https://graph.facebook.com/v20.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,instagram_business_account{id,name,username,profile_picture_url}`);
       const pagesData = await pagesRes.json();
 
       if (pagesData.data) {
@@ -215,18 +215,6 @@ export default function MetaInstagramIntegrationPage() {
     }
   };
 
-  const handleInstagramLogin = () => {
-    const currentRedirectUri = `${window.location.origin}/integrations/meta-instagram`;
-    const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
-    const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${encodeURIComponent(currentRedirectUri)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish`;
-
-    console.log('[Instagram Auth] Client ID:', clientId);
-    console.log('[Instagram Auth] Redirect URI:', currentRedirectUri);
-    console.log('[Instagram Auth] URL:', authUrl);
-
-    window.location.href = authUrl;
-  };
-
   return (
     <div className="flex flex-col h-full bg-muted/10">
       <div className="p-8 max-w-6xl mx-auto w-full space-y-8">
@@ -272,60 +260,36 @@ export default function MetaInstagramIntegrationPage() {
                   <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                     <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
                       <TabsList className="grid w-full grid-cols-2 mb-6">
-                        <TabsTrigger value="automatic">Automático (Novo)</TabsTrigger>
-                        <TabsTrigger value="manual">Manual / Legacy</TabsTrigger>
+                        <TabsTrigger value="automatic">Automatico (Facebook)</TabsTrigger>
+                        <TabsTrigger value="manual">Manual</TabsTrigger>
                       </TabsList>
 
-                      <TabsContent value="automatic" className="space-y-6">
-                        <Alert className="bg-purple-50/50 border-purple-100 text-purple-800 dark:bg-purple-950/20 dark:border-purple-900/50 dark:text-purple-300">
+                                            <TabsContent value="automatic" className="space-y-6">
+                        <Alert className="bg-blue-50/50 border-blue-100 text-blue-800 dark:bg-blue-950/20 dark:border-blue-900/50 dark:text-blue-300">
                           <AlertTitle className="flex items-center gap-2 font-semibold">
-                            <Instagram className="h-4 w-4" /> Login com Instagram
+                            <Facebook className="h-4 w-4" /> Conexao via Facebook
                           </AlertTitle>
                           <AlertDescription className="text-sm mt-1">
-                            Use sua conta do Instagram Business para conectar diretamente.
-                          </AlertDescription>
-                        </Alert>
-
-                        <div className="flex justify-center py-6">
-                          <Button
-                            onClick={handleInstagramLogin}
-                            className="w-full max-w-sm h-12 text-base shadow-sm bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-90 text-white"
-                            disabled={isExchanging}
-                          >
-                            {isExchanging ? (
-                              <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Conectando...</>
-                            ) : (
-                              <><Instagram className="mr-2 h-5 w-5" /> Conectar com Instagram</>
-                            )}
-                          </Button>
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="manual" className="space-y-6">
-                        <Alert className="mb-4">
-                          <AlertTitle>Modo Legacy (Facebook)</AlertTitle>
-                          <AlertDescription>
-                            Conecte via Facebook Login para listar páginas vinculadas.
+                            Use o login do Facebook para selecionar a pagina vinculada ao Instagram Business.
                           </AlertDescription>
                         </Alert>
 
                         {!fbAppId && (
                           <Alert variant="destructive" className="mb-4">
-                            <AlertDescription>NEXT_PUBLIC_FACEBOOK_APP_ID não configurado.</AlertDescription>
+                            <AlertDescription>NEXT_PUBLIC_FACEBOOK_APP_ID nao configurado.</AlertDescription>
                           </Alert>
                         )}
 
-                        <div className="flex justify-center mb-6">
-                          <FacebookLoginButton
-                            appId={fbAppId}
-                            onLoginSuccess={handleFacebookLoginSuccess}
-                            label="Buscar Paginas via Facebook"
-                            className="w-full max-w-sm"
-                          />
-                        </div>
-
-                        {/* Existing manual connection fields if needed, or just list accounts found via FB */}
-                        {availableAccounts.length > 0 && (
+                        {availableAccounts.length === 0 ? (
+                          <div className="flex justify-center py-6">
+                            <FacebookLoginButton
+                              appId={fbAppId}
+                              onLoginSuccess={handleFacebookLoginSuccess}
+                              label="Buscar Paginas via Facebook"
+                              className="w-full max-w-sm"
+                            />
+                          </div>
+                        ) : (
                           <div className="space-y-3">
                             <Label>Selecione a Conta do Instagram (via Facebook):</Label>
                             <RadioGroup value={selectedAccountId} onValueChange={handleAccountSelection} className="grid grid-cols-1 gap-3">
@@ -347,7 +311,7 @@ export default function MetaInstagramIntegrationPage() {
                                       )}
                                       <div>
                                         <div className="font-semibold text-lg">@{acc.username}</div>
-                                        <div className="text-xs text-muted-foreground">Via Página: {acc.page_name}</div>
+                                        <div className="text-xs text-muted-foreground">Via Pagina: {acc.page_name}</div>
                                       </div>
                                     </div>
                                     {selectedAccountId === acc.id && <Check className="h-5 w-5 text-primary" />}
@@ -355,20 +319,84 @@ export default function MetaInstagramIntegrationPage() {
                                 </div>
                               ))}
                             </RadioGroup>
-
-                            <div className="pt-4 flex justify-end">
-                              <Button
-                                type="button"
-                                onClick={() => handleCreate()}
-                                disabled={saving || !form.accessToken || !form.igBusinessId}
-                                className="bg-pink-600 hover:bg-pink-700 text-white min-w-[150px]"
-                              >
-                                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                <Check className="mr-2 h-4 w-4" /> Conectar Selecionada
-                              </Button>
-                            </div>
                           </div>
                         )}
+
+                        <div className="pt-4 flex justify-end">
+                          <Button
+                            type="button"
+                            onClick={() => setStep(2)}
+                            disabled={saving || !form.accessToken || !form.igBusinessId || !form.pageId}
+                          >
+                            Proximo: Configurar Webhook <ArrowRight className="ml-2 h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="manual" className="space-y-6">
+                        <Alert>
+                          <AlertTitle className="flex items-center gap-2 font-semibold">
+                            <Settings className="h-4 w-4" /> Configuracao manual
+                          </AlertTitle>
+                          <AlertDescription className="text-sm mt-1">
+                            Use se voce ja possui Page ID, Instagram Business ID e token da pagina.
+                          </AlertDescription>
+                        </Alert>
+
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Nome do Canal (Interno)</Label>
+                            <Input
+                              value={form.name}
+                              onChange={(e) => setForm({ ...form, name: e.target.value })}
+                              placeholder="Ex: Suporte Instagram"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Instagram Business ID</Label>
+                            <Input
+                              required
+                              value={form.igBusinessId}
+                              onChange={(e) => setForm({ ...form, igBusinessId: e.target.value })}
+                              placeholder="Ex: 178414..."
+                              className="font-mono text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Page ID (Facebook)</Label>
+                            <Input
+                              required
+                              value={form.pageId}
+                              onChange={(e) => setForm({ ...form, pageId: e.target.value })}
+                              placeholder="Ex: 10456789..."
+                              className="font-mono text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Token de Acesso da Pagina</Label>
+                            <Input
+                              required
+                              type="password"
+                              value={form.accessToken}
+                              onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
+                              placeholder="EAA..."
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="pt-4 flex justify-end">
+                          <Button
+                            type="button"
+                            onClick={() => setStep(2)}
+                            disabled={saving || !form.accessToken || !form.igBusinessId || !form.pageId}
+                          >
+                            Proximo: Configurar Webhook <ArrowRight className="ml-2 h-4 w-4" />
+                          </Button>
+                        </div>
                       </TabsContent>
                     </Tabs>
                   </div>
@@ -450,8 +478,8 @@ export default function MetaInstagramIntegrationPage() {
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">Ativo</Badge>
-                            <span className="text-xs font-mono text-muted-foreground truncate max-w-[120px]" title={ch.external_page_id || ''}>
-                              ID: {ch.external_page_id || 'N/A'}
+                            <span className="text-xs font-mono text-muted-foreground truncate max-w-[120px]" title={ch.ig_business_id || ch.external_page_id || ''}>
+                              ID: {ch.ig_business_id || ch.external_page_id || 'N/A'}
                             </span>
                           </div>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 -mr-2 -mt-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDelete(ch.id)}>
@@ -474,3 +502,6 @@ export default function MetaInstagramIntegrationPage() {
     </div>
   );
 }
+
+
+

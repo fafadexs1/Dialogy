@@ -14,11 +14,18 @@ export async function GET(request: NextRequest) {
   const mode = searchParams.get('hub.mode');
   const verifyToken = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
+  const envVerifyToken = process.env.META_VERIFY_TOKEN;
 
   if (mode === 'subscribe' && verifyToken && challenge) {
-    const channel = await findChannelByVerifyToken('instagram', verifyToken);
-    if (!channel) {
-      return NextResponse.json({ error: 'verify_token invalido' }, { status: 403 });
+    if (envVerifyToken) {
+      if (verifyToken !== envVerifyToken) {
+        return NextResponse.json({ error: 'verify_token invalido' }, { status: 403 });
+      }
+    } else {
+      const channel = await findChannelByVerifyToken('instagram', verifyToken);
+      if (!channel) {
+        return NextResponse.json({ error: 'verify_token invalido' }, { status: 403 });
+      }
     }
     return new NextResponse(challenge, {
       status: 200,

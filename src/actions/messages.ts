@@ -190,11 +190,16 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
         status: 'active',
     };
 
+    const externalChannelId =
+        row.platform === 'instagram'
+            ? row.ig_business_id || row.external_page_id
+            : row.external_page_id || row.ig_business_id;
+
     return {
         channel,
         platform: row.platform,
         externalUserId: row.external_user_id || row.last_external_sender_id,
-        externalChannelId: row.external_page_id || row.ig_business_id,
+        externalChannelId,
         chat: { id: chatId, workspace_id: row.workspace_id, status: 'atendimentos' as Chat['status'], contact_id: row.contact_id },
         contact: {
             id: row.contact_id,

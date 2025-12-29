@@ -11,6 +11,7 @@ import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
+import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 
@@ -300,6 +301,18 @@ async function handleMessagesUpsert(payload: any) {
         else if (effectiveMessageType === 'audioMessage') mimetype = 'audio/mp4';
     }
 
+    const normalizedMime = normalizeMimeType(mimetype);
+    const fileName = (mediaDetails as any)?.fileName || (mediaDetails as any)?.filename || null;
+    const resolvedType = resolveMediaMessageType({
+        currentType: dbMessageType,
+        mimetype: normalizedMime || mimetype,
+        fileName,
+    });
+    if (resolvedType !== dbMessageType) {
+        console.log(`[WEBHOOK_MSG_UPSERT] Ajustando tipo de mensagem: ${dbMessageType} -> ${resolvedType}`);
+        dbMessageType = resolvedType;
+    }
+
     let locationThumbnail: string | undefined;
     const rawLocationThumb = locationDetails?.jpegThumbnail;
     if (rawLocationThumb) {
@@ -324,8 +337,8 @@ async function handleMessagesUpsert(payload: any) {
 
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl || undefined,
-        mimetype: mimetype,
-        fileName: mediaDetails?.fileName,
+        mimetype: normalizedMime || mimetype,
+        fileName,
         duration: mediaDetails?.seconds,
         thumbnail: (mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail,
     };

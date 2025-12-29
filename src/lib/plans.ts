@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { db } from '@/lib/db';
 import { unstable_cache } from 'next/cache';
 import { PlanType, PlanLimits, PlanDetails, PLANS as DEFAULT_PLANS } from './plans-types';

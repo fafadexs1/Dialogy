@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import type { MetaChannel, User } from '@/lib/types';
-import { createMetaChannel, listMetaChannels, deleteMetaChannel } from '@/actions/meta-channels';
+import { createMetaChannel, listMetaChannels, deleteMetaChannel, getMetaVerifyToken } from '@/actions/meta-channels';
 import { Loader2, Trash2, Link2, RefreshCw, Wand2, MessageCircle, Check, Copy, ArrowRight, ShieldCheck, Key, Facebook, Laptop, Settings } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -36,6 +36,7 @@ export default function MetaMessengerIntegrationPage() {
   const [channels, setChannels] = useState<MetaChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [verifyTokenSource, setVerifyTokenSource] = useState('');
 
   // Wizard States
   const [step, setStep] = useState(1);
@@ -63,8 +64,35 @@ export default function MetaMessengerIntegrationPage() {
     return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
   };
 
+  const resetForm = (tokenOverride?: string) => {
+    const tokenValue = tokenOverride ?? verifyTokenSource || generateVerifyToken();
+    setForm({
+      name: '',
+      pageId: '',
+      verifyToken: tokenValue,
+      accessToken: '',
+      appSecret: '',
+      fbUserId: '',
+    });
+  };
+
   useEffect(() => {
-    setForm((prev) => ({ ...prev, verifyToken: generateVerifyToken() }));
+    const loadVerifyToken = async () => {
+      try {
+        const token = await getMetaVerifyToken();
+        if (token) {
+          setVerifyTokenSource(token);
+          resetForm(token);
+        } else {
+          resetForm();
+        }
+      } catch (error) {
+        console.error('[META_VERIFY_TOKEN]', error);
+        resetForm();
+      }
+    };
+
+    loadVerifyToken();
   }, []);
 
   const loadChannels = async (workspaceId: string) => {
@@ -101,7 +129,7 @@ export default function MetaMessengerIntegrationPage() {
         fbUserId: form.fbUserId, // Pass it to action
       });
       toast({ title: 'Conexão Estabelecida!', description: 'Facebook Messenger conectado com sucesso.' });
-      setForm({ name: '', pageId: '', verifyToken: '', accessToken: '', appSecret: '', fbUserId: '' });
+      resetForm();
       setSelectedPageId('');
       setAvailablePages([]);
       loadChannels(user.activeWorkspaceId);
