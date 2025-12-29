@@ -1,4 +1,4 @@
-import { MetaChannelRecord } from './meta-channel.service';
+import { MetaChannelRecord, refreshMetaChannelAccessToken } from './meta-channel.service';
 
 type OutgoingType = 'text' | 'image' | 'video' | 'audio' | 'file';
 
@@ -9,7 +9,7 @@ export class MessengerMessagingService {
     return `https://graph.facebook.com/v20.0/me/messages`;
   }
 
-  private async request(body: Record<string, any>) {
+  private async request(body: Record<string, any>, retryAuth = false) {
     const res = await fetch(`${this.endpoint}`, {
       method: 'POST',
       headers: {
@@ -24,7 +24,26 @@ export class MessengerMessagingService {
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(json.error?.message || 'Falha ao enviar mensagem para o Messenger.');
+      const error = json.error || {};
+      const message = String(error.message || '');
+      const lowered = message.toLowerCase();
+      const isAuthError =
+        error.code === 190 ||
+        error.type === 'OAuthException' ||
+        lowered.includes('error validating access token') ||
+        lowered.includes('session has expired');
+
+      if (isAuthError && !retryAuth) {
+        const refreshed = await refreshMetaChannelAccessToken(this.channel);
+        if (refreshed?.access_token) {
+          this.channel.access_token = refreshed.access_token;
+          this.channel.settings = refreshed.settings ?? this.channel.settings;
+          return this.request(body, true);
+        }
+        throw new Error('Token do canal expirado. Reconecte o canal Meta para continuar.');
+      }
+
+      throw new Error(message || 'Falha ao enviar mensagem para o Messenger.');
     }
     return json;
   }

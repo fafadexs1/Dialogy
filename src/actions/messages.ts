@@ -160,6 +160,7 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
           ch.access_token,
           ch.app_secret,
           ch.verify_token,
+          ch.settings,
           ch.name as channel_name,
           c.id as contact_id,
           c.workspace_id as contact_workspace_id,
@@ -188,6 +189,7 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
         verify_token: row.verify_token,
         name: row.channel_name,
         status: 'active',
+        settings: row.settings,
     };
 
     const externalChannelId =
@@ -656,51 +658,6 @@ export const sendAgentMessageAction = withDebug(
             console.error('[SEND_AGENT_MESSAGE] Falha ao obter nome do usuário para assinatura:', err);
         }
 
-        // Tenta Meta primeiro (Instagram/Messenger)
-        const client = await db.connect();
-        try {
-            const metaCtx = await resolveMetaSendContext(chatId, client);
-            if (metaCtx) {
-                try {
-                    const service =
-                        metaCtx.platform === 'instagram'
-                            ? new InstagramMessagingService(metaCtx.channel)
-                            : new MessengerMessagingService(metaCtx.channel);
-
-                    const apiResponse = await service.sendMessage({
-                        recipientId: metaCtx.externalUserId,
-                        type: 'text',
-                        text: contentWithSignature,
-                    });
-
-                    const persisted = await persistNormalizedMessage({
-                        channel: metaCtx.channel,
-                        chat: metaCtx.chat,
-                        contact: metaCtx.contact,
-                        message: { type: 'text', content, metadata: {} },
-                        platform: metaCtx.platform,
-                        direction: 'outgoing',
-                        externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                        externalSenderId: metaCtx.externalUserId,
-                        externalChannelId: metaCtx.externalChannelId,
-                        rawPayload: { request: { content: contentWithSignature }, response: apiResponse },
-                        fromMe: true,
-                        senderUserId: user.id,
-                        senderSystemAgentId: null,
-                        id: messageId,
-                    });
-                    return { success: true, message: persisted as Message };
-                } catch (metaErr) {
-                    console.error('[SEND_AGENT_MESSAGE][META]', metaErr);
-                    return { success: false, error: formatMetaSendError(metaErr) };
-                }
-            }
-        } catch (err) {
-            console.error('[SEND_AGENT_MESSAGE][META_CTX]', err);
-        } finally {
-            client.release();
-        }
-
         return internalSendMessage(chatId, content, user.id, tabId, { optimisticId: messageId }, undefined, messageId, undefined, contentWithSignature);
     },
     {
@@ -881,6 +838,38 @@ export const sendMediaAction = withDebug(
             const metaCtx = await resolveMetaSendContext(chatId, client);
             if (metaCtx) {
                 try {
+                    try {
+                        const chatInfoRes = await client.query(
+                            `SELECT workspace_id, status, agent_id FROM chats WHERE id = $1`,
+                            [chatId]
+                        );
+                        if (chatInfoRes.rowCount > 0) {
+                            const { workspace_id: workspaceId, status, agent_id: currentAgentId } = chatInfoRes.rows[0];
+                            if (!currentAgentId || status === 'encerrados') {
+                                await client.query(
+                                    "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
+                                    [user.id, chatId]
+                                );
+
+                                const agentRes = await client.query(
+                                    'SELECT full_name, email FROM users WHERE id = $1',
+                                    [user.id]
+                                );
+                                const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
+
+                                await client.query(
+                                    `INSERT INTO messages (
+                                        workspace_id, chat_id, type, content, from_me,
+                                        sender_user_id, created_at, is_read
+                                    ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
+                                    [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, user.id]
+                                );
+                            }
+                        }
+                    } catch (assignErr) {
+                        console.error('[SEND_MEDIA][ASSIGN]', assignErr);
+                    }
+
                     const service = metaCtx.platform === 'instagram'
                         ? new InstagramMessagingService(metaCtx.channel)
                         : new MessengerMessagingService(metaCtx.channel);

@@ -604,7 +604,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         </Avatar>
         {(() => {
           const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
-          const platform = (lastMessage?.platform || lastMessage?.source_from_api || chat.instance_type || '').toLowerCase();
+          const platform = (lastMessage?.platform || lastMessage?.source_from_api || chat.source || chat.instance_type || '').toLowerCase();
           let icon = <FaWhatsapp size={10} />;
           let bg = 'bg-green-500';
           let label = 'WhatsApp';

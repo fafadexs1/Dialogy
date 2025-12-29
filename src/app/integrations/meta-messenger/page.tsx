@@ -54,6 +54,8 @@ export default function MetaMessengerIntegrationPage() {
     accessToken: '',
     appSecret: '',
     fbUserId: '', // Add fbUserId here
+    fbUserAccessToken: '',
+    fbUserTokenExpiresAt: '',
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/messenger`;
@@ -65,7 +67,7 @@ export default function MetaMessengerIntegrationPage() {
   };
 
   const resetForm = (tokenOverride?: string) => {
-    const tokenValue = tokenOverride ?? verifyTokenSource || generateVerifyToken();
+    const tokenValue = tokenOverride ?? (verifyTokenSource || generateVerifyToken());
     setForm({
       name: '',
       pageId: '',
@@ -73,6 +75,8 @@ export default function MetaMessengerIntegrationPage() {
       accessToken: '',
       appSecret: '',
       fbUserId: '',
+      fbUserAccessToken: '',
+      fbUserTokenExpiresAt: '',
     });
   };
 
@@ -127,6 +131,8 @@ export default function MetaMessengerIntegrationPage() {
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
         fbUserId: form.fbUserId, // Pass it to action
+        fbUserAccessToken: form.fbUserAccessToken,
+        fbUserTokenExpiresAt: form.fbUserTokenExpiresAt,
       });
       toast({ title: 'Conexão Estabelecida!', description: 'Facebook Messenger conectado com sucesso.' });
       resetForm();
@@ -156,6 +162,14 @@ export default function MetaMessengerIntegrationPage() {
   const handleFacebookLoginSuccess = async (response: any) => {
     const userAccessToken = response.accessToken;
     const fbUserId = response.userID; // Capture User ID
+    const expiresIn = Number(response.expiresIn);
+    const dataAccessExpiry = Number(response.data_access_expiration_time);
+    const expiresAt =
+      Number.isFinite(expiresIn) && expiresIn > 0
+        ? new Date(Date.now() + expiresIn * 1000).toISOString()
+        : Number.isFinite(dataAccessExpiry) && dataAccessExpiry > 0
+          ? new Date(dataAccessExpiry * 1000).toISOString()
+          : '';
     try {
       // Fetch Pages
       const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture`);
@@ -163,7 +177,12 @@ export default function MetaMessengerIntegrationPage() {
       if (data.data) {
         setAvailablePages(data.data);
         // Store fbUserId temporarily in form state even if page not selected yet, or handle via selection
-        setForm(prev => ({ ...prev, fbUserId }));
+        setForm(prev => ({
+          ...prev,
+          fbUserId,
+          fbUserAccessToken: userAccessToken,
+          fbUserTokenExpiresAt: expiresAt,
+        }));
         toast({ title: 'Páginas Carregadas', description: `${data.data.length} páginas encontradas.` });
       } else {
         toast({ title: 'Nenhuma página', description: 'Não encontramos páginas administrativas nesta conta.', variant: 'destructive' });

@@ -17,6 +17,13 @@ export type MetaChannelRecord = {
   verify_token: string;
   name: string | null;
   status: string | null;
+  settings?: Record<string, any> | null;
+};
+
+type MetaChannelSettings = {
+  fb_user_id?: string;
+  fb_user_access_token?: string;
+  fb_user_token_expires_at?: string;
 };
 
 export type MetaContactRecord = {
@@ -81,6 +88,125 @@ export async function findChannelByExternalId(
 export async function getChannelById(channelId: string): Promise<MetaChannelRecord | null> {
   const { rows } = await db.query(`SELECT * FROM meta_channels WHERE id = $1 LIMIT 1`, [channelId]);
   return rows[0] || null;
+}
+
+const TOKEN_EXPIRY_LEEWAY_MS = 60 * 1000;
+
+function normalizeSettings(settings: any): Record<string, any> {
+  if (!settings || typeof settings !== 'object') return {};
+  return { ...settings };
+}
+
+function parseExpiresAt(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1_000_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+export async function exchangeFacebookUserToken(
+  userToken: string
+): Promise<{ accessToken: string; expiresAt?: string } | null> {
+  const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+  const appSecret = process.env.FACEBOOK_APP_SECRET;
+
+  if (!appId || !appSecret) {
+    return null;
+  }
+
+  const url = `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(
+    appId
+  )}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(userToken)}`;
+
+  try {
+    const res = await fetch(url);
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok || !json.access_token) {
+      console.warn('[META_TOKEN_EXCHANGE] Failed to exchange user token', json);
+      return null;
+    }
+
+    const expiresInRaw = json.expires_in;
+    const expiresIn =
+      typeof expiresInRaw === 'number'
+        ? expiresInRaw
+        : Number.parseInt(String(expiresInRaw), 10);
+    const expiresAt =
+      Number.isFinite(expiresIn) && expiresIn > 0
+        ? new Date(Date.now() + expiresIn * 1000).toISOString()
+        : undefined;
+
+    return { accessToken: json.access_token, expiresAt };
+  } catch (error) {
+    console.warn('[META_TOKEN_EXCHANGE] Request failed', error);
+    return null;
+  }
+}
+
+export async function refreshMetaChannelAccessToken(
+  channel: MetaChannelRecord
+): Promise<MetaChannelRecord | null> {
+  try {
+    const channelRecord = channel.settings ? channel : await getChannelById(channel.id);
+    if (!channelRecord) return null;
+
+    const settings = normalizeSettings(channelRecord.settings);
+    const metaSettings = settings as MetaChannelSettings;
+
+    let userAccessToken = metaSettings.fb_user_access_token;
+    if (!userAccessToken) {
+      console.warn('[META_TOKEN_REFRESH] Missing user access token for channel', channelRecord.id);
+      return null;
+    }
+
+    const expiresAtMs = parseExpiresAt(metaSettings.fb_user_token_expires_at);
+    if (expiresAtMs && expiresAtMs <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS) {
+      console.warn('[META_TOKEN_REFRESH] User token expired for channel', channelRecord.id);
+      return null;
+    }
+
+    const exchanged = await exchangeFacebookUserToken(userAccessToken);
+    if (exchanged?.accessToken) {
+      userAccessToken = exchanged.accessToken;
+      metaSettings.fb_user_access_token = exchanged.accessToken;
+      if (exchanged.expiresAt) {
+        metaSettings.fb_user_token_expires_at = exchanged.expiresAt;
+      }
+    }
+
+    if (!channelRecord.external_page_id) {
+      console.warn('[META_TOKEN_REFRESH] Missing page id for channel', channelRecord.id);
+      return null;
+    }
+
+    const pageUrl = `https://graph.facebook.com/v20.0/${channelRecord.external_page_id}?fields=access_token&access_token=${encodeURIComponent(
+      userAccessToken
+    )}`;
+
+    const pageRes = await fetch(pageUrl);
+    const pageJson = await pageRes.json().catch(() => ({}));
+
+    if (!pageRes.ok || !pageJson.access_token) {
+      console.warn('[META_TOKEN_REFRESH] Failed to fetch page access token', pageJson);
+      return null;
+    }
+
+    const updated = await db.query(
+      `UPDATE meta_channels SET access_token = $1, settings = $2, updated_at = timezone('utc', now()) WHERE id = $3 RETURNING *`,
+      [pageJson.access_token, settings, channelRecord.id]
+    );
+
+    return updated.rows[0] || null;
+  } catch (error) {
+    console.warn('[META_TOKEN_REFRESH] Failed to refresh channel token', error);
+    return null;
+  }
 }
 
 export async function logWebhookEvent(params: {

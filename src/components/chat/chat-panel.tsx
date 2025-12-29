@@ -109,7 +109,7 @@ import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { motion } from 'framer-motion';
 
-import { FaWhatsapp } from 'react-icons/fa6';
+import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 
 
@@ -758,6 +758,29 @@ export default function ChatPanel({
 
     const generateOptimisticId = () => uuidv4();
 
+    const lastPlatformMessage = chat?.messages?.length
+        ? chat.messages[chat.messages.length - 1]
+        : undefined;
+    const resolvedPlatform = (
+        lastPlatformMessage?.platform ||
+        lastPlatformMessage?.source_from_api ||
+        chat?.source ||
+        chat?.instance_type ||
+        ''
+    ).toString().toLowerCase();
+
+    const optimisticPlatform =
+        resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger'
+            ? (resolvedPlatform as 'instagram' | 'messenger')
+            : undefined;
+
+    const headerPlatformIcon =
+        resolvedPlatform === 'instagram'
+            ? <FaInstagram className="h-3 w-3 text-pink-500" />
+            : resolvedPlatform === 'messenger'
+                ? <FaFacebookMessenger className="h-3 w-3 text-blue-500" />
+                : <FaWhatsapp className="h-3 w-3 text-green-500" />;
+
     const handleFormSubmit = async () => {
         if (!chat || sendState === 'sending') return;
         setSendState('sending');
@@ -806,6 +829,8 @@ export default function ChatPanel({
                 metadata: isInternalNote ? { isInternalNote: true } : {},
                 api_message_status: 'PENDING',
                 instance_name: chat.instance_name || undefined,
+                platform: optimisticPlatform,
+                source_from_api: optimisticPlatform,
                 optimistic: true,
                 sentByTab: tabId
             };
@@ -1146,7 +1171,7 @@ export default function ChatPanel({
                         <p className="text-xs text-muted-foreground flex items-center gap-1 overflow-hidden">
                             {chat.instance_name && (
                                 <span className="flex items-center gap-1 truncate shrink-0">
-                                    <FaWhatsapp className="h-3 w-3 text-green-500" />
+                                    {headerPlatformIcon}
                                     {chat.instance_name}
                                 </span>
                             )}

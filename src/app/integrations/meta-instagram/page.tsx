@@ -57,6 +57,8 @@ export default function MetaInstagramIntegrationPage() {
     accessToken: '',
     appSecret: '',
     fbUserId: '',
+    fbUserAccessToken: '',
+    fbUserTokenExpiresAt: '',
   });
 
   const webhookUrl = `${origin}/api/webhooks/meta/instagram`;
@@ -68,7 +70,7 @@ export default function MetaInstagramIntegrationPage() {
   };
 
   const resetForm = (tokenOverride?: string) => {
-    const tokenValue = tokenOverride ?? verifyTokenSource || generateVerifyToken();
+    const tokenValue = tokenOverride ?? (verifyTokenSource || generateVerifyToken());
     setForm({
       name: '',
       igBusinessId: '',
@@ -77,6 +79,8 @@ export default function MetaInstagramIntegrationPage() {
       accessToken: '',
       appSecret: '',
       fbUserId: '',
+      fbUserAccessToken: '',
+      fbUserTokenExpiresAt: '',
     });
   };
 
@@ -136,6 +140,8 @@ export default function MetaInstagramIntegrationPage() {
         accessToken: form.accessToken,
         appSecret: form.appSecret || null,
         fbUserId: form.fbUserId,
+        fbUserAccessToken: form.fbUserAccessToken,
+        fbUserTokenExpiresAt: form.fbUserTokenExpiresAt,
       });
       toast({ title: 'Instagram Conectado!', description: 'Conexão estabelecida com sucesso.' });
       resetForm();
@@ -165,13 +171,26 @@ export default function MetaInstagramIntegrationPage() {
   const handleFacebookLoginSuccess = async (response: any) => {
     const userAccessToken = response.accessToken;
     const fbUserId = response.userID;
+    const expiresIn = Number(response.expiresIn);
+    const dataAccessExpiry = Number(response.data_access_expiration_time);
+    const expiresAt =
+      Number.isFinite(expiresIn) && expiresIn > 0
+        ? new Date(Date.now() + expiresIn * 1000).toISOString()
+        : Number.isFinite(dataAccessExpiry) && dataAccessExpiry > 0
+          ? new Date(dataAccessExpiry * 1000).toISOString()
+          : '';
     // 1. Get Pages first
     try {
       const pagesRes = await fetch(`https://graph.facebook.com/v20.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,instagram_business_account{id,name,username,profile_picture_url}`);
       const pagesData = await pagesRes.json();
 
       if (pagesData.data) {
-        setForm(prev => ({ ...prev, fbUserId }));
+        setForm(prev => ({
+          ...prev,
+          fbUserId,
+          fbUserAccessToken: userAccessToken,
+          fbUserTokenExpiresAt: expiresAt,
+        }));
         const accounts: InstagramAccount[] = [];
 
         for (const page of pagesData.data) {

@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { MetaChannel } from '@/lib/types';
-import { findChannelByExternalId } from '@/services/meta/meta-channel.service';
+import { exchangeFacebookUserToken, findChannelByExternalId } from '@/services/meta/meta-channel.service';
 
 export async function listMetaChannels(
   workspaceId: string,
@@ -45,6 +45,8 @@ export async function createMetaChannel(data: {
   accessToken: string;
   appSecret?: string | null;
   fbUserId?: string;
+  fbUserAccessToken?: string;
+  fbUserTokenExpiresAt?: string;
   igBusinessId?: string; // Add optional support just in case
 }) {
   const {
@@ -55,7 +57,10 @@ export async function createMetaChannel(data: {
     verifyToken,
     accessToken,
     appSecret,
-    igBusinessId
+    fbUserId,
+    fbUserAccessToken,
+    fbUserTokenExpiresAt,
+    igBusinessId,
   } = data;
   const effectiveVerifyToken = process.env.META_VERIFY_TOKEN || verifyToken;
 
@@ -80,6 +85,29 @@ export async function createMetaChannel(data: {
   const igId = type === 'instagram' ? igBusinessId : null;
 
   const id = randomUUID();
+  const settings: Record<string, any> = {};
+  if (fbUserId) {
+    settings.fb_user_id = fbUserId;
+  }
+
+  let resolvedUserToken = fbUserAccessToken;
+  let resolvedUserTokenExpiresAt = fbUserTokenExpiresAt;
+  if (resolvedUserToken) {
+    const exchanged = await exchangeFacebookUserToken(resolvedUserToken);
+    if (exchanged?.accessToken) {
+      resolvedUserToken = exchanged.accessToken;
+      resolvedUserTokenExpiresAt = exchanged.expiresAt || resolvedUserTokenExpiresAt;
+    }
+  }
+
+  if (resolvedUserToken) {
+    settings.fb_user_access_token = resolvedUserToken;
+  }
+  if (resolvedUserTokenExpiresAt) {
+    settings.fb_user_token_expires_at = resolvedUserTokenExpiresAt;
+  }
+
+  const settingsPayload = Object.keys(settings).length > 0 ? settings : null;
 
   await db.query(
     `
@@ -87,9 +115,10 @@ export async function createMetaChannel(data: {
         id, workspace_id, type, name, 
         external_page_id, ig_business_id, 
         access_token, verify_token, app_secret, 
+        settings,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active')
     `,
     [
       id,
@@ -99,8 +128,9 @@ export async function createMetaChannel(data: {
       pageId, // external_page_id
       igId,   // ig_business_id
       accessToken,
-        effectiveVerifyToken,
-      appSecret || null
+      effectiveVerifyToken,
+      appSecret || null,
+      settingsPayload,
     ]
   );
 

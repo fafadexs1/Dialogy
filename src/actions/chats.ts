@@ -785,7 +785,7 @@ async function fetchChats({
                 ORDER BY m.created_at DESC 
                 LIMIT 1
             ) AS instance_name,
-            lmd.source_from_api AS source,
+            COALESCE(lmd.source_from_api, mc.platform::text) AS source,
             COALESCE((
                 SELECT COUNT(*) FROM messages m
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
@@ -822,6 +822,7 @@ async function fetchChats({
             ) AS contact_custom_fields
         FROM merged_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
@@ -1581,7 +1582,7 @@ async function fetchChatsDelta({
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
-            lmd.source_from_api AS source,
+            COALESCE(lmd.source_from_api, mc.platform::text) AS source,
             COALESCE((
                 SELECT COUNT(*) FROM messages m
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
@@ -1618,6 +1619,7 @@ async function fetchChatsDelta({
             ) AS contact_custom_fields
         FROM chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
