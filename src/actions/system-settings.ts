@@ -2,11 +2,28 @@
 
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
     return result.rows[0]?.is_superadmin === true;
+}
+
+const getSystemSettingsCached = unstable_cache(
+    async (keys: string[]): Promise<{ [key: string]: string }> => {
+        const res = await db.query(`SELECT key, value FROM system_settings WHERE key = ANY($1)`, [keys]);
+        const settings: { [key: string]: string } = {};
+        res.rows.forEach(row => {
+            settings[row.key] = row.value;
+        });
+        return settings;
+    },
+    ['system-settings'],
+    { tags: ['system-settings'], revalidate: false }
+);
+
+function normalizeKeys(keys: string[]): string[] {
+    return [...new Set(keys.filter(Boolean))].sort();
 }
 
 export async function saveSystemSettingAction(key: string, value: string): Promise<{ success: boolean, error?: string }> {
@@ -25,6 +42,7 @@ export async function saveSystemSettingAction(key: string, value: string): Promi
         `, [key, value]);
 
         revalidatePath('/superadmin/billing/settings');
+        revalidateTag('system-settings', 'default');
         return { success: true };
     } catch (error: any) {
         console.error('[SAVE_SYSTEM_SETTING] Error:', error);
@@ -35,12 +53,11 @@ export async function saveSystemSettingAction(key: string, value: string): Promi
 // Internal function (No Auth Check) - Use with caution
 export async function getSystemSettings(keys: string[]): Promise<{ [key: string]: string }> {
     try {
-        const res = await db.query(`SELECT key, value FROM system_settings WHERE key = ANY($1)`, [keys]);
-        const settings: { [key: string]: string } = {};
-        res.rows.forEach(row => {
-            settings[row.key] = row.value;
-        });
-        return settings;
+        const normalized = normalizeKeys(keys);
+        if (!normalized.length) {
+            return {};
+        }
+        return await getSystemSettingsCached(normalized);
     } catch (error) {
         console.error('[GET_SYSTEM_SETTINGS_INTERNAL] Error:', error);
         return {};

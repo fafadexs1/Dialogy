@@ -22,10 +22,8 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const { user: authUser, isLoading: isAuthLoading } = useAuth();
   const [localUser, setLocalUser] = useState<User | null>(initialUser);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
-  const [useApiFallback, setUseApiFallback] = useState(false);
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const sessionOnlineSinceRef = useRef<string | null>(null);
   const supabase = useMemo(() => createClient(), []);
 
   // Unique Tab ID for multi-tab support
@@ -36,6 +34,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   // Ref to track if we are currently updating to avoid loop
   const isUpdatingRef = useRef(false);
+  const bootstrappedUserRef = useRef<string | null>(null);
 
   // Monitor online/offline status
   useEffect(() => {
@@ -54,101 +53,28 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     };
   }, []);
 
-  // Sync AuthUser with LocalUser (fetch profile if needed)
-  useEffect(() => {
-    // 1. Initial User Sync (Server -> Client)
-    if (initialUser) {
-      setLocalUser(prev => {
-        // Strict equality check for IDs to prevent unnecessary updates
-        if (prev?.id === initialUser.id && prev?.activeWorkspaceId === initialUser.activeWorkspaceId) {
-          return prev;
-        }
-        return initialUser;
-      });
-    }
-
-    if (isAuthLoading) return;
-
-    // 2. Fetch Profile if missing (Client fallback)
-    if (authUser && !localUser && !initialUser && !isUpdatingRef.current) {
-      // Only fetch if we really don't have a user (neither local nor initial)
-      const fetchProfile = async () => {
-        isUpdatingRef.current = true;
-        try {
-          const res = await fetch('/api/user');
-          if (res.ok) {
-            const userData = await res.json();
-            setLocalUser(prev => {
-              if (prev?.id === userData.id && prev?.activeWorkspaceId === userData.activeWorkspaceId) return prev;
-              return userData;
-            });
-          }
-        } catch (error) {
-          console.error("PresenceProvider: Failed to fetch user profile.", error);
-        } finally {
-          isUpdatingRef.current = false;
-        }
-      };
-
-      // Debounce fetch slightly to avoid race with initialUser effect
-      const timer = setTimeout(fetchProfile, 100);
-      return () => clearTimeout(timer);
-    } else if (!authUser && localUser) {
-      // User logged out
-      setLocalUser(null);
-    }
-  }, [authUser, isAuthLoading, initialUser]); // Removed localUser from deps to break loop
-
-  // Track last bootstrapped user to avoid reset loops
-  const bootstrappedUserRef = useRef<string | null>(null);
-
   useEffect(() => {
     const currentUserKey = localUser ? `${localUser.id}-${localUser.activeWorkspaceId}` : 'null';
 
     if (bootstrappedUserRef.current === currentUserKey && presenceBootstrapDone) {
-      // Already bootstrapped for this user, skip.
       return;
     }
 
-    // Reset per-session tracking when user or workspace updates
-    sessionOnlineSinceRef.current = null;
-    setUseApiFallback(false);
-
-    // Only reset done flag if strictly necessary (different user)
     if (bootstrappedUserRef.current !== currentUserKey) {
       setPresenceBootstrapDone(false);
     }
 
-    const loadExistingPresence = async () => {
-      if (isAuthLoading) return;
-      if (!localUser?.id || !localUser.activeWorkspaceId) {
-        setPresenceBootstrapDone(true);
-        bootstrappedUserRef.current = currentUserKey; // Mark processed
-        return;
-      }
+    if (isAuthLoading) return;
 
-      bootstrappedUserRef.current = currentUserKey; // Mark processed early to block re-entry
+    if (!localUser?.id || !localUser.activeWorkspaceId) {
+      setPresenceBootstrapDone(true);
+      bootstrappedUserRef.current = currentUserKey;
+      return;
+    }
 
-      try {
-        const { data, error } = await supabase
-          .from('user_workspace_presence')
-          .select('online_since, is_online, last_seen')
-          .eq('user_id', localUser.id)
-          .eq('workspace_id', localUser.activeWorkspaceId)
-          .maybeSingle();
-
-        if (!error && data?.is_online && data.online_since) {
-          sessionOnlineSinceRef.current = data.online_since;
-        }
-      } catch (error) {
-        console.error('PresenceProvider: Failed to load existing presence.', error);
-      } finally {
-        setPresenceBootstrapDone(true);
-      }
-    };
-
-    loadExistingPresence();
-  }, [localUser?.id, localUser?.activeWorkspaceId, supabase, isAuthLoading]);
+    bootstrappedUserRef.current = currentUserKey;
+    setPresenceBootstrapDone(true);
+  }, [localUser?.id, localUser?.activeWorkspaceId, isAuthLoading]);
 
   const persistPresenceViaApi = useCallback(
     async (isOnline: boolean, workspaceId: string) => {
@@ -163,7 +89,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
         if (!response.ok) {
           const reason = await response.text().catch(() => response.statusText);
-          console.error('PresenceProvider: Fallback API call failed.', reason);
+          console.error('PresenceProvider: Presence API call failed.', reason);
         }
       } catch (apiError) {
         console.error('PresenceProvider: Failed to persist presence via API.', apiError);
@@ -179,57 +105,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       if (!presenceBootstrapDone) return;
 
       const workspaceId = localUser.activeWorkspaceId;
-      const userId = localUser.id;
-
-      // Ensure stable session start time without causing re-renders
-      let onlineSince = sessionOnlineSinceRef.current;
-      if (isOnline && !onlineSince) {
-        const nowIso = new Date().toISOString();
-        onlineSince = nowIso;
-        sessionOnlineSinceRef.current = nowIso;
-      } else if (!isOnline) {
-        sessionOnlineSinceRef.current = null;
-      }
-
-      // If we already know RLS fails, skip it and go straight to API to prevent flickering
-      if (useApiFallback) {
-        try {
-          await persistPresenceViaApi(isOnline, workspaceId);
-        } catch (e) {
-          console.error("Fallback API also failed", e);
-        }
-        return;
-      }
-
-      try {
-        // Direct DB update using RLS
-        const payload: Record<string, any> = {
-          user_id: userId,
-          workspace_id: workspaceId,
-          is_online: isOnline,
-          last_seen: new Date().toISOString(),
-        };
-
-        // Persist session start once per online session; null it when going offline.
-        payload.online_since = isOnline ? onlineSince : null;
-
-        const { error } = await supabase.from('user_workspace_presence').upsert(payload, {
-          onConflict: 'user_id, workspace_id',
-        });
-
-        if (error) {
-          console.warn('PresenceProvider: RLS update failed, switching to API fallback.', error.message);
-          setUseApiFallback(true);
-          // Try API immediately so we don't miss this beat
-          await persistPresenceViaApi(isOnline, workspaceId);
-        }
-      } catch (error) {
-        console.error('PresenceProvider: RLS exception, switching to API fallback.', error);
-        setUseApiFallback(true);
-        await persistPresenceViaApi(isOnline, workspaceId);
-      }
+      await persistPresenceViaApi(isOnline, workspaceId);
     },
-    [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, supabase, useApiFallback, presenceBootstrapDone, isAuthLoading]
+    [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, presenceBootstrapDone, isAuthLoading]
   );
 
   const refreshOnlineAgents = useCallback(async () => {

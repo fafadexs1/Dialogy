@@ -37,7 +37,7 @@ export function FacebookLoginButton({
     appId,
     onLoginSuccess,
     onLoginFailure,
-    scope = 'public_profile,email,pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages',
+    scope = 'public_profile,email,pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages,business_management',
     label = 'Continuar com Facebook',
     className
 }: FacebookLoginButtonProps) {

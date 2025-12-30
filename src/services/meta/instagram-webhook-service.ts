@@ -1,4 +1,5 @@
 import type { Message, MessageMetadata } from '@/lib/types';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 import {
   MetaChannelRecord,
   resolveMetaContext,
@@ -80,7 +81,7 @@ async function fetchInstagramProfile(
     accessToken
   )}`;
   try {
-    const res = await fetch(url);
+    const res = await resilientFetch(url);
     if (!res.ok) return null;
     const json = await res.json();
     return {

@@ -1,23 +1,25 @@
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 import { MetaChannelRecord, refreshMetaChannelAccessToken } from './meta-channel.service';
 
 type OutgoingType = 'text' | 'image' | 'video' | 'audio' | 'file';
 
 export class MessengerMessagingService {
-  constructor(private channel: MetaChannelRecord) {}
+  constructor(private channel: MetaChannelRecord) { }
 
   private get endpoint(): string {
     return `https://graph.facebook.com/v20.0/me/messages`;
   }
 
-  private async request(body: Record<string, any>, retryAuth = false) {
-    const res = await fetch(`${this.endpoint}`, {
+  private async request(body: Record<string, any>, retryAuth = false): Promise<any> {
+    const res = await resilientFetch(`${this.endpoint}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.channel.access_token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messaging_type: 'RESPONSE',
+        messaging_type: body.messaging_type || 'RESPONSE',
+        tag: body.tag,
         ...body,
       }),
     });
@@ -93,5 +95,47 @@ export class MessengerMessagingService {
     }
 
     return this.sendAttachment(recipientId, type, mediaUrl);
+  }
+
+  async sendHumanAgentMessage(params: { recipientId: string; type: OutgoingType; text?: string; mediaUrl?: string }) {
+    const { recipientId, type, text, mediaUrl } = params;
+
+    // HUMAN AGENT TAG: Allows responding up to 7 days
+    // This requires the "Human Agent" permission from Meta
+    const basePayload = {
+      recipient: { id: recipientId },
+      messaging_type: 'MESSAGE_TAG',
+      tag: 'HUMAN_AGENT',
+    };
+
+    if (type === 'text') {
+      if (!text) throw new Error('Texto obrigatorio.');
+      return this.request({
+        ...basePayload,
+        message: { text },
+      });
+    }
+
+    if (!mediaUrl) throw new Error('URL de midia obrigatoria.');
+    return this.request({
+      ...basePayload,
+      message: {
+        attachment: {
+          type: type === 'file' ? 'file' : type,
+          payload: { url: mediaUrl },
+        },
+      },
+    });
+  }
+
+  async sendUtilityMessage(params: { recipientId: string; type: OutgoingType; text?: string; tag: string }) {
+    // Utility Tags: POST_PURCHASE_UPDATE, CONFIRMED_EVENT_UPDATE, etc.
+    // Requires pages_utility_messaging permission
+    return this.request({
+      recipient: { id: params.recipientId },
+      messaging_type: 'MESSAGE_TAG',
+      tag: params.tag,
+      message: { text: params.text }
+    });
   }
 }

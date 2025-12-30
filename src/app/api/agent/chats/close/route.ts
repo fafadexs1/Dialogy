@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sendAutomatedMessageAction } from '@/actions/messages';
+import { getWorkspaceTemplates } from '@/lib/workspace-config';
 
 interface CloseChatPayload {
     chatId: string;
@@ -65,11 +66,8 @@ export async function POST(request: Request) {
             const { workspace_id, current_tag, current_color, last_instance_name } = chatRes.rows[0];
 
             // 2. Get Close Template
-            const templateRes = await client.query(
-                'SELECT close_message_template FROM workspaces WHERE id = $1',
-                [workspace_id]
-            );
-            closeTemplate = (templateRes.rows[0]?.close_message_template as string | undefined)?.trim();
+            const { closeMessageTemplate } = await getWorkspaceTemplates(workspace_id);
+            closeTemplate = closeMessageTemplate || undefined;
 
             // 3. Resolve Tag Info
             let tagInfo = { label: null as string | null, color: null as string | null };

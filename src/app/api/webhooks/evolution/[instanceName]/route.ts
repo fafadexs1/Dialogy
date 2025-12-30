@@ -8,6 +8,7 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+import { enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
@@ -39,6 +40,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
 }
 
 import { logAction } from '@/lib/observability/logger';
+import { recordWebhookMetrics } from '@/lib/observability/metrics';
 
 // ... imports
 
@@ -48,24 +50,79 @@ export async function POST(
 ) {
     const params = await props.params;
     const instanceNameFromUrl = params.instanceName;
+    const requestId = randomUUID();
+    const receivedAt = Date.now();
     let payload: any;
 
+    let outcomeLogged = false;
     try {
         payload = await request.json();
     } catch (error) {
         console.error('[WEBHOOK] Erro ao converter o payload em JSON:', error);
+        await logAction({
+            action: 'webhook_processed_fail',
+            payload: {
+                request_id: requestId,
+                source: 'evolution',
+                status_code: 400,
+                error: 'invalid_json',
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'evolution',
+            status: 'fail',
+            event: 'invalid_json',
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
     const { event, instance: instanceNameFromPayload } = payload || {};
+    const payloadBytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
 
     if (instanceNameFromUrl !== instanceNameFromPayload) {
         console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+        await logAction({
+            action: 'webhook_processed_fail',
+            payload: {
+                request_id: requestId,
+                source: 'evolution',
+                status_code: 400,
+                error: 'instance_name_mismatch',
+                instance_url: instanceNameFromUrl,
+                instance_payload: instanceNameFromPayload,
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'evolution',
+            status: 'fail',
+            event: 'instance_name_mismatch',
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ error: 'Instance name mismatch' }, { status: 400 });
     }
 
     if (!event) {
         console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
+        await logAction({
+            action: 'webhook_processed_fail',
+            payload: {
+                request_id: requestId,
+                source: 'evolution',
+                status_code: 400,
+                error: 'event_missing',
+                instance: instanceNameFromUrl,
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'evolution',
+            status: 'fail',
+            event: 'event_missing',
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ error: 'Event not found' }, { status: 400 });
     }
 
@@ -81,38 +138,116 @@ export async function POST(
         console.error('[WEBHOOK] Failed to resolve workspace_id for logging', err);
     }
 
+    const statsBefore = evolutionWebhookQueue.stats;
     // Log the incoming webhook event
     await logAction({
         action: 'webhook_received',
         workspaceId,
         payload: {
+            request_id: requestId,
+            source: 'evolution',
             event,
             instance: instanceNameFromUrl,
-            data_summary: payload.data ? 'Data present' : 'No data',
-            // We can log the full payload if needed, but it might be large. 
-            // For now, let's log the full payload as requested by the user.
-            full_payload: payload
-        }
+            payload_bytes: payloadBytes,
+            data_present: Boolean(payload?.data),
+            queue: statsBefore,
+            // Keep full payload for traceability (logger will summarize).
+            full_payload: payload,
+        },
     });
 
-    const jobId = randomUUID();
-    const statsBefore = evolutionWebhookQueue.stats;
+    const jobId = requestId;
     console.log(`[WEBHOOK][${jobId}] Evento '${event}' recebido para ${instanceNameFromUrl}. Fila: ativos=${statsBefore.active}, pendentes=${statsBefore.pending}`);
 
     try {
-        const startedAt = Date.now();
+        const queuedAt = Date.now();
         await evolutionWebhookQueue.add(async () => {
-            await processEvolutionEvent(payload);
+            const processingStartedAt = Date.now();
+            const queueWaitMs = processingStartedAt - queuedAt;
+            try {
+                await processEvolutionEvent(payload);
+                const completedAt = Date.now();
+                await logAction({
+                    action: 'webhook_processed_success',
+                    workspaceId,
+                    payload: {
+                        request_id: requestId,
+                        source: 'evolution',
+                        event,
+                        instance: instanceNameFromUrl,
+                        status_code: 200,
+                        duration_ms: completedAt - receivedAt,
+                        processing_ms: completedAt - processingStartedAt,
+                        queue_wait_ms: queueWaitMs,
+                    },
+                });
+                recordWebhookMetrics({
+                    source: 'evolution',
+                    status: 'success',
+                    event,
+                    durationMs: completedAt - receivedAt,
+                    queueWaitMs,
+                });
+                outcomeLogged = true;
+            } catch (error) {
+                const completedAt = Date.now();
+                await logAction({
+                    action: 'webhook_processed_fail',
+                    workspaceId,
+                    payload: {
+                        request_id: requestId,
+                        source: 'evolution',
+                        event,
+                        instance: instanceNameFromUrl,
+                        status_code: 500,
+                        duration_ms: completedAt - receivedAt,
+                        processing_ms: completedAt - processingStartedAt,
+                        queue_wait_ms: queueWaitMs,
+                        error: error instanceof Error ? error.message : 'unknown_error',
+                    },
+                });
+                recordWebhookMetrics({
+                    source: 'evolution',
+                    status: 'fail',
+                    event,
+                    durationMs: completedAt - receivedAt,
+                    queueWaitMs,
+                });
+                outcomeLogged = true;
+                throw error;
+            }
         });
-        console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluído em ${Date.now() - startedAt}ms.`);
+        console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluído em ${Date.now() - queuedAt}ms.`);
         return NextResponse.json({
             message: 'Webhook processado com sucesso',
             jobId,
+            requestId,
             queue: evolutionWebhookQueue.stats,
         });
     } catch (error) {
         console.error(`[WEBHOOK][${jobId}] Erro ao processar evento '${event}':`, error);
-        return NextResponse.json({ error: 'Internal Server Error', jobId }, { status: 500 });
+        if (!outcomeLogged) {
+            await logAction({
+                action: 'webhook_processed_fail',
+                workspaceId,
+                payload: {
+                    request_id: requestId,
+                    source: 'evolution',
+                    event,
+                    instance: instanceNameFromUrl,
+                    status_code: 500,
+                    duration_ms: Date.now() - receivedAt,
+                    error: error instanceof Error ? error.message : 'unknown_error',
+                },
+            });
+            recordWebhookMetrics({
+                source: 'evolution',
+                status: 'fail',
+                event,
+                durationMs: Date.now() - receivedAt,
+            });
+        }
+        return NextResponse.json({ error: 'Internal Server Error', jobId, requestId }, { status: 500 });
     }
 }
 
@@ -439,8 +574,16 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     if (savedChat && savedMessage) {
+        const webhookTask = shouldEnqueueJob('webhook_outbound')
+            ? enqueueWebhookOutbound({
+                chatId: savedChat.id,
+                messageId: savedMessage.id,
+                instanceName,
+            })
+            : dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
+
         const postTransactionTasks: Promise<any>[] = [
-            dispatchMessageToWebhooks(savedChat, savedMessage, instanceName),
+            webhookTask,
         ];
 
         if (contactData?.id && apiConfig && !contactData.avatar_url) {

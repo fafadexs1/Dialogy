@@ -3,10 +3,11 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
 import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies } from '@/lib/auth/token';
 
-export async function updateSession(request: NextRequest) {
+export async function updateSession(request: NextRequest, requestHeaders?: Headers) {
+  const headersToUse = requestHeaders ?? new Headers(request.headers);
   let response = NextResponse.next({
     request: {
-      headers: new Headers(request.headers),
+      headers: headersToUse,
     },
   });
 
@@ -30,7 +31,7 @@ export async function updateSession(request: NextRequest) {
 
             response = NextResponse.next({
               request: {
-                headers: new Headers(request.headers),
+                headers: headersToUse,
               },
             });
 

@@ -2,7 +2,7 @@ import 'server-only';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { unstable_noStore as noStore } from 'next/cache';
+import { revalidateTag, unstable_cache } from 'next/cache';
 import { db } from '@/lib/db';
 import { GlobalSeoSettings, GlobalSeoSchema } from '@/types/seo-global';
 
@@ -51,14 +51,19 @@ async function readLegacySettings(): Promise<GlobalSeoSettings | null> {
     }
 }
 
-export const globalSeoStore = {
-    get: async (): Promise<GlobalSeoSettings> => {
-        const record = await globalSeoStore.getWithMeta();
-        return record.settings;
-    },
+async function persistSettings(settings: GlobalSeoSettings): Promise<void> {
+    await db.query(
+        `
+        INSERT INTO system_settings (key, value)
+        VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+        `,
+        [SETTINGS_KEY, JSON.stringify(settings)]
+    );
+}
 
-    getWithMeta: async (): Promise<GlobalSeoRecord> => {
-        noStore();
+const loadSeoSettings = unstable_cache(
+    async (): Promise<GlobalSeoRecord> => {
         try {
             const res = await db.query(
                 'SELECT value, updated_at FROM system_settings WHERE key = $1',
@@ -68,7 +73,7 @@ export const globalSeoStore = {
                 const legacy = await readLegacySettings();
                 if (legacy) {
                     try {
-                        await globalSeoStore.save(legacy);
+                        await persistSettings(GlobalSeoSchema.parse(legacy));
                     } catch (error) {
                         console.error('[GlobalSeoStore] Failed to migrate legacy settings:', error);
                     }
@@ -98,16 +103,23 @@ export const globalSeoStore = {
             return { settings: DEFAULT_SETTINGS, updatedAt: null };
         }
     },
+    ['system-settings-seo'],
+    { tags: ['system-settings'], revalidate: false }
+);
+
+export const globalSeoStore = {
+    get: async (): Promise<GlobalSeoSettings> => {
+        const record = await globalSeoStore.getWithMeta();
+        return record.settings;
+    },
+
+    getWithMeta: async (): Promise<GlobalSeoRecord> => {
+        return loadSeoSettings();
+    },
 
     save: async (settings: GlobalSeoSettings): Promise<void> => {
         const validData = GlobalSeoSchema.parse(settings);
-        await db.query(
-            `
-            INSERT INTO system_settings (key, value)
-            VALUES ($1, $2)
-            ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
-            `,
-            [SETTINGS_KEY, JSON.stringify(validData)]
-        );
+        await persistSettings(validData);
+        revalidateTag('system-settings', 'default');
     }
 };

@@ -1,13 +1,14 @@
 
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
+import { updateUserOnlineStatus } from '@/actions/user';
 
 export async function createWorkspaceAction(
   prevState: any,
@@ -88,6 +89,7 @@ export async function createWorkspaceAction(
   }
 
   revalidatePath('/', 'layout');
+  revalidateTag('workspace-config', 'default');
 
   // Return success state instead of redirecting
   return { success: true, error: null };
@@ -201,6 +203,7 @@ export async function updateWorkspaceAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/settings/workspace');
+  revalidateTag('workspace-config', 'default');
 
   return { success: true, error: null };
 }
@@ -220,14 +223,8 @@ export async function switchWorkspaceAction(workspaceId: string) {
     const oldWorkspaceId = userRes.rows[0]?.last_active_workspace_id;
 
     if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
-      // 2. Mark as offline in the OLD workspace
-      await db.query(`
-                INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
-                VALUES ($1, $2, FALSE, NULL, NOW())
-                ON CONFLICT (user_id, workspace_id)
-                DO UPDATE SET is_online = FALSE, online_since = NULL, last_seen = NOW()
-             `, [userId, oldWorkspaceId]);
-
+      // 2. Mark as offline in the OLD workspace (clear all sessions)
+      await updateUserOnlineStatus(userId, oldWorkspaceId, false, undefined, true);
       console.log(`[SWITCH_WORKSPACE] User ${userId} marked offline in old workspace ${oldWorkspaceId}`);
     }
 
@@ -235,12 +232,7 @@ export async function switchWorkspaceAction(workspaceId: string) {
     await db.query('UPDATE users SET last_active_workspace_id = $1 WHERE id = $2', [workspaceId, userId]);
 
     // 4. Force online in NEW workspace immediately
-    await db.query(`
-            INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen)
-            VALUES ($1, $2, TRUE, NOW(), NOW())
-            ON CONFLICT (user_id, workspace_id)
-            DO UPDATE SET is_online = TRUE, online_since = COALESCE(user_workspace_presence.online_since, NOW()), last_seen = NOW()
-         `, [userId, workspaceId]);
+    await updateUserOnlineStatus(userId, workspaceId, true);
 
     console.log(`[SWITCH_WORKSPACE] Usuário ${userId} trocou para o workspace ${workspaceId}.`);
   } catch (error) {

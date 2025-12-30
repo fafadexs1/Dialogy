@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 import type { Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
+import { enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { buildChatProtocol } from '@/lib/utils';
 
 export type MetaChannelType = 'instagram' | 'messenger';
@@ -124,7 +126,7 @@ export async function exchangeFacebookUserToken(
   )}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(userToken)}`;
 
   try {
-    const res = await fetch(url);
+    const res = await resilientFetch(url);
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok || !json.access_token) {
@@ -189,7 +191,7 @@ export async function refreshMetaChannelAccessToken(
       userAccessToken
     )}`;
 
-    const pageRes = await fetch(pageUrl);
+    const pageRes = await resilientFetch(pageUrl);
     const pageJson = await pageRes.json().catch(() => ({}));
 
     if (!pageRes.ok || !pageJson.access_token) {
@@ -634,7 +636,15 @@ export async function persistNormalizedMessage(params: {
   };
 
   if (direction === 'incoming') {
-    dispatchMessageToWebhooks(chatForDispatch, persistedMessage, channel.name || platform).catch((error) => {
+    const webhookDispatch = shouldEnqueueJob('webhook_outbound')
+      ? enqueueWebhookOutbound({
+          chatId: chatForDispatch.id,
+          messageId: persistedMessage.id,
+          instanceName: channel.name || platform,
+        })
+      : dispatchMessageToWebhooks(chatForDispatch, persistedMessage, channel.name || platform);
+
+    webhookDispatch.catch((error) => {
       console.error('[META_WEBHOOK_DISPATCH] Failed to dispatch incoming message', error);
     });
   }

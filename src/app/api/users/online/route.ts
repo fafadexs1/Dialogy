@@ -25,13 +25,13 @@ export async function POST(request: Request) {
             }
         }
 
-        const { userId, workspaceId } = payload;
+        const { userId, workspaceId, tabId, forceOffline } = payload as { userId?: string; workspaceId?: string; tabId?: string; forceOffline?: boolean };
 
         if (!userId || !workspaceId) {
             return NextResponse.json({ error: 'User ID and workspaceId are required' }, { status: 400 });
         }
 
-        await updateUserOnlineStatus(userId, workspaceId, false);
+        await updateUserOnlineStatus(userId, workspaceId, false, tabId, Boolean(forceOffline));
 
         // Retorna uma resposta 204 No Content, que é apropriada para sendBeacon.
         return new Response(null, { status: 204 });

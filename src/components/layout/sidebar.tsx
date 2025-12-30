@@ -367,7 +367,7 @@ export function Sidebar({ user }: SidebarProps) {
           await fetch("/api/users/online-status", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspaceId: user.activeWorkspaceId, isOnline: false }),
+            body: JSON.stringify({ workspaceId: user.activeWorkspaceId, isOnline: false, forceOffline: true }),
           });
         } catch (error) {
           console.error("Error setting offline status:", error);

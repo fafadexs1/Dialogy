@@ -92,6 +92,98 @@ async function logWebhookAttempt({
     }
 }
 
+function toIsoDate(value: string | Date): string {
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+export async function dispatchMessageToWebhooksById(
+    chatId: string,
+    messageId: string,
+    instanceName?: string | null
+) {
+    const chatRes = await db.query(
+        `SELECT 
+            c.id,
+            c.workspace_id,
+            c.status,
+            c.agent_id,
+            u.full_name AS agent_name,
+            ct.id AS contact_id,
+            ct.name AS contact_name,
+            ct.phone_number_jid,
+            ct.email,
+            ct.avatar_url
+         FROM chats c
+         JOIN contacts ct ON ct.id = c.contact_id
+         LEFT JOIN users u ON u.id = c.agent_id
+         WHERE c.id = $1`,
+        [chatId]
+    );
+
+    if (chatRes.rowCount === 0) {
+        console.error(`[WEBHOOK_DISPATCHER] Chat ${chatId} not found.`);
+        return;
+    }
+
+    const chatRow = chatRes.rows[0];
+
+    const messageRes = await db.query(
+        `SELECT id, content, type, from_me, created_at, metadata, direction, instance_name
+         FROM messages
+         WHERE id = $1`,
+        [messageId]
+    );
+
+    if (messageRes.rowCount === 0) {
+        console.error(`[WEBHOOK_DISPATCHER] Message ${messageId} not found.`);
+        return;
+    }
+
+    const messageRow = messageRes.rows[0];
+    const resolvedInstance = instanceName || messageRow.instance_name || 'N/A';
+
+    const chat: Chat = {
+        id: chatRow.id,
+        workspace_id: chatRow.workspace_id,
+        status: chatRow.status,
+        contact: {
+            id: chatRow.contact_id,
+            workspace_id: chatRow.workspace_id,
+            name: chatRow.contact_name,
+            phone_number_jid: chatRow.phone_number_jid,
+            email: chatRow.email,
+            avatar_url: chatRow.avatar_url,
+        } as Contact,
+        agent: chatRow.agent_id
+            ? ({ id: chatRow.agent_id, name: chatRow.agent_name } as any)
+            : undefined,
+        messages: [],
+    };
+
+    const message: Message = {
+        id: messageRow.id,
+        chat_id: chatRow.id,
+        workspace_id: chatRow.workspace_id,
+        content: messageRow.content || '',
+        type: messageRow.type,
+        status: 'default',
+        metadata: messageRow.metadata || undefined,
+        transcription: null,
+        timestamp: '',
+        createdAt: toIsoDate(messageRow.created_at),
+        formattedDate: '',
+        from_me: messageRow.from_me,
+        direction: messageRow.direction || undefined,
+        instance_name: resolvedInstance,
+    };
+
+    await dispatchMessageToWebhooks(chat, message, resolvedInstance);
+}
+
 export async function dispatchMessageToWebhooks(
     chat: Chat,
     message: Message,

@@ -2,10 +2,10 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { revalidatePath } from 'next/cache';
-import type { Plan, Integration, PlanIntegration } from '@/lib/types';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import type { Plan } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-import { getIntegrations } from './integrations';
+import { getIntegrationsCatalog } from '@/lib/integrations-catalog';
 
 
 async function checkSuperAdmin(userId: string): Promise<boolean> {
@@ -25,12 +25,7 @@ export async function getPlans(): Promise<{ plans: Plan[] | null; error?: string
     try {
         const plansRes = await db.query('SELECT * FROM plans ORDER BY name');
         const planIntegrationsRes = await db.query('SELECT * FROM plan_integrations');
-        const allIntegrationsRes = await getIntegrations();
-
-        if (allIntegrationsRes.error || !allIntegrationsRes.integrations) {
-            throw new Error('Falha ao buscar as definições de integrações.');
-        }
-        const allIntegrations = allIntegrationsRes.integrations;
+        const allIntegrations = await getIntegrationsCatalog();
 
 
         const plans = plansRes.rows.map(plan => {
@@ -101,6 +96,7 @@ export async function savePlan(plan: Omit<Plan, 'id' | 'integrations'> & { id?: 
 
         await client.query('COMMIT');
         revalidatePath('/superadmin/plans');
+        revalidateTag('plans', 'default');
         return { success: true, planId };
 
     } catch (error: any) {
@@ -128,6 +124,7 @@ export async function deletePlan(planId: string): Promise<{ success: boolean, er
         // For now, we'll allow deletion. Deleting a plan will cascade to plan_integrations.
         await db.query('DELETE FROM plans WHERE id = $1', [planId]);
         revalidatePath('/superadmin/plans');
+        revalidateTag('plans', 'default');
         return { success: true };
     } catch (error: any) {
         console.error('[DELETE_PLAN_ACTION]', error);
@@ -156,9 +153,11 @@ export async function savePlanIntegration(data: { planId: string, integrationId:
             [planId, integrationId, includedQuantity, additionalCost, isEnabled]
         );
         revalidatePath('/superadmin/plans');
+        revalidateTag('plans', 'default');
         return { success: true };
     } catch (error: any) {
         console.error('[SAVE_PLAN_INTEGRATION_ACTION]', error);
         return { success: false, error: 'Falha ao salvar configuração da integração.' };
     }
 }
+

@@ -1,4 +1,5 @@
 import { withDebug } from '@/lib/observability/logger';
+import { fetchEvolutionAPI } from '@/actions/evolution-api';
 
 interface TemplateComponent {
     type: string;
@@ -29,32 +30,20 @@ export const sendTemplateMessage = withDebug(
         const { api_url, api_key } = apiConfig;
         const { number, name, language, components } = payload;
 
-        // Ensure URL ends with /
-        const baseUrl = api_url.endsWith('/') ? api_url : `${api_url}/`;
-        const url = `${baseUrl}message/sendTemplate/${instanceName}`;
-
         const body = {
             number,
             name,
             language,
             components
         };
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': api_key,
-            },
-            body: JSON.stringify(body),
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Evolution API Error (${response.status}): ${errorText}`);
-        }
-
-        return await response.json();
+        return fetchEvolutionAPI(
+            `/message/sendTemplate/${instanceName}`,
+            { api_url, api_key },
+            {
+                method: 'POST',
+                body: JSON.stringify(body),
+            }
+        );
     },
     {
         contextResolver: (apiConfig, instanceName, payload) => ({

@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { getPresenceTtlSeconds } from '@/lib/presence';
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -313,6 +314,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
     }
 
     try {
+        const ttlSeconds = getPresenceTtlSeconds();
         const res = await db.query(`
             SELECT 
                 t.id, 
@@ -326,13 +328,15 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
                     JOIN user_workspace_presence uwp
                         ON tm.user_id = uwp.user_id
                         AND uwp.workspace_id = t.workspace_id
-                    WHERE tm.team_id = t.id AND uwp.is_online = TRUE
+                    WHERE tm.team_id = t.id
+                      AND uwp.is_online = TRUE
+                      AND uwp.last_seen > NOW() - ($2 * interval '1 second')
                 ), 0) as "membersCount"
             FROM teams t
             WHERE t.workspace_id = $1
             GROUP BY t.id
             ORDER BY t.name;
-        `, [workspaceId]);
+        `, [workspaceId, ttlSeconds]);
 
         const teams = res.rows.map(row => ({
             id: row.id,

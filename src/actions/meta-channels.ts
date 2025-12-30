@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { MetaChannel } from '@/lib/types';
 import { exchangeFacebookUserToken, findChannelByExternalId } from '@/services/meta/meta-channel.service';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 
 export async function listMetaChannels(
   workspaceId: string,
@@ -62,7 +63,12 @@ export async function createMetaChannel(data: {
     fbUserTokenExpiresAt,
     igBusinessId,
   } = data;
-  const effectiveVerifyToken = process.env.META_VERIFY_TOKEN || verifyToken;
+
+  // IF we have a global verify token, we use it for verification (in the webhook route),
+  // BUT we cannot store it in the DB for multiple channels due to the unique constraint (workspace_id, verify_token).
+  // Since the DB value is ignored by the webhook when ENV is set, we can store a random unique token.
+  const isGlobalTokenMode = !!process.env.META_VERIFY_TOKEN;
+  const effectiveVerifyToken = isGlobalTokenMode ? randomUUID() : (verifyToken || randomUUID());
 
   if (type === 'instagram') {
     if (!igBusinessId) {
@@ -134,10 +140,40 @@ export async function createMetaChannel(data: {
     ]
   );
 
+  // Subscribe App to Page Webhooks (Justifies pages_manage_metadata)
+  try {
+    await subscribeAppToPage(pageId, accessToken);
+  } catch (error) {
+    console.error('Failed to subscribe app to page webhooks:', error);
+    // Non-blocking, but logged
+  }
+
   revalidatePath('/integrations/meta-messenger');
   revalidatePath('/integrations/meta-instagram');
 
   return { id };
+}
+
+async function subscribeAppToPage(pageId: string, pageAccessToken: string) {
+  // Fields we need for messaging
+  const fields = [
+    'messages',
+    'messaging_postbacks',
+    'messaging_optins',
+    'message_deliveries',
+    'message_reads',
+    'message_echoes'
+  ].join(',');
+
+  const url = `https://graph.facebook.com/v20.0/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${pageAccessToken}`;
+
+  const res = await resilientFetch(url, { method: 'POST' });
+  const data = await res.json();
+
+  if (!res.ok || !data.success) {
+    throw new Error(JSON.stringify(data));
+  }
+  return data;
 }
 
 export async function deleteMetaChannel(id: string, workspaceId: string) {
@@ -167,7 +203,7 @@ export async function exchangeInstagramToken(
   formData.append('redirect_uri', redirectUri);
   formData.append('code', code);
 
-  const tokenRes = await fetch(tokenUrl, {
+  const tokenRes = await resilientFetch(tokenUrl, {
     method: 'POST',
     body: formData,
   });
@@ -188,7 +224,7 @@ export async function exchangeInstagramToken(
   let finalToken = shortLivedToken;
   try {
     const longLiveUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortLivedToken}`;
-    const longLiveRes = await fetch(longLiveUrl);
+    const longLiveRes = await resilientFetch(longLiveUrl);
     const longLiveData = await longLiveRes.json();
     if (longLiveData.access_token) {
       finalToken = longLiveData.access_token;
@@ -200,7 +236,7 @@ export async function exchangeInstagramToken(
   // 3. Get User Details (to get username/name)
   // GET https://graph.instagram.com/me?fields=id,username&access_token={token}
   const meUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${finalToken}`;
-  const meRes = await fetch(meUrl);
+  const meRes = await resilientFetch(meUrl);
   const meData = await meRes.json();
 
   if (!meData.id) {

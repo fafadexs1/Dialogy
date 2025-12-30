@@ -2,7 +2,7 @@
 
 import { db } from '@/lib/db';
 import { getCurrentUser } from './user';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 
 export type IntegrationConfig<T = any> = {
     provider: string;
@@ -178,5 +178,6 @@ export async function updateIntegration(data: any): Promise<{ success: boolean; 
     // Stub for now, as we don't have a table for Integration Definitions yet.
     // In a real scenario, this would update an 'integrations_catalog' table.
     console.log('[UPDATE_INTEGRATION] Stub called with:', data);
+    revalidateTag('integration-catalog', 'default');
     return { success: true };
 }

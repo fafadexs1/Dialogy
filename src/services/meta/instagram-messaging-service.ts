@@ -1,3 +1,4 @@
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 import { MetaChannelRecord, refreshMetaChannelAccessToken } from './meta-channel.service';
 
 type OutgoingType = 'text' | 'image' | 'video' | 'audio' | 'file';
@@ -13,8 +14,8 @@ export class InstagramMessagingService {
     return `https://graph.facebook.com/v20.0/${baseId}/messages`;
   }
 
-  private async request(body: Record<string, any>, retryAuth = false) {
-    const res = await fetch(this.endpoint, {
+  private async request(body: Record<string, any>, retryAuth = false): Promise<any> {
+    const res = await resilientFetch(this.endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.channel.access_token}`,

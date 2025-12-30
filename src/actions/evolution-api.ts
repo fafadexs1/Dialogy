@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig, EvolutionInstanceSettings } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
@@ -53,7 +54,7 @@ export async function fetchEvolutionAPI(
     const url = `${baseUrl}${endpoint}`;
 
     try {
-        const response = await fetch(url, {
+        const response = await resilientFetch(url, {
             ...options,
             headers: {
                 'Content-Type': 'application/json',

@@ -1,4 +1,4 @@
-﻿
+
 'use server';
 
 import { db } from '@/lib/db';
@@ -15,10 +15,10 @@ import { randomUUID } from 'crypto';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
 import { reportServerError } from '@/lib/observability/errors';
+import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-config';
+import { getPresenceTtlSeconds } from '@/lib/presence';
 
-// Fallback timezone
-const defaultTimeZone = 'America/Sao_Paulo';
-const workspaceTimezoneCache = new Map<string, string>();
+const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -182,6 +182,7 @@ export const transferChatAction = withDebug(
             if (teamId) {
                 console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
                 console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
+                const presenceTtlSeconds = getPresenceTtlSeconds();
                 const query = `
                 SELECT
                     u.id as "agentId",
@@ -195,13 +196,16 @@ export const transferChatAction = withDebug(
                     ON uwp.user_id = u.id
                     AND uwp.workspace_id = t.workspace_id
                 LEFT JOIN chats c ON u.id = c.agent_id
-                WHERE tm.team_id = $1 AND uwp.is_online = TRUE AND u.id <> $2
+                WHERE tm.team_id = $1
+                  AND uwp.is_online = TRUE
+                  AND uwp.last_seen > NOW() - ($3 * interval '1 second')
+                  AND u.id <> $2
                 GROUP BY u.id, t.name
                 ORDER BY "lastAssigned" ASC NULLS FIRST, random()
                 LIMIT 1
             `;
 
-                const agentRes = await client.query(query, [teamId, currentAgentId]);
+                const agentRes = await client.query(query, [teamId, currentAgentId, presenceTtlSeconds]);
 
                 if (agentRes.rows.length === 0) {
                     await client.query('ROLLBACK');
@@ -224,11 +228,8 @@ export const transferChatAction = withDebug(
                 return { success: false, error: "Não foi possível determinar um agente para a transferência." };
             }
 
-            const templateRes = await client.query(
-                'SELECT transfer_team_message_template FROM workspaces WHERE id = $1',
-                [workspaceId]
-            );
-            transferTemplate = (templateRes.rows[0]?.transfer_team_message_template as string | undefined)?.trim();
+            const { transferTeamMessageTemplate } = await getWorkspaceTemplates(workspaceId);
+            transferTemplate = transferTeamMessageTemplate || undefined;
 
             // Update chat with the new agent and status
             await client.query(`
@@ -361,11 +362,8 @@ export const closeChatAction = withDebug(
             }
             const { workspace_id, current_tag, current_color, last_instance_name } = chatRes.rows[0];
 
-            const templateRes = await client.query(
-                'SELECT close_message_template FROM workspaces WHERE id = $1',
-                [workspace_id]
-            );
-            closeTemplate = (templateRes.rows[0]?.close_message_template as string | undefined)?.trim();
+            const { closeMessageTemplate } = await getWorkspaceTemplates(workspace_id);
+            closeTemplate = closeMessageTemplate || undefined;
 
             let tagInfo = { label: null as string | null, color: null as string | null };
             if (reasonTagId) {
@@ -617,6 +615,7 @@ type ChatRow = {
     last_message_sender_user_id: string | null;
     last_message_sender_system_agent_id: string | null;
     last_message_instance_name: string | null;
+    last_message_platform: string | null;
     last_message_source_from_api: string | null;
     last_message_message_id_from_api: string | null;
     last_message_api_message_status: string | null;
@@ -660,16 +659,6 @@ type MessageRow = {
     team_name?: string | null;
     team_color?: string | null;
 };
-
-async function getWorkspaceTimezone(workspaceId: string): Promise<string> {
-    if (workspaceTimezoneCache.has(workspaceId)) {
-        return workspaceTimezoneCache.get(workspaceId)!;
-    }
-    const workspaceRes = await db.query('SELECT timezone FROM workspaces WHERE id = $1', [workspaceId]);
-    const timezone = workspaceRes.rows[0]?.timezone || defaultTimeZone;
-    workspaceTimezoneCache.set(workspaceId, timezone);
-    return timezone;
-}
 
 async function fetchChats({
     workspaceId,
@@ -742,6 +731,7 @@ async function fetchChats({
                 sender_system_agent_id,
                 instance_name,
                 source_from_api,
+                platform,
                 message_id_from_api,
                 api_message_status,
                 is_read,
@@ -785,7 +775,25 @@ async function fetchChats({
                 ORDER BY m.created_at DESC 
                 LIMIT 1
             ) AS instance_name,
-            COALESCE(lmd.source_from_api, mc.platform::text) AS source,
+            COALESCE(
+                lmd.source_from_api,
+                lmd.platform::text,
+                (
+                    SELECT m.source_from_api
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT m.platform::text
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.platform IS NOT NULL
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ),
+                mc.platform::text
+            ) AS source,
             COALESCE((
                 SELECT COUNT(*) FROM messages m
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
@@ -809,6 +817,7 @@ async function fetchChats({
             lmd.sender_user_id AS last_message_sender_user_id,
             lmd.sender_system_agent_id AS last_message_sender_system_agent_id,
             lmd.instance_name AS last_message_instance_name,
+            lmd.platform AS last_message_platform,
             lmd.source_from_api AS last_message_source_from_api,
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
@@ -869,7 +878,7 @@ export const getInitialChatsData = withDebug(
                     oldestMessageDate: null,
                     hasMoreHistory: false,
                     hasMoreChats: false,
-                    timezone: defaultTimeZone,
+                    timezone: DEFAULT_TIMEZONE,
                     error: "Usuario nao autenticado."
                 };
             }
@@ -878,6 +887,17 @@ export const getInitialChatsData = withDebug(
         }
 
         try {
+            // Repair chats that were marked as attending without an assigned agent.
+            await db.query(
+                `UPDATE chats
+                 SET status = 'gerais',
+                     assigned_at = NULL
+                 WHERE workspace_id = $1
+                   AND status = 'atendimentos'
+                   AND agent_id IS NULL`,
+                [workspaceId]
+            );
+
             const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
 
             const activeChatsLimit = 100000; // Effectively unlimited for active queues
@@ -963,7 +983,7 @@ export const getInitialChatsData = withDebug(
                 oldestMessageDate: null,
                 hasMoreHistory: false,
                 hasMoreChats: false,
-                timezone: defaultTimeZone,
+                timezone: DEFAULT_TIMEZONE,
                 error: 'Falha ao carregar dados iniciais: ' + (error instanceof Error ? error.message : 'erro desconhecido')
             };
         }
@@ -1562,6 +1582,7 @@ async function fetchChatsDelta({
                 sender_system_agent_id,
                 instance_name,
                 source_from_api,
+                platform,
                 message_id_from_api,
                 api_message_status,
                 is_read,
@@ -1582,7 +1603,25 @@ async function fetchChatsDelta({
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
-            COALESCE(lmd.source_from_api, mc.platform::text) AS source,
+            COALESCE(
+                lmd.source_from_api,
+                lmd.platform::text,
+                (
+                    SELECT m.source_from_api
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT m.platform::text
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.platform IS NOT NULL
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ),
+                mc.platform::text
+            ) AS source,
             COALESCE((
                 SELECT COUNT(*) FROM messages m
                 WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
@@ -1605,6 +1644,7 @@ async function fetchChatsDelta({
             lmd.sender_user_id AS last_message_sender_user_id,
             lmd.sender_system_agent_id AS last_message_sender_system_agent_id,
             lmd.instance_name AS last_message_instance_name,
+            lmd.platform AS last_message_platform,
             lmd.source_from_api AS last_message_source_from_api,
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
@@ -1690,6 +1730,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
                     sender_system_agent_id: row.last_message_sender_system_agent_id,
                     instance_name: row.last_message_instance_name,
                     source_from_api: row.last_message_source_from_api,
+                    platform: row.last_message_platform as any,
                     message_id_from_api: row.last_message_message_id_from_api,
                     api_message_status: row.last_message_api_message_status,
                     is_read: row.last_message_is_read,
@@ -2078,3 +2119,4 @@ export const toggleChatAutopilot = withDebug(
         contextResolver: (chatId, isActive, agentId) => ({ payload: { chatId, isActive, agentId } })
     }
 );
+

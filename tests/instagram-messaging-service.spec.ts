@@ -19,10 +19,7 @@ describe('InstagramMessagingService', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({}),
-    })) as typeof fetch;
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })) as unknown as typeof fetch;
   });
 
   afterEach(() => {

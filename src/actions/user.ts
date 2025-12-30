@@ -7,37 +7,76 @@ import { db } from '@/lib/db';
 import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { cache } from 'react';
+import { getPresenceTtlSeconds } from '@/lib/presence';
 
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
+
+async function ensurePresenceMetadataColumn() {
+    await db.query(`
+        ALTER TABLE user_workspace_presence
+        ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+    `);
+}
+
+export async function sweepStalePresence(workspaceId?: string): Promise<number> {
+    const ttlSeconds = getPresenceTtlSeconds();
+    const params: Array<string | number> = [];
+    let workspaceClause = '';
+    if (workspaceId) {
+        params.push(workspaceId);
+        workspaceClause = `AND workspace_id = $1`;
+    }
+
+    await ensurePresenceMetadataColumn();
+
+    const result = await db.query(
+        `
+        UPDATE user_workspace_presence
+        SET
+            is_online = FALSE,
+            online_since = NULL,
+            metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{active_sessions}', '{}'::jsonb, true)
+        WHERE is_online = TRUE
+          ${workspaceClause}
+          AND last_seen < NOW() - ($${params.length + 1} * interval '1 second')
+        `,
+        [...params, ttlSeconds]
+    );
+
+    return result.rowCount ?? 0;
+}
 
 /**
  * Persist workspace-level presence so that server-side flows (e.g., load-balancing)
  * can reason about which agents are currently online.
  */
-export async function updateUserOnlineStatus(userId: string, workspaceId: string, isOnline: boolean, tabId?: string): Promise<void> {
+export async function updateUserOnlineStatus(
+    userId: string,
+    workspaceId: string,
+    isOnline: boolean,
+    tabId?: string,
+    forceOffline: boolean = false
+): Promise<void> {
     if (!userId || !workspaceId) {
         console.warn('[UPDATE_USER_STATUS] Missing userId or workspaceId.');
         return;
     }
 
     try {
-        // 1. Ensure the 'metadata' column exists for session tracking (Soft Migration)
-        // We use 'metadata' generic column to store active_sessions
-        await db.query(`
-            ALTER TABLE user_workspace_presence ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
-        `);
+        const ttlSeconds = getPresenceTtlSeconds();
+        const nowIso = new Date().toISOString();
+
+        await ensurePresenceMetadataColumn();
+        await sweepStalePresence(workspaceId);
 
         // 2. Perform Atomic Update with Session Logic
         // Logic:
         // - Retrieve current map of { tabId: timestamp } from metadata->'active_sessions'
-        // - Filter out stale sessions (> 45s ago)
+        // - Filter out stale sessions (older than TTL)
         // - If tabId provided:
         //    - If isOnline=true: Upsert tabId with NOW()
         //    - If isOnline=false: Remove tabId
         // - Determine is_online: count(remaining_sessions) > 0
-
-        const nowIso = new Date().toISOString();
-        const ttlSeconds = 45; // 45 seconds tolerance for heartbeat
 
         const query = `
         INSERT INTO user_workspace_presence (user_id, workspace_id, is_online, online_since, last_seen, metadata)
@@ -132,28 +171,25 @@ export async function updateUserOnlineStatus(userId: string, workspaceId: string
         }
 
         // Handle current Tab
-        if (tabId) {
+        if (forceOffline) {
+            Object.keys(nextSessions).forEach((key) => delete nextSessions[key]);
+        } else if (tabId) {
             if (isOnline) {
-                nextSessions[tabId] = new Date().toISOString();
+                nextSessions[tabId] = nowIso;
             } else {
                 delete nextSessions[tabId];
             }
         } else {
-            // Legacy/Fallback (no tabID): Just force the state logic purely? 
-            // If no tabID, we can't do multi-tab safely. 
-            // We assume "default" session or just rely on pure Heartbeat if we enforce tabId on frontend.
-            // But for safety:
+            // Legacy/Fallback (no tabID): single default session
             if (isOnline) {
-                nextSessions['default'] = new Date().toISOString();
+                nextSessions['default'] = nowIso;
             } else {
-                // Aggressive offline if no tabId provided (legacy behavior)
-                // Or just remove 'default'
                 delete nextSessions['default'];
             }
         }
 
         const sessionCount = Object.keys(nextSessions).length;
-        const newIsOnline = sessionCount > 0;
+        const newIsOnline = !forceOffline && sessionCount > 0;
 
         metadata.active_sessions = nextSessions;
 
@@ -191,6 +227,8 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
     }
 
     try {
+        const ttlSeconds = getPresenceTtlSeconds();
+        await sweepStalePresence(workspaceId);
         const res = await db.query(
             `
             SELECT
@@ -210,9 +248,9 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
             LEFT JOIN roles r ON uwr.role_id = r.id
             WHERE uwp.workspace_id = $1 
             AND uwp.is_online = TRUE
-            AND uwp.last_seen > NOW() - INTERVAL '45 seconds'
+            AND uwp.last_seen > NOW() - ($2 * interval '1 second')
             `,
-            [workspaceId]
+            [workspaceId, ttlSeconds]
         );
 
         return res.rows.map((row): OnlineAgent => ({

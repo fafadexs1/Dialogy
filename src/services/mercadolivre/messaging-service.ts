@@ -1,3 +1,4 @@
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 
 export interface MercadoLivreAccountRecord {
     id: string;
@@ -21,7 +22,7 @@ export class MercadoLivreMessagingService {
             'Content-Type': 'application/json',
         };
 
-        const res = await fetch(url, {
+        const res = await resilientFetch(url, {
             method,
             headers,
             body: body ? JSON.stringify(body) : undefined,

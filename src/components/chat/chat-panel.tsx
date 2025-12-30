@@ -762,9 +762,9 @@ export default function ChatPanel({
         ? chat.messages[chat.messages.length - 1]
         : undefined;
     const resolvedPlatform = (
+        chat?.source ||
         lastPlatformMessage?.platform ||
         lastPlatformMessage?.source_from_api ||
-        chat?.source ||
         chat?.instance_type ||
         ''
     ).toString().toLowerCase();

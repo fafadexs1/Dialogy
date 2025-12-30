@@ -27,6 +27,11 @@ interface FacebookPage {
   access_token: string;
   category: string;
   picture?: { data: { url: string } };
+  about?: string;
+  location?: { city?: string; country?: string; street?: string };
+  website?: string;
+  fan_count?: number;
+  verification_status?: string;
 }
 
 export default function MetaMessengerIntegrationPage() {
@@ -172,7 +177,7 @@ export default function MetaMessengerIntegrationPage() {
           : '';
     try {
       // Fetch Pages
-      const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture`);
+      const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture,about,location,website,fan_count,verification_status`);
       const data = await res.json();
       if (data.data) {
         setAvailablePages(data.data);
@@ -288,29 +293,71 @@ export default function MetaMessengerIntegrationPage() {
                           ) : (
                             <div className="space-y-3">
                               <Label>Selecione a Página para conectar:</Label>
-                              <RadioGroup value={selectedPageId} onValueChange={handlePageSelection} className="grid grid-cols-1 gap-3">
+                              <RadioGroup value={selectedPageId} onValueChange={handlePageSelection} className="grid grid-cols-1 gap-4">
                                 {availablePages.map(page => (
-                                  <div key={page.id}>
+                                  <div key={page.id} className="relative">
                                     <RadioGroupItem value={page.id} id={page.id} className="peer sr-only" />
                                     <Label
                                       htmlFor={page.id}
-                                      className="flex items-center justify-between rounded-lg border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary transition-all cursor-pointer"
+                                      className="flex flex-col gap-3 rounded-xl border-2 border-muted bg-card p-5 hover:bg-accent/50 hover:border-primary/50 peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 [&:has([data-state=checked])]:border-primary transition-all cursor-pointer shadow-sm"
                                     >
-                                      <div className="flex items-center gap-3">
-                                        {page.picture?.data?.url ? (
-                                          // eslint-disable-next-line @next/next/no-img-element
-                                          <img src={page.picture.data.url} alt={page.name} className="w-10 h-10 rounded-full" />
-                                        ) : (
-                                          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                                            <Facebook className="h-5 w-5 text-muted-foreground" />
+                                      <span className="flex items-start justify-between w-full">
+                                        <span className="flex items-start gap-4">
+                                          {page.picture?.data?.url ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={page.picture.data.url} alt={page.name} className="w-12 h-12 rounded-full border bg-white" />
+                                          ) : (
+                                            <span className="w-12 h-12 rounded-full bg-muted flex items-center justify-center border">
+                                              <Facebook className="h-6 w-6 text-muted-foreground" />
+                                            </span>
+                                          )}
+                                          <span className="space-y-1">
+                                            <span className="font-bold text-lg leading-none block">{page.name}</span>
+                                            <span className="text-sm text-muted-foreground flex items-center gap-2">
+                                              <Badge variant="secondary" className="text-[10px] h-5 px-1.5">{page.category}</Badge>
+                                              <span className="text-xs font-mono opacity-70">ID: {page.id}</span>
+                                            </span>
+                                          </span>
+                                        </span>
+                                        {selectedPageId === page.id && (
+                                          <div className="bg-primary text-primary-foreground rounded-full p-1">
+                                            <Check className="h-4 w-4" />
                                           </div>
                                         )}
-                                        <div>
-                                          <div className="font-semibold text-lg">{page.name}</div>
-                                          <div className="text-xs text-muted-foreground">{page.category} • ID: {page.id}</div>
-                                        </div>
+                                      </span>
+
+                                      {/* Rich Metadata Section for App Review */}
+                                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground mt-2 pl-[4.5rem]">
+                                        {(page as any).about && (
+                                          <div className="col-span-2 italic border-l-2 pl-2 py-1 my-1">
+                                            "{(page as any).about}"
+                                          </div>
+                                        )}
+                                        {(page as any).location && (page as any).location.city && (
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-semibold text-foreground/80">Local:</span>
+                                            {(page as any).location.city}, {(page as any).location.country}
+                                          </div>
+                                        )}
+                                        {(page as any).website && (
+                                          <div className="flex items-center gap-1.5 overflow-hidden">
+                                            <span className="font-semibold text-foreground/80">Site:</span>
+                                            <span className="truncate max-w-[150px]">{(page as any).website}</span>
+                                          </div>
+                                        )}
+                                        {(page as any).fan_count !== undefined && (
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-semibold text-foreground/80">Seguidores:</span>
+                                            {(page as any).fan_count}
+                                          </div>
+                                        )}
+                                        {(page as any).verification_status && (page as any).verification_status !== 'not_verified' && (
+                                          <div className="flex items-center gap-1.5 text-blue-600">
+                                            <ShieldCheck className="h-3 w-3" />
+                                            <span className="font-semibold">Verificado ({(page as any).verification_status})</span>
+                                          </div>
+                                        )}
                                       </div>
-                                      {selectedPageId === page.id && <Check className="h-5 w-5 text-primary" />}
                                     </Label>
                                   </div>
                                 ))}

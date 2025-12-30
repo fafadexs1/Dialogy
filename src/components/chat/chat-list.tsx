@@ -604,19 +604,34 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         </Avatar>
         {(() => {
           const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
-          const platform = (lastMessage?.platform || lastMessage?.source_from_api || chat.source || chat.instance_type || '').toLowerCase();
+          const platformSources = [
+            chat.source,
+            lastMessage?.platform,
+            lastMessage?.source_from_api,
+            chat.instance_type,
+          ].filter(Boolean).map(s => s.toLowerCase());
+
+          const isInstagram = platformSources.some(s => s.includes('instagram'));
+          const isMessenger = platformSources.some(s => s.includes('messenger') || s.includes('facebook'));
+          const isWhatsapp = platformSources.some(s => s.includes('whatsapp') || s.includes('baileys') || s.includes('wa_cloud'));
+
+          // Heuristic: "Meta User" usually implies Messenger/Facebook if not explicitly Instagram
+          const isMetaUser = chat.contact.name.startsWith('Meta User');
+
           let icon = <FaWhatsapp size={10} />;
           let bg = 'bg-green-500';
           let label = 'WhatsApp';
-          if (platform === 'instagram') {
+
+          if (isInstagram) {
             icon = <FaInstagram size={10} />;
             bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
             label = 'Instagram';
-          } else if (platform === 'messenger') {
+          } else if (isMessenger || (isMetaUser && !isWhatsapp)) {
             icon = <FaFacebookMessenger size={10} />;
             bg = 'bg-blue-500';
             label = 'Messenger';
           }
+
           return (
             <TooltipProvider>
               <Tooltip>
@@ -647,7 +662,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Tooltip>
           </TooltipProvider>
         )}
-      </motion.div>
+      </motion.div >
 
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">

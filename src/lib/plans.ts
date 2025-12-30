@@ -22,7 +22,7 @@ export const getPlan = unstable_cache(
         } as PlanDetails;
     },
     ['get-plan-by-slug'],
-    { tags: ['plans'], revalidate: 3600 }
+    { tags: ['plans'], revalidate: false }
 );
 
 export const getAllPlans = unstable_cache(
@@ -37,5 +37,5 @@ export const getAllPlans = unstable_cache(
         })) as PlanDetails[];
     },
     ['get-all-plans'],
-    { tags: ['plans'], revalidate: 3600 }
+    { tags: ['plans'], revalidate: false }
 );

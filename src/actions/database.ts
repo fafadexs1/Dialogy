@@ -752,6 +752,26 @@ create table if not exists public.system_settings (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+-- Async Queue Jobs
+create table if not exists public.queue_jobs (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  status text not null default 'queued',
+  payload jsonb not null,
+  attempts int not null default 0,
+  max_attempts int not null default 5,
+  priority int not null default 0,
+  run_at timestamptz not null default timezone('utc', now()),
+  locked_at timestamptz,
+  locked_by text,
+  last_error text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+create index if not exists idx_queue_jobs_status_run_at on public.queue_jobs(status, run_at);
+create index if not exists idx_queue_jobs_type on public.queue_jobs(type);
+create index if not exists idx_queue_jobs_locked_at on public.queue_jobs(locked_at);
+
 
 -- ============================================
 -- Gatilho para sincronização de novos usuários (Supabase Auth)
@@ -838,6 +858,7 @@ select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
 select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
 select public._create_updated_at_trigger('public.meta_conversations'); -- NEW
 select public._create_updated_at_trigger('public.system_settings'); -- NEW
+select public._create_updated_at_trigger('public.queue_jobs'); -- NEW
 
 drop function if exists public._create_updated_at_trigger(regclass);
 `;

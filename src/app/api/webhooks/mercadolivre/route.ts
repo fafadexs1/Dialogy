@@ -1,11 +1,28 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { MercadoLivreMessagingService, MercadoLivreAccountRecord } from '@/services/mercadolivre/messaging-service';
+import { logAction } from '@/lib/observability/logger';
+import { recordWebhookMetrics } from '@/lib/observability/metrics';
 
 export async function POST(request: Request) {
+    const requestId = randomUUID();
+    const receivedAt = Date.now();
     try {
         const body = await request.json();
         const { topic, resource, user_id, received } = body;
+        const payloadBytes = Buffer.byteLength(JSON.stringify(body ?? {}));
+
+        await logAction({
+            action: 'webhook_received',
+            payload: {
+                request_id: requestId,
+                source: 'mercadolivre',
+                event: topic,
+                user_id,
+                payload_bytes: payloadBytes,
+            },
+        });
 
         console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resource}, User: ${user_id}`);
 
@@ -17,6 +34,24 @@ export async function POST(request: Request) {
 
         if ((accountRes.rowCount ?? 0) === 0) {
             console.warn(`[ML Webhook] Received event for unknown user_id: ${user_id}`);
+            await logAction({
+                action: 'webhook_processed_success',
+                payload: {
+                    request_id: requestId,
+                    source: 'mercadolivre',
+                    status_code: 200,
+                    event: topic,
+                    result: 'ignored_user_not_found',
+                    payload_bytes: payloadBytes,
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'mercadolivre',
+                status: 'success',
+                event: topic,
+                durationMs: Date.now() - receivedAt,
+            });
             return NextResponse.json({ status: 'ignored', reason: 'User not found locally' });
         }
 
@@ -80,12 +115,19 @@ export async function POST(request: Request) {
 
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
-                    // Re-open if needed
-                    await db.query(`UPDATE chats SET status = 'atendimentos', updated_at = NOW() WHERE id = $1 AND status = 'encerrados'`, [chatId]);
+                    // Re-open if needed (only keep "atendimentos" when an agent is already assigned)
+                    await db.query(
+                        `UPDATE chats
+                         SET status = CASE WHEN agent_id IS NULL THEN 'gerais' ELSE 'atendimentos' END,
+                             assigned_at = CASE WHEN agent_id IS NULL THEN NULL ELSE assigned_at END,
+                             updated_at = NOW()
+                         WHERE id = $1 AND status = 'encerrados'`,
+                        [chatId]
+                    );
                 } else {
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)
-                         VALUES ($1, $2, 'mercadolivre', 'atendimentos', NOW(), NOW()) RETURNING id`,
+                         VALUES ($1, $2, 'mercadolivre', 'gerais', NOW(), NOW()) RETURNING id`,
                         [account.workspace_id, contactId]
                     );
                     chatId = newChat.rows[0].id;
@@ -142,6 +184,24 @@ export async function POST(request: Request) {
 
                 // Ignora mensagens enviadas por mim (Seller)
                 if (String(message.from.user_id) === String(account.user_id)) {
+                    await logAction({
+                        action: 'webhook_processed_success',
+                        payload: {
+                            request_id: requestId,
+                            source: 'mercadolivre',
+                            status_code: 200,
+                            event: topic,
+                            workspace_id: account.workspace_id,
+                            result: 'ignored_from_me',
+                            duration_ms: Date.now() - receivedAt,
+                        },
+                    });
+                    recordWebhookMetrics({
+                        source: 'mercadolivre',
+                        status: 'success',
+                        event: topic,
+                        durationMs: Date.now() - receivedAt,
+                    });
                     return NextResponse.json({ status: 'ignored', reason: 'From me' });
                 }
 
@@ -175,11 +235,18 @@ export async function POST(request: Request) {
                 );
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
-                    await db.query(`UPDATE chats SET status = 'atendimentos', updated_at = NOW() WHERE id = $1 AND status = 'encerrados'`, [chatId]);
+                    await db.query(
+                        `UPDATE chats
+                         SET status = CASE WHEN agent_id IS NULL THEN 'gerais' ELSE 'atendimentos' END,
+                             assigned_at = CASE WHEN agent_id IS NULL THEN NULL ELSE assigned_at END,
+                             updated_at = NOW()
+                         WHERE id = $1 AND status = 'encerrados'`,
+                        [chatId]
+                    );
                 } else {
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)
-                         VALUES ($1, $2, 'mercadolivre', 'atendimentos', NOW(), NOW()) RETURNING id`,
+                         VALUES ($1, $2, 'mercadolivre', 'gerais', NOW(), NOW()) RETURNING id`,
                         [account.workspace_id, contactId]
                     );
                     chatId = newChat.rows[0].id;
@@ -214,10 +281,49 @@ export async function POST(request: Request) {
             }
         }
 
+        await logAction({
+            action: 'webhook_processed_success',
+            payload: {
+                request_id: requestId,
+                source: 'mercadolivre',
+                status_code: 200,
+                event: topic,
+                workspace_id: account.workspace_id,
+                payload_bytes: payloadBytes,
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'mercadolivre',
+            status: 'success',
+            event: topic,
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ status: 'ok' });
 
     } catch (err: any) {
         console.error('[ML Webhook] Error:', err);
-        return NextResponse.json({ error: 'Internal Error' }, { status: 500 });
+        const statusCode = err instanceof SyntaxError ? 400 : 500;
+        const errorCode = err instanceof SyntaxError ? 'invalid_json' : 'internal_error';
+        await logAction({
+            action: 'webhook_processed_fail',
+            payload: {
+                request_id: requestId,
+                source: 'mercadolivre',
+                status_code: statusCode,
+                error: errorCode,
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'mercadolivre',
+            status: 'fail',
+            event: errorCode,
+            durationMs: Date.now() - receivedAt,
+        });
+        return NextResponse.json(
+            { error: statusCode === 400 ? 'invalid_json' : 'Internal Error' },
+            { status: statusCode }
+        );
     }
 }

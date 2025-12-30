@@ -23,6 +23,8 @@ import {
 import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
+import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
+import { enqueueJob, shouldEnqueueJob } from '@/lib/queue';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -211,21 +213,6 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
         },
     };
 }
-
-async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
-    const instanceRes = await db.query(
-        `SELECT c.api_url, c.api_key 
-       FROM evolution_api_instances i
-       JOIN whatsapp_clusters c ON i.cluster_id = c.id
-       WHERE i.instance_name = $1`,
-        [instanceName]
-    );
-    if (instanceRes.rowCount === 0) {
-        return null;
-    }
-    return instanceRes.rows[0];
-}
-
 
 /**
  * Ação genérica para enviar uma mensagem de texto.
@@ -427,13 +414,70 @@ async function internalSendMessage(
             throw new Error('Nao foi possivel encontrar o numero de destino ou a instancia para este chat.');
         }
 
-        const apiConfig = await getApiConfigForInstance(instanceName);
+        const apiConfig = await getEvolutionApiConfig(instanceName);
 
         if (!apiConfig) {
             throw new Error('Configuracao da API nao encontrada para a instancia ' + instanceName + '.');
         }
 
+        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
+        const dbMetadata = { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) };
 
+        if (shouldEnqueueJob('whatsapp_send')) {
+            let insertRes;
+            if (messageId) {
+                insertRes = await client.query(
+                    `INSERT INTO messages (
+                        id, workspace_id, chat_id, type, content, from_me, 
+                        message_id_from_api, api_message_status, instance_name, 
+                        metadata, is_read, ${senderColumn}, sent_by_tab
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    RETURNING *`,
+                    [
+                        messageId, workspaceId, chatId, 'text', content, true,
+                        null, 'PENDING', instanceName,
+                        dbMetadata, true, senderId, tabId
+                    ]
+                );
+            } else {
+                insertRes = await client.query(
+                    `INSERT INTO messages (
+                        workspace_id, chat_id, type, content, from_me, 
+                        message_id_from_api, api_message_status, instance_name, 
+                        metadata, is_read, ${senderColumn}, sent_by_tab
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    RETURNING *`,
+                    [
+                        workspaceId, chatId, 'text', content, true,
+                        null, 'PENDING', instanceName,
+                        dbMetadata, true, senderId, tabId
+                    ]
+                );
+            }
+
+            const queuedMessageId = insertRes.rows[0]?.id || messageId;
+
+            await enqueueJob(
+                'whatsapp_send',
+                {
+                    messageId: queuedMessageId,
+                    workspaceId,
+                    instanceName,
+                    number: remoteJid,
+                    content,
+                    apiContent,
+                    template,
+                    metadata: dbMetadata,
+                    senderId,
+                    senderType: metadata?.sentBy === 'system_agent' ? 'system_agent' : 'user',
+                    tabId,
+                },
+                { client }
+            );
+
+            await client.query('COMMIT');
+            return { success: true, apiResponse: { queued: true }, message: mapDbMessageToFrontend(insertRes.rows[0]) };
+        }
 
         let apiResponse: any;
         if (template) {
@@ -447,8 +491,6 @@ async function internalSendMessage(
             apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, apiContent || content);
         }
 
-        const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
-
         let insertRes;
         if (messageId) {
             insertRes = await client.query(
@@ -461,7 +503,7 @@ async function internalSendMessage(
                 [
                     messageId, workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
-                    { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) }, true, senderId, tabId
+                    dbMetadata, true, senderId, tabId
                 ]
             );
         } else {
@@ -475,7 +517,7 @@ async function internalSendMessage(
                 [
                     workspaceId, chatId, 'text', content, true,
                     apiResponse?.key?.id, 'SENT', instanceName,
-                    { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) }, true, senderId, tabId
+                    dbMetadata, true, senderId, tabId
                 ]
             );
         }
@@ -540,7 +582,7 @@ async function internalSendMedia(
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
 
-        const apiConfig = await getApiConfigForInstance(instanceName);
+        const apiConfig = await getEvolutionApiConfig(instanceName);
         if (!apiConfig) throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
@@ -843,7 +885,7 @@ export const sendMediaAction = withDebug(
                             `SELECT workspace_id, status, agent_id FROM chats WHERE id = $1`,
                             [chatId]
                         );
-                        if (chatInfoRes.rowCount > 0) {
+                        if ((chatInfoRes.rowCount ?? 0) > 0) {
                             const { workspace_id: workspaceId, status, agent_id: currentAgentId } = chatInfoRes.rows[0];
                             if (!currentAgentId || status === 'encerrados') {
                                 await client.query(
@@ -1055,7 +1097,7 @@ export const sendAgentTemplateAction = withDebug(
             }
 
             // 3. Get API Config
-            const apiConfig = await getApiConfigForInstance(instanceName);
+            const apiConfig = await getEvolutionApiConfig(instanceName);
             if (!apiConfig) {
                 throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
             }
@@ -1301,3 +1343,4 @@ export const forwardMessageAction = withDebug(
         contextResolver: (msg, targetId) => ({ payload: { originalMessageId: msg.id, targetChatId: targetId } })
     }
 );
+

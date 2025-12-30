@@ -1,6 +1,9 @@
 import 'server-only';
 
+import { trace } from '@opentelemetry/api';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getRequestContext } from '@/lib/observability/request-context';
+import { recordActionMetrics } from '@/lib/observability/metrics';
 
 type LogActionInput = {
   workspaceId?: string | null;
@@ -17,10 +20,17 @@ const DEFAULT_SAMPLE_RATE =
     ? Number(process.env.LOG_SAMPLE_RATE ?? '0.1')
     : 0.1;
 
+const WEBHOOK_SAMPLE_RATE =
+  Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') >= 0 &&
+  Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') <= 1
+    ? Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02')
+    : 0.02;
+
 // Per-action overrides to drastically reduce noisy logs.
 const ACTION_SAMPLE_OVERRIDES: Record<string, number> = {
-  webhook_received:
-    Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') || 0.02,
+  webhook_received: WEBHOOK_SAMPLE_RATE,
+  webhook_processed_success: WEBHOOK_SAMPLE_RATE,
+  webhook_processed_fail: 1,
 };
 
 const DISABLED_ACTIONS = new Set<string>([
@@ -46,10 +56,45 @@ export async function logAction(input: LogActionInput): Promise<void> {
 
   // Fail-open: never throw from telemetry.
   try {
+    const requestContext = await getRequestContext();
+    const resolvedWorkspaceId = input.workspaceId ?? requestContext.workspaceId ?? null;
+    const resolvedUserId = input.userId ?? requestContext.userId ?? null;
+    const requestId = requestContext.requestId;
+    const releaseChannel = requestContext.releaseChannel;
+    const span = trace.getActiveSpan();
+    const spanContext = span?.spanContext();
+    const traceId = spanContext?.traceId;
+    const spanId = spanContext?.spanId;
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
     const payload = { ...(input.payload ?? {}) };
+    if (!payload.request_id && requestId) {
+      payload.request_id = requestId;
+    }
+    if (!payload.trace_id && traceId) {
+      payload.trace_id = traceId;
+    }
+    if (!payload.span_id && spanId) {
+      payload.span_id = spanId;
+    }
+    if (!payload.user_id && resolvedUserId) {
+      payload.user_id = resolvedUserId;
+    }
+    if (!payload.workspace_id && resolvedWorkspaceId) {
+      payload.workspace_id = resolvedWorkspaceId;
+    }
+    if (!payload.release_channel && releaseChannel) {
+      payload.release_channel = releaseChannel;
+    }
+
+    if (span) {
+      if (requestId) span.setAttribute('request.id', requestId);
+      if (resolvedUserId) span.setAttribute('enduser.id', resolvedUserId);
+      if (resolvedWorkspaceId) span.setAttribute('dialogy.workspace_id', resolvedWorkspaceId);
+      if (releaseChannel) span.setAttribute('dialogy.release_channel', releaseChannel);
+    }
 
     // Avoid storing huge webhook payloads; keep only a summary.
     if (input.action === 'webhook_received' && 'full_payload' in payload) {
@@ -62,11 +107,23 @@ export async function logAction(input: LogActionInput): Promise<void> {
       };
     }
 
+    if (process.env.LOG_TO_STDOUT === 'true') {
+      const logEntry = {
+        level: 'info',
+        action: input.action,
+        workspace_id: resolvedWorkspaceId,
+        user_id: resolvedUserId,
+        timestamp: new Date().toISOString(),
+        payload,
+      };
+      console.log(JSON.stringify(logEntry));
+    }
+
     const insertBuilder = supabaseAdmin
       .from('workspace_logs')
       .insert({
-        workspace_id: input.workspaceId ?? null,
-        user_id: input.userId ?? null,
+        workspace_id: resolvedWorkspaceId,
+        user_id: resolvedUserId,
         action: input.action,
         payload,
       });
@@ -110,14 +167,16 @@ export function withDebug<T extends (...args: any[]) => any>(
 
     try {
       const result = await Promise.race([fn(...args), timeoutPromise]);
+      const duration = Date.now() - start;
       await logAction({
         ...(context ?? {}),
         action: `${actionName}_success`,
         payload: {
           ...(context?.payload ?? {}),
-          duration: Date.now() - start,
+          duration,
         },
       });
+      recordActionMetrics(actionName, 'success', duration);
       return result as Awaited<ReturnType<T>>;
     } catch (err: any) {
       const duration = Date.now() - start;
@@ -131,6 +190,7 @@ export function withDebug<T extends (...args: any[]) => any>(
             duration,
           },
         });
+        recordActionMetrics(actionName, 'redirect', duration);
         throw err;
       }
 
@@ -143,6 +203,7 @@ export function withDebug<T extends (...args: any[]) => any>(
           error: err?.message ?? 'unknown_error',
         },
       });
+      recordActionMetrics(actionName, 'fail', duration);
       throw err;
     }
   }) as T;

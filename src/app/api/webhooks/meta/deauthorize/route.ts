@@ -1,13 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
+import { logAction } from '@/lib/observability/logger';
+import { recordWebhookMetrics } from '@/lib/observability/metrics';
 
 export async function POST(req: NextRequest) {
+    const requestId = randomUUID();
+    const receivedAt = Date.now();
     try {
         const formData = await req.formData();
         const signedRequest = formData.get('signed_request') as string;
 
         if (!signedRequest) {
+            await logAction({
+                action: 'webhook_processed_fail',
+                payload: {
+                    request_id: requestId,
+                    source: 'meta-deauthorize',
+                    status_code: 400,
+                    error: 'missing_signed_request',
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'meta-deauthorize',
+                status: 'fail',
+                event: 'missing_signed_request',
+                durationMs: Date.now() - receivedAt,
+            });
             return NextResponse.json({ error: 'Missing signed_request' }, { status: 400 });
         }
 
@@ -15,6 +35,22 @@ export async function POST(req: NextRequest) {
 
         if (!appSecret) {
             console.error("FACEBOOK_APP_SECRET is not defined");
+            await logAction({
+                action: 'webhook_processed_fail',
+                payload: {
+                    request_id: requestId,
+                    source: 'meta-deauthorize',
+                    status_code: 500,
+                    error: 'missing_app_secret',
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'meta-deauthorize',
+                status: 'fail',
+                event: 'missing_app_secret',
+                durationMs: Date.now() - receivedAt,
+            });
             return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
         }
 
@@ -29,6 +65,22 @@ export async function POST(req: NextRequest) {
             .digest();
 
         if (Buffer.compare(Buffer.from(sig, 'binary'), expectedSig) !== 0) {
+            await logAction({
+                action: 'webhook_processed_fail',
+                payload: {
+                    request_id: requestId,
+                    source: 'meta-deauthorize',
+                    status_code: 401,
+                    error: 'invalid_signature',
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'meta-deauthorize',
+                status: 'fail',
+                event: 'invalid_signature',
+                durationMs: Date.now() - receivedAt,
+            });
             return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
         }
 
@@ -54,10 +106,41 @@ export async function POST(req: NextRequest) {
         }
 
         // Facebook expects a success response
+        await logAction({
+            action: 'webhook_processed_success',
+            payload: {
+                request_id: requestId,
+                source: 'meta-deauthorize',
+                status_code: 200,
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'meta-deauthorize',
+            status: 'success',
+            event: 'deauthorize',
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ success: true });
 
     } catch (error) {
         console.error("Deauthorization Error:", error);
+        await logAction({
+            action: 'webhook_processed_fail',
+            payload: {
+                request_id: requestId,
+                source: 'meta-deauthorize',
+                status_code: 500,
+                error: error instanceof Error ? error.message : 'internal_error',
+                duration_ms: Date.now() - receivedAt,
+            },
+        });
+        recordWebhookMetrics({
+            source: 'meta-deauthorize',
+            status: 'fail',
+            event: 'internal_error',
+            durationMs: Date.now() - receivedAt,
+        });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

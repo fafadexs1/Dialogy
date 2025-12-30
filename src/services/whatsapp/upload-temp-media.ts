@@ -3,6 +3,7 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'crypto';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 
 const TEMP_MEDIA_BUCKET = 'temp-media';
 const DELETE_DELAY_MS = 5 * 60 * 1000; // 5 minutes
@@ -28,7 +29,7 @@ async function toBufferFromSource(source: string): Promise<Buffer> {
     const isUrl = /^https?:\/\//i.test(trimmed);
 
     if (isUrl) {
-        const response = await fetch(trimmed);
+        const response = await resilientFetch(trimmed);
         if (!response.ok) {
             throw new Error(`Falha ao baixar mídia da URL: ${response.status} ${response.statusText}`);
         }
