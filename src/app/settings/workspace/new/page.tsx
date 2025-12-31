@@ -11,18 +11,21 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2, PlusCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import { useI18n } from '@/i18n/i18n-provider';
 
 function SubmitButton() {
+    const { t } = useI18n();
     const { pending } = useFormStatus();
     return (
         <Button type="submit" className="w-full" disabled={pending}>
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {pending ? 'Criando...' : 'Criar Workspace'}
+            {pending ? t("Criando...") : t("Criar workspace")}
         </Button>
     )
 }
 
 export default function NewWorkspacePage() {
+  const { t } = useI18n();
   const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
   const router = useRouter();
 
@@ -38,28 +41,28 @@ export default function NewWorkspacePage() {
          <header className="mb-6">
             <h1 className="text-2xl font-bold flex items-center gap-2">
                 <PlusCircle />
-                Criar Novo Workspace
+                {t("Criar novo workspace")}
             </h1>
             <p className="text-muted-foreground">
-                Crie um novo espaço de trabalho para organizar suas equipes e conversas.
+                {t("Crie um novo espaco de trabalho para organizar suas equipes e conversas.")}
             </p>
         </header>
 
         <Card className="w-full max-w-lg">
             <form action={formAction}>
                 <CardHeader>
-                    <CardTitle>Detalhes do Workspace</CardTitle>
+                    <CardTitle>{t("Detalhes do workspace")}</CardTitle>
                     <CardDescription>
-                        Dê um nome ao seu novo workspace. Você poderá convidar membros depois.
+                        {t("De um nome ao seu novo workspace. Voce podera convidar membros depois.")}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-2">
-                        <Label htmlFor="workspace-name">Nome do Workspace</Label>
+                        <Label htmlFor="workspace-name">{t("Nome do workspace")}</Label>
                         <Input
                             id="workspace-name"
                             name="workspaceName"
-                            placeholder="Ex: Acme Inc, Equipe de Vendas"
+                            placeholder={t("Ex: Acme Inc, Equipe de Vendas")}
                             required
                             autoFocus
                         />
@@ -67,7 +70,7 @@ export default function NewWorkspacePage() {
                      {state.error && (
                         <Alert variant="destructive" className="mt-4">
                             <AlertCircle className="h-4 w-4" />
-                            <AlertTitle>Erro ao criar workspace</AlertTitle>
+                            <AlertTitle>{t("Erro ao criar workspace")}</AlertTitle>
                             <AlertDescription>{state.error}</AlertDescription>
                         </Alert>
                     )}

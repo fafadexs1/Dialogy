@@ -1,0 +1,34 @@
+{
+  "nav": {
+    "chat": "Chat",
+    "crm": "CRM",
+    "campaigns": "Campanhas",
+    "analytics": "Analytics",
+    "integrations": "Integracoes",
+    "support": "Suporte",
+    "nexus": "NexusFlow",
+    "team": "Equipe",
+    "teamMembers": "Membros",
+    "teams": "Equipes",
+    "teamPermissions": "Papeis & Permissoes",
+    "automations": "Automacoes",
+    "systemAgents": "Agentes do Sistema",
+    "aiAgent": "Agente de IA"
+  },
+  "account": {
+    "label": "Conta",
+    "profile": "Perfil",
+    "billing": "Cobranca",
+    "settings": "Configuracoes",
+    "systemLogs": "Logs do Sistema",
+    "signOut": "Sair",
+    "signingOut": "Saindo...",
+    "yourAccount": "Sua conta",
+    "userFallback": "Usuario"
+  },
+  "language": {
+    "label": "Idioma",
+    "description": "Escolha o idioma da interface.",
+    "switcher": "Selecionar idioma"
+  }
+}

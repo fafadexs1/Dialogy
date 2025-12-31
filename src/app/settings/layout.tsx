@@ -8,16 +8,18 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { SettingsProvider, useSettings } from './settings-context';
+import { useI18n } from '@/i18n/i18n-provider';
 
 const settingsNavItems = [
-  { href: '/settings/profile', label: 'Perfil', icon: User },
-  { href: '/settings/workspace', label: 'Workspace', icon: Building },
-  { href: '/settings/billing', label: 'Cobrança & Faturas', icon: CreditCard },
-  { href: '/settings/shortcuts', label: 'Atalhos', icon: MessageSquareQuote },
-  { href: '/settings/security', label: 'Segurança', icon: Shield },
-]
+  { href: '/settings/profile', labelKey: 'Perfil', icon: User },
+  { href: '/settings/workspace', labelKey: 'Workspace', icon: Building },
+  { href: '/settings/billing', labelKey: 'Cobranca & Faturas', icon: CreditCard },
+  { href: '/settings/shortcuts', labelKey: 'Atalhos', icon: MessageSquareQuote },
+  { href: '/settings/security', labelKey: 'Seguranca', icon: Shield },
+];
 
 function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const pathname = usePathname();
   const { user, loading } = useSettings();
 
@@ -33,13 +35,13 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col flex-1 h-full">
       <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold">Configurações</h1>
-          <p className="text-muted-foreground">Gerencie suas preferências de perfil, workspace e conta.</p>
+          <h1 className="text-2xl font-bold">{t("Configuracoes")}</h1>
+          <p className="text-muted-foreground">{t("Gerencie suas preferencias de perfil, workspace e conta.")}</p>
         </div>
         <Button asChild>
           <Link href="/settings/workspace/new">
             <PlusCircle className="mr-2 h-4 w-4" />
-            Criar Novo Workspace
+            {t("Criar novo workspace")}
           </Link>
         </Button>
       </header>
@@ -58,7 +60,7 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <item.icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <span>{t(item.labelKey)}</span>
               </Link>
             ))}
           </nav>

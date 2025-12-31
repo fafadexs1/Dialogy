@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '../ui/checkbox';
 import { ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useI18n } from '@/i18n/i18n-provider';
 import { cn } from '@/lib/utils';
 
 interface RegisterFormProps {
@@ -15,15 +16,17 @@ interface RegisterFormProps {
 }
 
 const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
+  const { t } = useI18n();
   const strengthLevels = [
-    { label: 'Muito Fraca', color: 'bg-red-500', width: '20%' },
-    { label: 'Fraca', color: 'bg-orange-500', width: '40%' },
-    { label: 'Média', color: 'bg-yellow-500', width: '60%' },
-    { label: 'Forte', color: 'bg-green-500', width: '80%' },
-    { label: 'Muito Forte', color: 'bg-emerald-600', width: '100%' },
+    { label: t("Muito fraca"), color: 'bg-red-500', width: '20%' },
+    { label: t("Fraca"), color: 'bg-orange-500', width: '40%' },
+    { label: t("Media"), color: 'bg-yellow-500', width: '60%' },
+    { label: t("Forte"), color: 'bg-green-500', width: '80%' },
+    { label: t("Muito forte"), color: 'bg-emerald-600', width: '100%' },
   ];
 
   const currentLevel = strengthLevels[strength];
+  const strengthLabel = currentLevel?.label || t("Invalida");
 
   return (
     <div className="space-y-1">
@@ -34,13 +37,14 @@ const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
         />
       </div>
       <p className="text-xs font-medium text-white/40">
-        Força da senha: <span className="text-white/80">{currentLevel?.label || 'Inválida'}</span>
+        {t("Forca da senha: {label}", { label: strengthLabel })}
       </p>
     </div>
   );
 };
 
 export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
+  const { t } = useI18n();
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState('');
@@ -72,8 +76,8 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
 
     if (pass !== confirmPass) {
       toast({
-        title: "As senhas não coincidem",
-        description: "Por favor, verifique se as senhas digitadas são iguais.",
+        title: t("As senhas nao coincidem"),
+        description: t("Por favor, verifique se as senhas digitadas sao iguais."),
         variant: "destructive"
       });
       return;
@@ -86,30 +90,30 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
     <form onSubmit={handleSubmit} className="space-y-5">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="name" className="font-medium text-white/80 text-sm">Nome <span className="text-white/30">(obrigatório)</span></Label>
-          <Input id="name" name="name" type="text" placeholder="Primeiro nome" required autoComplete="given-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
+          <Label htmlFor="name" className="font-medium text-white/80 text-sm">{t("Nome")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
+          <Input id="name" name="name" type="text" placeholder={t("Primeiro nome")} required autoComplete="given-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="lastname" className="font-medium text-white/80 text-sm">Sobrenome <span className="text-white/30">(obrigatório)</span></Label>
-          <Input id="lastname" name="lastname" type="text" placeholder="Sobrenome" required autoComplete="family-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
+          <Label htmlFor="lastname" className="font-medium text-white/80 text-sm">{t("Sobrenome")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
+          <Input id="lastname" name="lastname" type="text" placeholder={t("Sobrenome")} required autoComplete="family-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
         </div>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="email" className="font-medium text-white/80 text-sm">E-mail <span className="text-white/30">(obrigatório)</span></Label>
-        <Input id="email" name="email" type="email" placeholder="Insira seu melhor e-mail" required autoComplete="email" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
+        <Label htmlFor="email" className="font-medium text-white/80 text-sm">{t("E-mail")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
+        <Input id="email" name="email" type="email" placeholder={t("Insira seu melhor e-mail")} required autoComplete="email" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="phone" className="font-medium text-white/80 text-sm">Telefone pessoal <span className="text-white/30">(obrigatório)</span></Label>
-        <Input id="phone" name="phone" type="tel" placeholder="Insira o seu número" required autoComplete="tel" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
+        <Label htmlFor="phone" className="font-medium text-white/80 text-sm">{t("Telefone pessoal")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
+        <Input id="phone" name="phone" type="tel" placeholder={t("Insira o seu numero")} required autoComplete="tel" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password" className="font-medium text-white/80 text-sm">Senha <span className="text-white/30">(obrigatório)</span></Label>
+        <Label htmlFor="password" className="font-medium text-white/80 text-sm">{t("Senha")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
         <div className='relative'>
           <Input
             id="password"
             name="password"
             type={showPassword ? 'text' : 'password'}
-            placeholder="Crie uma senha forte"
+            placeholder={t("Crie uma senha forte")}
             required
             autoComplete="new-password"
             className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
@@ -123,13 +127,13 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
         <PasswordStrengthIndicator strength={passwordStrength} />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="confirmPassword" className="font-medium text-white/80 text-sm">Confirmar Senha <span className="text-white/30">(obrigatório)</span></Label>
+        <Label htmlFor="confirmPassword" className="font-medium text-white/80 text-sm">{t("Confirmar senha")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
         <div className='relative'>
           <Input
             id="confirmPassword"
             name="confirmPassword"
             type={showPassword ? 'text' : 'password'}
-            placeholder="Repita sua senha"
+            placeholder={t("Repita sua senha")}
             required
             autoComplete="new-password"
             className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
@@ -142,14 +146,14 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
       <div className="flex items-center space-x-2 pt-4">
         <Checkbox id="terms" required className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" />
         <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-white/60">
-          Li e aceito os termos de uso da Dialogy.{' '}
-          <a href="#" className="underline text-blue-400 hover:text-blue-300">Ler termos</a>
+          {t("Li e aceito os termos de uso da Dialogy.")}{' '}
+          <a href="#" className="underline text-blue-400 hover:text-blue-300">{t("Ler termos")}</a>
         </label>
       </div>
 
       <Button type="submit" className="w-full h-12 text-base bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-lg shadow-blue-600/20 transition-all" disabled={pending}>
         {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-        {pending ? 'Criando conta...' : 'Criar Conta e Entrar'}
+        {pending ? t("Criando conta...") : t("Criar conta e entrar")}
       </Button>
     </form>
   );

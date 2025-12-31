@@ -29,16 +29,18 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSettings } from '../settings-context';
 import { Badge } from '@/components/ui/badge';
+import { useI18n } from '@/i18n/i18n-provider';
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
+    const { t } = useI18n();
     const { pending } = useFormStatus();
     return (
         <Button type="submit" disabled={pending} className="min-w-[140px]">
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {pending ? 'Salvando...' : (
+            {pending ? t("Salvando...") : (
                 <>
                     <Save className="mr-2 h-4 w-4" />
-                    {isEditing ? 'Salvar Alterações' : 'Criar Atalho'}
+                    {isEditing ? t("Salvar alteracoes") : t("Criar atalho")}
                 </>
             )}
         </Button>
@@ -47,6 +49,7 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 
 
 export default function ShortcutsPage() {
+    const { t } = useI18n();
     const { user } = useSettings();
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -66,7 +69,7 @@ export default function ShortcutsPage() {
         ]);
 
         if (shortcutsResult.error) {
-            toast({ title: "Erro ao carregar atalhos", description: shortcutsResult.error, variant: 'destructive' });
+            toast({ title: t("Erro ao carregar atalhos"), description: shortcutsResult.error, variant: 'destructive' });
         } else {
             setShortcuts(shortcutsResult.shortcuts || []);
         }
@@ -88,12 +91,12 @@ export default function ShortcutsPage() {
 
     useEffect(() => {
         if (state.success) {
-            toast({ title: 'Atalho Salvo!', description: 'Sua resposta rápida está pronta para uso.' });
+            toast({ title: t("Atalho salvo!"), description: t("Sua resposta rapida esta pronta para uso.") });
             setIsFormVisible(false);
             setEditingShortcut(null);
             if (user?.activeWorkspaceId) fetchData(user.activeWorkspaceId);
         } else if (state.error) {
-            toast({ title: "Erro ao Salvar", description: state.error, variant: "destructive" });
+            toast({ title: t("Erro ao salvar"), description: state.error, variant: "destructive" });
         }
     }, [state, fetchData, user?.activeWorkspaceId]);
 
@@ -117,10 +120,10 @@ export default function ShortcutsPage() {
     const handleDelete = async (shortcutId: string) => {
         const result = await deleteShortcut(shortcutId);
         if (result.success) {
-            toast({ title: 'Atalho removido' });
+            toast({ title: t("Atalho removido") });
             if (user?.activeWorkspaceId) fetchData(user.activeWorkspaceId);
         } else {
-            toast({ title: 'Erro ao remover', description: result.error, variant: 'destructive' });
+            toast({ title: t("Erro ao remover"), description: result.error, variant: 'destructive' });
         }
     }
 
@@ -132,13 +135,13 @@ export default function ShortcutsPage() {
         <div className="max-w-5xl mx-auto space-y-8 pb-10">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Atalhos</h1>
-                    <p className="text-muted-foreground mt-1 text-lg">Respostas rápidas para agilizar seu atendimento.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">{t("Atalhos")}</h1>
+                    <p className="text-muted-foreground mt-1 text-lg">{t("Respostas rapidas para agilizar seu atendimento.")}</p>
                 </div>
                 {!isFormVisible && (
                     <Button onClick={handleAddNew} size="lg" className="shadow-lg hover:shadow-xl transition-all">
                         <Plus className="mr-2 h-5 w-5" />
-                        Novo Atalho
+                        {t("Novo atalho")}
                     </Button>
                 )}
             </header>
@@ -152,23 +155,23 @@ export default function ShortcutsPage() {
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2 text-xl">
                                     {editingShortcut ? <Edit className="h-5 w-5 text-primary" /> : <Sparkles className="h-5 w-5 text-primary" />}
-                                    {editingShortcut ? 'Editar Atalho' : 'Criar Novo Atalho'}
+                                    {editingShortcut ? t("Editar atalho") : t("Criar novo atalho")}
                                 </CardTitle>
-                                <CardDescription>Configure o gatilho e a mensagem.</CardDescription>
+                                <CardDescription>{t("Configure o gatilho e a mensagem.")}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <Label htmlFor="name" className="text-base font-semibold">Gatilho (Comando)</Label>
+                                        <Label htmlFor="name" className="text-base font-semibold">{t("Gatilho (comando)")}</Label>
                                         <div className="relative group">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted-foreground group-focus-within:text-primary transition-colors">/</div>
-                                            <Input id="name" name="name" placeholder="exemplo" required defaultValue={editingShortcut?.name} className="pl-7 h-12 text-lg font-mono" />
+                                            <Input id="name" name="name" placeholder={t("exemplo")} required defaultValue={editingShortcut?.name} className="pl-7 h-12 text-lg font-mono" />
                                         </div>
-                                        <p className="text-xs text-muted-foreground">Digite este comando no chat para inserir a mensagem.</p>
+                                        <p className="text-xs text-muted-foreground">{t("Digite este comando no chat para inserir a mensagem.")}</p>
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label className="text-base font-semibold">Visibilidade</Label>
+                                        <Label className="text-base font-semibold">{t("Visibilidade")}</Label>
                                         <Select
                                             name="type"
                                             value={selectedType}
@@ -178,9 +181,9 @@ export default function ShortcutsPage() {
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="private"><div className="flex items-center gap-2"><Lock className="h-4 w-4" /> Privado (Só eu vejo)</div></SelectItem>
-                                                <SelectItem value="team"><div className="flex items-center gap-2"><Users className="h-4 w-4" /> Equipe (Todos da equipe)</div></SelectItem>
-                                                <SelectItem value="global"><div className="flex items-center gap-2"><Globe className="h-4 w-4" /> Global (Todo o workspace)</div></SelectItem>
+                                                <SelectItem value="private"><div className="flex items-center gap-2"><Lock className="h-4 w-4" /> {t("Privado (so eu vejo)")}</div></SelectItem>
+                                                <SelectItem value="team"><div className="flex items-center gap-2"><Users className="h-4 w-4" /> {t("Equipe (todos da equipe)")}</div></SelectItem>
+                                                <SelectItem value="global"><div className="flex items-center gap-2"><Globe className="h-4 w-4" /> {t("Global (todo o workspace)")}</div></SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -188,10 +191,10 @@ export default function ShortcutsPage() {
 
                                 {selectedType === 'team' && (
                                     <div className="space-y-2 animate-in slide-in-from-top-2">
-                                        <Label htmlFor="teamId">Selecione a Equipe</Label>
+                                        <Label htmlFor="teamId">{t("Selecione a equipe")}</Label>
                                         <Select name="teamId" required defaultValue={editingShortcut?.team_id}>
                                             <SelectTrigger className="h-11">
-                                                <SelectValue placeholder="Selecione uma equipe..." />
+                                                <SelectValue placeholder={t("Selecione uma equipe...")} />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {teams.map(team => (
@@ -208,29 +211,29 @@ export default function ShortcutsPage() {
                                 )}
 
                                 <div className="space-y-2">
-                                    <Label htmlFor="message" className="text-base font-semibold">Mensagem Completa</Label>
+                                    <Label htmlFor="message" className="text-base font-semibold">{t("Mensagem completa")}</Label>
                                     <Textarea
                                         id="message"
                                         name="message"
                                         required
                                         rows={6}
-                                        placeholder="Olá! Como posso ajudar você hoje?"
+                                        placeholder={t("Ola! Como posso ajudar voce hoje?")}
                                         defaultValue={editingShortcut?.message}
                                         className="resize-none text-base leading-relaxed"
                                     />
-                                    <p className="text-xs text-muted-foreground text-right">{editingShortcut?.message?.length || 0} caracteres</p>
+                                    <p className="text-xs text-muted-foreground text-right">{editingShortcut?.message?.length || 0} {t("caracteres")}</p>
                                 </div>
 
                                 {state.error && (
                                     <Alert variant="destructive">
                                         <AlertCircle className="h-4 w-4" />
-                                        <AlertTitle>Erro ao Salvar</AlertTitle>
+                                        <AlertTitle>{t("Erro ao salvar")}</AlertTitle>
                                         <AlertDescription>{state.error}</AlertDescription>
                                     </Alert>
                                 )}
                             </CardContent>
                             <CardFooter className="flex justify-end gap-3 bg-muted/20 py-4">
-                                <Button type="button" variant="ghost" onClick={handleCancel}>Cancelar</Button>
+                                <Button type="button" variant="ghost" onClick={handleCancel}>{t("Cancelar")}</Button>
                                 <SubmitButton isEditing={!!editingShortcut} />
                             </CardFooter>
                         </form>
@@ -265,23 +268,23 @@ export default function ShortcutsPage() {
                                                 </AlertDialogTrigger>
                                                 <AlertDialogContent>
                                                     <AlertDialogHeader>
-                                                        <AlertDialogTitle>Excluir Atalho</AlertDialogTitle>
+                                                        <AlertDialogTitle>{t("Excluir atalho")}</AlertDialogTitle>
                                                         <AlertDialogDescription>
-                                                            Tem certeza que deseja apagar o atalho <span className="font-bold text-foreground">/{shortcut.name}</span>?
+                                                            {t("Tem certeza que deseja apagar o atalho {shortcut}?", { shortcut: `/${shortcut.name}` })}
                                                         </AlertDialogDescription>
                                                     </AlertDialogHeader>
                                                     <AlertDialogFooter>
-                                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                                        <AlertDialogAction onClick={() => handleDelete(shortcut.id)} className="bg-destructive hover:bg-destructive/90">Excluir</AlertDialogAction>
+                                                        <AlertDialogCancel>{t("Cancelar")}</AlertDialogCancel>
+                                                        <AlertDialogAction onClick={() => handleDelete(shortcut.id)} className="bg-destructive hover:bg-destructive/90">{t("Excluir")}</AlertDialogAction>
                                                     </AlertDialogFooter>
                                                 </AlertDialogContent>
                                             </AlertDialog>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2">
-                                        {shortcut.type === 'global' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Globe className="h-3 w-3" /> Global</Badge>}
-                                        {shortcut.type === 'private' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Lock className="h-3 w-3" /> Privado</Badge>}
-                                        {shortcut.type === 'team' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Users className="h-3 w-3" /> {shortcut.team_name || 'Equipe'}</Badge>}
+                                        {shortcut.type === 'global' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Globe className="h-3 w-3" /> {t("Global")}</Badge>}
+                                        {shortcut.type === 'private' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Lock className="h-3 w-3" /> {t("Privado")}</Badge>}
+                                        {shortcut.type === 'team' && <Badge variant="outline" className="text-xs font-normal gap-1 h-5"><Users className="h-3 w-3" /> {shortcut.team_name || t("Equipe")}</Badge>}
                                     </div>
                                 </CardHeader>
                                 <CardContent className="pl-6 pt-2">
@@ -299,13 +302,13 @@ export default function ShortcutsPage() {
                         <div className="p-4 bg-muted/30 rounded-full mb-4">
                             <Keyboard className="h-10 w-10 text-muted-foreground" />
                         </div>
-                        <h3 className="text-xl font-semibold">Sua lista de atalhos está vazia</h3>
+                        <h3 className="text-xl font-semibold">{t("Sua lista de atalhos esta vazia")}</h3>
                         <p className="text-muted-foreground mt-2 max-w-md mx-auto">
-                            Crie atalhos para responder perguntas frequentes com apenas alguns cliques.
+                            {t("Crie atalhos para responder perguntas frequentes com apenas alguns cliques.")}
                         </p>
                         <Button onClick={handleAddNew} className="mt-6">
                             <Plus className="mr-2 h-4 w-4" />
-                            Começar agora
+                            {t("Comecar agora")}
                         </Button>
                     </div>
                 )}

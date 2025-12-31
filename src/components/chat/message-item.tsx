@@ -106,6 +106,38 @@ function LocationMessage({ message }: { message: Message }) {
     );
 }
 
+function SafeMediaImage({ src, alt, className, width, height, onClick }: { src: string, alt: string, className?: string, width: number, height: number, onClick?: () => void }) {
+    const [hasError, setHasError] = React.useState(false);
+
+    if (hasError) {
+        return (
+            <div
+                className={cn("flex flex-col items-center justify-center bg-muted/30 border border-border rounded-lg p-4 text-muted-foreground", className)}
+                style={{ width: width, height: height > 200 ? 200 : height }}
+                onClick={onClick}
+            >
+                <div className="bg-muted/50 p-3 rounded-full mb-2">
+                    <FileIcon className="h-6 w-6 opacity-50" />
+                </div>
+                <span className="text-xs font-medium text-center opacity-70">Mídia indisponível</span>
+                <span className="text-[10px] opacity-50 text-center">Arquivo expirado ou não encontrado</span>
+            </div>
+        );
+    }
+
+    return (
+        <Image
+            src={src}
+            alt={alt}
+            width={width}
+            height={height}
+            className={className}
+            onError={() => setHasError(true)}
+            onClick={onClick}
+        />
+    );
+}
+
 function MediaMessage({ message, workspaceId }: { message: Message, workspaceId: string }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
@@ -126,13 +158,15 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('image/')) {
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
-                    <Image
-                        src={urlToUse}
-                        alt={message.content || fileName || 'Imagem enviada'}
-                        width={300}
-                        height={300}
-                        className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto cursor-pointer hover:brightness-90 transition-all"
-                    />
+                    <div className="cursor-pointer">
+                        <SafeMediaImage
+                            src={urlToUse}
+                            alt={message.content || fileName || 'Imagem enviada'}
+                            width={300}
+                            height={300}
+                            className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto hover:brightness-90 transition-all"
+                        />
+                    </div>
                 </MediaViewer>
             );
         }
@@ -141,19 +175,19 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
                     <div className="relative group cursor-pointer">
-                    <Image
-                        src={safeThumbnail || '/placeholder-video.png'}
-                        alt="Vídeo"
-                        width={300}
-                        height={200}
+                        <SafeMediaImage
+                            src={safeThumbnail || '/placeholder-video.png'}
+                            alt="Vídeo"
+                            width={300}
+                            height={200}
                             className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto brightness-75 group-hover:brightness-90 transition-all"
                         />
-                        <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                             <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform">
                                 <PlayCircle className="h-8 w-8 text-white" />
                             </div>
                         </div>
-                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium">
+                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium pointer-events-none">
                             {duration ? formatDuration(duration) : 'Vídeo'}
                         </div>
                     </div>
@@ -179,11 +213,6 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                 href={urlToUse}
                 target="_blank"
                 rel="noopener noreferrer"
-                // Use text-inherit to allow parent text color (white for sent, black for received) to propagate
-                // But muted-foreground is specific. 
-                // We should condition on isFromMe usually, but here we are inside renderMedia which doesn't know isFromMe easy?
-                // Actually MessageItem knows isFromMe. But renderMessageContent logic...
-                // Let's use robust classes.
                 className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[80vw] md:max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"
             >
                 <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />

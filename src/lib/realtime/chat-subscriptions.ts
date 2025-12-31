@@ -42,9 +42,13 @@ export function subscribeToChatMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
-        filter: `chat_id=eq.${chatId}`,
+        // filter: `chat_id=eq.${chatId}`, // FILTER DISABLED: Blocking realtime updates
       },
-      onMessage,
+      (payload) => {
+        console.log('[REALTIME-DEBUG] Message payload (Filter Disabled):', payload);
+        console.log('[REALTIME-DEBUG] Expected Chat ID was:', chatId);
+        onMessage(payload);
+      },
     )
     .subscribe(onStatusChange);
 }
@@ -55,17 +59,22 @@ export function subscribeToWorkspaceChatUpdates({
   onChatUpdate,
   onStatusChange,
 }: WorkspaceChatSubscriptionParams): RealtimeChannel {
+  console.log('[REALTIME-DEBUG-CHATS] Subscribing to chats for workspace:', workspaceId);
   return client
     .channel(buildWorkspaceChatChannelName(workspaceId))
     .on(
       'postgres_changes',
       {
-        event: 'UPDATE',
+        event: '*', // Listen for INSERT, UPDATE, and DELETE
         schema: 'public',
         table: 'chats',
-        filter: `workspace_id=eq.${workspaceId}`,
+        // filter: `workspace_id=eq.${workspaceId}`, // FILTER DISABLED: Blocking realtime updates
       },
-      onChatUpdate,
+      (payload) => {
+        console.log('[REALTIME-DEBUG-CHATS] Chat update payload (NO FILTER):', payload);
+        console.log('[REALTIME-DEBUG-CHATS] Expected Workspace ID was:', workspaceId);
+        onChatUpdate(payload);
+      },
     )
     .subscribe(onStatusChange);
 }

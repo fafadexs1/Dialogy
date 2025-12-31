@@ -35,6 +35,60 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   // Ref to track if we are currently updating to avoid loop
   const isUpdatingRef = useRef(false);
   const bootstrappedUserRef = useRef<string | null>(null);
+  const fetchingUserRef = useRef(false);
+
+  // ✅ Sync localUser when authUser becomes available but localUser is null
+  // This handles the case where server renders with initialUser=null (session not synced yet)
+  // but the client has a valid auth session after login
+  // 🔄 Added retry with delay for cold start scenarios where session isn't propagated yet
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (localUser) return; // Already have user data
+    if (!authUser) return; // No auth session
+    if (fetchingUserRef.current) return; // Already fetching
+
+    fetchingUserRef.current = true;
+
+    const fetchUserWithRetry = async (attempt: number = 1): Promise<void> => {
+      const maxAttempts = 3;
+      const delay = attempt * 500; // 500ms, 1000ms, 1500ms
+
+      try {
+        const res = await fetch('/api/users/me', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setLocalUser(data.user);
+            return;
+          }
+        }
+
+        // If user is null or request failed, retry with delay
+        if (attempt < maxAttempts) {
+          console.log(`[PresenceProvider] User not found on attempt ${attempt}, retrying in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          return fetchUserWithRetry(attempt + 1);
+        } else {
+          console.warn(`[PresenceProvider] Failed to fetch user after ${maxAttempts} attempts.`);
+        }
+      } catch (err) {
+        console.error('[PresenceProvider] Error fetching user profile:', err);
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, delay));
+          return fetchUserWithRetry(attempt + 1);
+        }
+      }
+    };
+
+    fetchUserWithRetry().finally(() => {
+      fetchingUserRef.current = false;
+    });
+  }, [authUser, localUser, isAuthLoading]);
 
   // Monitor online/offline status
   useEffect(() => {
@@ -125,17 +179,18 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const isPublicPage = ['/login', '/register', '/setup', '/', '/creators'].includes(pathname);
 
   useEffect(() => {
-    // Polling effect: Refresh online agents every 3 seconds
+    // Polling effect: Refresh online agents every 10 seconds (backup to Realtime)
+    // Realtime subscription handles instant updates, polling is just for sync
     if (isAuthLoading || !localUser?.activeWorkspaceId || isPublicPage) return;
 
     let intervalId: NodeJS.Timeout;
     const isDeveloper = pathname.startsWith('/developer');
-    const pollInterval = isDeveloper ? 60000 : 3000;
+    const pollInterval = isDeveloper ? 60000 : 10000; // 10 seconds normal, 1 minute for developer
 
     const initialTimer = setTimeout(() => {
       refreshOnlineAgents();
       intervalId = setInterval(refreshOnlineAgents, pollInterval);
-    }, 1000);
+    }, 2000); // Delay initial fetch by 2s to let auth settle
 
     return () => {
       clearTimeout(initialTimer);
@@ -155,10 +210,10 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     // Set self as online in parallel
     updateServerPresence(true);
 
-    // HEARTBEAT & ACTIVITY: Ensure user stays online aggressively
+    // HEARTBEAT: Ensure user stays online (30 seconds - balance between responsiveness and requests)
     const heartbeatInterval = setInterval(() => {
       updateServerPresence(true);
-    }, 10000);
+    }, 30000); // 30 seconds
 
     const handleActivity = () => {
       if (document.visibilityState === 'visible') {
@@ -169,7 +224,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     let lastActivity = 0;
     const throttledActivity = () => {
       const now = Date.now();
-      if (now - lastActivity > 5000) {
+      if (now - lastActivity > 30000) { // 30 seconds throttle (was 5s)
         lastActivity = now;
         handleActivity();
       }
@@ -202,6 +257,8 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           if (workspaceId && workspaceId !== localUser.activeWorkspaceId) {
             return;
           }
+
+          // Immediately refresh - Realtime already handles the push, just sync state
           refreshOnlineAgents();
         }
       )

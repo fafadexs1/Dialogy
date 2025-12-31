@@ -45,7 +45,7 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         alt={alt ?? ""}
         className={cn(
           "aspect-square h-full w-full object-cover",
-          hasError && "hidden",
+          (hasError || !isLoaded) && "hidden",
           className
         )}
         onLoad={(e) => {

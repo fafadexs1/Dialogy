@@ -12,8 +12,10 @@ import { CheckCircle2, Building, UserPlus, ArrowRight, Loader2 } from 'lucide-re
 import { createWorkspaceAction } from '@/actions/workspace';
 import { useFormStatus } from 'react-dom';
 import { useActionState } from 'react';
+import { useI18n } from '@/i18n/i18n-provider';
 
 function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () => void }) {
+  const { t } = useI18n();
   const [state, formAction] = useActionState(createWorkspaceAction, { success: false, error: null });
   const { pending } = useFormStatus();
 
@@ -26,12 +28,12 @@ function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () =>
   return (
     <form action={formAction} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="workspaceName">Nome do Workspace</Label>
-        <Input id="workspaceName" name="workspaceName" placeholder="Ex: Acme Inc." required disabled={pending} />
+        <Label htmlFor="workspaceName">{t("Nome do workspace")}</Label>
+        <Input id="workspaceName" name="workspaceName" placeholder={t("Ex: Acme Inc.")} required disabled={pending} />
       </div>
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-        Continuar
+        {t("Continuar")}
       </Button>
     </form>
   );
@@ -39,6 +41,7 @@ function CreateWorkspaceForm({ onWorkspaceCreated }: { onWorkspaceCreated: () =>
 
 
 export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated }: { user: User, currentStep: number, onWorkspaceCreated: () => void }) {
+  const { t } = useI18n();
   const router = useRouter();
 
   const finishOnboarding = () => {
@@ -51,8 +54,8 @@ export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated 
         return (
           <>
             <div className='text-center'>
-              <CardTitle className="text-2xl font-bold text-gray-800">Crie seu primeiro Workspace</CardTitle>
-              <CardDescription className='mt-1'>Um workspace é o espaço onde sua equipe colabora. Você pode ter vários.</CardDescription>
+              <CardTitle className="text-2xl font-bold text-gray-800">{t("Crie seu primeiro workspace")}</CardTitle>
+              <CardDescription className='mt-1'>{t("Um workspace e o espaco onde sua equipe colabora. Voce pode ter varios.")}</CardDescription>
             </div>
             <div className='mt-8'>
               <CreateWorkspaceForm onWorkspaceCreated={onWorkspaceCreated} />
@@ -64,7 +67,7 @@ export default function OnboardingSteps({ user, currentStep, onWorkspaceCreated 
         finishOnboarding();
         return (
           <div>
-            <p>Redirecionando...</p>
+            <p>{t("Redirecionando...")}</p>
           </div>
         )
     }

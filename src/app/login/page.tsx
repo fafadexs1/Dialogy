@@ -4,6 +4,7 @@ import { Code2 } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getServerI18n } from '@/i18n/server';
 
 interface LoginPageProps {
   searchParams: Promise<{
@@ -15,6 +16,7 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const supabase = await createClient();
+  const { t } = await getServerI18n();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -41,16 +43,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <Image src="/logo.png" alt="Dialogy" width={180} height={56} className="h-12 w-auto" />
           </Link>
 
-          <h1 className="text-3xl font-bold mb-2 tracking-tight">Bem-vindo de volta</h1>
-          <p className="text-white/60">
-            Acesse sua conta para gerenciar seus bots e conversas.
-          </p>
+          <h1 className="text-3xl font-bold mb-2 tracking-tight">{t("Bem-vindo de volta")}</h1>
+          <p className="text-white/60">{t("Acesse sua conta para gerenciar seus bots e conversas.")}</p>
         </div>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
           {isRegistered && (
             <div className="mb-6 p-4 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center">
-              Conta criada com sucesso! Faça login para continuar.
+              {t("Conta criada com sucesso! Faca login para continuar.")}
             </div>
           )}
 
@@ -58,9 +58,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </div>
 
         <p className="text-center mt-8 text-sm text-white/40">
-          Não tem uma conta?{' '}
+          {t("Nao tem uma conta?")} {' '}
           <Link href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-            Cadastre-se gratuitamente
+            {t("Cadastre-se gratuitamente")}
           </Link>
         </p>
       </div>

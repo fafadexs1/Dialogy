@@ -13,20 +13,23 @@ import { updateUserProfile } from '@/actions/user';
 import { toast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Switch } from '@/components/ui/switch';
+import { useI18n } from '@/i18n/i18n-provider';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 function SubmitButton() {
+  const { t } = useI18n();
   const { pending } = useFormStatus();
   return (
     <Button type="submit" disabled={pending}>
       {pending ? (
         <>
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Salvando...
+          {t("Salvando...")}
         </>
       ) : (
         <>
           <Save className="mr-2 h-4 w-4" />
-          Salvar Alteracoes
+          {t("Salvar alteracoes")}
         </>
       )}
     </Button>
@@ -34,6 +37,7 @@ function SubmitButton() {
 }
 
 function NotificationSettings() {
+  const { t } = useI18n();
   const [queueSoundEnabled, setQueueSoundEnabled] = useState(true);
   const [attendingSoundEnabled, setAttendingSoundEnabled] = useState(true);
 
@@ -69,22 +73,22 @@ function NotificationSettings() {
     localStorage.setItem(storageKey, JSON.stringify(enabled));
     localStorage.setItem('notificationSoundEnabled', JSON.stringify(nextQueue || nextAttending));
     toast({
-      title: `Audio de ${key === 'queue' ? 'fila' : 'atendimento'} ${enabled ? 'ativado' : 'desativado'}.`,
+      title: t("Audio de {context} {state}.", { context: key === 'queue' ? t("fila") : t("atendimento"), state: enabled ? t("ativado") : t("desativado") }),
     });
   };
 
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <div className="space-y-0.5">
-        <Label className="text-base">Alertas sonoros</Label>
+        <Label className="text-base">{t("Alertas sonoros")}</Label>
         <p className="text-sm text-muted-foreground">
-          Ative ou desative os sons para novas mensagens em fila ou em atendimento.
+          {t("Ative ou desative os sons para novas mensagens em fila ou em atendimento.")}
         </p>
       </div>
       <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
         <div className="space-y-0.5">
-          <Label htmlFor="queue-sound-switch" className="text-sm">Som para fila</Label>
-          <p className="text-xs text-muted-foreground">Toca quando chega nova mensagem na fila (gerais).</p>
+          <Label htmlFor="queue-sound-switch" className="text-sm">{t("Som para fila")}</Label>
+          <p className="text-xs text-muted-foreground">{t("Toca quando chega nova mensagem na fila (gerais).")}</p>
         </div>
         <Switch
           id="queue-sound-switch"
@@ -94,8 +98,8 @@ function NotificationSettings() {
       </div>
       <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
         <div className="space-y-0.5">
-          <Label htmlFor="attending-sound-switch" className="text-sm">Som para atendendo</Label>
-          <p className="text-xs text-muted-foreground">Toca quando chega mensagem em atendimentos ativos.</p>
+          <Label htmlFor="attending-sound-switch" className="text-sm">{t("Som para atendendo")}</Label>
+          <p className="text-xs text-muted-foreground">{t("Toca quando chega mensagem em atendimentos ativos.")}</p>
         </div>
         <Switch
           id="attending-sound-switch"
@@ -108,6 +112,7 @@ function NotificationSettings() {
 }
 
 export default function ProfilePage() {
+  const { t } = useI18n();
   const { user, loading } = useSettings();
   const [state, formAction] = useActionState(updateUserProfile, { success: false, error: null });
 
@@ -148,7 +153,7 @@ export default function ProfilePage() {
         .upload(fileName, avatarFile);
 
       if (error) {
-        toast({ title: "Erro no Upload", description: error.message, variant: 'destructive' });
+        toast({ title: t("Erro no upload"), description: error.message, variant: 'destructive' });
         setIsUploading(false);
         return;
       }
@@ -170,13 +175,13 @@ export default function ProfilePage() {
   useEffect(() => {
     if (state.success) {
       toast({
-        title: "Perfil Atualizado!",
-        description: "Suas informacoes foram salvas com sucesso.",
+        title: t("Perfil atualizado!"),
+        description: t("Suas informacoes foram salvas com sucesso."),
       });
       setAvatarFile(null);
     } else if (state.error) {
       toast({
-        title: "Erro ao Atualizar",
+        title: t("Erro ao atualizar"),
         description: state.error,
         variant: "destructive",
       });
@@ -194,16 +199,16 @@ export default function ProfilePage() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <UserCircle />
-          Perfil e Preferencias
+          {t("Perfil e preferencias")}
         </h1>
-        <p className="text-muted-foreground">Gerencie suas informacoes pessoais e aparencia na plataforma.</p>
+        <p className="text-muted-foreground">{t("Gerencie suas informacoes pessoais e aparencia na plataforma.")}</p>
       </header>
 
       <form ref={formRef} onSubmit={handleSubmit}>
         <input type="hidden" name="avatarUrl" value={avatarUrl} />
         <Card>
           <CardHeader>
-            <CardTitle>Informacoes Pessoais</CardTitle>
+            <CardTitle>{t("Informacoes pessoais")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-center gap-6">
@@ -212,31 +217,31 @@ export default function ProfilePage() {
                 <AvatarFallback className="text-3xl">{fullName.charAt(0)}</AvatarFallback>
               </Avatar>
               <div className="space-y-2">
-                <Label>Foto de Perfil</Label>
+                <Label>{t("Foto de perfil")}</Label>
                 <div className="flex gap-2">
                   <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
                   <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
                     <UploadCloud className="mr-2 h-4 w-4" />
-                    Carregar Imagem
+                    {t("Carregar imagem")}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">PNG, JPG, GIF ate 2MB.</p>
+                <p className="text-xs text-muted-foreground">{t("PNG, JPG, GIF ate 2MB.")}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="fullName">Nome Completo</Label>
+                <Label htmlFor="fullName">{t("Nome completo")}</Label>
                 <Input
                   id="fullName"
                   name="fullName"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Seu nome completo"
+                  placeholder={t("Seu nome completo")}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="email">E-mail</Label>
+                <Label htmlFor="email">{t("E-mail")}</Label>
                 <Input
                   id="email"
                   name="email"
@@ -250,7 +255,7 @@ export default function ProfilePage() {
           <CardFooter className="border-t pt-6 flex justify-end">
             <Button type="submit" disabled={isUploading}>
               {isUploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isUploading ? 'Enviando imagem...' : 'Salvar Alteracoes'}
+              {isUploading ? t("Enviando imagem...") : t("Salvar alteracoes")}
             </Button>
           </CardFooter>
         </Card>
@@ -258,11 +263,27 @@ export default function ProfilePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Bell />Notificacoes</CardTitle>
-          <CardDescription>Gerencie como voce recebe alertas.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Bell />{t("Notificacoes")}</CardTitle>
+          <CardDescription>{t("Gerencie como voce recebe alertas.")}</CardDescription>
         </CardHeader>
         <CardContent>
           <NotificationSettings />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("Aparencia")}</CardTitle>
+          <CardDescription>{t("Escolha como o Dialogy deve ser exibido.")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+            <div className="space-y-0.5">
+              <Label className="text-sm">{t("Tema da interface")}</Label>
+              <p className="text-xs text-muted-foreground">{t("Claro, escuro ou seguir o sistema.")}</p>
+            </div>
+            <ThemeToggle />
+          </div>
         </CardContent>
       </Card>
     </div>

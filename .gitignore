@@ -36,9 +36,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.env
 
 .genkit/*
-.env*
 
 # firebase
 firebase-debug.log

@@ -27,13 +27,7 @@ import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { usePresence } from '@/hooks/use-online-status';
 import ReactDOM from 'react-dom';
-import {
-  buildChatMessageChannelName,
-  buildWorkspaceChatChannelName,
-  subscribeToChatMessages,
-  subscribeToWorkspaceChatUpdates,
-  teardownChannel,
-} from '@/lib/realtime/chat-subscriptions';
+import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 
@@ -390,7 +384,13 @@ export default function MobileChatLayout({
     const data = payload.new as any;
     if (!data) return null;
     try {
-      const createdAt = new Date(data.created_at);
+      let createdAt: Date;
+      try {
+        createdAt = new Date(data.created_at);
+        if (isNaN(createdAt.getTime())) throw new Error('Invalid date');
+      } catch {
+        createdAt = new Date(); // Fallback to now
+      }
       const timestamp = formatInTimeZone(createdAt, workspaceTimezone, 'HH:mm', { locale: ptBR });
       const formattedDate = formatMessageDay(createdAt);
       let metadata;
@@ -789,6 +789,9 @@ export default function MobileChatLayout({
       } else {
         updateSelectedChatPath(null);
       }
+      // ✅ Marcar hydration completa e finalizar loading após sucesso
+      isHydratedRef.current = true;
+      setIsLoading(false);
     } catch (error: any) {
       console.error('[INITIAL_CHATS] Error:', error);
       const message = error.message || 'Não foi possível buscar os dados do chat.';
@@ -801,14 +804,9 @@ export default function MobileChatLayout({
       } else {
         toast({ title: 'Erro ao carregar conversas', description: message, variant: 'destructive' });
         setFetchError(message);
+        isHydratedRef.current = true;
         setIsLoading(false);
       }
-    } finally {
-      if (retryCount >= 1 || !fetchError) {
-        // Only mark hydrated if success or out of retries
-        isHydratedRef.current = true;
-      }
-      if (retryCount >= 1) setIsLoading(false);
     }
   }, [initialChatId, initialUser?.activeWorkspaceId, setInitialData, updateSelectedChatPath, retryCount, fetchError]);
 
@@ -818,6 +816,22 @@ export default function MobileChatLayout({
       initializeInbox();
     }
   }, [retryCount, initializeInbox, isLoading]);
+
+  // 🛡️ Watchdog: Force stop loading after 15s
+  useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => {
+        if (isLoading) {
+          console.error('[INBOX_WATCHDOG_MOBILE] Force stopping infinite loading after 15s.');
+          setIsLoading(false);
+          if (!initialData?.chats && !fetchError) {
+            setFetchError('Tempo limite excedido. Tente recarregar a página.');
+          }
+        }
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, initialData, fetchError]);
 
   const runDeltaSync = useCallback(async () => {
     if (!initialUser?.activeWorkspaceId) return;
@@ -993,9 +1007,10 @@ export default function MobileChatLayout({
 
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
-        // Interval: 3s if visible, 15s if background. Backoff to 10s+ on error.
-        let interval = isVisible ? 3000 : 15000;
-        if (errorCount > 0) interval = Math.max(interval, 10000);
+        // Strategy: 30s if visible, 5m if background. Backoff on error.
+        // Realtime handles instant updates, polling is just a backup for consistency
+        let interval = isVisible ? 30000 : 300000;
+        if (errorCount > 0) interval = Math.max(interval, 30000);
 
         timeoutId = setTimeout(poll, interval);
       }
@@ -1027,144 +1042,64 @@ export default function MobileChatLayout({
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
-  const realtimeMessagesChannelRef = useRef<RealtimeChannel | null>(null);
-  const realtimeChatsChannelRef = useRef<RealtimeChannel | null>(null);
+  // Centralized Realtime subscriptions - prevents duplicate channel conflicts
+  const handleRealtimeChatUpdate = useCallback(async (payload: RealtimePostgresChangesPayload<any>) => {
+    console.log('[REALTIME] Chat update received:', payload);
+    const newChatData = payload.new as any;
 
-  // Ref to keep track of the latest handleRealtimeMessage without re-subscribing
-  const handleRealtimeMessageRef = useRef(handleRealtimeMessage);
-  useEffect(() => {
-    handleRealtimeMessageRef.current = handleRealtimeMessage;
-  }, [handleRealtimeMessage]);
-
-  useEffect(() => {
-    const workspaceId = initialUser?.activeWorkspaceId;
-    if (!workspaceId || !selectedChatId) {
-      if (realtimeMessagesChannelRef.current) {
-        const supabase = createClient();
-        console.info('[REALTIME] Cleaning up messages channel because no chat is selected.');
-        teardownChannel(supabase, realtimeMessagesChannelRef.current);
-        realtimeMessagesChannelRef.current = null;
-      }
-      return;
-    }
-
-    const supabase = createClient();
-    const channelName = buildChatMessageChannelName(workspaceId, selectedChatId);
-
-    if (realtimeMessagesChannelRef.current?.topic === channelName) {
-      return;
-    }
-
-    if (realtimeMessagesChannelRef.current) {
-      console.info(`[REALTIME] Removing old messages channel ${realtimeMessagesChannelRef.current.topic}`);
-      teardownChannel(supabase, realtimeMessagesChannelRef.current);
-      realtimeMessagesChannelRef.current = null;
-    }
-
-    console.info(`[REALTIME] Subscribing to messages channel ${channelName}`);
-    const channel = subscribeToChatMessages({
-      client: supabase,
-      workspaceId,
-      chatId: selectedChatId,
-      onMessage: (payload) => handleRealtimeMessageRef.current(payload),
-      onStatusChange: (status) => console.info(`[REALTIME] Messages channel ${channelName} status: ${status}`),
-    });
-
-    realtimeMessagesChannelRef.current = channel;
-
-    return () => {
-      if (realtimeMessagesChannelRef.current) {
-        console.info(`[REALTIME] Cleaning up messages channel ${channelName}`);
-        teardownChannel(supabase, realtimeMessagesChannelRef.current);
-        realtimeMessagesChannelRef.current = null;
-      }
+    // 1. Optimistic update (preserving existing fields by merging top-level)
+    const optimisticUpdate: Partial<Chat> = {
+      ...newChatData,
+      agentId: newChatData.agent_id,
     };
-  }, [initialUser?.activeWorkspaceId, selectedChatId]);
+    // Fix agent object minimally if needed for optimistic update
+    if (newChatData.agent_id === initialUser?.id) {
+      optimisticUpdate.agent = initialUser ?? undefined;
+    } else if (newChatData.agent_id === null) {
+      optimisticUpdate.agent = undefined;
+    }
 
-  useEffect(() => {
-    const workspaceId = initialUser?.activeWorkspaceId;
-    if (!workspaceId) {
-      if (realtimeChatsChannelRef.current) {
-        const supabase = createClient();
-        console.info('[REALTIME] Cleaning up chats channel because workspace is missing.');
-        teardownChannel(supabase, realtimeChatsChannelRef.current);
-        realtimeChatsChannelRef.current = null;
+    // CRITICAL FIX: For INSERT events, we MUST initialize messages array
+    // and ensure updatedAt is set so it sorts correctly to the top
+    if (payload.eventType === 'INSERT') {
+      (optimisticUpdate as any).messages = [];
+      optimisticUpdate.updatedAt = newChatData.updated_at || newChatData.created_at || new Date().toISOString();
+    }
+
+    useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
+
+    // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
+    try {
+      const { refreshChatAction } = await import('@/actions/chats');
+      const result = await refreshChatAction(newChatData.id);
+      if (result.chat) {
+        useInboxStore.getState().upsertChats([result.chat]);
+      } else {
+        console.warn('[REALTIME] Failed to refresh chat details:', result.error);
       }
-      return;
+    } catch (err) {
+      console.error('[REALTIME] Error refreshing chat:', err);
     }
+  }, [initialUser?.id, initialUser]);
 
-    const supabase = createClient();
-    const channelName = buildWorkspaceChatChannelName(workspaceId);
-
-    if (realtimeChatsChannelRef.current?.topic === channelName) {
-      return;
-    }
-
-    if (realtimeChatsChannelRef.current) {
-      console.info(`[REALTIME] Removing old chats channel ${realtimeChatsChannelRef.current.topic}`);
-      teardownChannel(supabase, realtimeChatsChannelRef.current);
-      realtimeChatsChannelRef.current = null;
-    }
-
-    console.info(`[REALTIME] Subscribing to chats channel ${channelName}`);
-    const channel = subscribeToWorkspaceChatUpdates({
-      client: supabase,
-      workspaceId,
-      onChatUpdate: async (payload) => {
-        console.log('[REALTIME] Chat update received:', payload);
-        const newChatData = payload.new as any;
-
-        // 1. Optimistic update (preserving existing fields by merging top-level)
-        const optimisticUpdate: Partial<Chat> = {
-          ...newChatData,
-          agentId: newChatData.agent_id,
-        };
-        // Fix agent object minimally if needed for optimistic update
-        if (newChatData.agent_id === initialUser?.id) {
-          optimisticUpdate.agent = initialUser;
-        } else if (newChatData.agent_id === null) {
-          optimisticUpdate.agent = undefined;
-        }
-        useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
-
-        // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
-        try {
-          // Dynamic import to avoid circular dependency issues if any, though likely safe.
-          // But simpler: just import at top if possible. trying dynamic for safety in this robust component.
-          const { refreshChatAction } = await import('@/actions/chats');
-          const result = await refreshChatAction(newChatData.id);
-          if (result.chat) {
-            useInboxStore.getState().upsertChats([result.chat]);
-          } else {
-            console.warn('[REALTIME] Failed to refresh chat details:', result.error);
-          }
-        } catch (err) {
-          console.error('[REALTIME] Error refreshing chat:', err);
-        }
-      },
-      onStatusChange: (status) => {
-        console.info(`[REALTIME] Chats channel ${channelName} status: ${status}`);
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.warn(`[REALTIME] Connection lost (${status}). Suggesting manual refresh via toast if persistent.`);
-          // Only show toast if it's not a temporary disconnect (simple logic: check visibility)
-          if (document.visibilityState === 'visible') {
-            // Could act more aggressively here, e.g. force runDeltaSync
-            runDeltaSync();
-          }
-        }
-      },
-    });
-
-    realtimeChatsChannelRef.current = channel;
-
-    return () => {
-      if (realtimeChatsChannelRef.current) {
-        console.info(`[REALTIME] Cleaning up chats channel ${channelName}`);
-        teardownChannel(supabase, realtimeChatsChannelRef.current);
-        realtimeChatsChannelRef.current = null;
+  const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
+    console.info(`[REALTIME] ${type} channel status: ${status}`);
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      console.warn(`[REALTIME] Connection lost (${status}). Running delta sync as fallback.`);
+      if (document.visibilityState === 'visible') {
+        runDeltaSync();
       }
-    };
-  }, [initialUser?.activeWorkspaceId, initialUser?.id]);
+    }
+  }, [runDeltaSync]);
+
+  // Use centralized Realtime hook
+  useRealtimeSubscriptions({
+    workspaceId: initialUser?.activeWorkspaceId,
+    selectedChatId,
+    onChatUpdate: handleRealtimeChatUpdate,
+    onMessageUpdate: handleRealtimeMessage,
+    onStatusChange: handleRealtimeStatusChange,
+  });
 
   useEffect(() => {
     if (initialData) {

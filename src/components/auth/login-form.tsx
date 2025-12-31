@@ -9,37 +9,41 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { login } from '@/actions/auth';
+import { useI18n } from '@/i18n/i18n-provider';
 import Link from 'next/link';
 import Image from 'next/image';
 
 function LoginButton() {
+  const { t } = useI18n();
   const { pending } = useFormStatus();
   return (
     <Button type="submit" className="w-full h-12 text-base bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-lg shadow-blue-600/20 transition-all" disabled={pending}>
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      {pending ? 'Entrando...' : 'Entrar'}
+      {pending ? t("Entrando...") : t("Entrar")}
     </Button>
   )
 }
 
 function SocialButton({ provider, icon, label, isIconOnly, children }: { provider: string, icon?: string, label: string, isIconOnly?: boolean, children?: React.ReactNode }) {
+  const { t } = useI18n();
   if (isIconOnly) {
     return (
       <Button variant="outline" size="icon" className="h-12 w-12 rounded-xl bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 flex-shrink-0 transition-colors">
-        {icon ? <Image src={icon} alt={`${provider} logo`} width={24} height={24} /> : children}
+        {icon ? <Image src={icon} alt={t("Logo do {provider}", { provider })} width={24} height={24} /> : children}
       </Button>
     )
   }
 
   return (
     <Button variant="outline" className="w-full flex items-center justify-center gap-2 h-12 bg-white/5 border-white/10 rounded-xl text-white font-medium hover:bg-white/10 hover:border-white/20 hover:text-white transition-colors">
-      {icon ? <Image src={icon} alt={`${provider} logo`} width={20} height={20} /> : children}
+      {icon ? <Image src={icon} alt={t("Logo do {provider}", { provider })} width={20} height={20} /> : children}
       {label}
     </Button>
   )
 }
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
+  const { t } = useI18n();
   const [state, formAction] = useActionState(login as any, { success: false, message: '' });
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -79,12 +83,12 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     <form action={formAction} onSubmit={handleRemember} className="space-y-5">
       <input type="hidden" name="redirectTo" value={redirectTo || ''} />
       <div className="space-y-2">
-        <Label htmlFor="email" className="font-medium text-white/80 text-sm">E-mail</Label>
+        <Label htmlFor="email" className="font-medium text-white/80 text-sm">{t("E-mail")}</Label>
         <Input
           id="email"
           name="email"
           type="email"
-          placeholder="seu@email.com"
+          placeholder={t("seu@email.com")}
           required
           autoComplete="email"
           value={email}
@@ -94,16 +98,16 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
       </div>
       <div className="space-y-2">
         <div className="flex justify-between items-center">
-          <Label htmlFor="password" className="font-medium text-white/80 text-sm">Senha</Label>
+          <Label htmlFor="password" className="font-medium text-white/80 text-sm">{t("Senha")}</Label>
           <Link href="/forgot-password" className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline">
-            Esqueceu a senha?
+            {t("Esqueceu a senha?")}
           </Link>
         </div>
         <Input
           id="password"
           name="password"
           type="password"
-          placeholder="••••••••"
+          placeholder="********"
           required
           autoComplete="current-password"
           value={password}
@@ -121,13 +125,13 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           checked={rememberMe}
           onChange={(e) => setRememberMe(e.target.checked)}
         />
-        <Label htmlFor="remember-me" className="text-sm text-white/60">Lembrar de mim</Label>
+        <Label htmlFor="remember-me" className="text-sm text-white/60">{t("Lembrar de mim")}</Label>
       </div>
 
       {state?.message && (
         <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-400">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Erro no Login</AlertTitle>
+          <AlertTitle>{t("Erro no Login")}</AlertTitle>
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       )}
@@ -141,7 +145,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           <span className="w-full border-t border-white/10" />
         </div>
         <div className="relative flex justify-center text-xs">
-          <span className="bg-[#0f172a] px-2 text-white/40 uppercase">Ou continue com</span>
+          <span className="bg-[#0f172a] px-2 text-white/40 uppercase">{t("Ou continue com")}</span>
         </div>
       </div>
 

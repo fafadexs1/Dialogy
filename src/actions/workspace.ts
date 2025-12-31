@@ -5,7 +5,7 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 import { updateUserOnlineStatus } from '@/actions/user';
@@ -155,7 +155,7 @@ export async function updateWorkspaceAction(
       const extension = avatarFile.name?.split('.').pop() || 'png';
       const filePath = `public/${workspaceId}-${Date.now()}.${extension}`;
 
-      const { error: uploadError } = await supabaseAdmin.storage
+      const { error: uploadError } = await getSupabaseAdmin().storage
         .from('workspace-avatars')
         .upload(filePath, buffer, {
           upsert: true,
@@ -167,7 +167,7 @@ export async function updateWorkspaceAction(
         return { success: false, error: `Erro ao enviar avatar: ${uploadError.message}` };
       }
 
-      const { data: signedData, error: signedUrlError } = await supabaseAdmin.storage
+      const { data: signedData, error: signedUrlError } = await getSupabaseAdmin().storage
         .from('workspace-avatars')
         .createSignedUrl(filePath, 31536000);
 

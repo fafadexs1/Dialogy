@@ -1,6 +1,13 @@
 'use server';
 
-import { supabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
+
+// ... (assuming usage is simple, I will check content first implicitly by trying a safe replace, but wait, I don't know the exact usage line)
+// Actually I need to see the file to replace usage. I only grepped the import.
+// Let's modify the import effectively using Replace.
+// I will start with IMPORT.
+// I will use READ to see usage first to be safe.
+
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'crypto';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
@@ -52,7 +59,7 @@ function scheduleTempDeletion(filePath: string) {
     // Best-effort cleanup; não aguardamos o resultado.
     setTimeout(async () => {
         try {
-            const { error } = await supabaseAdmin.storage.from(TEMP_MEDIA_BUCKET).remove([filePath]);
+            const { error } = await getSupabaseAdmin().storage.from(TEMP_MEDIA_BUCKET).remove([filePath]);
             if (error) {
                 console.error('[TEMP_MEDIA] Erro ao apagar arquivo expirado:', error, 'Path:', filePath);
             }
@@ -75,7 +82,7 @@ export async function uploadTempMedia({ media, mimetype, fileName }: UploadParam
     );
     const filePath = `${randomUUID()}/${finalFileName}`;
 
-    const { error } = await supabaseAdmin.storage
+    const { error } = await getSupabaseAdmin().storage
         .from(TEMP_MEDIA_BUCKET)
         .upload(filePath, buffer, {
             contentType: mimetype,

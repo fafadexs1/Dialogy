@@ -228,7 +228,9 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
 
     try {
         const ttlSeconds = getPresenceTtlSeconds();
-        await sweepStalePresence(workspaceId);
+        // REMOVED: await sweepStalePresence(workspaceId); 
+        // Optimization: The query below already filters by last_seen, so we don't need to write to DB (update stale) on every read polling.
+        // Stale presence will be cleaned up eventually by other updates or we can move this to a less frequent triggers.
         const res = await db.query(
             `
             SELECT

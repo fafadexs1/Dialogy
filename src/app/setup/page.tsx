@@ -8,8 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Loader2, Server, AlertCircle, CheckCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useI18n } from '@/i18n/i18n-provider';
 
 export default function SetupPage() {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const router = useRouter();
@@ -31,25 +33,25 @@ export default function SetupPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Server />
-            Configuração do Banco de Dados
+            {t("Configuracao do Banco de Dados")}
           </CardTitle>
           <CardDescription>
-            Este assistente irá configurar as tabelas e estruturas necessárias no seu banco de dados PostgreSQL, incluindo permissões padrão. Clique no botão abaixo para começar.
+            {t("Este assistente ira configurar as tabelas e estruturas necessarias no seu banco de dados PostgreSQL, incluindo permissoes padrao. Clique no botao abaixo para comecar.")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={handleInitialize} disabled={loading} className="w-full">
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {loading ? 'Inicializando...' : 'Verificar e Configurar Banco de Dados'}
+            {loading ? t("Inicializando...") : t("Verificar e configurar banco de dados")}
           </Button>
 
           {result && (
             <div className={`mt-4 p-4 rounded-md text-sm flex items-start gap-3 ${result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
               {result.success ? <CheckCircle className="h-5 w-5 flex-shrink-0" /> : <AlertCircle className="h-5 w-5 flex-shrink-0" />}
               <div>
-                <p className="font-semibold">{result.success ? 'Sucesso!' : 'Erro!'}</p>
+                <p className="font-semibold">{result.success ? t("Sucesso!") : t("Erro!")}</p>
                 <p>{result.message}</p>
-                 {result.success && <p className="mt-2">Você pode agora <Link href="/register" className="underline font-bold">ir para a página de registro</Link>.</p>}
+                 {result.success && <p className="mt-2">{t("Voce pode agora")} <Link href="/register" className="underline font-bold">{t("ir para a pagina de registro")}</Link>.</p>}
               </div>
             </div>
           )}

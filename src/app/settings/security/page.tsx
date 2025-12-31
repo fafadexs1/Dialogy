@@ -3,8 +3,10 @@
 
 import { Loader2 } from "lucide-react";
 import { useSettings } from "../settings-context";
+import { useI18n } from '@/i18n/i18n-provider';
 
 export default function SecurityPage() {
+    const { t } = useI18n();
     const { user } = useSettings();
 
     if (!user) {
@@ -15,8 +17,8 @@ export default function SecurityPage() {
 
     return (
         <div>
-            <h1 className="text-2xl font-bold">Segurança</h1>
-            <p className="text-muted-foreground">Em breve: altere sua senha e gerencie a autenticação de dois fatores.</p>
+            <h1 className="text-2xl font-bold">{t("Seguranca")}</h1>
+            <p className="text-muted-foreground">{t("Em breve: altere sua senha e gerencie a autenticacao de dois fatores.")}</p>
         </div>
     )
 }

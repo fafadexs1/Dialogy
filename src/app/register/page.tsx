@@ -9,8 +9,10 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Code2 } from 'lucide-react';
 import { RegisterForm } from '@/components/auth/register-form';
 import { useActionState } from 'react';
+import { useI18n } from '@/i18n/i18n-provider';
 
 export default function RegisterPage() {
+    const { t } = useI18n();
     const [registerState, registerAction, isRegisterPending] = useActionState(register, { success: false, message: null, user: null });
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -36,9 +38,9 @@ export default function RegisterPage() {
                         <Image src="/logo.png" alt="Dialogy" width={300} height={80} className="h-24 w-auto" />
                     </Link>
 
-                    <h1 className="text-3xl font-bold mb-2 tracking-tight">Crie sua conta</h1>
+                    <h1 className="text-3xl font-bold mb-2 tracking-tight">{t("Crie sua conta")}</h1>
                     <p className="text-white/60">
-                        Comece a automatizar suas conversas hoje mesmo.
+                        {t("Comece a automatizar suas conversas hoje mesmo.")}
                     </p>
                 </div>
 
@@ -46,7 +48,7 @@ export default function RegisterPage() {
                     {registerState.message && (
                         <Alert variant="destructive" className="mb-6 bg-red-500/10 border-red-500/20 text-red-400">
                             <AlertCircle className="h-4 w-4" />
-                            <AlertTitle>Erro no Cadastro</AlertTitle>
+                            <AlertTitle>{t("Erro no Cadastro")}</AlertTitle>
                             <AlertDescription>{registerState.message}</AlertDescription>
                         </Alert>
                     )}
@@ -55,9 +57,9 @@ export default function RegisterPage() {
                 </div>
 
                 <p className="text-center mt-8 text-sm text-white/40">
-                    Já tem uma conta?{' '}
+                    {t("Ja tem uma conta?")} {' '}
                     <Link href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-                        Entre agora
+                        {t("Entre agora")}
                     </Link>
                 </p>
             </div>

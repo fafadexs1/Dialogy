@@ -9,8 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, ArrowLeft, Loader2, Mail } from 'lucide-react';
+import { useI18n } from '@/i18n/i18n-provider';
 
 export default function ForgotPasswordPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const supabase = createClient();
   const [email, setEmail] = useState('');
@@ -43,22 +45,22 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-xl shadow-lg p-6 space-y-6">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.back()} aria-label="Voltar">
+          <Button variant="ghost" size="icon" onClick={() => router.back()} aria-label={t("Voltar")}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <p className="text-xs text-muted-foreground">Recuperar acesso</p>
-            <h1 className="text-xl font-semibold">Esqueci minha senha</h1>
+            <p className="text-xs text-muted-foreground">{t("Recuperar acesso")}</p>
+            <h1 className="text-xl font-semibold">{t("Esqueci minha senha")}</h1>
           </div>
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Informe o e-mail da sua conta. Vamos enviar um link seguro para você redefinir a senha.
+          {t("Informe o e-mail da sua conta. Vamos enviar um link seguro para voce redefinir a senha.")}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="reset-email">E-mail</Label>
+            <Label htmlFor="reset-email">{t("E-mail")}</Label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -67,7 +69,7 @@ export default function ForgotPasswordPage() {
                 type="email"
                 required
                 autoComplete="email"
-                placeholder="voce@empresa.com"
+                placeholder={t("voce@empresa.com")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="pl-10"
@@ -78,26 +80,26 @@ export default function ForgotPasswordPage() {
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Erro ao enviar e-mail</AlertTitle>
+              <AlertTitle>{t("Erro ao enviar e-mail")}</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
           {status === 'sent' && (
             <Alert>
-              <AlertTitle>E-mail enviado</AlertTitle>
-              <AlertDescription>Confira sua caixa de entrada (e o spam) para redefinir sua senha.</AlertDescription>
+              <AlertTitle>{t("E-mail enviado")}</AlertTitle>
+              <AlertDescription>{t("Confira sua caixa de entrada (e o spam) para redefinir sua senha.")}</AlertDescription>
             </Alert>
           )}
 
           <Button type="submit" className="w-full" disabled={status === 'sending'}>
             {status === 'sending' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {status === 'sending' ? 'Enviando...' : 'Enviar link de redefinição'}
+            {status === 'sending' ? t("Enviando...") : t("Enviar link de redefinicao")}
           </Button>
         </form>
 
         <div className="text-center text-sm text-muted-foreground">
           <Link href="/login" className="text-[#007BFF] hover:underline">
-            Voltar para o login
+            {t("Voltar para o login")}
           </Link>
         </div>
       </div>

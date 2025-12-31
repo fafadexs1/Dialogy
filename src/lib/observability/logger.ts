@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { trace } from '@opentelemetry/api';
-import { supabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { getRequestContext } from '@/lib/observability/request-context';
 import { recordActionMetrics } from '@/lib/observability/metrics';
 
@@ -16,13 +16,13 @@ const DEFAULT_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const DEFAULT_SAMPLE_RATE =
   Number(process.env.LOG_SAMPLE_RATE ?? '0.1') >= 0 &&
-  Number(process.env.LOG_SAMPLE_RATE ?? '0.1') <= 1
+    Number(process.env.LOG_SAMPLE_RATE ?? '0.1') <= 1
     ? Number(process.env.LOG_SAMPLE_RATE ?? '0.1')
     : 0.1;
 
 const WEBHOOK_SAMPLE_RATE =
   Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') >= 0 &&
-  Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') <= 1
+    Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02') <= 1
     ? Number(process.env.WEBHOOK_LOG_SAMPLE_RATE ?? '0.02')
     : 0.02;
 
@@ -119,7 +119,7 @@ export async function logAction(input: LogActionInput): Promise<void> {
       console.log(JSON.stringify(logEntry));
     }
 
-    const insertBuilder = supabaseAdmin
+    const insertBuilder = getSupabaseAdmin()
       .from('workspace_logs')
       .insert({
         workspace_id: resolvedWorkspaceId,

@@ -28,27 +28,28 @@ import { WorkspaceSwitcher } from "./workspace-switcher";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/actions/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { LanguageToggle } from "@/components/ui/language-toggle";
+import { useI18n } from "@/i18n/i18n-provider";
 
-const mainNavItems = [
-  { href: "/inbox", icon: MessageSquare, label: "Chat", exact: false },
-  { href: "/crm", icon: Users, label: "CRM", exact: false },
-  { href: "/campaigns", icon: Send, label: "Campanhas", exact: false },
-  { href: "/analytics", icon: BarChart2, label: "Analytics", exact: false },
-  { href: "/integrations", icon: Puzzle, label: "Integrações", exact: false },
-  { href: "/support", icon: HelpCircle, label: "Suporte", exact: false },
-  { href: "/nexus", icon: Sparkles, label: "NexusFlow", exact: false },
+const mainNavItems: NavItem[] = [
+  { href: "/inbox", icon: MessageSquare, labelKey: "nav.chat", exact: false },
+  { href: "/crm", icon: Users, labelKey: "nav.crm", exact: false },
+  { href: "/campaigns", icon: Send, labelKey: "nav.campaigns", exact: false },
+  { href: "/analytics", icon: BarChart2, labelKey: "nav.analytics", exact: false },
+  { href: "/integrations", icon: Puzzle, labelKey: "nav.integrations", exact: false },
+  { href: "/support", icon: HelpCircle, labelKey: "nav.support", exact: false },
+  { href: "/nexus", icon: Sparkles, labelKey: "nav.nexus", exact: false },
 ];
 
-const teamNavItems = [
-  { href: "/team/members", icon: Users2, label: "Membros" },
-  { href: "/team", icon: ShieldAlert, label: "Equipes" },
-  { href: "/team/permissions", icon: Fingerprint, label: "Papéis & Permissões" },
+const teamNavItems: FlyoutItemConfig[] = [
+  { href: "/team/members", icon: Users2, labelKey: "nav.teamMembers" },
+  { href: "/team", icon: ShieldAlert, labelKey: "nav.teams" },
+  { href: "/team/permissions", icon: Fingerprint, labelKey: "nav.teamPermissions" },
 ];
 
-const automationNavItems = [
-  { href: "/automations/robots", icon: Rocket, label: "Agentes do Sistema" },
-  { href: "/autopilot", icon: Bot, label: "Agente de IA" },
+const automationNavItems: FlyoutItemConfig[] = [
+  { href: "/automations/robots", icon: Rocket, labelKey: "nav.systemAgents" },
+  { href: "/autopilot", icon: Bot, labelKey: "nav.aiAgent" },
 ];
 
 import Image from "next/image";
@@ -70,7 +71,7 @@ function DialogyLogo() {
 type NavItem = {
   href: string;
   icon: LucideIcon;
-  label: string;
+  labelKey: string;
   exact?: boolean;
 };
 
@@ -88,9 +89,11 @@ function SidebarTooltip({ label }: { label: string }) {
 
 function SidebarIconLink({
   item,
+  label,
   isActive,
 }: {
   item: NavItem;
+  label: string;
   isActive: boolean;
 }) {
   const Icon = item.icon;
@@ -106,17 +109,24 @@ function SidebarIconLink({
             ? "bg-blue-600 text-white shadow-[0_0_15px_-3px_rgba(37,99,235,0.35)]"
             : "text-zinc-400 hover:text-white hover:bg-white/10"
         )}
-        aria-label={item.label}
+        aria-label={label}
       >
         <Icon className="h-5 w-5" />
         {isActive && (
           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 h-6 w-[2px] rounded-full bg-blue-300/80" />
         )}
       </Link>
-      <SidebarTooltip label={item.label} />
+      <SidebarTooltip label={label} />
     </div>
   );
 }
+
+type FlyoutItemConfig = {
+  href: string;
+  icon: LucideIcon;
+  labelKey: string;
+  descriptionKey?: string;
+};
 
 type FlyoutItem = {
   href: string;
@@ -214,6 +224,8 @@ function AccountMenu({
   onSignOut: () => void;
   signingOut: boolean;
 }) {
+  const { t } = useI18n();
+
   return (
     <div ref={containerRef} className="relative group w-full flex items-center justify-center">
       <button
@@ -221,7 +233,7 @@ function AccountMenu({
         onClick={onToggle}
         className="relative p-0.5 rounded-full bg-gradient-to-br from-blue-500/30 via-purple-500/20 to-blue-500/30 hover:from-blue-500/50 hover:via-purple-500/30 hover:to-blue-500/50 transition-all duration-300"
         aria-expanded={isOpen}
-        aria-label="Conta"
+        aria-label={t("account.label")}
       >
         <div className="absolute inset-0 blur-xl opacity-20 bg-primary/40" />
         <Avatar className="relative h-10 w-10 border border-sidebar-border bg-sidebar-accent">
@@ -231,7 +243,7 @@ function AccountMenu({
           </AvatarFallback>
         </Avatar>
       </button>
-      <SidebarTooltip label={user.name || "Sua conta"} />
+      <SidebarTooltip label={user.name || t("account.yourAccount")} />
 
       {isOpen && (
         <div className="absolute left-14 bottom-0 z-50 w-72 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl p-3 space-y-2">
@@ -243,17 +255,19 @@ function AccountMenu({
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-sidebar-foreground truncate">{user.name || "Usuário"}</p>
+              <p className="text-sm font-semibold text-sidebar-foreground truncate">
+                {user.name || t("account.userFallback")}
+              </p>
               <p className="text-xs text-muted-foreground truncate">{user.email}</p>
             </div>
           </div>
 
           <div className="space-y-1">
-            <AccountLink href="/settings/profile" icon={UserIcon} label="Perfil" />
-            <AccountLink href="/settings/billing" icon={CreditCard} label="Cobrança" />
-            <AccountLink href="/settings" icon={Settings} label="Configurações" />
+            <AccountLink href="/settings/profile" icon={UserIcon} label={t("account.profile")} />
+            <AccountLink href="/settings/billing" icon={CreditCard} label={t("account.billing")} />
+            <AccountLink href="/settings" icon={Settings} label={t("account.settings")} />
             {user.is_superadmin ? (
-              <AccountLink href="/team/logs" icon={Monitor} label="Logs do Sistema" />
+              <AccountLink href="/team/logs" icon={Monitor} label={t("account.systemLogs")} />
             ) : null}
           </div>
 
@@ -264,7 +278,7 @@ function AccountMenu({
             disabled={signingOut}
           >
             <LogOut className="h-4 w-4" />
-            {signingOut ? "Saindo..." : "Sair"}
+            {signingOut ? t("account.signingOut") : t("account.signOut")}
           </button>
         </div>
       )}
@@ -297,6 +311,7 @@ function AccountLink({
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const [openMenu, setOpenMenu] = useState<"team" | "automation" | "account" | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -312,6 +327,28 @@ export function Sidebar({ user }: SidebarProps) {
     if (item.href === '/nexus' && !hasNexusConfig) return false;
     return true;
   });
+
+  const teamItems = useMemo(
+    () =>
+      teamNavItems.map((item) => ({
+        href: item.href,
+        icon: item.icon,
+        label: t(item.labelKey),
+        description: item.descriptionKey ? t(item.descriptionKey) : undefined,
+      })),
+    [t]
+  );
+
+  const automationItems = useMemo(
+    () =>
+      automationNavItems.map((item) => ({
+        href: item.href,
+        icon: item.icon,
+        label: t(item.labelKey),
+        description: item.descriptionKey ? t(item.descriptionKey) : undefined,
+      })),
+    [t]
+  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -386,7 +423,7 @@ export function Sidebar({ user }: SidebarProps) {
           href="/inbox"
           prefetch={false}
           className="group relative flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-all duration-300 hover:bg-primary/20 hover:shadow-[0_0_20px_-4px_rgba(var(--primary),0.45)]"
-          aria-label="Inbox"
+          aria-label={t("nav.chat")}
         >
           <DialogyLogo />
         </Link>
@@ -397,15 +434,20 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="flex-1 flex flex-col items-center justify-center w-full gap-2 overflow-visible">
         <nav className="flex flex-col items-center gap-2 w-full overflow-visible">
           {filteredNavItems.map((item) => (
-            <SidebarIconLink key={item.href} item={item} isActive={isActive(item)} />
+            <SidebarIconLink
+              key={item.href}
+              item={item}
+              label={t(item.labelKey)}
+              isActive={isActive(item)}
+            />
           ))}
 
           <div className="h-px w-8 bg-sidebar-border my-1.5" />
 
           <FlyoutMenu
-            label="Equipe"
+            label={t("nav.team")}
             icon={Users2}
-            items={teamNavItems}
+            items={teamItems}
             isActive={teamActive}
             isOpen={openMenu === "team"}
             onToggle={() => setOpenMenu(openMenu === "team" ? null : "team")}
@@ -414,9 +456,9 @@ export function Sidebar({ user }: SidebarProps) {
           />
 
           <FlyoutMenu
-            label="Automações"
+            label={t("nav.automations")}
             icon={Bot}
-            items={automationNavItems}
+            items={automationItems}
             isActive={automationActive}
             isOpen={openMenu === "automation"}
             onToggle={() => setOpenMenu(openMenu === "automation" ? null : "automation")}
@@ -428,8 +470,9 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       <div className="flex w-full flex-col items-center gap-3 pb-1">
-        <div className="flex items-center justify-center w-full">
-          <ThemeToggle />
+        <div className="relative group w-full flex items-center justify-center">
+          <LanguageToggle />
+          <SidebarTooltip label={t("language.label")} />
         </div>
         <AccountMenu
           user={user}

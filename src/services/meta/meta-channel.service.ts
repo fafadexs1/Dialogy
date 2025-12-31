@@ -130,7 +130,7 @@ export async function exchangeFacebookUserToken(
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok || !json.access_token) {
-      console.warn('[META_TOKEN_EXCHANGE] Failed to exchange user token', json);
+      console.error('[META_TOKEN_EXCHANGE] Failed to exchange user token', JSON.stringify(json));
       return null;
     }
 
@@ -146,7 +146,7 @@ export async function exchangeFacebookUserToken(
 
     return { accessToken: json.access_token, expiresAt };
   } catch (error) {
-    console.warn('[META_TOKEN_EXCHANGE] Request failed', error);
+    console.error('[META_TOKEN_EXCHANGE] Request failed', error);
     return null;
   }
 }
@@ -163,17 +163,23 @@ export async function refreshMetaChannelAccessToken(
 
     let userAccessToken = metaSettings.fb_user_access_token;
     if (!userAccessToken) {
-      console.warn('[META_TOKEN_REFRESH] Missing user access token for channel', channelRecord.id);
+      console.error('[META_TOKEN_REFRESH] CRITICAL: Missing user access token for channel', channelRecord.id);
       return null;
     }
 
     const expiresAtMs = parseExpiresAt(metaSettings.fb_user_token_expires_at);
+
+    // We check expiry but DO NOT BLOCK the refresh attempt.
+    // Sometimes the local date is skewed or FB allows grace periods.
     if (expiresAtMs && expiresAtMs <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS) {
-      console.warn('[META_TOKEN_REFRESH] User token expired for channel', channelRecord.id);
-      return null;
+      console.warn('[META_TOKEN_REFRESH] User token expired locally. Attempting refresh anyway...', {
+        id: channelRecord.id,
+        expiresAt: new Date(expiresAtMs).toISOString()
+      });
     }
 
     const exchanged = await exchangeFacebookUserToken(userAccessToken);
+
     if (exchanged?.accessToken) {
       userAccessToken = exchanged.accessToken;
       metaSettings.fb_user_access_token = exchanged.accessToken;
@@ -206,7 +212,7 @@ export async function refreshMetaChannelAccessToken(
 
     return updated.rows[0] || null;
   } catch (error) {
-    console.warn('[META_TOKEN_REFRESH] Failed to refresh channel token', error);
+    console.error('[META_TOKEN_REFRESH] EXCEPTION during refresh:', error);
     return null;
   }
 }
@@ -638,10 +644,10 @@ export async function persistNormalizedMessage(params: {
   if (direction === 'incoming') {
     const webhookDispatch = shouldEnqueueJob('webhook_outbound')
       ? enqueueWebhookOutbound({
-          chatId: chatForDispatch.id,
-          messageId: persistedMessage.id,
-          instanceName: channel.name || platform,
-        })
+        chatId: chatForDispatch.id,
+        messageId: persistedMessage.id,
+        instanceName: channel.name || platform,
+      })
       : dispatchMessageToWebhooks(chatForDispatch, persistedMessage, channel.name || platform);
 
     webhookDispatch.catch((error) => {

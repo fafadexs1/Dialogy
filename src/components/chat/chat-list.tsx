@@ -1066,8 +1066,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
-      const timeA = a.messages.length > 0 ? new Date(a.messages[a.messages.length - 1].createdAt).getTime() : 0;
-      const timeB = b.messages.length > 0 ? new Date(b.messages[b.messages.length - 1].createdAt).getTime() : 0;
+      const msgsA = a.messages || [];
+      const msgsB = b.messages || [];
+      const timeA = msgsA.length > 0 ? new Date(msgsA[msgsA.length - 1].createdAt).getTime() : (a.updatedAt ? new Date(a.updatedAt).getTime() : 0);
+      const timeB = msgsB.length > 0 ? new Date(msgsB[msgsB.length - 1].createdAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : 0);
       return timeB - timeA;
     });
 

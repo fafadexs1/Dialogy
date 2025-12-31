@@ -6,6 +6,8 @@ import { ThemeProvider } from '@/providers/theme-provider';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { ensureServerHeartbeat } from '@/lib/observability/logger';
+import { I18nProvider } from '@/i18n/i18n-provider';
+import { getServerLocale } from '@/i18n/server';
 
 import { getCurrentUser } from '@/actions/user';
 import { FacebookSDK } from '@/components/integrations/facebook-sdk';
@@ -58,9 +60,10 @@ export default async function RootLayout({
 }>) {
   ensureServerHeartbeat();
   const user = await getCurrentUser();
+  const locale = await getServerLocale();
 
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
+    <html lang={locale} className="h-full" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -77,14 +80,16 @@ export default async function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <AuthProvider>
-              <FacebookSDK appId={process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || ''} />
-              <PresenceProvider initialUser={user}>
-                <MainAppLayout>
-                  {children}
-                </MainAppLayout>
-              </PresenceProvider>
-            </AuthProvider>
+            <I18nProvider initialLocale={locale}>
+              <AuthProvider>
+                <FacebookSDK appId={process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || ''} />
+                <PresenceProvider initialUser={user}>
+                  <MainAppLayout>
+                    {children}
+                  </MainAppLayout>
+                </PresenceProvider>
+              </AuthProvider>
+            </I18nProvider>
           </ThemeProvider>
         </ErrorBoundary>
         <Toaster />
