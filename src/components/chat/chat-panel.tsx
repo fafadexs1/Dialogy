@@ -57,7 +57,7 @@ import {
     Contrast,
     Languages
 } from 'lucide-react';
-import { uploadFileToStorage } from '@/lib/supabase/storage';
+import { uploadFileToStorage, deleteFileFromStorage } from '@/lib/supabase/storage';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -1013,10 +1013,12 @@ export default function ChatPanel({
         }
     };
 
+
+
     const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
         if (!chat) return;
 
-        // Upload to Supabase Storage
+        // 1. Upload to Supabase Storage (Public Bucket)
         const fileName = `audio_${Date.now()}.webm`;
         const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
 
@@ -1025,27 +1027,29 @@ export default function ChatPanel({
             return;
         }
 
+        // 2. Send Media using the Public URL (instead of Base64)
+        // User requested: "leave file in public, send url, then delete file"
+        // We pass publicUrl in the 'base64' field because the action expects a string there, 
+        // and internal logic handles URLs if they start with http.
         const result = await sendMediaAction(chat.id, '', [{
-            base64: publicUrl, // Passing URL instead of base64
+            base64: publicUrl,
             mimetype,
-            filename: 'audio_gravado.mp3', // Keep this filename to trigger voice note handling
-            mediatype: 'audio' as any, // Cast to any to avoid strict type check issue temporarily
+            filename: 'audio_gravado.mp3',
+            mediatype: 'audio' as any,
             thumbnail: undefined
-        }], tabId);
+        }], tabId, { mediaUrl: publicUrl });
 
         if (result.error) {
             toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
         } else if ((result as any).messages && (result as any).messages.length > 0) {
-            // For audio recording, we don't have an optimistic text message to replace,
-            // but we might want to manually append it if we haven't already.
-            // However, sendMediaAction usually handles its own optimistic preview if implemented? 
-            // Actually, audio recorder in this project doesn't seem to add an optimistic row beforehand.
-            // It just uploads and sends. So we can append the REAL message now to make it instant.
             appendMessagesToChat(chat.id, (result as any).messages);
         }
+
+        // 3. Delete the file from system (Supabase Storage) after sending
+        // Note: This breaks the 'mediaUrl' link in the database history if we rely on this specific file.
+        // However, this is the explicit user request.
+        await deleteFileFromStorage('temp-media', fileName);
     };
-
-
 
     const onEmojiClick = (emojiData: EmojiClickData) => {
         const editableDiv = contentEditableRef.current;

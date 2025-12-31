@@ -627,7 +627,8 @@ async function internalSendMedia(
                 apiResponse?.message?.mediaUrl ||
                 messageDetails?.url ||
                 (apiResponse as any)?.tempMediaPublicUrl ||
-                (file.base64?.startsWith('http') ? file.base64 : undefined);
+                (file.base64?.startsWith('http') ? file.base64 : undefined) ||
+                (metadata?.mediaUrl as string);
 
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),
@@ -866,7 +867,8 @@ export const sendMediaAction = withDebug(
             mediatype: 'image' | 'video' | 'document' | 'audio';
             thumbnail?: string;
         }[],
-        tabId: string | null
+        tabId: string | null,
+        metadata?: MessageMetadata
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -931,7 +933,7 @@ export const sendMediaAction = withDebug(
                             message: {
                                 type: file.mediatype === 'document' ? 'document' : file.mediatype,
                                 content: caption,
-                                metadata: { mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
+                                metadata: { ...metadata, mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
                                 mediaUrl: file.base64,
                             },
                             platform: metaCtx.platform,
@@ -957,7 +959,7 @@ export const sendMediaAction = withDebug(
             client.release();
         }
 
-        return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId);
+        return internalSendMedia(chatId, caption, mediaFiles, user.id, tabId, metadata);
     },
     {
         contextResolver: (chatId, caption, mediaFiles) => ({

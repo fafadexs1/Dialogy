@@ -30,3 +30,24 @@ export async function uploadFileToStorage(
         return { publicUrl: null, error: 'Unexpected error occurred' };
     }
 }
+
+export async function deleteFileFromStorage(
+    bucket: string,
+    path: string
+): Promise<{ success: boolean; error: string | null }> {
+    const supabase = createClient();
+    try {
+        const { error } = await supabase.storage
+            .from(bucket)
+            .remove([path]);
+
+        if (error) {
+            console.error('Error deleting file:', error);
+            return { success: false, error: error.message };
+        }
+        return { success: true, error: null };
+    } catch (err) {
+        console.error('Unexpected error deleting file:', err);
+        return { success: false, error: 'Unexpected error occurred' };
+    }
+}
