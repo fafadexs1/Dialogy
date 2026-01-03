@@ -19,7 +19,8 @@ import {
     MapPin,
     Copy,
     Clock,
-    ArrowRightLeft
+    ArrowRightLeft,
+    XCircle
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -243,16 +244,20 @@ interface MessageItemProps {
     currentUserId: string;
     instanceName?: string;
     onForward?: (message: Message) => void;
+    onRetry?: (message: Message) => void;
 }
 
-const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward }: MessageItemProps) => {
+const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward, onRetry }: MessageItemProps) => {
     const { toast } = useToast();
     const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
 
     const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
-    const isPending = message.api_message_status === 'PENDING';
+    const status = (message.api_message_status || '').toUpperCase();
+    const isFailed = status === 'FAILED';
     const isInternalNote = message.metadata?.isInternalNote;
+    const failureReason = typeof message.metadata?.send_error === 'string' ? message.metadata.send_error : undefined;
+    const statusTitle = isFailed && failureReason ? `Falha ao enviar: ${failureReason}` : (message.api_message_status || 'Sem status');
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const isLocationMessage =
@@ -410,24 +415,43 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                             </div>
                             <div
                                 className={cn("flex items-center text-[10px] text-muted-foreground/60 mt-1.5 dark:text-white/40", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}
-                                title={message.api_message_status || 'Sem status'}
+                                title={statusTitle}
                             >
                                 <span className="mx-1">
                                     {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, 'HH:mm', { locale: ptBR })}
                                 </span>
                                 {message.from_me && !isDeleted && (
-                                    (() => {
-                                        const status = message.api_message_status?.toUpperCase();
-                                        // Case-insensitive pending check
-                                        if (status === 'PENDING') return <Clock className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
+                                    <div className="flex items-center gap-1">
+                                        {isFailed ? (
+                                            <>
+                                                <XCircle className="h-3 w-3 text-red-400" />
+                                                <span className="text-red-400">Falha</span>
+                                                {onRetry && !isInternalNote && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="link"
+                                                        size="sm"
+                                                        className="h-auto px-1 text-red-400 hover:text-red-300"
+                                                        onClick={() => onRetry(message)}
+                                                    >
+                                                        Reenviar
+                                                    </Button>
+                                                )}
+                                            </>
+                                        ) : (
+                                            (() => {
+                                                // Case-insensitive pending check
+                                                if (status === 'PENDING') return <Clock className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
 
-                                        if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />;
-                                        if (status === 'DELIVERED') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
-                                        // SENT: WhatsApp Single Check (Sent to Server)
-                                        // DELIVERED: WhatsApp Double Check (Delivered to Recipient)
-                                        // Fallback/Sent -> Check (Single)
-                                        return <Check className="h-3 w-3" />;
-                                    })()
+                                                if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />;
+                                                if (status === 'DELIVERED') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
+                                                // SENT: WhatsApp Single Check (Sent to Server)
+                                                // DELIVERED: WhatsApp Double Check (Delivered to Recipient)
+                                                // Fallback/Sent -> Check (Single)
+                                                return <Check className="h-3 w-3" />;
+                                            })()
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>

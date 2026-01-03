@@ -768,6 +768,227 @@ export const sendInternalNoteAction = withDebug(
     }
 );
 
+export const getMessageStatusBatchAction = withDebug(
+    'get_message_status_batch',
+    async function getMessageStatusBatchAction(
+        chatId: string,
+        messageIds: string[]
+    ): Promise<{
+        statuses: Array<{ id: string; api_message_status: string | null; message_id_from_api: string | null }>;
+        error?: string;
+    }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { statuses: [], error: 'Usuario nao autenticado.' };
+        }
+
+        if (!chatId || !messageIds?.length) {
+            return { statuses: [] };
+        }
+
+        const { rows } = await db.query(
+            `SELECT id, api_message_status, message_id_from_api
+             FROM messages
+             WHERE chat_id = $1 AND id::text = ANY($2::text[])`,
+            [chatId, messageIds]
+        );
+
+        return {
+            statuses: rows.map((row: any) => ({
+                id: row.id,
+                api_message_status: row.api_message_status ?? null,
+                message_id_from_api: row.message_id_from_api ?? null,
+            })),
+        };
+    },
+    {
+        contextResolver: (chatId, messageIds) => ({
+            payload: { chatId, count: messageIds?.length || 0 },
+        }),
+    }
+);
+
+export const retryMessageAction = withDebug(
+    'retry_message',
+    async function retryMessageAction(
+        messageId: string
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Usuario nao autenticado.' };
+        }
+
+        if (!messageId) {
+            return { success: false, error: 'Mensagem invalida.' };
+        }
+
+        const messageRes = await db.query(
+            `SELECT 
+                m.id,
+                m.chat_id,
+                m.content,
+                m.metadata,
+                m.type,
+                m.from_me,
+                m.api_message_status,
+                m.instance_name,
+                m.sender_user_id,
+                m.sender_system_agent_id,
+                m.sent_by_tab,
+                c.workspace_id,
+                ct.phone_number_jid,
+                (
+                    SELECT m2.instance_name
+                    FROM messages m2
+                    WHERE m2.chat_id = c.id AND m2.instance_name IS NOT NULL
+                    ORDER BY m2.created_at DESC
+                    LIMIT 1
+                ) AS last_instance_name
+             FROM messages m
+             JOIN chats c ON c.id = m.chat_id
+             JOIN contacts ct ON ct.id = c.contact_id
+             WHERE m.id = $1`,
+            [messageId]
+        );
+
+        if ((messageRes.rowCount ?? 0) === 0) {
+            return { success: false, error: 'Mensagem nao encontrada.' };
+        }
+
+        const messageRow = messageRes.rows[0];
+        const currentStatus = (messageRow.api_message_status || '').toUpperCase();
+        if (currentStatus && currentStatus !== 'FAILED' && currentStatus !== 'PENDING') {
+            return { success: false, error: 'Mensagem nao esta em estado de falha.' };
+        }
+
+        if (!messageRow.from_me) {
+            return { success: false, error: 'Nao e possivel reenviar mensagens recebidas.' };
+        }
+
+        if (messageRow.type !== 'text') {
+            return { success: false, error: 'Reenvio disponivel apenas para mensagens de texto.' };
+        }
+
+        const metadata = messageRow.metadata || {};
+        if ((metadata as MessageMetadata)?.isInternalNote) {
+            return { success: false, error: 'Nao e possivel reenviar notas internas.' };
+        }
+
+        if (!messageRow.content || !messageRow.content.trim()) {
+            return { success: false, error: 'Conteudo da mensagem esta vazio.' };
+        }
+
+        const membershipRes = await db.query(
+            `SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2`,
+            [user.id, messageRow.workspace_id]
+        );
+        if ((membershipRes.rowCount ?? 0) === 0) {
+            return { success: false, error: 'Sem permissao para reenviar mensagem.' };
+        }
+
+        const instanceName = messageRow.instance_name || messageRow.last_instance_name;
+        if (!instanceName) {
+            return { success: false, error: 'Instancia nao encontrada para reenviar a mensagem.' };
+        }
+
+        if (!messageRow.phone_number_jid) {
+            return { success: false, error: 'Destino nao encontrado para reenviar a mensagem.' };
+        }
+
+        const senderId = messageRow.sender_user_id || user.id;
+        const senderType = messageRow.sender_system_agent_id ? 'system_agent' : 'user';
+
+        let apiContent = messageRow.content;
+        const isSystemSender = messageRow.sender_system_agent_id || (metadata as MessageMetadata)?.sentBy === 'system_agent';
+        if (!isSystemSender) {
+            try {
+                const userRes = await db.query('SELECT full_name FROM users WHERE id = $1', [senderId]);
+                const fullName = userRes.rows[0]?.full_name;
+                if (fullName) {
+                    const firstName = fullName.trim().split(' ')[0].toUpperCase();
+                    apiContent = `*${firstName}*:\n\n${messageRow.content}`;
+                }
+            } catch (err) {
+                console.error('[RETRY_MESSAGE] Falha ao obter nome do remetente:', err);
+            }
+        }
+
+        if (shouldEnqueueJob('whatsapp_send')) {
+            const client = await db.connect();
+            let statusUpdated = false;
+            try {
+                await client.query('BEGIN');
+                await client.query(
+                    `UPDATE messages
+                     SET api_message_status = 'PENDING',
+                         message_id_from_api = NULL
+                     WHERE id = $1`,
+                    [messageId]
+                );
+                statusUpdated = true;
+
+                await enqueueJob(
+                    'whatsapp_send',
+                    {
+                        messageId,
+                        workspaceId: messageRow.workspace_id,
+                        instanceName,
+                        number: messageRow.phone_number_jid,
+                        content: messageRow.content,
+                        apiContent,
+                        metadata,
+                        senderId,
+                        senderType,
+                        tabId: messageRow.sent_by_tab,
+                    },
+                    { client }
+                );
+
+                await client.query('COMMIT');
+                return { success: true };
+            } catch (error) {
+                await client.query('ROLLBACK');
+                if (statusUpdated) {
+                    await db.query(
+                        `UPDATE messages SET api_message_status = 'FAILED' WHERE id = $1`,
+                        [messageId]
+                    );
+                }
+                console.error('[RETRY_MESSAGE] Erro ao reenviar mensagem:', error);
+                return { success: false, error: 'Falha ao reenviar mensagem.' };
+            } finally {
+                client.release();
+            }
+        }
+
+        try {
+            const apiConfig = await getEvolutionApiConfig(instanceName);
+            if (!apiConfig) {
+                return { success: false, error: `Configuracao da API nao encontrada para a instancia ${instanceName}.` };
+            }
+
+            const apiResponse = await sendTextMessage(apiConfig, instanceName, messageRow.phone_number_jid, apiContent);
+            await db.query(
+                `UPDATE messages
+                 SET message_id_from_api = $1,
+                     api_message_status = $2,
+                     instance_name = COALESCE(instance_name, $3)
+                 WHERE id = $4`,
+                [apiResponse?.key?.id ?? null, 'SENT', instanceName, messageId]
+            );
+            return { success: true };
+        } catch (error) {
+            console.error('[RETRY_MESSAGE] Erro ao reenviar mensagem inline:', error);
+            return { success: false, error: 'Falha ao reenviar mensagem.' };
+        }
+    },
+    {
+        contextResolver: (messageId) => ({ payload: { messageId } }),
+    }
+);
+
 /**
  * Action for sending automated messages.
  */

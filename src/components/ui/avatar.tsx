@@ -27,10 +27,20 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
     const [isLoaded, setIsLoaded] = React.useState<boolean>(false)
     const [hasError, setHasError] = React.useState<boolean>(false)
     const safeSrc = React.useMemo(() => (typeof src === 'string' && src.trim() !== '') ? src : undefined, [src]);
+    const internalRef = React.useRef<HTMLImageElement | null>(null);
 
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
       safeSrc || fallbackSrc
     )
+
+    const setRefs = React.useCallback((node: HTMLImageElement | null) => {
+      internalRef.current = node;
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref) {
+        (ref as React.MutableRefObject<HTMLImageElement | null>).current = node;
+      }
+    }, [ref]);
 
     React.useEffect(() => {
       setCurrentSrc(safeSrc || fallbackSrc)
@@ -38,9 +48,17 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
       setHasError(false)
     }, [safeSrc, fallbackSrc])
 
+    React.useEffect(() => {
+      if (!currentSrc) return;
+      const img = internalRef.current;
+      if (img && img.complete && img.naturalWidth > 0) {
+        setIsLoaded(true);
+      }
+    }, [currentSrc]);
+
     return currentSrc ? (
       <img
-        ref={ref}
+        ref={setRefs}
         src={currentSrc}
         alt={alt ?? ""}
         className={cn(

@@ -201,6 +201,7 @@ export default function CustomerChatLayout({
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
   const messagesByChat = useInboxStore((state) => state.messagesByChat);
   const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
+  const oldestMessageIdByChat = useInboxStore((state) => state.oldestMessageIdByChat);
   const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
   const setInitialData = useInboxStore((state) => state.setInitialData);
   const setSelectedChatId = useInboxStore((state) => state.setSelectedChatId);
@@ -291,6 +292,7 @@ export default function CustomerChatLayout({
   const currentChatMessages = selectedChatId ? messagesByChat[selectedChatId] || [] : [];
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
+  const oldestLoadedMessageId = selectedChatId ? oldestMessageIdByChat[selectedChatId] : null;
 
   const enrichedSelectedChat = useMemo(() => selectedChat ? {
     ...selectedChat,
@@ -560,19 +562,27 @@ export default function CustomerChatLayout({
     }
   }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
-  const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
+  const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
     try {
+      // console.log('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
       const result = await getChatMessagesWindow({
         chatId,
-        before: before ?? undefined,
+        before: beforeDate ?? undefined,
+        beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone
       });
-      if (before) {
-        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
+      /* console.log('[LOAD_MESSAGES] Result:', {
+        messagesCount: result.messages.length,
+        oldestMessageDate: result.oldestMessageDate,
+        oldestMessageId: result.oldestMessageId,
+        hasMoreHistory: result.hasMoreHistory
+      }); */
+      if (beforeDate) {
+        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       } else {
-        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.hasMoreHistory);
+        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       }
       if (result.contact) {
         updateChatContact(result.contact);
@@ -581,7 +591,7 @@ export default function CustomerChatLayout({
       console.error('[LOAD_MESSAGES] Error:', error);
       toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
     } finally {
-      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!before });
+      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!beforeDate });
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
@@ -606,16 +616,37 @@ export default function CustomerChatLayout({
   }, [loadChatMessages]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!selectedChatId) return;
-    const before = oldestLoadedMessageDate;
-    if (!before) return;
-    await loadChatMessages(selectedChatId, before);
-  }, [loadChatMessages, oldestLoadedMessageDate, selectedChatId]);
+    console.log('[LOAD_OLDER] Called. selectedChatId:', selectedChatId, 'beforeDate:', oldestLoadedMessageDate, 'beforeId:', oldestLoadedMessageId);
+    if (!selectedChatId) {
+      console.log('[LOAD_OLDER] No selected chat, returning');
+      return;
+    }
+    const beforeDate = oldestLoadedMessageDate;
+    const beforeId = oldestLoadedMessageId;
+    if (!beforeDate || !beforeId) {
+      console.log('[LOAD_OLDER] Missing cursor (beforeDate or beforeId is null), returning');
+      return;
+    }
+    await loadChatMessages(selectedChatId, beforeDate, beforeId);
+  }, [loadChatMessages, oldestLoadedMessageDate, oldestLoadedMessageId, selectedChatId]);
 
   const ensureMessagesForChat = useCallback(async (chatId: string) => {
-    const currentMessages = useInboxStore.getState().messagesByChat[chatId];
-    if (currentMessages && currentMessages.length) return;
-    await loadChatMessages(chatId);
+    const state = useInboxStore.getState();
+    const currentMessages = state.messagesByChat[chatId] || [];
+    if (!currentMessages.length) {
+      await loadChatMessages(chatId);
+      return;
+    }
+
+    const chat = state.chats.find((candidate) => candidate.id === chatId);
+    const latestMessages = chat?.messages;
+    const latestMessage = latestMessages && latestMessages.length
+      ? latestMessages[latestMessages.length - 1]
+      : undefined;
+    if (latestMessage && !currentMessages.some((message) => message.id === latestMessage.id)) {
+      // Chat list is fresher than the cached thread; refresh the window.
+      await loadChatMessages(chatId);
+    }
   }, [loadChatMessages]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
@@ -674,10 +705,11 @@ export default function CustomerChatLayout({
     if (!hasMessages) return;
     if (prefetchedHistoryRef.current.has(selectedChatId)) return;
     const hasMore = state.hasMoreHistoryByChat[selectedChatId];
-    const before = state.oldestMessageDateByChat[selectedChatId];
-    if (hasMore && before) {
+    const beforeDate = state.oldestMessageDateByChat[selectedChatId];
+    const beforeId = state.oldestMessageIdByChat[selectedChatId];
+    if (hasMore && beforeDate && beforeId) {
       prefetchedHistoryRef.current.add(selectedChatId);
-      loadChatMessages(selectedChatId, before).catch((err) => console.error('[PREFETCH_HISTORY]', err));
+      loadChatMessages(selectedChatId, beforeDate, beforeId).catch((err) => console.error('[PREFETCH_HISTORY]', err));
     }
   }, [selectedChatId, loadChatMessages]);
 
@@ -705,6 +737,7 @@ export default function CustomerChatLayout({
         lastSyncChats: result.lastSyncChats,
         lastSyncMessageForSelected: result.lastSyncMessageForSelected,
         oldestMessageDate: result.oldestMessageDate,
+        oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory,
         hasMoreChats: result.hasMoreChats,
       });
@@ -998,6 +1031,26 @@ export default function CustomerChatLayout({
       const result = await refreshChatAction(newChatData.id);
       if (result.chat) {
         useInboxStore.getState().upsertChats([result.chat]);
+
+        // --- REALTIME FIX: Sync latest message to open chat ---
+        // Since ChatList updates work (triggering this), we use the returned chat's last message
+        // to update the open chat view if it matches. This covers cases where the 'messages' channel fails.
+        const state = useInboxStore.getState();
+        console.log('[REALTIME-DEBUG] Refresh Chat Result:', {
+          resultChatId: result.chat.id,
+          selectedChatId: state.selectedChatId,
+          hasMessages: result.chat.messages?.length,
+          latestMessage: result.chat.messages?.[0]
+        });
+
+        if (state.selectedChatId === result.chat.id && result.chat.messages?.length > 0) {
+          console.log('[REALTIME-DEBUG] Appending late-arriving message to chat view');
+          useInboxStore.getState().appendMessagesToChat(result.chat.id, result.chat.messages);
+        } else {
+          console.log('[REALTIME-DEBUG] Skipped appending message. Match:', state.selectedChatId === result.chat.id);
+        }
+        // -----------------------------------------------------
+        // -----------------------------------------------------
       } else {
         console.warn('[REALTIME] Failed to refresh chat details:', result.error);
       }
@@ -1075,6 +1128,7 @@ export default function CustomerChatLayout({
         lastSyncChats: initialData.lastSyncChats,
         lastSyncMessageForSelected: initialData.lastSyncMessageForSelected,
         oldestMessageDate: initialData.oldestMessageDate,
+        oldestMessageId: initialData.oldestMessageId,
         hasMoreHistory: initialData.hasMoreHistory,
         hasMoreChats: initialData.hasMoreChats,
       });

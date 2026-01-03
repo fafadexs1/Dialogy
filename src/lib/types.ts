@@ -153,6 +153,7 @@ export type MessageMetadata = {
   isMarketing?: boolean;
   is_bulk_action?: boolean;
   optimisticId?: string;
+  send_error?: string;
 }
 
 export type Message = {

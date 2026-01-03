@@ -238,6 +238,7 @@ export default function MobileChatLayout({
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
   const messagesByChat = useInboxStore((state) => state.messagesByChat);
   const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
+  const oldestMessageIdByChat = useInboxStore((state) => state.oldestMessageIdByChat);
   const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
   const setInitialData = useInboxStore((state) => state.setInitialData);
   const setSelectedChatId = useInboxStore((state) => state.setSelectedChatId);
@@ -372,6 +373,7 @@ export default function MobileChatLayout({
   const currentChatMessages = selectedChatId ? messagesByChat[selectedChatId] || [] : [];
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
+  const oldestLoadedMessageId = selectedChatId ? oldestMessageIdByChat[selectedChatId] : null;
 
   const formatMessageDay = useCallback((date: Date) => {
     const zonedDate = toZonedTime(date, workspaceTimezone);
@@ -635,19 +637,20 @@ export default function MobileChatLayout({
     }
   }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
-  const loadChatMessages = useCallback(async (chatId: string, before?: string | null) => {
+  const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
     try {
       const result = await getChatMessagesWindow({
         chatId,
-        before: before ?? undefined,
+        before: beforeDate ?? undefined,
+        beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone
       });
-      if (before) {
-        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.hasMoreHistory);
+      if (beforeDate) {
+        prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       } else {
-        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.hasMoreHistory);
+        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       }
       if (result.contact) {
         updateChatContact(result.contact);
@@ -656,7 +659,7 @@ export default function MobileChatLayout({
       console.error('[LOAD_MESSAGES] Error:', error);
       toast({ title: 'Erro ao carregar mensagens', description: error.message || 'Tente novamente.', variant: 'destructive' });
     } finally {
-      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!before });
+      reportClientMetric('load_messages', performance.now() - startedAt, { chatId, hasHistory: !!beforeDate });
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
@@ -682,15 +685,29 @@ export default function MobileChatLayout({
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatId) return;
-    const before = oldestLoadedMessageDate;
-    if (!before) return;
-    await loadChatMessages(selectedChatId, before);
-  }, [loadChatMessages, oldestLoadedMessageDate, selectedChatId]);
+    const beforeDate = oldestLoadedMessageDate;
+    const beforeId = oldestLoadedMessageId;
+    if (!beforeDate || !beforeId) return;
+    await loadChatMessages(selectedChatId, beforeDate, beforeId);
+  }, [loadChatMessages, oldestLoadedMessageDate, oldestLoadedMessageId, selectedChatId]);
 
   const ensureMessagesForChat = useCallback(async (chatId: string) => {
-    const currentMessages = useInboxStore.getState().messagesByChat[chatId];
-    if (currentMessages && currentMessages.length) return;
-    await loadChatMessages(chatId);
+    const state = useInboxStore.getState();
+    const currentMessages = state.messagesByChat[chatId] || [];
+    if (!currentMessages.length) {
+      await loadChatMessages(chatId);
+      return;
+    }
+
+    const chat = state.chats.find((candidate) => candidate.id === chatId);
+    const latestMessages = chat?.messages;
+    const latestMessage = latestMessages && latestMessages.length
+      ? latestMessages[latestMessages.length - 1]
+      : undefined;
+    if (latestMessage && !currentMessages.some((message) => message.id === latestMessage.id)) {
+      // Chat list is fresher than the cached thread; refresh the window.
+      await loadChatMessages(chatId);
+    }
   }, [loadChatMessages]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
@@ -749,10 +766,11 @@ export default function MobileChatLayout({
     if (!hasMessages) return;
     if (prefetchedHistoryRef.current.has(selectedChatId)) return;
     const hasMore = state.hasMoreHistoryByChat[selectedChatId];
-    const before = state.oldestMessageDateByChat[selectedChatId];
-    if (hasMore && before) {
+    const beforeDate = state.oldestMessageDateByChat[selectedChatId];
+    const beforeId = state.oldestMessageIdByChat[selectedChatId];
+    if (hasMore && beforeDate && beforeId) {
       prefetchedHistoryRef.current.add(selectedChatId);
-      loadChatMessages(selectedChatId, before).catch((err) => console.error('[PREFETCH_HISTORY]', err));
+      loadChatMessages(selectedChatId, beforeDate, beforeId).catch((err) => console.error('[PREFETCH_HISTORY]', err));
     }
   }, [selectedChatId, loadChatMessages]);
 
@@ -780,6 +798,7 @@ export default function MobileChatLayout({
         lastSyncChats: result.lastSyncChats,
         lastSyncMessageForSelected: result.lastSyncMessageForSelected,
         oldestMessageDate: result.oldestMessageDate,
+        oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory,
         hasMoreChats: result.hasMoreChats,
       });
@@ -1111,6 +1130,7 @@ export default function MobileChatLayout({
         lastSyncChats: initialData.lastSyncChats,
         lastSyncMessageForSelected: initialData.lastSyncMessageForSelected,
         oldestMessageDate: initialData.oldestMessageDate,
+        oldestMessageId: initialData.oldestMessageId,
         hasMoreHistory: initialData.hasMoreHistory,
         hasMoreChats: initialData.hasMoreChats,
       });

@@ -3,6 +3,7 @@ import type { Chat, Contact, Message } from '@/lib/types';
 
 type MessagesRecord = Record<string, Message[]>;
 type TimestampRecord = Record<string, string | null>;
+type IdRecord = Record<string, string | null>;
 type BooleanRecord = Record<string, boolean>;
 
 type InboxState = {
@@ -12,6 +13,7 @@ type InboxState = {
   lastSyncChats: string | null;
   lastSyncMessages: TimestampRecord;
   oldestMessageDateByChat: TimestampRecord;
+  oldestMessageIdByChat: IdRecord;
   hasMoreHistoryByChat: BooleanRecord;
   hasMoreChats: boolean;
   setInitialData: (payload: {
@@ -21,6 +23,7 @@ type InboxState = {
     lastSyncChats: string | null;
     lastSyncMessageForSelected: string | null;
     oldestMessageDate: string | null;
+    oldestMessageId: string | null;
     hasMoreHistory: boolean;
     hasMoreChats: boolean;
   }) => void;
@@ -29,9 +32,9 @@ type InboxState = {
   appendChats: (chats: Chat[]) => void;
   setHasMoreChats: (hasMore: boolean) => void;
   updateChatContact: (contact: Contact) => void;
-  setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, hasMoreHistory?: boolean) => void;
+  setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean) => void;
   appendMessagesToChat: (chatId: string, messages: Message[], lastSync?: string | null) => void;
-  prependMessagesToChat: (chatId: string, messages: Message[], oldestDate?: string | null, hasMoreHistory?: boolean) => void;
+  prependMessagesToChat: (chatId: string, messages: Message[], oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean) => void;
   markChatAsRead: (chatId: string) => void;
   incrementUnread: (chatId: string) => void;
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
@@ -52,6 +55,7 @@ const baseState = {
   lastSyncChats: null as string | null,
   lastSyncMessages: {} as TimestampRecord,
   oldestMessageDateByChat: {} as TimestampRecord,
+  oldestMessageIdByChat: {} as IdRecord,
   hasMoreHistoryByChat: {} as BooleanRecord,
   hasMoreChats: false,
   drafts: {} as Record<string, string>,
@@ -77,6 +81,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     lastSyncChats,
     lastSyncMessageForSelected,
     oldestMessageDate,
+    oldestMessageId,
     hasMoreHistory,
     hasMoreChats,
   }) => {
@@ -87,6 +92,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       lastSyncChats,
       lastSyncMessages: selectedChatId ? { [selectedChatId]: lastSyncMessageForSelected ?? null } : {},
       oldestMessageDateByChat: selectedChatId ? { [selectedChatId]: oldestMessageDate ?? null } : {},
+      oldestMessageIdByChat: selectedChatId ? { [selectedChatId]: oldestMessageId ?? null } : {},
       hasMoreHistoryByChat: selectedChatId ? { [selectedChatId]: hasMoreHistory } : {},
       hasMoreChats,
     });
@@ -149,7 +155,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       ),
     }));
   },
-  setMessagesForChat: (chatId, messages, lastSync, oldestDate, hasMoreHistory) => {
+  setMessagesForChat: (chatId, messages, lastSync, oldestDate, oldestId, hasMoreHistory) => {
     set((state) => {
       const current = state.messagesByChat[chatId] || [];
       const merged = dedupeMessages([...current, ...messages]);
@@ -163,6 +169,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
           typeof oldestDate !== 'undefined'
             ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
             : state.oldestMessageDateByChat,
+        oldestMessageIdByChat:
+          typeof oldestId !== 'undefined'
+            ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
+            : state.oldestMessageIdByChat,
         hasMoreHistoryByChat:
           typeof hasMoreHistory !== 'undefined'
             ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
@@ -176,21 +186,29 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const current = state.messagesByChat[chatId] || [];
       const cleanedCurrent = messages.reduce((acc, incoming) => {
         if (incoming.sentByTab) {
+          const incomingOptimisticId = incoming.metadata?.optimisticId;
+          const contentCandidates = acc.filter(
+            (message) =>
+              message.optimistic &&
+              message.sentByTab === incoming.sentByTab &&
+              message.content === incoming.content
+          );
+          const contentMatchIdToRemove =
+            contentCandidates.length === 1 ? contentCandidates[0].id : null;
           return acc.filter(
             (message) => {
-              // Only remove optimistic messages that have temporary IDs (start with 'optimistic-')
-              // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
-              // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
+              // Remove only the matching optimistic message for this tab.
+              // Prefer ID/optimisticId match; use content match only when it's unambiguous.
               if (message.optimistic && message.sentByTab === incoming.sentByTab) {
                 // Strict ID match: Always replace.
                 if (message.id === incoming.id) return false;
 
                 // Optimistic ID match (via metadata): Logic for when server ID differs but it's the same message.
-                if (incoming.metadata?.optimisticId && message.id === incoming.metadata.optimisticId) return false;
+                if (incomingOptimisticId && message.id === incomingOptimisticId) return false;
 
                 // Content match: If IDs differ (server ignored client ID), assume same message if content matches.
                 // This prevents "stuck as sending" duplicates while preserving other distinct pending messages.
-                if (message.content === incoming.content) return false;
+                if (contentMatchIdToRemove && message.id === contentMatchIdToRemove) return false;
 
                 return true;
               }
@@ -220,17 +238,23 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       };
     });
   },
-  prependMessagesToChat: (chatId, messages, oldestDate, hasMoreHistory) => {
-    if (!messages.length) return;
+  prependMessagesToChat: (chatId, messages, oldestDate, oldestId, hasMoreHistory) => {
     set((state) => {
       const current = state.messagesByChat[chatId] || [];
-      const merged = dedupeMessages([...messages, ...current]);
+      const merged = messages.length ? dedupeMessages([...messages, ...current]) : current;
+      const shouldUpdateCursor = messages.length > 0;
       return {
-        messagesByChat: { ...state.messagesByChat, [chatId]: merged },
+        messagesByChat: messages.length
+          ? { ...state.messagesByChat, [chatId]: merged }
+          : state.messagesByChat,
         oldestMessageDateByChat:
-          typeof oldestDate !== 'undefined'
+          shouldUpdateCursor && typeof oldestDate !== 'undefined'
             ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
             : state.oldestMessageDateByChat,
+        oldestMessageIdByChat:
+          shouldUpdateCursor && typeof oldestId !== 'undefined'
+            ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
+            : state.oldestMessageIdByChat,
         hasMoreHistoryByChat:
           typeof hasMoreHistory !== 'undefined'
             ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }

@@ -576,6 +576,7 @@ export type InitialChatsPayload = {
     lastSyncChats: string | null;
     lastSyncMessageForSelected: string | null;
     oldestMessageDate: string | null;
+    oldestMessageId: string | null;
     hasMoreHistory: boolean;
     hasMoreChats: boolean;
     timezone: string;
@@ -876,6 +877,7 @@ export const getInitialChatsData = withDebug(
                     lastSyncChats: null,
                     lastSyncMessageForSelected: null,
                     oldestMessageDate: null,
+                    oldestMessageId: null,
                     hasMoreHistory: false,
                     hasMoreChats: false,
                     timezone: DEFAULT_TIMEZONE,
@@ -946,6 +948,7 @@ export const getInitialChatsData = withDebug(
             let messages: Message[] = [];
             let lastSyncMessageForSelected: string | null = null;
             let oldestMessageDate: string | null = null;
+            let oldestMessageId: string | null = null;
             let hasMoreHistory = false;
 
             if (selectedChatId) {
@@ -957,6 +960,7 @@ export const getInitialChatsData = withDebug(
                 messages = msgResult.messages;
                 lastSyncMessageForSelected = msgResult.lastSyncMessage;
                 oldestMessageDate = msgResult.oldestMessageDate;
+                oldestMessageId = msgResult.oldestMessageId;
                 hasMoreHistory = msgResult.hasMoreHistory;
             }
 
@@ -967,6 +971,7 @@ export const getInitialChatsData = withDebug(
                 lastSyncChats,
                 lastSyncMessageForSelected,
                 oldestMessageDate,
+                oldestMessageId,
                 hasMoreHistory,
                 hasMoreChats,
                 timezone,
@@ -981,6 +986,7 @@ export const getInitialChatsData = withDebug(
                 lastSyncChats: null,
                 lastSyncMessageForSelected: null,
                 oldestMessageDate: null,
+                oldestMessageId: null,
                 hasMoreHistory: false,
                 hasMoreChats: false,
                 timezone: DEFAULT_TIMEZONE,
@@ -1805,31 +1811,44 @@ export async function getChatMessagesWindow({
     chatId,
     limit,
     before,
+    beforeId,
     timezone,
 }: {
     chatId: string;
     limit: number;
     before?: string | null;
+    beforeId?: string | null;
     timezone: string;
 }): Promise<{
     messages: Message[];
     lastSyncMessage: string | null;
     oldestMessageDate: string | null;
+    oldestMessageId: string | null;
     hasMoreHistory: boolean;
     contact?: Contact;
 }> {
     const params: (string | number)[] = [chatId, limit];
     let beforeClause = '';
-    if (before) {
+    if (before && beforeId) {
+        params.push(before, beforeId);
+        // Use timestamptz for proper comparison with timestamp with time zone column
+        beforeClause = 'AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)';
+    } else if (before) {
         params.push(before);
-        beforeClause = 'AND m.created_at < $3';
+        beforeClause = 'AND m.created_at < $3::timestamptz';
     }
 
-    // Modified query to fetch messages for the contact associated with the chat
+    // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
+
+    // Fetch messages from ALL chats of the same contact (not just the current chat)
+    // This provides full conversation history across all sessions with this contact
+    // The chat_id $1 is used to find the contact_id via the subquery
     const { rows } = await db.query(
         `
-        WITH target_chat AS (
-            SELECT contact_id, workspace_id FROM chats WHERE id = $1
+        WITH target_contact AS (
+            SELECT contact_id, workspace_id 
+            FROM chats 
+            WHERE id = $1
         )
         SELECT 
             m.*,
@@ -1842,15 +1861,17 @@ export async function getChatMessagesWindow({
             cont.address AS contact_address
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
+        JOIN target_contact tc ON c.contact_id = tc.contact_id AND c.workspace_id = tc.workspace_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        JOIN target_chat tc ON c.contact_id = tc.contact_id AND c.workspace_id = tc.workspace_id
         WHERE 1=1
         ${beforeClause}
-        ORDER BY m.created_at DESC
+        ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
         `,
         params
     );
+
+    // console.log('[GET_CHAT_MESSAGES_WINDOW] Query result:', { rowsCount: rows.length, firstRowDate: rows[0]?.created_at, lastRowDate: rows[rows.length - 1]?.created_at });
 
     const senderIds = [...new Set(rows.map((row) => row.sender_user_id).filter(Boolean))];
     const systemAgentIds = [...new Set(rows.map((row) => row.sender_system_agent_id).filter(Boolean))];
@@ -1877,10 +1898,24 @@ export async function getChatMessagesWindow({
         .reverse();
 
     const lastSyncMessage = rows.reduce<string | null>((acc, row) => maxIsoDate(acc, row.created_at), null);
-    const oldestMessageDate = messages[0]?.createdAt || null;
+    const oldestRow = rows[rows.length - 1];
+    // Ensure oldestMessageDate is always an ISO string, not a Date object
+    const rawOldestDate = oldestRow?.created_at;
+    const oldestMessageDate = rawOldestDate
+        ? (rawOldestDate instanceof Date ? rawOldestDate.toISOString() : String(rawOldestDate))
+        : null;
+    const oldestMessageId = oldestRow?.id || null;
     const hasMoreHistory = rows.length === limit;
 
-    return { messages, lastSyncMessage, oldestMessageDate, hasMoreHistory, contact };
+    console.log('[GET_CHAT_MESSAGES_WINDOW] Pagination info:', {
+        rowsCount: rows.length,
+        limit,
+        hasMoreHistory,
+        oldestMessageDate,
+        oldestMessageId
+    });
+
+    return { messages, lastSyncMessage, oldestMessageDate, oldestMessageId, hasMoreHistory, contact };
 }
 
 async function fetchMessageDeltas({
@@ -2015,10 +2050,18 @@ function parseMetadata(metadata: any): MessageMetadata | undefined {
     }
 }
 
-function maxIsoDate(current: string | null, candidate: string | null): string | null {
-    if (!candidate) return current;
-    if (!current) return candidate;
-    return new Date(candidate).getTime() > new Date(current).getTime() ? candidate : current;
+function maxIsoDate(current: string | Date | null, candidate: string | Date | null): string | null {
+    if (!candidate) return toIsoString(current);
+    if (!current) return toIsoString(candidate);
+    const currentTime = new Date(current).getTime();
+    const candidateTime = new Date(candidate).getTime();
+    return candidateTime > currentTime ? toIsoString(candidate) : toIsoString(current);
+}
+
+function toIsoString(value: string | Date | null): string | null {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString();
+    return String(value);
 }
 
 export async function getContactMessages({

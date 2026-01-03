@@ -73,7 +73,7 @@ import { Textarea } from '../ui/textarea';
 import { getContactMessages, toggleChatAutopilot } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
-import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
 import { getAutopilotConfig, addDocumentToKnowledgeBase } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
 import { generateChatHtml } from '@/lib/chat-export';
@@ -133,6 +133,15 @@ interface ChatPanelProps {
     onToggleRTL: () => void;
     onBack?: () => void;
 }
+
+type TextSendJob = {
+    chatId: string;
+    messageId: string;
+    content: string;
+    isInternalNote: boolean;
+    metadata: MessageMetadata;
+    startedAt: number;
+};
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
     const [internalIsOpen, setInternalIsOpen] = React.useState(false);
@@ -321,6 +330,10 @@ export default function ChatPanel({
     const [sendState, setSendState] = useState<'idle' | 'sending' | 'error'>('idle');
     const [lastSendError, setLastSendError] = useState<string | null>(null);
     const lastSendDraftRef = useRef<{ text: string; media: MediaFileType[]; isNote: boolean } | null>(null);
+    const textSendQueueRef = useRef<TextSendJob[]>([]);
+    const textSendProcessingRef = useRef(false);
+    const [textSendQueueCount, setTextSendQueueCount] = useState(0);
+    const retryingMessagesRef = useRef(new Set<string>());
 
     // Virtualization refs/state removed
     // const messageHeightsRef = useRef<Map<string, number>>(new Map()); 
@@ -344,8 +357,9 @@ export default function ChatPanel({
     const previousFirstMessageIdRef = useRef<string | null>(null);
     const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
-    const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
     const replaceOptimisticMessage = useInboxStore((state) => state.replaceOptimisticMessage);
+    const updateMessage = useInboxStore((state) => state.updateMessage);
+    const statusPollInFlightRef = useRef(false);
 
     useEffect(() => {
         canLoadOlderRef.current = !((chat as any)?.protocolScoped) && canLoadOlder;
@@ -485,11 +499,77 @@ export default function ChatPanel({
         return chat?.messages || [];
     }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages]);
 
+    const pendingStatusIds = useMemo(() => {
+        if (!chat?.messages?.length) return [];
+        return chat.messages
+            .filter((message) => message.chat_id === chat.id)
+            .filter((message) => message.from_me && (message.api_message_status || '').toUpperCase() === 'PENDING')
+            .map((message) => message.id);
+    }, [chat?.id, chat?.messages]);
+
+    useEffect(() => {
+        if (!chat?.id || isProtocolScoped || !pendingStatusIds.length) {
+            return;
+        }
+
+        const intervalId = setInterval(async () => {
+            if (statusPollInFlightRef.current) return;
+            statusPollInFlightRef.current = true;
+            try {
+                const result = await getMessageStatusBatchAction(chat.id, pendingStatusIds);
+                if (result.error) {
+                    console.warn('[STATUS_POLL] Failed to refresh message status:', result.error);
+                    return;
+                }
+                result.statuses.forEach((status) => {
+                    if (!status?.id) return;
+                    updateMessage(chat.id, status.id, {
+                        api_message_status: status.api_message_status || undefined,
+                        message_id_from_api: status.message_id_from_api || undefined,
+                    });
+                });
+            } catch (error) {
+                console.warn('[STATUS_POLL] Failed to refresh message status:', error);
+            } finally {
+                statusPollInFlightRef.current = false;
+            }
+        }, 4000);
+
+        return () => {
+            clearInterval(intervalId);
+        };
+    }, [chat?.id, isProtocolScoped, pendingStatusIds, updateMessage]);
+
     // Layout effect for manual scroll removed as Virtuoso handles it
     // useLayoutEffect(() => { ... }, [messagesToRender, messagesToRender.length]);
 
-    // VIRTUALIZAÇÃO DESATIVADA DEVIDO A BUGS VISUAIS
+    // VIRTUALIZATION ENABLED
     const visibleMessages = messagesToRender;
+
+    // First Item Index Strategy for Bidirectional Scrolling/Prepend
+    const [firstItemIndex, setFirstItemIndex] = useState(10000);
+    const prevMessagesLengthRef = useRef(visibleMessages.length);
+
+    // Reset when chat changes
+    useEffect(() => {
+        setFirstItemIndex(10000);
+        prevMessagesLengthRef.current = visibleMessages.length;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chat?.id]);
+
+    // Detect prepend
+    useLayoutEffect(() => {
+        const currentLen = visibleMessages.length;
+        const prevLen = prevMessagesLengthRef.current;
+        // Check if length increased AND we are fetching history (prepend scenario)
+        if (currentLen > prevLen && isFetchingHistoryRef.current) {
+            const diff = currentLen - prevLen;
+            console.log('[VIRTUOSO] Prepend detected:', diff, 'items. Adjusting firstItemIndex.');
+            setFirstItemIndex((prev) => prev - diff);
+        }
+        prevMessagesLengthRef.current = currentLen;
+    }, [visibleMessages, isFetchingHistoryRef]);
+
     const startIndex = 0;
     const padTop = 0;
     const padBottom = 0;
@@ -781,30 +861,144 @@ export default function ChatPanel({
                 ? <FaFacebookMessenger className="h-3 w-3 text-blue-500" />
                 : <FaWhatsapp className="h-3 w-3 text-green-500" />;
 
+    const processTextSendQueue = useCallback(async () => {
+        if (textSendProcessingRef.current) return;
+        textSendProcessingRef.current = true;
+
+        while (true) {
+            const job = textSendQueueRef.current[0];
+            if (!job) {
+                textSendProcessingRef.current = false;
+                if (textSendQueueRef.current.length === 0) {
+                    break;
+                }
+                textSendProcessingRef.current = true;
+                continue;
+            }
+            try {
+                const result = job.isInternalNote
+                    ? await sendInternalNoteAction(job.chatId, job.content, tabId, job.messageId)
+                    : await guardedSendAgentMessage(job.chatId, job.content, tabId, job.messageId);
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Falha ao enviar mensagem.');
+                }
+
+                if (result.message) {
+                    const realMessage = {
+                        ...result.message,
+                        sender: {
+                            id: currentUser.id,
+                            name: currentUser.name,
+                            avatar: currentUser.avatar || currentUser.avatar_url,
+                            type: 'user'
+                        },
+                        formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
+                    } as Message;
+                    replaceOptimisticMessage(job.chatId, job.messageId, realMessage);
+                } else {
+                    updateMessage(job.chatId, job.messageId, {
+                        api_message_status: 'PENDING',
+                        metadata: { ...job.metadata, send_error: undefined },
+                    });
+                }
+
+                if (job.isInternalNote) {
+                    reportClientMetric('message_sent', performance.now() - job.startedAt);
+                }
+
+                onActionSuccess();
+                setDraft(job.chatId, '');
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Falha ao enviar mensagem.';
+                updateMessage(job.chatId, job.messageId, {
+                    api_message_status: 'FAILED',
+                    metadata: { ...job.metadata, send_error: errorMessage },
+                });
+                toast({ title: 'Falha ao enviar', description: errorMessage, variant: 'destructive' });
+            } finally {
+                reportClientMetric('send_message', performance.now() - job.startedAt, { chatId: job.chatId, media: false });
+            }
+
+            textSendQueueRef.current.shift();
+            setTextSendQueueCount(textSendQueueRef.current.length);
+        }
+    }, [currentUser, onActionSuccess, replaceOptimisticMessage, setDraft, tabId, toast, updateMessage, workspaceTimezone]);
+
+    const enqueueTextSend = useCallback((job: TextSendJob) => {
+        textSendQueueRef.current.push(job);
+        setTextSendQueueCount(textSendQueueRef.current.length);
+        void processTextSendQueue();
+    }, [processTextSendQueue]);
+
+    const handleRetryMessage = useCallback(async (message: Message) => {
+        if (!message?.id) return;
+        if ((message.api_message_status || '').toUpperCase() !== 'FAILED') return;
+        if (message.metadata?.isInternalNote) return;
+        if (retryingMessagesRef.current.has(message.id)) return;
+
+        retryingMessagesRef.current.add(message.id);
+        const baseMetadata = message.metadata || {};
+
+        updateMessage(message.chat_id, message.id, {
+            api_message_status: 'PENDING',
+            metadata: { ...baseMetadata, send_error: undefined },
+        });
+
+        try {
+            const result = await retryMessageAction(message.id);
+            if (!result.success) {
+                const errorText = result.error || 'Falha ao reenviar mensagem.';
+                if (errorText.toLowerCase().includes('nao encontrada')) {
+                    const fallback = await guardedSendAgentMessage(message.chat_id, message.content, tabId, message.id);
+                    if (!fallback.success) {
+                        throw new Error(fallback.error || 'Falha ao reenviar mensagem.');
+                    }
+                    if (fallback.message) {
+                        const realMessage = {
+                            ...fallback.message,
+                            sender: {
+                                id: currentUser.id,
+                                name: currentUser.name,
+                                avatar: currentUser.avatar || currentUser.avatar_url,
+                                type: 'user'
+                            },
+                            formattedDate: formatMessageDate(new Date(fallback.message.createdAt), workspaceTimezone)
+                        } as Message;
+                        replaceOptimisticMessage(message.chat_id, message.id, realMessage);
+                    }
+                } else {
+                    throw new Error(errorText);
+                }
+            }
+            onActionSuccess();
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Falha ao reenviar mensagem.';
+            updateMessage(message.chat_id, message.id, {
+                api_message_status: 'FAILED',
+                metadata: { ...baseMetadata, send_error: errorMessage },
+            });
+            toast({ title: 'Falha ao reenviar', description: errorMessage, variant: 'destructive' });
+        } finally {
+            retryingMessagesRef.current.delete(message.id);
+        }
+    }, [currentUser, onActionSuccess, replaceOptimisticMessage, tabId, toast, updateMessage, workspaceTimezone]);
+
     const handleFormSubmit = async () => {
-        if (!chat || sendState === 'sending') return;
-        setSendState('sending');
-        setLastSendError(null);
-        const sendStart = performance.now();
+        if (!chat) return;
 
         const currentMessageText = htmlToWhatsappMarkdown(newMessage);
         const currentMediaFiles = [...mediaFiles];
         const isTextOnly = currentMediaFiles.length === 0;
 
-        if (isTextOnly && !currentMessageText.trim()) {
-            setSendState('idle');
-            return;
-        }
-
-        lastSendDraftRef.current = { text: currentMessageText, media: currentMediaFiles, isNote: isInternalNote };
-        setNewMessage('');
-        setMediaFiles([]);
-        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
-
-        let optimisticId: string | null = null;
         if (isTextOnly) {
+            if (!currentMessageText.trim()) {
+                return;
+            }
+
             const now = new Date();
-            optimisticId = uuidv4();
+            const optimisticId = uuidv4();
+            const metadata: MessageMetadata = isInternalNote ? { isInternalNote: true } : {};
 
             const optimisticMessage: Message = {
                 id: optimisticId,
@@ -826,7 +1020,7 @@ export default function ChatPanel({
                     type: 'user'
                 },
                 transcription: null,
-                metadata: isInternalNote ? { isInternalNote: true } : {},
+                metadata,
                 api_message_status: 'PENDING',
                 instance_name: chat.instance_name || undefined,
                 platform: optimisticPlatform,
@@ -843,153 +1037,112 @@ export default function ChatPanel({
             setTimeout(() => {
                 virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length, align: 'end', behavior: 'smooth' });
             }, 50);
+
+            setNewMessage('');
+            setMediaFiles([]);
+            if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
+            setDraft(chat.id, '');
+            enqueueTextSend({
+                chatId: chat.id,
+                messageId: optimisticId,
+                content: currentMessageText,
+                isInternalNote,
+                metadata,
+                startedAt: performance.now(),
+            });
+            return;
         }
 
+        if (sendState === 'sending') return;
+        setSendState('sending');
+        setLastSendError(null);
+        const sendStart = performance.now();
+
+        lastSendDraftRef.current = { text: currentMessageText, media: currentMediaFiles, isNote: isInternalNote };
+        setNewMessage('');
+        setMediaFiles([]);
+        if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+
         try {
-            if (!isTextOnly) {
-                // SEQUENTIAL SENDING LOGIC
-                // We process files one by one. If one fails, we stop and keep the remaining in the list.
+            // SEQUENTIAL SENDING LOGIC
+            // We process files one by one. If one fails, we stop and keep the remaining in the list.
 
-                let captionToSend = currentMessageText;
-                const totalFiles = currentMediaFiles.length;
-                let lastResult: { success: boolean; error?: string; messages?: Message[] } | null = null;
+            let captionToSend = currentMessageText;
+            const totalFiles = currentMediaFiles.length;
+            let lastResult: { success: boolean; error?: string; messages?: Message[] } | null = null;
 
-                for (let i = 0; i < totalFiles; i++) {
-                    const mf = currentMediaFiles[i];
+            for (let i = 0; i < totalFiles; i++) {
+                const mf = currentMediaFiles[i];
 
-                    try {
-                        const extension = mf.name.split('.').pop() || 'dat';
-                        const fileName = Date.now() + '_' + uuidv4() + '.' + extension;
+                try {
+                    const extension = mf.name.split('.').pop() || 'dat';
+                    const fileName = Date.now() + '_' + uuidv4() + '.' + extension;
 
-                        // 1. Upload
-                        const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
+                    // 1. Upload
+                    const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
 
-                        if (uploadError || !publicUrl) {
-                            throw new Error(`Falha no upload de ${mf.name}: ${uploadError}`);
-                        }
-
-                        // 2. Send Action (Single File)
-                        const filePayload = [{
-                            base64: publicUrl,
-                            mimetype: mf.type,
-                            filename: mf.name,
-                            mediatype: mf.mediatype,
-                            thumbnail: mf.thumbnail,
-                        }];
-
-                        // Attach caption only to the first file (or as user prefers, usually first)
-                        // If user typed text, we send it with the first image. 
-                        // Subsequent images go without text.
-                        const currentCaption = i === 0 ? captionToSend : '';
-
-                        const result = await sendMediaAction(chat.id, currentCaption, filePayload, tabId);
-                        lastResult = result;
-
-                        if (result.error) {
-                            throw new Error(result.error);
-                        }
-
-                        // 3. Success: Remove this file from the UI list
-                        setMediaFiles(prev => prev.filter(f => f.id !== mf.id));
-
-                        // Add a small delay between sends to prevent overwhelming the server/API if needed
-                        // await new Promise(r => setTimeout(r, 500));
-
-                    } catch (fileErr: any) {
-                        console.error(`Error sending file ${mf.name}:`, fileErr);
-                        toast({
-                            title: 'Erro ao enviar ' + mf.name,
-                            description: fileErr.message || 'Falha no envio.',
-                            variant: 'destructive'
-                        });
-                        // Stop processing further files so user can see what failed
-                        setSendState('error');
-                        setLastSendError(`Erro ao enviar ${mf.name}`);
-                        // Restore the caption if it wasn't sent with the first file yet? 
-                        // Actually, better to just let the user retry.
-                        if (i === 0) {
-                            setNewMessage(currentMessageText); // Restore text if first failed
-                            if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessageText;
-                        }
-                        return; // Exit function, don't clear draft ref completely yet
-                    }
-                }
-
-                // If loop finishes, all good
-                setSendState('idle');
-                setLastSendError(null);
-                lastSendDraftRef.current = null;
-                onActionSuccess(); // Trigger update
-
-                if (lastResult?.error) throw new Error(lastResult.error);
-
-                if (lastResult?.messages && lastResult.messages.length > 0 && optimisticId) {
-                    replaceOptimisticMessage(chat.id, optimisticId, lastResult.messages[0]);
-                }
-            } else if (isInternalNote) {
-                const result = await sendInternalNoteAction(chat.id, currentMessageText, tabId, optimisticId || undefined);
-                if (result.success) {
-                    reportClientMetric('message_sent', (performance.now() - sendStart));
-                    // Smart Polling: Refresh chat data to confirm status updates (e.g. from 'queue' to 'attending')
-                    onActionSuccess();
-
-                    // Clear draft
-                    setDraft(chat.id, '');
-
-                    if (result.message && optimisticId) {
-                        const realMessage = {
-                            ...result.message,
-                            sender: {
-                                id: currentUser.id,
-                                name: currentUser.name,
-                                avatar: currentUser.avatar || currentUser.avatar_url,
-                                type: 'user'
-                            },
-                            formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
-                        } as Message;
-                        replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                    if (uploadError || !publicUrl) {
+                        throw new Error(`Falha no upload de ${mf.name}: ${uploadError}`);
                     }
 
-                    setSendState('idle');
-                    setLastSendError(null);
-                    lastSendDraftRef.current = null;
-                } else {
-                    throw new Error(result.error);
-                }
-            } else {
-                const result = await guardedSendAgentMessage(chat.id, currentMessageText, tabId, optimisticId || undefined);
-                if (result.error) throw new Error(result.error);
+                    // 2. Send Action (Single File)
+                    const filePayload = [{
+                        base64: publicUrl,
+                        mimetype: mf.type,
+                        filename: mf.name,
+                        mediatype: mf.mediatype,
+                        thumbnail: mf.thumbnail,
+                    }];
 
-                // Smart Polling: Refresh chat data to confirm status updates
-                onActionSuccess();
+                    // Attach caption only to the first file (or as user prefers, usually first)
+                    // If user typed text, we send it with the first image. 
+                    // Subsequent images go without text.
+                    const currentCaption = i === 0 ? captionToSend : '';
 
-                // Clear draft
-                setDraft(chat.id, '');
+                    const result = await sendMediaAction(chat.id, currentCaption, filePayload, tabId);
+                    lastResult = result;
 
-                setSendState('idle');
-                setLastSendError(null);
-                lastSendDraftRef.current = null;
-                if (result.message && optimisticId) {
-                    const realMessage = {
-                        ...result.message,
-                        sender: {
-                            id: currentUser.id,
-                            name: currentUser.name,
-                            avatar: currentUser.avatar || currentUser.avatar_url,
-                            type: 'user'
-                        },
-                        formattedDate: formatMessageDate(new Date(result.message.createdAt), workspaceTimezone)
-                    } as Message;
-                    replaceOptimisticMessage(chat.id, optimisticId, realMessage);
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+
+                    // 3. Success: Remove this file from the UI list
+                    setMediaFiles(prev => prev.filter(f => f.id !== mf.id));
+
+                    // Add a small delay between sends to prevent overwhelming the server/API if needed
+                    // await new Promise(r => setTimeout(r, 500));
+
+                } catch (fileErr: any) {
+                    console.error(`Error sending file ${mf.name}:`, fileErr);
+                    toast({
+                        title: 'Erro ao enviar ' + mf.name,
+                        description: fileErr.message || 'Falha no envio.',
+                        variant: 'destructive'
+                    });
+                    // Stop processing further files so user can see what failed
+                    setSendState('error');
+                    setLastSendError(`Erro ao enviar ${mf.name}`);
+                    // Restore the caption if it wasn't sent with the first file yet? 
+                    // Actually, better to just let the user retry.
+                    if (i === 0) {
+                        setNewMessage(currentMessageText); // Restore text if first failed
+                        if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessageText;
+                    }
+                    return; // Exit function, don't clear draft ref completely yet
                 }
             }
 
+            // If loop finishes, all good
+            setSendState('idle');
+            setLastSendError(null);
+            lastSendDraftRef.current = null;
+            onActionSuccess(); // Trigger update
+
+            if (lastResult?.error) throw new Error(lastResult.error);
         } catch (error) {
             console.error('Error during message submission:', error);
             toast({ title: 'Erro Critico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
-            if (optimisticId) {
-                removeMessagesForChat(chat.id, (message) => message.id === optimisticId);
-            }
             setSendState('error');
             setLastSendError(error instanceof Error ? error.message : 'Falha ao enviar mensagem');
 
@@ -1359,16 +1512,19 @@ export default function ChatPanel({
             </header>
 
             {/* Messages Area */}
+
             <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
                 <Virtuoso
+                    key={chat?.id}
                     ref={virtuosoRef}
                     style={{ height: '100%', width: '100%' }}
                     data={visibleMessages}
-                    initialTopMostItemIndex={visibleMessages.length - 1}
+                    firstItemIndex={firstItemIndex}
+                    initialTopMostItemIndex={firstItemIndex + visibleMessages.length - 1}
+                    increaseViewportBy={500}
+                    alignToBottom={true}
                     followOutput={(isAtBottom) => {
-                        // If user is near bottom, keep sticking to bottom.
-                        // If user scrolled up, don't auto-scroll.
-                        if (isAtBottom || !userScrolledUpRef.current) {
+                        if (isAtBottom) {
                             return 'auto';
                         }
                         return false;
@@ -1377,7 +1533,7 @@ export default function ChatPanel({
                         userScrolledUpRef.current = !atBottom;
                     }}
                     startReached={() => {
-                        if (canLoadOlder && !isLoadingOlderMessages) {
+                        if (canLoadOlder && !isLoadingOlderMessages && !isFetchingHistoryRef.current) {
                             tryLoadOlder();
                         }
                     }}
@@ -1388,10 +1544,11 @@ export default function ChatPanel({
                                 <span>Carregando mensagens anteriores...</span>
                             </div>
                         ) : null,
-                        Footer: () => <div className="h-4" /> // Spacing at bottom
+                        Footer: () => <div className="h-4" />
                     }}
                     itemContent={(index, message) => {
-                        const prevMessage = index > 0 ? visibleMessages[index - 1] : undefined;
+                        const arrayIndex = index - firstItemIndex;
+                        const prevMessage = arrayIndex > 0 ? visibleMessages[arrayIndex - 1] : undefined;
                         return (
                             <div className="px-2 md:px-6 py-0.5">
                                 <MessageItem
@@ -1403,6 +1560,7 @@ export default function ChatPanel({
                                     currentUserId={currentUser.id}
                                     instanceName={chat.instance_name}
                                     onForward={handleForwardMessage}
+                                    onRetry={handleRetryMessage}
                                 />
                             </div>
                         );
@@ -1601,7 +1759,7 @@ export default function ChatPanel({
                                             </div>
                                         ) : (
                                             <div className="animate-in zoom-in duration-300">
-                                                <SendMessageButton disabled={isAiTyping || sendState === 'sending'} />
+                                                <SendMessageButton disabled={isAiTyping || (sendState === 'sending' && mediaFiles.length > 0)} />
                                             </div>
                                         )}
                                     </div>
@@ -1619,6 +1777,12 @@ export default function ChatPanel({
                                     <Button variant="link" size="sm" className="px-1 h-auto text-red-200" onClick={handleFormSubmit}>
                                         Reenviar
                                     </Button>
+                                </div>
+                            )}
+                            {textSendQueueCount > 0 && (
+                                <div className="text-xs text-muted-foreground flex items-center gap-2 pl-1">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span>Fila de envio: {textSendQueueCount} mensagem{textSendQueueCount > 1 ? 's' : ''}</span>
                                 </div>
                             )}
 
