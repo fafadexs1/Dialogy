@@ -49,6 +49,10 @@ export async function updateSession(request: NextRequest, requestHeaders?: Heade
 
   // Refresh only when the token is close to expiring to avoid hammering /auth/v1/user.
   const accessToken = getSupabaseAccessTokenFromCookies(request.cookies);
+  if (!accessToken) {
+    return response;
+  }
+
   const decoded = await decodeSupabaseJwt(accessToken);
   const now = Date.now();
   const refreshBufferMs = 5 * 60 * 1000; // 5 minutes

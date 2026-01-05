@@ -661,6 +661,55 @@ type MessageRow = {
     team_color?: string | null;
 };
 
+export const loadOlderChatsAction = withDebug(
+    'load_older_chats',
+    async function loadOlderChatsAction(
+        workspaceId: string,
+        before: string,
+        statuses: Chat['status'][] = ['gerais', 'atendimentos'],
+        ownership: 'mine' | 'everyone' = 'mine'
+    ): Promise<{ success: boolean; chats?: Chat[]; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { success: false, error: "Usuário não autenticado." };
+        }
+
+        try {
+            const userId = user.id;
+            const limit = 20;
+
+            const rows = await fetchChats({
+                workspaceId,
+                userId,
+                limit,
+                includeChatId: null,
+                before,
+                ownership,
+                statuses
+            });
+
+            if (rows.length === 0) {
+                return { success: true, chats: [] };
+            }
+
+            const timezone = await getWorkspaceTimezone(workspaceId);
+            const { chats } = await hydrateChats(rows, timezone);
+
+            return { success: true, chats };
+
+        } catch (error) {
+            console.error("Erro ao carregar chats antigos:", error);
+            reportServerError((error as Error).message, 'load_older_chats');
+            return { success: false, error: "Falha ao carregar mais conversas." };
+        }
+    },
+    {
+        contextResolver: (workspaceId, before) => ({ payload: { workspaceId, before } })
+    }
+);
+
 async function fetchChats({
     workspaceId,
     userId,

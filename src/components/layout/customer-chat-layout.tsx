@@ -9,7 +9,7 @@ import ContactPanel from '../chat/contact-panel';
 import { CommandPalette } from '../chat/command-palette';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
-import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow, loadOlderChatsAction } from '@/actions/chats';
 import type { InitialChatsPayload } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
@@ -185,6 +185,7 @@ export default function CustomerChatLayout({
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMoreChats, setIsLoadingMoreChats] = useState(false); // New state for loading more chats
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
@@ -213,6 +214,9 @@ export default function CustomerChatLayout({
   const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
   const incrementUnread = useInboxStore((state) => state.incrementUnread);
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+  const appendChats = useInboxStore((state) => state.appendChats);
+  const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
+  const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
 
   const handleBoundaryError = useCallback((error: Error) => {
     console.error('[INBOX_UI_ERROR]', error);
@@ -453,6 +457,7 @@ export default function CustomerChatLayout({
 
     tryPlay().catch(async (e) => {
       console.error('[NOTIFICATION] Error playing notification sound (ref):', e);
+      // Suppress NotAllowedError spam, it's expected if user hasn't interacted
       if (e?.name === 'NotAllowedError' && !audioUnlockRequestedRef.current) {
         setNeedsAudioUnlock(true);
         audioUnlockRequestedRef.current = true;
@@ -463,37 +468,16 @@ export default function CustomerChatLayout({
         fallback.volume = 1;
         await fallback.play();
         console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
-      } catch (fallbackError) {
-        console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
+      } catch (fallbackError: any) {
+        // Only log fallback error if it's not another autoplay block
+        if (fallbackError?.name !== 'NotAllowedError') {
+          console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
+        }
       }
     });
   }, []);
 
-  useEffect(() => {
-    if (!unreadWatchInitializedRef.current) {
-      unreadCountsRef.current = Object.fromEntries(chats.map((c) => [c.id, c.unreadCount || 0]));
-      unreadWatchInitializedRef.current = true;
-      return;
-    }
-
-    chats.forEach((chat) => {
-      const prev = unreadCountsRef.current[chat.id] ?? 0;
-      const current = chat.unreadCount || 0;
-      if (current > prev) {
-        if (chat.status === 'gerais') {
-          console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
-          playNotificationSound('queue');
-        } else if (chat.status === 'atendimentos') {
-          // Only play attending sound if the chat belongs to the current user
-          if (chat.agent?.id === initialUser?.id) {
-            console.log('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
-            playNotificationSound('attending');
-          }
-        }
-      }
-      unreadCountsRef.current[chat.id] = current;
-    });
-  }, [chats, playNotificationSound]);
+  // REDUNDANT useEffect REMOVED HERE used to watch unreadCountsRef
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -517,7 +501,7 @@ export default function CustomerChatLayout({
       message.from_me = rawMessage.sender_user_id === initialUser.id;
     }
 
-    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
+    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me, 'Event:', payload.eventType);
 
     const snapshot = useInboxStore.getState();
     const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
@@ -526,17 +510,15 @@ export default function CustomerChatLayout({
     const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
     const currentSelectedChatId = snapshot.selectedChatId;
 
+    // Always update the data store
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
+
     if (message.sentByTab && message.sentByTab === tabIdRef.current) {
       // Only remove optimistic messages that have temporary IDs (start with 'optimistic-')
-      // Text messages now use UUIDs and share the same ID as the real message, so they are handled by dedupeMessages.
-      // We don't want to remove other pending text messages (UUIDs) just because one message arrived.
       removeMessagesForChat(message.chat_id, (m) => !!m.optimistic && m.sentByTab === message.sentByTab && m.id.startsWith('optimistic-'));
     }
 
     // Optimistic update for read receipts:
-    // If we receive a message update where api_message_status is READ and it's from us,
-    // we assume all previous messages are also read.
     if (message.from_me && message.api_message_status === 'READ') {
       snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
@@ -545,7 +527,8 @@ export default function CustomerChatLayout({
       runDeltaSyncRef.current();
     }
 
-    if (!message.from_me) {
+    // Notification Logic: strict check for INSERT event
+    if (payload.eventType === 'INSERT' && !message.from_me) {
       const shouldTrackUnread = message.chat_id !== currentSelectedChatId && (isQueueMessage || isOwnAttending || !messageChat);
       if (shouldTrackUnread) {
         incrementUnread(message.chat_id);
@@ -648,6 +631,65 @@ export default function CustomerChatLayout({
       await loadChatMessages(chatId);
     }
   }, [loadChatMessages]);
+
+  const handleLoadMoreChats = useCallback(async (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => {
+    if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
+
+    const state = useInboxStore.getState();
+    const currentChats = state.chats;
+    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine' } = options || {};
+
+    // Filter logic to find the LAST chat that is visible in the current view
+    // This is critical because 'currentChats' contains ALL chats (mixed statuses)
+    // We need the timestamp of the last chat *in the filtered list* to properly page
+    const filteredChats = currentChats.filter(chat => {
+      // 1. Status Check
+      const matchesStatus = statuses.includes(chat.status);
+      if (!matchesStatus) return false;
+
+      // 2. Ownership Check
+      const chatAgentId = chat.agent?.id || chat.agentId;
+      const matchesOwner =
+        ownership === 'everyone' ||
+        chatAgentId === initialUser.id ||
+        chat.status === 'gerais'; // Gerais always visible if status matches
+
+      return matchesOwner;
+    });
+
+    if (filteredChats.length === 0) return;
+
+    const lastChat = filteredChats[filteredChats.length - 1];
+    if (!lastChat.updatedAt) return;
+
+    setIsLoadingMoreChats(true);
+    try {
+      const result = await loadOlderChatsAction(
+        initialUser.activeWorkspaceId,
+        lastChat.updatedAt,
+        statuses,
+        ownership
+      );
+
+      if (result.success && result.chats) {
+        if (result.chats.length === 0) {
+          // If the server returns empty for this filter, it implies we reached the end *for this view*.
+          // However, global 'hasMoreChats' might still be true for other views.
+          // We don't setHasMoreChats(false) globally here to avoid breaking other tabs.
+        } else {
+          appendChats(result.chats);
+        }
+      } else {
+        if (result.error) {
+          console.error('[LOAD_MORE_CHATS] Error:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('[LOAD_MORE_CHATS] Exception:', error);
+    } finally {
+      setIsLoadingMoreChats(false);
+    }
+  }, [isLoadingMoreChats, hasMoreChats, initialUser, appendChats]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
     if (!chat) {
@@ -1269,6 +1311,9 @@ export default function CustomerChatLayout({
               onConfirmForward={handleConfirmForward}
               onCancelForward={handleCancelForward}
               onPrefetch={prefetchChat}
+              loadMore={handleLoadMoreChats}
+              hasMore={hasMoreChats}
+              isLoadingMore={isLoadingMoreChats}
             />
           </ErrorBoundary>
           <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>

@@ -80,6 +80,47 @@ export function useRealtimeSubscriptions(options: {
             statusHandlers.add(statusHandler);
         }
 
+        const handleChatStatusChange = (status: string) => {
+            console.info(`[REALTIME-GLOBAL] Chats channel status: ${status}`);
+            statusHandlers.forEach((handler) => handler(status, 'chats'));
+
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                console.warn(`[REALTIME-GLOBAL] Chats channel encountered fatal error: ${status}. Attempting to reconnect...`);
+                // Force cleanup to trigger re-creation on next effect run or immediately if possible
+                // For global singleton pattern, we might need a more aggressive reset
+
+                // Teardown immediately
+                if (globalChannels.chats) {
+                    teardownChannel(supabase, globalChannels.chats);
+                    globalChannels.chats = null;
+                    globalChannels.chatsWorkspaceId = null;
+                }
+
+                // We rely on the component re-mounting or the effect re-running to re-subscribe.
+                // However, without a state change, the effect might not re-run.
+                // A specialized reconnection manager might be better, but for now, 
+                // simply nulling it out will force the *next* mounter to create it.
+                // But for the *current* active session, we need to recover.
+
+                // Simple recovery: Retry subscription after delay
+                setTimeout(() => {
+                    if (globalChannels.chats) return; // Already recovered?
+                    console.info('[REALTIME-GLOBAL] Reconnecting chats channel...');
+
+                    globalChannels.chats = subscribeToWorkspaceChatUpdates({
+                        client: supabase,
+                        workspaceId,
+                        onChatUpdate: (payload) => {
+                            console.log('[REALTIME-GLOBAL] Chat update received:', payload);
+                            chatHandlers.forEach((handler) => handler(payload));
+                        },
+                        onStatusChange: handleChatStatusChange,
+                    });
+                    globalChannels.chatsWorkspaceId = workspaceId;
+                }, 1000);
+            }
+        };
+
         // Only create channel if it doesn't exist or workspace changed
         if (globalChannels.chatsWorkspaceId !== workspaceId || !globalChannels.chats) {
             // Cleanup old channel if workspace changed
@@ -98,10 +139,7 @@ export function useRealtimeSubscriptions(options: {
                     console.log('[REALTIME-GLOBAL] Chat update received:', payload);
                     chatHandlers.forEach((handler) => handler(payload));
                 },
-                onStatusChange: (status) => {
-                    console.info(`[REALTIME-GLOBAL] Chats channel status: ${status}`);
-                    statusHandlers.forEach((handler) => handler(status, 'chats'));
-                },
+                onStatusChange: handleChatStatusChange,
             });
 
             globalChannels.chatsWorkspaceId = workspaceId;
@@ -138,6 +176,38 @@ export function useRealtimeSubscriptions(options: {
             messageHandlers.add(messageHandler);
         }
 
+        const handleMessageStatusChange = (status: string) => {
+            console.info(`[REALTIME-GLOBAL] Messages channel status: ${status}`);
+            statusHandlers.forEach((handler) => handler(status, 'messages'));
+
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                console.warn(`[REALTIME-GLOBAL] Messages channel encountered fatal error: ${status}. Attempting to reconnect...`);
+
+                if (globalChannels.messages) {
+                    teardownChannel(supabase, globalChannels.messages);
+                    globalChannels.messages = null;
+                    globalChannels.messagesChatId = null;
+                }
+
+                setTimeout(() => {
+                    if (globalChannels.messages) return;
+                    console.info('[REALTIME-GLOBAL] Reconnecting messages channel...');
+
+                    globalChannels.messages = subscribeToChatMessages({
+                        client: supabase,
+                        workspaceId,
+                        chatId: 'all',
+                        onMessage: (payload) => {
+                            console.log('[REALTIME-GLOBAL] Message received (Reconnected):', payload);
+                            messageHandlers.forEach((handler) => handler(payload));
+                        },
+                        onStatusChange: handleMessageStatusChange,
+                    });
+                    globalChannels.messagesChatId = workspaceId;
+                }, 1000);
+            }
+        };
+
         // Only create channel if it doesn't exist or workspace changed
         if (globalChannels.messagesChatId !== workspaceId || !globalChannels.messages) {
             // Cleanup old channel if workspace changed
@@ -158,10 +228,7 @@ export function useRealtimeSubscriptions(options: {
                     console.log('[REALTIME-GLOBAL] Message received:', payload);
                     messageHandlers.forEach((handler) => handler(payload));
                 },
-                onStatusChange: (status) => {
-                    console.info(`[REALTIME-GLOBAL] Messages channel status: ${status}`);
-                    statusHandlers.forEach((handler) => handler(status, 'messages'));
-                },
+                onStatusChange: handleMessageStatusChange,
             });
 
             globalChannels.messagesChatId = workspaceId; // Use workspaceId as key

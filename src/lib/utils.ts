@@ -19,6 +19,16 @@ export function formatMessageDate(date: Date, timezone: string): string {
   return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });
 }
 
+export function formatMessageTime(date: Date | string, timezone: string = 'America/Sao_Paulo'): string {
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    const zonedDate = toZonedTime(d, timezone);
+    return formatDate(zonedDate, "HH:mm");
+  } catch (e) {
+    return typeof date === 'string' ? date : '';
+  }
+}
+
 export function buildChatProtocol(chatId: string): string {
   if (!chatId) return '';
   const cleaned = chatId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();

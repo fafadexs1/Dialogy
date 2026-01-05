@@ -547,28 +547,31 @@ export default function ChatPanel({
     const visibleMessages = messagesToRender;
 
     // First Item Index Strategy for Bidirectional Scrolling/Prepend
-    const [firstItemIndex, setFirstItemIndex] = useState(10000);
+    // We use a Ref to track index and update it SYNCHRONOUSLY during render to avoid jumps.
+    const START_INDEX = 10000;
+    const firstItemIndexRef = useRef(START_INDEX);
     const prevMessagesLengthRef = useRef(visibleMessages.length);
+    const prevChatIdRef = useRef(chat?.id);
 
-    // Reset when chat changes
-    useEffect(() => {
-        setFirstItemIndex(10000);
+    // Reset when chat changes (during render to be ready for first paint)
+    if (chat?.id !== prevChatIdRef.current) {
+        firstItemIndexRef.current = START_INDEX;
         prevMessagesLengthRef.current = visibleMessages.length;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [chat?.id]);
+        prevChatIdRef.current = chat?.id;
+    }
 
-    // Detect prepend
-    useLayoutEffect(() => {
-        const currentLen = visibleMessages.length;
-        const prevLen = prevMessagesLengthRef.current;
-        // Check if length increased AND we are fetching history (prepend scenario)
-        if (currentLen > prevLen && isFetchingHistoryRef.current) {
-            const diff = currentLen - prevLen;
-            console.log('[VIRTUOSO] Prepend detected:', diff, 'items. Adjusting firstItemIndex.');
-            setFirstItemIndex((prev) => prev - diff);
-        }
-        prevMessagesLengthRef.current = currentLen;
-    }, [visibleMessages, isFetchingHistoryRef]);
+    // Detect prepend during render
+    const currentLen = visibleMessages.length;
+    const prevLen = prevMessagesLengthRef.current;
+
+    // Check if length increased AND we are fetching history (prepend scenario)
+    // We also check if we are NOT switching chats (index reset handles that)
+    if (currentLen > prevLen && isFetchingHistoryRef.current) {
+        const diff = currentLen - prevLen;
+        console.log('[VIRTUOSO] Prepend detected (sync):', diff, 'Adjusting firstItemIndex.');
+        firstItemIndexRef.current -= diff;
+    }
+    prevMessagesLengthRef.current = currentLen;
 
     const startIndex = 0;
     const padTop = 0;
@@ -1519,8 +1522,8 @@ export default function ChatPanel({
                     ref={virtuosoRef}
                     style={{ height: '100%', width: '100%' }}
                     data={visibleMessages}
-                    firstItemIndex={firstItemIndex}
-                    initialTopMostItemIndex={firstItemIndex + visibleMessages.length - 1}
+                    firstItemIndex={firstItemIndexRef.current}
+                    initialTopMostItemIndex={firstItemIndexRef.current + visibleMessages.length - 1}
                     increaseViewportBy={500}
                     alignToBottom={true}
                     followOutput={(isAtBottom) => {
@@ -1547,7 +1550,7 @@ export default function ChatPanel({
                         Footer: () => <div className="h-4" />
                     }}
                     itemContent={(index, message) => {
-                        const arrayIndex = index - firstItemIndex;
+                        const arrayIndex = index - firstItemIndexRef.current;
                         const prevMessage = arrayIndex > 0 ? visibleMessages[arrayIndex - 1] : undefined;
                         return (
                             <div className="px-2 md:px-6 py-0.5">

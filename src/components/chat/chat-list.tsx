@@ -4,7 +4,11 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { cn, formatMessageTime } from '@/lib/utils';
+import { Virtuoso } from 'react-virtuoso';
+import { useInboxStore } from '@/hooks/use-inbox-store';
+import { getInitialChatsData } from '@/actions/chats';
+import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -760,7 +764,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             )}
             {lastMessage && (
               <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
-                {lastMessage.timestamp}
+                {formatMessageTime(lastMessage.timestamp || lastMessage.createdAt, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
               </p>
             )}
           </div>
@@ -846,21 +850,13 @@ interface ChatListProps {
   onCancelForward?: () => void;
   onPrefetch?: (chatId: string) => void;
   className?: string;
+  loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
-import { Virtuoso } from 'react-virtuoso';
-import { useInboxStore } from '@/hooks/use-inbox-store';
-import { loadMoreChatsAction, getInitialChatsData } from '@/actions/chats';
 
-// ... existing imports ...
-
-// ... existing components ...
-
-import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
-
-// ... existing imports ...
-
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -872,7 +868,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [showMarketing, setShowMarketing] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
   const [snoozedUntilMap, setSnoozedUntilMap] = useState<Record<string, number>>({});
 
@@ -889,7 +884,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
-  // const debouncedSearch = useDebouncedValue(searchQuery, 220); // Removed, replaced by debouncedSearchTerm
 
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
@@ -897,8 +891,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const toggleBulkMode = () => {
     setIsBulkMode(!isBulkMode);
     setSelectedBulkChats(new Set());
-    // If we're entering bulk mode, maybe we want to select the current filtered list?
-    // No, usually user selects manually.
   };
 
   const handleSnooze = (chatId: string) => {
@@ -926,18 +918,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   };
 
   const handleSelectAllBulk = () => {
-    // Select all visible chats in the current tab
-    // We can use filteredChats
     if (filteredChats.length === 0) return;
-
     const allIds = filteredChats.map(c => c.id);
     const allSelected = allIds.every(id => selectedBulkChats.has(id));
 
     if (allSelected) {
-      // Deselect all
       setSelectedBulkChats(new Set());
     } else {
-      // Select all
       setSelectedBulkChats(new Set(allIds));
     }
   };
@@ -949,23 +936,17 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     const chatIds = Array.from(selectedBulkChats);
     let successCount = 0;
 
-    // Process one by one on the client to avoid server timeouts on vast operations
     for (const chatId of chatIds) {
       try {
-        // We reuse the action but send one by one
         const result = await closeMultipleChatsAction([chatId], bulkMessage);
         if (result.success) {
           successCount++;
-          // Optional: We could update the UI here to remove the processed chat from the list or selection
-          // But since we want to be safe, we just wait for the end.
         }
       } catch (err) {
         console.error(`Falha ao encerrar chat ${chatId}`, err);
       }
     }
 
-    // Always finish "successfully" regarding the UI flow, 
-    // reporting how many were actually closed if needed.
     if (successCount > 0) {
       toast({ title: `Concluído`, description: `${successCount} atendimentos foram encerrados.` });
       setIsBulkDialogOpen(false);
@@ -986,20 +967,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const confirmAssignChat = async () => {
     if (!chatToAssign) return;
-
-    // Call unguarded or guarded? The component calls guarded usually.
-    // guardedAssignChat logic passes through the result from assignChatToSelfAction
     const result = await guardedAssignChat(chatToAssign.id);
 
     if (result.success) {
       toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact.name} agora está com você.` });
-
-      // If we got the full chat back (with updated colors/tags/status), update the store immediately
-      // This prevents the "transparent tag" glitch while waiting for realtime/refresh
       if ((result as any).chat) {
         useInboxStore.getState().upsertChats([(result as any).chat]);
       }
-
       onUpdate();
     } else {
       toast({ title: 'Não foi possível assumir', description: result.error || 'Erro desconhecido', variant: 'destructive' });
@@ -1008,29 +982,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   };
 
   const selectedChatIdRef = React.useRef(selectedChat?.id);
-  const lastSelectedStatusRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChat?.id;
   }, [selectedChat?.id]);
-
-  // Effect removed to prevent auto-navigation
-  // useEffect(() => {
-  //   const status = selectedChat?.status;
-  //   if (!status) {
-  //     lastSelectedStatusRef.current = null;
-  //     return;
-  //   }
-
-  //   const statusChanged = lastSelectedStatusRef.current !== status;
-  //   const isKnownTab = status === 'gerais' || status === 'atendimentos' || status === 'encerrados';
-
-  //   if (statusChanged && isKnownTab && activeTab !== status) {
-  //     setActiveTab(status);
-  //   }
-
-  //   lastSelectedStatusRef.current = status;
-  // }, [activeTab, selectedChat?.status]);
 
   useEffect(() => {
     if (isFirstRun.current) {
@@ -1116,13 +1071,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
 
       const chatAgentId = chat.agent?.id || chat.agentId;
-      // Client-side ownership filter is now redundant if server filters correctly, 
-      // but we keep it for safety or if mixed data is present.
-      // Actually, if we fetch 'everyone', we might want to filter 'mine' on client?
-      // No, if we fetch 'everyone', we want to see everyone.
-      // If we fetch 'mine', we want to see mine.
-      // So this filter should match the server state.
-
       const matchesOwner =
         ownershipFilter === 'everyone' ||
         chatAgentId === currentUser.id ||
@@ -1133,8 +1081,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const snoozedUntil = snoozedUntilMap[chat.id];
       const matchesSnooze = !snoozedUntil || snoozedUntil <= now;
 
-      // Search Logic
-      const query = debouncedSearchTerm.toLowerCase(); // Changed to debouncedSearchTerm
+      const query = debouncedSearchTerm.toLowerCase();
       const protocol = chat.protocol || buildChatProtocol(chat.id);
       const matchesSearch =
         !query ||
@@ -1146,45 +1093,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap] // Changed to debouncedSearchTerm
+    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap]
   );
 
   const filteredChats = useMemo(() => {
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
-
-  const handleLoadMore = async () => {
-    if (isLoadingMore || !currentUser.activeWorkspaceId) return;
-    setIsLoadingMore(true);
-
-    let oldestDate: string | null = null;
-    if (chats.length > 0) {
-      const dates = chats.map(c => c.updatedAt ? new Date(c.updatedAt).getTime() : 0).filter(t => t > 0);
-      if (dates.length > 0) {
-        const minDate = Math.min(...dates);
-        oldestDate = new Date(minDate).toISOString();
-      }
-    }
-
-    if (!oldestDate) {
-      setIsLoadingMore(false);
-      return;
-    }
-
-    const result = await loadMoreChatsAction({
-      workspaceId: currentUser.activeWorkspaceId,
-      limit: 20,
-      before: oldestDate,
-      ownership: ownershipFilter
-    });
-
-    if (result.chats) {
-      appendChats(result.chats);
-      setHasMoreChats(result.hasMoreChats);
-    }
-
-    setIsLoadingMore(false);
-  };
 
   return (
     <div
@@ -1194,7 +1108,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         className
       )}
     >
-      {/* Header */}
       <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border dark:border-white/10 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
@@ -1245,7 +1158,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     </div>
                   </RadioGroup>
                 </div>
-
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1272,7 +1184,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               </PopoverContent>
             </Popover>
 
-            {/* Bulk Mode Toggle - Only in 'atendimentos' tab usually, but user might want it generally */}
             {activeTab === 'atendimentos' && !isForwarding && (
               <TooltipProvider>
                 <Tooltip>
@@ -1312,11 +1223,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <Input
             placeholder="Pesquisar por nome, telefone ou mensagem..."
             className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
-            value={searchTerm} // Changed to searchTerm
-            onChange={(e) => setSearchTerm(e.target.value)} // Changed to setSearchTerm
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             aria-label="Pesquisar conversas"
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && searchTerm.trim()) { // Changed to searchTerm
+              if (e.key === 'Enter' && searchTerm.trim()) {
                 e.preventDefault();
                 e.stopPropagation();
                 setIsSearchDialogOpen(true);
@@ -1329,13 +1240,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       <SearchDetailsDialog
         isOpen={isSearchDialogOpen}
         onOpenChange={setIsSearchDialogOpen}
-        searchQuery={searchTerm} // Changed to searchTerm
+        searchQuery={searchTerm}
         chats={chats}
         workspaceId={currentUser.activeWorkspaceId}
         onSelectChat={setSelectedChat}
       />
 
-      {/* Online agents */}
       <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/30 dark:bg-black dark:border-white/10">
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
           Agentes Online ({onlineAgents.length})
@@ -1402,12 +1312,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         <span className="text-muted-foreground">Equipe</span>
                         <span className="font-medium text-foreground">{agent.user.team || 'Geral'}</span>
                       </div>
-
                       <Button
                         size="sm"
                         className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white font-medium"
                         onClick={() => {
-                          // Close hover card by clicking body or something, but mainly trigger action
                           setSelectedAgent(agent.user);
                         }}
                       >
@@ -1420,9 +1328,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               ))
             )}
             {onlineAgents.length === 0 && (
-              // This case only happens if we are sure nobody is online, but skeleton handles "loading" effectively.
-              // We might want a "no agents" state if we are done loading.
-              // For now, let's keep the skeleton logic as "loading" or empty state.
               <p className="text-xs text-muted-foreground italic sr-only">Nenhum agente online</p>
             )}
           </div>
@@ -1436,7 +1341,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         isOnline={true}
       />
 
-      {/* Tabs */}
       <div className="p-3 xl:p-4 flex-shrink-0 border-b border-border dark:border-white/10">
         <div className="flex items-center bg-muted/50 rounded-lg p-1 border border-border dark:bg-black/40 dark:border-white/5">
           {TABS.map((tab) => {
@@ -1471,58 +1375,54 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
       </div>
 
-      {/* Bulk Action Bar */}
-      {
-        isBulkMode && (
-          <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
-            <div className="flex items-center gap-2 px-2">
-              <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
-              <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
-                {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
-              </Button>
-            </div>
-            <div className="flex items-center gap-1">
-              <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
-                    Encerrar
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
-                    <DialogDescription className="text-muted-foreground">
-                      Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
-                    <Textarea
-                      id="bulk-message"
-                      placeholder="Ex: Agradecemos o contato!"
-                      className="bg-muted/50 border-border text-foreground min-h-[100px]"
-                      value={bulkMessage}
-                      onChange={(e) => setBulkMessage(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
-                    </p>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
-                    <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
-                      {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Confirmar Encerramento
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
+      {isBulkMode && (
+        <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 px-2">
+            <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
+            <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
+              {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
+            </Button>
           </div>
-        )
-      }
+          <div className="flex items-center gap-1">
+            <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
+                  Encerrar
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
+                  <DialogDescription className="text-muted-foreground">
+                    Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
+                  <Textarea
+                    id="bulk-message"
+                    placeholder="Ex: Agradecemos o contato!"
+                    className="bg-muted/50 border-border text-foreground min-h-[100px]"
+                    value={bulkMessage}
+                    onChange={(e) => setBulkMessage(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
+                  </p>
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
+                  <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                    {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Confirmar Encerramento
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+      )}
 
-      {/* Chat list */}
       <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
         {filteredChats.length > 0 ? (
           <>
@@ -1554,20 +1454,36 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </div>
               )}
               endReached={() => {
-                if (hasMoreChats && activeTab === 'encerrados' && !isLoadingMore) {
-                  handleLoadMore();
+                if (hasMore && loadMore && !isLoadingMore) {
+                  let statuses: Chat['status'][] = ['gerais', 'atendimentos'];
+                  if (activeTab === 'gerais') statuses = ['gerais'];
+                  if (activeTab === 'atendimentos') statuses = ['atendimentos'];
+                  if (activeTab === 'encerrados') statuses = ['encerrados'];
+
+                  loadMore({
+                    statuses,
+                    ownership: ownershipFilter
+                  });
                 }
               }}
               components={{
                 Footer: () => {
                   return (
                     <>
-                      {hasMoreChats && activeTab === 'encerrados' && (
+                      {hasMore && (
                         <div className="p-2 flex justify-center">
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={handleLoadMore}
+                            onClick={() => {
+                              if (loadMore && !isLoadingMore) {
+                                let statuses: Chat['status'][] = ['gerais', 'atendimentos'];
+                                if (activeTab === 'gerais') statuses = ['gerais'];
+                                if (activeTab === 'atendimentos') statuses = ['atendimentos'];
+                                if (activeTab === 'encerrados') statuses = ['encerrados'];
+                                loadMore({ statuses, ownership: ownershipFilter });
+                              }
+                            }}
                             disabled={isLoadingMore}
                             className="text-muted-foreground hover:text-foreground"
                           >
@@ -1624,36 +1540,32 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         )}
       </div>
 
-      {/* Forwarding Footer */}
-      {
-        isForwarding && (
-          <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-foreground font-medium">
-                {selectedForwardingChatIds?.size || 0} selecionados
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
-                onClick={onCancelForward}
-              >
-                Cancelar
-              </Button>
-              <Button
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
-                onClick={onConfirmForward}
-                disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
-              >
-                Encaminhar
-              </Button>
-            </div>
+      {isForwarding && (
+        <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-foreground font-medium">
+              {selectedForwardingChatIds?.size || 0} selecionados
+            </span>
           </div>
-        )
-      }
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
+              onClick={onCancelForward}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
+              onClick={onConfirmForward}
+              disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
+            >
+              Encaminhar
+            </Button>
+          </div>
+        </div>
+      )}
 
-      {/* Assign Confirmation Dialog */}
       <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
         <AlertDialogContent className="bg-background border-border text-foreground">
           <AlertDialogHeader>
@@ -1672,4 +1584,4 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       </AlertDialog>
     </div >
   );
-};
+}
