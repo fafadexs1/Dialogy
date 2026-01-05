@@ -385,6 +385,11 @@ export default function MobileChatLayout({
   const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {
     const data = payload.new as any;
     if (!data) return null;
+
+    // [DEBUG] Inspect payload structure in production
+    // console.log('[REALTIME-DEBUG] mapRealtimePayload input data keys:', Object.keys(data));
+    // console.log('[REALTIME-DEBUG] mapRealtimePayload input data values:', JSON.stringify(data));
+
     try {
       let createdAt: Date;
       try {
@@ -415,13 +420,13 @@ export default function MobileChatLayout({
             type: 'user'
           } as const;
         } else if (data.sender_user_id === initialUser?.id && initialUser) {
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar || initialUser.avatar_url || undefined, type: 'user' } as const;
         } else if (chat?.agent && (!data.sender_user_id || data.sender_user_id === chat.agent.id)) {
           // If sender_id matches chat agent or is missing (legacy), use chat agent
-          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar_url ?? undefined, type: 'user' } as const;
+          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar || chat.agent.avatar_url || undefined, type: 'user' } as const;
         } else if (initialUser) {
           // Fallback to current user if nothing else matches (e.g. optimistic without ID persistence yet)
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar_url ?? undefined, type: 'user' } as const;
+          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar || initialUser.avatar_url || undefined, type: 'user' } as const;
         }
       } else if (chat?.contact) {
         sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url ?? undefined, type: 'contact' } as const;

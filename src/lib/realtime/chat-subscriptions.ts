@@ -50,7 +50,13 @@ export function subscribeToChatMessages({
         onMessage(payload);
       },
     )
-    .subscribe(onStatusChange);
+    .subscribe((status, err) => {
+      console.log(`[REALTIME-DEBUG] Subscription status for message channel: ${status}`, err ? err : '');
+      if (err) {
+        console.error('[REALTIME-DEBUG] Subscription ERROR:', err);
+      }
+      if (onStatusChange) onStatusChange(status);
+    });
 }
 
 export function subscribeToWorkspaceChatUpdates({
@@ -76,7 +82,13 @@ export function subscribeToWorkspaceChatUpdates({
         onChatUpdate(payload);
       },
     )
-    .subscribe(onStatusChange);
+    .subscribe((status, err) => {
+      console.log(`[REALTIME-DEBUG-CHATS] Subscription status for chats channel: ${status}`, err ? err : '');
+      if (err) {
+        console.error('[REALTIME-DEBUG-CHATS] Subscription ERROR:', err);
+      }
+      if (onStatusChange) onStatusChange(status);
+    });
 }
 
 export function teardownChannel(client: SupabaseLike, channel: RealtimeChannel | null) {

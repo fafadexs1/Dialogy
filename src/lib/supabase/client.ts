@@ -13,11 +13,24 @@ let client: SupabaseClient | undefined;
  */
 export function createClient(): SupabaseClient {
   if (!client) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    // [DEBUG] Log environment variable status (safely)
+    if (typeof window !== 'undefined') {
+      console.log('[SUPABASE-DEBUG] Initializing client...');
+      console.log(`[SUPABASE-DEBUG] URL available: ${!!url}`);
+      console.log(`[SUPABASE-DEBUG] Key available: ${!!key}`);
+      if (!url || !key) {
+        console.error('[SUPABASE-DEBUG] CRITICAL: Supabase URL or Key is MISSING in environment variables!');
+      }
+    }
+
     // If the client doesn't exist, create it.
     // Note: Keep realtime config minimal to avoid connection issues
     client = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      url!,
+      key!,
       {
         realtime: {
           params: {
