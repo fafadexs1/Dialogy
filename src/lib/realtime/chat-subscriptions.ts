@@ -42,16 +42,15 @@ export function subscribeToChatMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
-        // filter: `chat_id=eq.${chatId}`, // FILTER DISABLED: Blocking realtime updates
+        filter: chatId === 'all' ? `workspace_id=eq.${workspaceId}` : `chat_id=eq.${chatId}`,
       },
       (payload) => {
-        console.log('[REALTIME-DEBUG] Message payload (Filter Disabled):', payload);
-        console.log('[REALTIME-DEBUG] Expected Chat ID was:', chatId);
+        // console.log('[REALTIME-DEBUG] Message payload (Filter Enabled):', payload);
         onMessage(payload);
       },
     )
     .subscribe((status, err) => {
-      console.log(`[REALTIME-DEBUG] Subscription status for message channel: ${status}`, err ? err : '');
+      console.log(`[REALTIME-DEBUG] Subscription status for message channel (${chatId === 'all' ? 'WORKSPACE' : 'CHAT'}): ${status}`, err ? err : '');
       if (err) {
         console.error('[REALTIME-DEBUG] Subscription ERROR:', err);
       }
@@ -74,11 +73,10 @@ export function subscribeToWorkspaceChatUpdates({
         event: '*', // Listen for INSERT, UPDATE, and DELETE
         schema: 'public',
         table: 'chats',
-        // filter: `workspace_id=eq.${workspaceId}`, // FILTER DISABLED: Blocking realtime updates
+        filter: `workspace_id=eq.${workspaceId}`,
       },
       (payload) => {
-        console.log('[REALTIME-DEBUG-CHATS] Chat update payload (NO FILTER):', payload);
-        console.log('[REALTIME-DEBUG-CHATS] Expected Workspace ID was:', workspaceId);
+        // console.log('[REALTIME-DEBUG-CHATS] Chat update payload (Filter Enabled):', payload);
         onChatUpdate(payload);
       },
     )

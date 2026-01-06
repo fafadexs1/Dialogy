@@ -248,6 +248,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           event: '*',
           schema: 'public',
           table: 'user_workspace_presence',
+          filter: `workspace_id=eq.${localUser.activeWorkspaceId}`,
         },
         (payload) => {
           const newData = payload.new as any;
