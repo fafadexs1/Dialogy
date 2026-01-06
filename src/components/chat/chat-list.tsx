@@ -564,7 +564,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       tabIndex={0}
       role="option"
       aria-selected={isSelected}
-      aria-label={`Conversa com ${chat.contact.name}${isSnoozed ? ' adiada' : ''}`}
+      aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}${isSnoozed ? ' adiada' : ''}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
         <div className="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-full shadow-glow-primary"></div>
@@ -603,8 +603,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         layoutId={`avatar-morph-${chat.id}`}
       >
         <Avatar className="h-12 w-12 md:h-10 md:w-10 border border-border">
-          <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-          <AvatarFallback className="bg-muted text-muted-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
+          <AvatarImage src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
+          <AvatarFallback className="bg-muted text-muted-foreground">{(chat.contact?.name || '?').charAt(0)}</AvatarFallback>
         </Avatar>
         {(() => {
           const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
@@ -620,7 +620,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           const isWhatsapp = platformSources.some(s => s.includes('whatsapp') || s.includes('baileys') || s.includes('wa_cloud'));
 
           // Heuristic: "Meta User" usually implies Messenger/Facebook if not explicitly Instagram
-          const isMetaUser = chat.contact.name.startsWith('Meta User');
+          const isMetaUser = chat.contact?.name?.startsWith('Meta User');
 
           let icon = <FaWhatsapp size={10} />;
           let bg = 'bg-green-500';
@@ -672,8 +672,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
-              <p className={cn("font-semibold truncate whitespace-nowrap max-w-[70%] md:max-w-[60%]", "text-base md:text-sm text-foreground")} title={chat.contact.name}>
-                {chat.contact.name}
+              <p className={cn("font-semibold truncate whitespace-nowrap max-w-[70%] md:max-w-[60%]", "text-base md:text-sm text-foreground")} title={chat.contact?.name}>
+                {chat.contact?.name || 'Carregando...'}
               </p>
               {chat.status === 'encerrados' && (
                 <Badge className={cn("text-[10px] border-0 px-1.5 py-0.5 flex-shrink-0", statusTone)}>

@@ -1071,6 +1071,20 @@ export default function CustomerChatLayout({
     if (payload.eventType === 'INSERT') {
       (optimisticUpdate as any).messages = [];
       optimisticUpdate.updatedAt = newChatData.updated_at || newChatData.created_at || new Date().toISOString();
+
+      // Ensure contact object exists to prevent UI crashes (accessing property 'name' of undefined)
+      if (!optimisticUpdate.contact && newChatData.contact_id) {
+        // Try to find contact in existing chats if possible, or create a safe placeholder
+        // Since we don't have access to a global contacts list here easily, we use a Safe Placeholder.
+        // It will be replaced by the full fetch in the next step immediately.
+        (optimisticUpdate as any).contact = {
+          id: newChatData.contact_id,
+          name: 'Novo Contato...',
+          workspace_id: initialUser?.activeWorkspaceId || '',
+          avatar_url: null,
+          phone: '',
+        };
+      }
     }
 
     useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);

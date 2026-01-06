@@ -1088,6 +1088,17 @@ export default function MobileChatLayout({
     if (payload.eventType === 'INSERT') {
       (optimisticUpdate as any).messages = [];
       optimisticUpdate.updatedAt = newChatData.updated_at || newChatData.created_at || new Date().toISOString();
+
+      // Ensure contact object exists to prevent UI crashes
+      if (!optimisticUpdate.contact && newChatData.contact_id) {
+        (optimisticUpdate as any).contact = {
+          id: newChatData.contact_id,
+          name: 'Novo Contato...',
+          workspace_id: initialUser?.activeWorkspaceId || '',
+          avatar_url: null,
+          phone: '',
+        };
+      }
     }
 
     useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
