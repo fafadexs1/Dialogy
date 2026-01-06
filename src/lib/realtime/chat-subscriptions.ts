@@ -42,15 +42,18 @@ export function subscribeToChatMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
-        filter: chatId === 'all' ? `workspace_id=eq.${workspaceId}` : `chat_id=eq.${chatId}`,
+        filter: chatId === 'all' ? undefined : `chat_id=eq.${chatId}`,
       },
       (payload) => {
-        // console.log('[REALTIME-DEBUG] Message payload (Filter Enabled):', payload);
+        // console.log('[REALTIME-DEBUG] Message payload:', payload);
         onMessage(payload);
       },
     )
     .subscribe((status, err) => {
       console.log(`[REALTIME-DEBUG] Subscription status for message channel (${chatId === 'all' ? 'WORKSPACE' : 'CHAT'}): ${status}`, err ? err : '');
+      if (chatId === 'all' && status === 'SUBSCRIBED') {
+        console.warn('[REALTIME-DEBUG] Global message subscription active without server-side filter. Relying on client-side chat association.');
+      }
       if (err) {
         console.error('[REALTIME-DEBUG] Subscription ERROR:', err);
       }

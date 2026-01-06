@@ -440,15 +440,16 @@ const isMarketingMessage = (message: Message) => {
 };
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign, onPrefetch }) => {
-  const isMarketingChat = chat.messages.some((m: any) => isMarketingMessage(m as Message));
+  const isMarketingChat = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
   const visibleMessages = React.useMemo(() => {
+    if (!chat.messages) return [];
     if (showMarketing) return chat.messages;
     return chat.messages.filter(m => !isMarketingMessage(m));
   }, [chat.messages, showMarketing]);
   const removeChat = useInboxStore(state => state.removeChat);
   const drafts = useInboxStore(state => state.drafts);
   const draft = drafts[chat.id];
-  const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages[chat.messages.length - 1];
+  const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages?.[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';

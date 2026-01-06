@@ -1087,6 +1087,11 @@ export default function CustomerChatLayout({
       }
     }
 
+    // CRITICAL: Ensure messages array exists for all events to prevent UI crashes if chat was previously removed
+    if (!(optimisticUpdate as any).messages) {
+      (optimisticUpdate as any).messages = [];
+    }
+
     useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
 
     // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
