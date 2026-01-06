@@ -76,17 +76,15 @@ export function CommandPalette() {
                         {chatsByStatus.attending.map((chat) => (
                             <CommandItem
                                 key={chat.id}
-                                value={`${chat.contact.name} ${chat.protocol} ${chat.messages[chat.messages.length - 1]?.content || ''}`}
+                                value={`${chat.contact?.name || 'Desconhecido'} ${chat.protocol || ''} ${chat.messages[chat.messages.length - 1]?.content || ''}`}
                                 onSelect={() => {
                                     runCommand(() => {
                                         setSelectedChatId(chat.id);
-                                        // Also navigate if needed (e.g. valid route)
-                                        // replaceChatPath(chat.id); // Assuming this helper handles logic, but store update is primary
                                     });
                                 }}
                             >
                                 <MessageSquare className="mr-2 h-4 w-4" />
-                                <span>{chat.contact.name}</span>
+                                <span>{chat.contact?.name || 'Desconhecido'}</span>
                                 <span className="ml-auto text-xs text-muted-foreground">
                                     {chat.updatedAt ? formatDistanceToNow(new Date(chat.updatedAt), { addSuffix: true, locale: ptBR }) : ''}
                                 </span>
@@ -98,11 +96,11 @@ export function CommandPalette() {
                         {chatsByStatus.queue.map((chat) => (
                             <CommandItem
                                 key={chat.id}
-                                value={`${chat.contact.name} ${chat.protocol}`}
+                                value={`${chat.contact?.name || 'Desconhecido'} ${chat.protocol || ''}`}
                                 onSelect={() => runCommand(() => setSelectedChatId(chat.id))}
                             >
                                 <User className="mr-2 h-4 w-4" />
-                                <span>{chat.contact.name}</span>
+                                <span>{chat.contact?.name || 'Desconhecido'}</span>
                                 <span className="ml-auto text-xs text-muted-foreground">
                                     {chat.updatedAt ? formatDistanceToNow(new Date(chat.updatedAt), { addSuffix: true, locale: ptBR }) : ''}
                                 </span>

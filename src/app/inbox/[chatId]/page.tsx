@@ -1,9 +1,11 @@
 
 'use server';
 
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import CustomerChatLayout from '@/components/layout/customer-chat-layout';
 import MobileChatLayout from '@/components/layout/mobile-chat-layout';
+import ResponsiveLayoutWrapper from '@/components/layout/responsive-layout-wrapper';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
@@ -24,16 +26,38 @@ export default async function InboxPage({ params }: InboxPageProps) {
     return <WorkspaceOnboarding user={user} />;
   }
 
+  // Detect Device
+  const headersList = await headers();
+  const userAgent = headersList.get('user-agent') || '';
+  const isMobile = /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+  const defaultLayout = isMobile ? 'mobile' : 'desktop';
+
   // Otherwise, show the main chat interface.
   // We pass the chatId from the URL to the layout component.
   return (
-    <>
-      <div className="hidden md:flex w-full h-full">
-        <CustomerChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
-      </div>
-      <div className="flex md:hidden w-full h-full">
-        <MobileChatLayout initialUser={user} chatId={chatId || null} initialData={initialData} />
-      </div>
-    </>
+    <ResponsiveLayoutWrapper
+      defaultLayout={defaultLayout}
+      desktopLayout={
+        <div className="flex w-full h-full">
+          <CustomerChatLayout
+            initialUser={user}
+            chatId={chatId || null}
+            initialData={initialData}
+          />
+        </div>
+      }
+      mobileLayout={
+        <div className="flex w-full h-full">
+          <MobileChatLayout
+            initialUser={user}
+            chatId={chatId || null}
+            initialData={initialData}
+          />
+        </div>
+      }
+    >
+      {/* Wrapper decides what to render */}
+      {null}
+    </ResponsiveLayoutWrapper>
   )
 }

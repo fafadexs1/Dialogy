@@ -527,7 +527,7 @@ async function handleMessagesUpsert(payload: any) {
         if (!contactData) throw new Error("Contact data is null despite rowCount > 0");
 
         let chatRes = await client.query(
-            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`, [workspaceId, contactData.id]
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactData.id]
         );
 
         let chat: Chat;
@@ -545,6 +545,7 @@ async function handleMessagesUpsert(payload: any) {
             chat = newChatRes.rows[0];
         }
         chat.contact = contactData;
+        console.log(`[WEBHOOK_MSG_UPSERT] Chat loaded - is_autopilot_active: ${chat.is_autopilot_active}, copilot_mode: ${(chat as any).copilot_mode}`);
 
         const messageResult = await client.query(
             `INSERT INTO messages (
@@ -599,7 +600,7 @@ async function handleMessagesUpsert(payload: any) {
             );
         }
 
-        Promise.all(postTransactionTasks).catch(err => {
+        await Promise.all(postTransactionTasks).catch(err => {
             console.error("[WEBHOOK_POST_TRANSACTION] Erro ao executar tarefas em paralelo:", err);
         });
     }

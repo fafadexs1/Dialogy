@@ -55,9 +55,11 @@ import {
     FileText,
     Brain,
     Contrast,
-    Languages
+    Languages,
+    Pencil
 } from 'lucide-react';
 import { uploadFileToStorage, deleteFileFromStorage } from '@/lib/supabase/storage';
+import { createClient } from '@/lib/supabase/client';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -70,7 +72,7 @@ import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
-import { getContactMessages, toggleChatAutopilot } from '@/actions/chats';
+import { getContactMessages, toggleChatAutopilot, updateChatCopilotModeAction } from '@/actions/chats';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
@@ -335,6 +337,9 @@ export default function ChatPanel({
     const [textSendQueueCount, setTextSendQueueCount] = useState(0);
     const retryingMessagesRef = useRef(new Set<string>());
 
+    // AI Copilot Suggestion State
+    const [aiSuggestion, setAiSuggestion] = useState<{ text: string; configName: string } | null>(null);
+
     // Virtualization refs/state removed
     // const messageHeightsRef = useRef<Map<string, number>>(new Map()); 
 
@@ -359,6 +364,7 @@ export default function ChatPanel({
     const appendMessagesToChat = useInboxStore((state) => state.appendMessagesToChat);
     const replaceOptimisticMessage = useInboxStore((state) => state.replaceOptimisticMessage);
     const updateMessage = useInboxStore((state) => state.updateMessage);
+    const messagesByChat = useInboxStore((state) => state.messagesByChat); // Connect to store messages
     const statusPollInFlightRef = useRef(false);
 
     useEffect(() => {
@@ -402,6 +408,14 @@ export default function ChatPanel({
         }
     };
 
+    const handleCopilotModeChange = async (mode: 'auto' | 'suggest') => {
+        if (chat) {
+            updateChat(chat.id, { copilot_mode: mode });
+            await updateChatCopilotModeAction(chat.id, mode);
+            toast({ title: `Modo alterado para ${mode === 'auto' ? 'Automático' : 'Sugestão'}` });
+        }
+    };
+
     const fetchAutopilotData = useCallback(async () => {
         if (!currentUser.activeWorkspaceId) return;
         const data = await getAutopilotConfig(currentUser.activeWorkspaceId);
@@ -430,7 +444,31 @@ export default function ChatPanel({
     useEffect(() => {
         setIsAiAgentActive(chat?.is_autopilot_active ?? false);
         autopilotSwitchTouchedRef.current = false;
+        setAiSuggestion(null); // Clear suggestion when chat changes
     }, [chat?.id, chat?.is_autopilot_active]);
+
+    // Subscribe to AI suggestions via Realtime
+    useEffect(() => {
+        console.log('[CHAT_PANEL] Checking copilot subscription. Mode:', chat?.copilot_mode, 'ID:', chat?.id);
+        if (!chat?.id || chat.copilot_mode !== 'suggest') return;
+
+        const supabase = createClient();
+        const channel = supabase.channel(`chat:${chat.id}`)
+            .on('broadcast', { event: 'ai_suggestion' }, (payload) => {
+                console.log('[CHAT_PANEL] Received AI suggestion:', payload);
+                if (payload.payload?.suggestion) {
+                    setAiSuggestion({
+                        text: payload.payload.suggestion,
+                        configName: payload.payload.configName || 'IA'
+                    });
+                }
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [chat?.id, chat?.copilot_mode]);
 
     const tryLoadOlder = useCallback(() => {
         // Virtuoso calls this when we reach top, so we don't need to check scrollTop manually anymore.
@@ -496,8 +534,9 @@ export default function ChatPanel({
         if (showFullHistory && allContactMessages.length > 0) {
             return allContactMessages;
         }
-        return chat?.messages || [];
-    }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages]);
+        // FIX: Use messagesByChat from store instead of chat.messages (which only has latest)
+        return chat && messagesByChat[chat.id] ? messagesByChat[chat.id] : (chat?.messages || []);
+    }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages, chat?.id, messagesByChat]);
 
     const pendingStatusIds = useMemo(() => {
         if (!chat?.messages?.length) return [];
@@ -552,26 +591,32 @@ export default function ChatPanel({
     const firstItemIndexRef = useRef(START_INDEX);
     const prevMessagesLengthRef = useRef(visibleMessages.length);
     const prevChatIdRef = useRef(chat?.id);
+    const prevFirstMessageIdRef = useRef<string | null>(visibleMessages.length > 0 ? visibleMessages[0].id : null);
 
     // Reset when chat changes (during render to be ready for first paint)
     if (chat?.id !== prevChatIdRef.current) {
         firstItemIndexRef.current = START_INDEX;
         prevMessagesLengthRef.current = visibleMessages.length;
         prevChatIdRef.current = chat?.id;
+        prevFirstMessageIdRef.current = visibleMessages.length > 0 ? visibleMessages[0].id : null;
     }
 
     // Detect prepend during render
     const currentLen = visibleMessages.length;
     const prevLen = prevMessagesLengthRef.current;
+    const currentFirstId = visibleMessages.length > 0 ? visibleMessages[0].id : null;
+    const prevFirstId = prevFirstMessageIdRef.current;
 
-    // Check if length increased AND we are fetching history (prepend scenario)
-    // We also check if we are NOT switching chats (index reset handles that)
-    if (currentLen > prevLen && isFetchingHistoryRef.current) {
+    // Check if length increased AND first ID changed (Prepend Scenario)
+    // This is more robust than relying on isFetchingHistoryRef which might clear too early
+    if (currentLen > prevLen && currentFirstId !== prevFirstId && prevFirstId !== null) {
         const diff = currentLen - prevLen;
         console.log('[VIRTUOSO] Prepend detected (sync):', diff, 'Adjusting firstItemIndex.');
         firstItemIndexRef.current -= diff;
     }
+
     prevMessagesLengthRef.current = currentLen;
+    prevFirstMessageIdRef.current = currentFirstId;
 
     const startIndex = 0;
     const padTop = 0;
@@ -624,6 +669,20 @@ export default function ChatPanel({
             });
 
             if (result?.response) {
+                const copilotMode = chat?.copilot_mode || 'auto';
+
+                if (copilotMode === 'suggest') {
+                    setAiSuggestion({
+                        text: result.response,
+                        configName: autopilotConfig?.name || 'IA',
+                    });
+                    return;
+                }
+
+                if (copilotMode === 'off') {
+                    return;
+                }
+
                 const agentIdForMessage = chat.agent?.id || currentUser.id;
                 const sendResult = await sendAutomatedMessageAction(chat.id, result.response, agentIdForMessage);
                 if (sendResult.success) {
@@ -653,7 +712,7 @@ export default function ChatPanel({
         setIsAiTyping(false);
     }, [chat?.id]);
 
-    const handleDeleteMessage = async (messageId: string, instanceName?: string) => {
+    const handleDeleteMessage = useCallback(async (messageId: string, instanceName?: string) => {
         if (!instanceName) {
             toast({ title: "Erro", description: "Não foi possível determinar a instância da mensagem.", variant: 'destructive' });
             return;
@@ -665,7 +724,7 @@ export default function ChatPanel({
             toast({ title: "Mensagem apagada com sucesso!" });
             onActionSuccess();
         }
-    };
+    }, [toast, onActionSuccess]);
 
     const handleForwardMessage = useCallback((message: Message) => {
         onForwardMessage(message);
@@ -987,10 +1046,11 @@ export default function ChatPanel({
         }
     }, [currentUser, onActionSuccess, replaceOptimisticMessage, tabId, toast, updateMessage, workspaceTimezone]);
 
-    const handleFormSubmit = async () => {
+    const handleFormSubmit = async (overrideHtml?: string | React.SyntheticEvent) => {
         if (!chat) return;
 
-        const currentMessageText = htmlToWhatsappMarkdown(newMessage);
+        const messageSource = typeof overrideHtml === 'string' ? overrideHtml : newMessage;
+        const currentMessageText = htmlToWhatsappMarkdown(messageSource);
         const currentMediaFiles = [...mediaFiles];
         const isTextOnly = currentMediaFiles.length === 0;
 
@@ -1536,8 +1596,18 @@ export default function ChatPanel({
                         userScrolledUpRef.current = !atBottom;
                     }}
                     startReached={() => {
+                        console.log('[VIRTUOSO_START_REACHED] triggered', {
+                            canLoadOlder,
+                            isLoadingOlderMessages,
+                            isFetchingHistoryRef: isFetchingHistoryRef.current,
+                            showFullHistory,
+                            messagesCount: visibleMessages.length
+                        });
                         if (canLoadOlder && !isLoadingOlderMessages && !isFetchingHistoryRef.current) {
+                            console.log('[VIRTUOSO_START_REACHED] calling tryLoadOlder');
                             tryLoadOlder();
+                        } else {
+                            console.log('[VIRTUOSO_START_REACHED] skipped tryLoadOlder');
                         }
                     }}
                     components={{
@@ -1561,7 +1631,7 @@ export default function ChatPanel({
                                     workspaceTimezone={workspaceTimezone}
                                     onDelete={handleDeleteMessage}
                                     currentUserId={currentUser.id}
-                                    instanceName={chat.instance_name}
+                                    instanceName={chat?.instance_name}
                                     onForward={handleForwardMessage}
                                     onRetry={handleRetryMessage}
                                 />
@@ -1603,6 +1673,66 @@ export default function ChatPanel({
                             }}
                         />
                     )} */}
+
+                        {/* AI Copilot Suggestion Bubble */}
+                        {aiSuggestion && (
+                            <div className="animate-in slide-in-from-bottom-2 duration-300 mb-3">
+                                <div className="bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 border border-blue-500/30 rounded-2xl p-4 shadow-lg backdrop-blur-sm">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                            <Brain className="w-4 h-4 text-white" />
+                                        </div>
+                                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                                            Sugestão do {aiSuggestion.configName}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-foreground mb-3 whitespace-pre-wrap line-clamp-4">
+                                        {aiSuggestion.text}
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            className="bg-green-600 hover:bg-green-700 text-white"
+                                            onClick={() => {
+                                                handleFormSubmit(aiSuggestion.text);
+                                                setAiSuggestion(null);
+                                            }}
+                                        >
+                                            <Check className="w-4 h-4 mr-1" />
+                                            Enviar
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                                setNewMessage(aiSuggestion.text);
+                                                if (contentEditableRef.current) {
+                                                    contentEditableRef.current.innerHTML = aiSuggestion.text;
+                                                    contentEditableRef.current.focus();
+                                                }
+                                                setAiSuggestion(null);
+                                            }}
+                                        >
+                                            <Pencil className="w-4 h-4 mr-1" />
+                                            Editar
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="ghost"
+                                            className="text-muted-foreground hover:text-red-500"
+                                            onClick={() => setAiSuggestion(null)}
+                                        >
+                                            <X className="w-4 h-4 mr-1" />
+                                            Ignorar
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-4">
                             <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown} className='flex items-end gap-2'>
                                 <input type="hidden" name="chatId" value={chat.id} />
@@ -1816,6 +1946,34 @@ export default function ChatPanel({
                                         </Select>
                                     ) : (
                                         <Label htmlFor="ai-agent-switch" className="font-medium text-xs text-foreground cursor-pointer">Agente de IA</Label>
+                                    )}
+
+                                    {isAiAgentActive && (
+                                        <Select
+                                            value={chat?.copilot_mode || 'auto'}
+                                            onValueChange={(val) => handleCopilotModeChange(val as 'auto' | 'suggest')}
+                                        >
+                                            <SelectTrigger className="h-6 border-none bg-transparent text-xs font-medium text-foreground focus:ring-0 px-1 gap-1 w-auto min-w-[30px] outline-none shadow-none ring-0 focus:ring-offset-0 ml-1 border-l border-border pl-2 rounded-none">
+                                                <div className="flex items-center gap-1">
+                                                    {chat?.copilot_mode === 'suggest' ? <MessageSquareQuote className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                                                    <span className="hidden sm:inline">{chat?.copilot_mode === 'suggest' ? 'Sugestão' : 'Auto'}</span>
+                                                </div>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="auto">
+                                                    <div className="flex items-center gap-2">
+                                                        <Bot className="h-3 w-3" />
+                                                        <span>Automático</span>
+                                                    </div>
+                                                </SelectItem>
+                                                <SelectItem value="suggest">
+                                                    <div className="flex items-center gap-2">
+                                                        <MessageSquareQuote className="h-3 w-3" />
+                                                        <span>Sugestão (Aprovar)</span>
+                                                    </div>
+                                                </SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     )}
                                     {isAiTyping && <Loader2 className="h-3 w-3 animate-spin text-primary ml-1" />}
                                 </div>

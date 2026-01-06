@@ -34,6 +34,11 @@ export function subscribeToChatMessages({
   onMessage,
   onStatusChange,
 }: ChatMessageSubscriptionParams): RealtimeChannel {
+  const filter =
+    chatId === 'all'
+      ? `workspace_id=eq.${workspaceId}`
+      : `chat_id=eq.${chatId}`;
+
   return client
     .channel(buildChatMessageChannelName(workspaceId, chatId))
     .on(
@@ -42,7 +47,7 @@ export function subscribeToChatMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
-        filter: chatId === 'all' ? undefined : `chat_id=eq.${chatId}`,
+        filter,
       },
       (payload) => {
         // console.log('[REALTIME-DEBUG] Message payload:', payload);
@@ -51,9 +56,6 @@ export function subscribeToChatMessages({
     )
     .subscribe((status, err) => {
       console.log(`[REALTIME-DEBUG] Subscription status for message channel (${chatId === 'all' ? 'WORKSPACE' : 'CHAT'}): ${status}`, err ? err : '');
-      if (chatId === 'all' && status === 'SUBSCRIBED') {
-        console.warn('[REALTIME-DEBUG] Global message subscription active without server-side filter. Relying on client-side chat association.');
-      }
       if (err) {
         console.error('[REALTIME-DEBUG] Subscription ERROR:', err);
       }

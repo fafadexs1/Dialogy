@@ -98,6 +98,126 @@ export async function generateAgentResponse(input: z.infer<typeof AutoResponderF
   return autoResponderFlow(input);
 }
 
+function normalizeText(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getNameVariants(name: string): string[] {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  const first = parts[0] || '';
+  const variants = new Set<string>();
+  [trimmed, normalizeText(trimmed), first, normalizeText(first)].forEach((variant) => {
+    if (variant && variant.length >= 2) {
+      variants.add(variant);
+    }
+  });
+  return Array.from(variants);
+}
+
+function historyContainsName(chatHistory: string | undefined, variants: string[]): boolean {
+  if (!chatHistory || variants.length === 0) return false;
+  const normalizedHistory = normalizeText(chatHistory);
+  return variants.some((variant) => {
+    const normalizedVariant = normalizeText(variant);
+    if (!normalizedVariant) return false;
+    const pattern = new RegExp(`\\b${escapeRegExp(normalizedVariant)}\\b`, 'i');
+    return pattern.test(normalizedHistory);
+  });
+}
+
+function stripRepeatedName(response: string, contactName: string, chatHistory?: string): string {
+  const variants = getNameVariants(contactName);
+  if (variants.length === 0 || !historyContainsName(chatHistory, variants)) return response;
+
+  const namePattern = variants.map(escapeRegExp).join('|');
+  if (!namePattern) return response;
+
+  let updated = response;
+  const greetingPattern = new RegExp(
+    `^(\\s*(?:Olá|Ola|Oi|Oiê|Oie|Hey|Bom dia|Boa tarde|Boa noite)\\s*[,!]?\\s*)(${namePattern})(\\b[!,.]?\\s*)`,
+    'i'
+  );
+  updated = updated.replace(greetingPattern, '$1');
+
+  const startNamePattern = new RegExp(`^(\\s*)(${namePattern})(\\b[,:!\\-–—]?\\s*)`, 'i');
+  updated = updated.replace(startNamePattern, '$1');
+
+  const commaWrappedPattern = new RegExp(`,\\s*(${namePattern})\\s*,`, 'gi');
+  updated = updated.replace(commaWrappedPattern, ',');
+
+  const leadingCommaPattern = new RegExp(`,\\s*(${namePattern})(\\b)`, 'gi');
+  updated = updated.replace(leadingCommaPattern, '');
+
+  const trailingCommaPattern = new RegExp(`(${namePattern})\\s*,`, 'gi');
+  updated = updated.replace(trailingCommaPattern, '');
+
+  updated = updated.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
+
+  return updated;
+}
+
+const greetingTokenRegex = /\b(ola|oi|oie|oii|hey|bom dia|boa tarde|boa noite)\b/i;
+const emojiRegex = /\p{Extended_Pictographic}/u;
+const emojiGlobalRegex = /\p{Extended_Pictographic}/gu;
+
+function historyContainsGreeting(chatHistory?: string): boolean {
+  if (!chatHistory) return false;
+  const normalized = normalizeText(chatHistory);
+  return greetingTokenRegex.test(normalized);
+}
+
+function containsEmoji(value?: string): boolean {
+  if (!value) return false;
+  return emojiRegex.test(value);
+}
+
+function getEmojiBudget(chatHistory?: string, customerMessage?: string): number {
+  if (containsEmoji(customerMessage) || containsEmoji(chatHistory)) return 1;
+  return 0;
+}
+
+function limitEmojis(response: string, maxEmojis: number): string {
+  if (!response) return response;
+
+  if (maxEmojis <= 0) {
+    const stripped = response.replace(emojiGlobalRegex, '');
+    return stripped.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
+  }
+
+  let count = 0;
+  emojiGlobalRegex.lastIndex = 0;
+  const updated = response.replace(emojiGlobalRegex, (match) => {
+    if (count < maxEmojis) {
+      count += 1;
+      return match;
+    }
+    return '';
+  });
+
+  return updated.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
+}
+
+function stripRepeatedGreeting(response: string, chatHistory?: string): string {
+  if (!response || !historyContainsGreeting(chatHistory)) return response;
+
+  let updated = response;
+  const greetingPattern = new RegExp(
+    `^(\\s*(?:Ola|Ol\\u00e1|Oi|Oie|Oii|Hey|Bom dia|Boa tarde|Boa noite)\\s*[,!]?\\s*)`,
+    'i'
+  );
+  updated = updated.replace(greetingPattern, '');
+  updated = updated.replace(/^,\\s*/, '');
+  updated = updated.replace(/\\s{2,}/g, ' ').replace(/\\s+([,.!?])/g, '$1').trim();
+
+  return updated;
+}
+
 // --- Agent Prompt ---
 
 // --- Agent Prompt Config ---
@@ -125,7 +245,13 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 3. **Tom de Voz**: Seja sempre educado, paciente e inteligente.
    - Explique termos técnicos se necessário.
    - Nunca seja arrogante ou robótico.
-   - **NÃO repita o nome do usuário toda hora**. Use apenas no início da conversa ou se for muito necessário. Não comece toda frase com "Olá, [Nome]".
+   - **NÃO repita o nome do usuário**. Use no máximo 1x por conversa e apenas na primeira resposta ou se for realmente necessário.
+   - Se o nome já aparecer no histórico ou em uma mensagem anterior sua, **não use novamente**.
+   - Prefira saudações sem nome (ex: "Olá!") ou comece direto com a resposta.
+   - Evite repeticao: nao repita saudacoes, frases prontas ou a mesma pergunta em respostas seguidas.
+   - Se ja cumprimentou ou ofereceu ajuda no historico recente, va direto ao ponto.
+   - Emojis: use com moderacao. No maximo 1 por mensagem e apenas se o usuario usar emojis ou o tom for informal.
+   - Evite emojis em temas serios ou quando o usuario estiver frustrado/irritado.
 
 **DIRETRIZES DE RESPOSTA**:
 1. **Prioridade Máxima (Regras)**:
@@ -242,12 +368,30 @@ const autoResponderFlow = ai.defineFlow(
     // Only return a response if the AI decided a rule was triggered or it could answer.
     // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
-      return output;
+      const emojiBudget = getEmojiBudget(input.chatHistory, input.customerMessage);
+      const sanitized = limitEmojis(
+        stripRepeatedGreeting(
+          stripRepeatedName(output.response, input.contact?.name ?? '', input.chatHistory),
+          input.chatHistory
+        ),
+        emojiBudget
+      );
+      const response = sanitized.trim() ? sanitized : output.response;
+      return { ...output, response };
     }
     const fallback = input.config?.default_fallback_reply?.trim();
     if (fallback) {
+      const emojiBudget = getEmojiBudget(input.chatHistory, input.customerMessage);
+      const sanitized = limitEmojis(
+        stripRepeatedGreeting(
+          stripRepeatedName(fallback, input.contact?.name ?? '', input.chatHistory),
+          input.chatHistory
+        ),
+        emojiBudget
+      );
+      const response = sanitized.trim() ? sanitized : fallback;
       return {
-        response: fallback,
+        response,
         triggeredRule: output?.triggeredRule ?? null,
       };
     }

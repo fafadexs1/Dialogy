@@ -13,15 +13,6 @@ export async function middleware(request: NextRequest) {
   const requestId = requestHeaders.get('x-request-id') || crypto.randomUUID();
   requestHeaders.set('x-request-id', requestId);
 
-  const releaseCookieName =
-    process.env.RELEASE_CHANNEL_COOKIE || 'dialogy_release_channel';
-  const releaseChannel =
-    requestHeaders.get('x-release-channel') ||
-    request.cookies.get(releaseCookieName)?.value ||
-    process.env.APP_RELEASE_CHANNEL ||
-    'stable';
-  requestHeaders.set('x-release-channel', releaseChannel);
-
   const accessToken = getSupabaseAccessTokenFromCookies(request.cookies);
   const decoded = await decodeSupabaseJwt(accessToken);
   if (decoded?.sub) {
@@ -93,7 +84,6 @@ export async function middleware(request: NextRequest) {
   }
 
   response.headers.set('x-request-id', requestId);
-  response.headers.set('x-release-channel', releaseChannel);
 
   if (!isHtmlRequest) {
     return response;

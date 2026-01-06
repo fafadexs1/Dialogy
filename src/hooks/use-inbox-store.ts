@@ -85,16 +85,49 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     hasMoreHistory,
     hasMoreChats,
   }) => {
-    set({
-      chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
-      selectedChatId,
-      messagesByChat: selectedChatId ? { [selectedChatId]: messages } : {},
-      lastSyncChats,
-      lastSyncMessages: selectedChatId ? { [selectedChatId]: lastSyncMessageForSelected ?? null } : {},
-      oldestMessageDateByChat: selectedChatId ? { [selectedChatId]: oldestMessageDate ?? null } : {},
-      oldestMessageIdByChat: selectedChatId ? { [selectedChatId]: oldestMessageId ?? null } : {},
-      hasMoreHistoryByChat: selectedChatId ? { [selectedChatId]: hasMoreHistory } : {},
-      hasMoreChats,
+    set((state) => {
+      const hasSelection = !!selectedChatId;
+      const existingMessages = hasSelection ? state.messagesByChat[selectedChatId!] || [] : [];
+      const shouldPreserveMessages = hasSelection && messages.length === 0 && existingMessages.length > 0;
+
+      return {
+        chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
+        selectedChatId,
+        messagesByChat: hasSelection
+          ? {
+            ...state.messagesByChat,
+            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: messages }),
+          }
+          : state.messagesByChat,
+        lastSyncChats,
+        lastSyncMessages: hasSelection
+          ? {
+            ...state.lastSyncMessages,
+            ...(shouldPreserveMessages && lastSyncMessageForSelected == null
+              ? {}
+              : { [selectedChatId!]: lastSyncMessageForSelected ?? null }),
+          }
+          : state.lastSyncMessages,
+        oldestMessageDateByChat: hasSelection
+          ? {
+            ...state.oldestMessageDateByChat,
+            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageDate ?? null }),
+          }
+          : state.oldestMessageDateByChat,
+        oldestMessageIdByChat: hasSelection
+          ? {
+            ...state.oldestMessageIdByChat,
+            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageId ?? null }),
+          }
+          : state.oldestMessageIdByChat,
+        hasMoreHistoryByChat: hasSelection
+          ? {
+            ...state.hasMoreHistoryByChat,
+            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: hasMoreHistory }),
+          }
+          : state.hasMoreHistoryByChat,
+        hasMoreChats,
+      };
     });
   },
   setSelectedChatId: (chatId) => set({ selectedChatId: chatId }),

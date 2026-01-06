@@ -12,8 +12,7 @@ import {
     Settings,
     LogOut,
     LayoutDashboard,
-    Globe,
-    Flag
+    Globe
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,6 @@ const configNavItems = [
     { href: '/superadmin/meta-webhooks', label: 'Webhooks Meta', icon: Activity, exact: false },
     { href: '/superadmin/billing/settings', label: 'Config. Faturamento', icon: Settings, exact: true },
     { href: '/superadmin/seo', label: 'SEO Manager', icon: Globe, exact: false },
-    { href: '/superadmin/feature-flags', label: 'Feature Flags', icon: Flag, exact: true },
 ];
 
 export function Sidebar() {

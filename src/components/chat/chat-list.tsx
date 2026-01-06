@@ -1454,53 +1454,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   />
                 </div>
               )}
-              endReached={() => {
-                if (hasMore && loadMore && !isLoadingMore) {
-                  let statuses: Chat['status'][] = ['gerais', 'atendimentos'];
-                  if (activeTab === 'gerais') statuses = ['gerais'];
-                  if (activeTab === 'atendimentos') statuses = ['atendimentos'];
-                  if (activeTab === 'encerrados') statuses = ['encerrados'];
 
-                  loadMore({
-                    statuses,
-                    ownership: ownershipFilter
-                  });
-                }
-              }}
-              components={{
-                Footer: () => {
-                  return (
-                    <>
-                      {hasMore && (
-                        <div className="p-2 flex justify-center">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (loadMore && !isLoadingMore) {
-                                let statuses: Chat['status'][] = ['gerais', 'atendimentos'];
-                                if (activeTab === 'gerais') statuses = ['gerais'];
-                                if (activeTab === 'atendimentos') statuses = ['atendimentos'];
-                                if (activeTab === 'encerrados') statuses = ['encerrados'];
-                                loadMore({ statuses, ownership: ownershipFilter });
-                              }
-                            }}
-                            disabled={isLoadingMore}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            {isLoadingMore ? (
-                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            ) : (
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                            )}
-                            Carregar mais conversas
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  );
-                },
-              }}
             />
           </>
         ) : (

@@ -6,7 +6,6 @@ export type RequestContext = {
   requestId?: string;
   userId?: string;
   workspaceId?: string;
-  releaseChannel?: string;
 };
 
 export async function getRequestContext(): Promise<RequestContext> {
@@ -19,10 +18,6 @@ export async function getRequestContext(): Promise<RequestContext> {
         undefined,
       userId: headerStore.get('x-user-id') || undefined,
       workspaceId: headerStore.get('x-workspace-id') || undefined,
-      releaseChannel:
-        headerStore.get('x-release-channel') ||
-        process.env.APP_RELEASE_CHANNEL ||
-        undefined,
     };
   } catch {
     return {};

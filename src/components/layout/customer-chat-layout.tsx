@@ -235,7 +235,7 @@ export default function CustomerChatLayout({
   const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
-  const prefetchedHistoryRef = useRef<Set<string>>(new Set());
+  const activatedChatIdsRef = useRef<Set<string>>(new Set());
 
   const isHydratedRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -556,7 +556,7 @@ export default function CustomerChatLayout({
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
     try {
-      // console.log('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
+      console.log('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
@@ -564,12 +564,12 @@ export default function CustomerChatLayout({
         limit: 50,
         timezone: workspaceTimezone
       });
-      /* console.log('[LOAD_MESSAGES] Result:', {
+      console.log('[LOAD_MESSAGES] Result:', {
         messagesCount: result.messages.length,
         oldestMessageDate: result.oldestMessageDate,
         oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory
-      }); */
+      });
       if (beforeDate) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       } else {
@@ -587,24 +587,8 @@ export default function CustomerChatLayout({
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
   const prefetchChat = useCallback((chatId: string) => {
-    // 1. Check if we already have messages
-    const state = useInboxStore.getState();
-    const hasMessages = state.messagesByChat[chatId]?.length > 0;
-    if (hasMessages) return;
-
-    // 2. Check if we already promised (or are fetching) this chat recently
-    if (prefetchedHistoryRef.current.has(chatId)) return;
-
-    // 3. Mark as prefetched to avoid spam
-    prefetchedHistoryRef.current.add(chatId);
-
-    // 4. Trigger fetch
-    console.log('[PREFETCH] Hover prefetch started for:', chatId);
-    loadChatMessages(chatId).catch(err => {
-      console.error('[PREFETCH] Failed to prefetch:', err);
-      // On error, maybe allow retrying later? For now, we leave it in the set to avoid spam loops.
-    });
-  }, [loadChatMessages]);
+    void chatId;
+  }, []);
 
   const loadOlderMessages = useCallback(async () => {
     console.log('[LOAD_OLDER] Called. selectedChatId:', selectedChatId, 'beforeDate:', oldestLoadedMessageDate, 'beforeId:', oldestLoadedMessageId);
@@ -612,19 +596,33 @@ export default function CustomerChatLayout({
       console.log('[LOAD_OLDER] No selected chat, returning');
       return;
     }
-    const beforeDate = oldestLoadedMessageDate;
-    const beforeId = oldestLoadedMessageId;
-    if (!beforeDate || !beforeId) {
-      console.log('[LOAD_OLDER] Missing cursor (beforeDate or beforeId is null), returning');
+    const state = useInboxStore.getState();
+    const currentMessages = state.messagesByChat[selectedChatId] || [];
+    const oldestMessage = currentMessages[0];
+    const beforeDate = oldestLoadedMessageDate ?? oldestMessage?.createdAt ?? null;
+    const beforeId = oldestLoadedMessageId ?? oldestMessage?.id ?? null;
+    console.log('[LOAD_OLDER] Computed cursors:', {
+      storedOldestDate: oldestLoadedMessageDate,
+      storedOldestId: oldestLoadedMessageId,
+      fallbackFromMessage: oldestMessage?.createdAt,
+      finalBeforeDate: beforeDate,
+      finalBeforeId: beforeId,
+      hasMoreHistory: state.hasMoreHistoryByChat[selectedChatId]
+    });
+    if (!beforeDate) {
+      console.log('[LOAD_OLDER] Missing cursor date, returning');
       return;
     }
-    await loadChatMessages(selectedChatId, beforeDate, beforeId);
+    await loadChatMessages(selectedChatId, beforeDate, beforeId ?? undefined);
   }, [loadChatMessages, oldestLoadedMessageDate, oldestLoadedMessageId, selectedChatId]);
 
-  const ensureMessagesForChat = useCallback(async (chatId: string) => {
+  const ensureMessagesForChat = useCallback(async (chatId: string, options?: { force?: boolean }) => {
+    const force = options?.force ?? false;
     const state = useInboxStore.getState();
     const currentMessages = state.messagesByChat[chatId] || [];
-    if (!currentMessages.length) {
+    console.log('[ENSURE_MESSAGES] Called for chat:', chatId, 'force:', force, 'currentMessages:', currentMessages.length, 'hasMoreHistory:', state.hasMoreHistoryByChat[chatId]);
+    if (force || !currentMessages.length) {
+      console.log('[ENSURE_MESSAGES] Loading messages (force or empty)');
       await loadChatMessages(chatId);
       return;
     }
@@ -636,9 +634,23 @@ export default function CustomerChatLayout({
       : undefined;
     if (latestMessage && !currentMessages.some((message) => message.id === latestMessage.id)) {
       // Chat list is fresher than the cached thread; refresh the window.
+      console.log('[ENSURE_MESSAGES] Chat list fresher, loading messages');
       await loadChatMessages(chatId);
+    } else {
+      console.log('[ENSURE_MESSAGES] Skipped loading, messages already present');
     }
   }, [loadChatMessages]);
+
+  useEffect(() => {
+    if (!selectedChatId) return;
+    if (activatedChatIdsRef.current.has(selectedChatId)) {
+      console.log('[ENSURE_MESSAGES_EFFECT] Skipped - already activated:', selectedChatId);
+      return;
+    }
+    console.log('[ENSURE_MESSAGES_EFFECT] First activation for chat:', selectedChatId);
+    activatedChatIdsRef.current.add(selectedChatId);
+    void ensureMessagesForChat(selectedChatId, { force: true });
+  }, [selectedChatId, ensureMessagesForChat]);
 
   const handleLoadMoreChats = useCallback(async (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => {
     if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
@@ -708,14 +720,22 @@ export default function CustomerChatLayout({
       return;
     }
 
-    if (selectedChatIdRef.current === chat.id) return; // Prevent duplicate navigation
+    const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
+    if (selectedChatIdRef.current === chat.id) {
+      if (isFirstActivation) {
+        activatedChatIdsRef.current.add(chat.id);
+        void ensureMessagesForChat(chat.id, { force: true });
+      }
+      return;
+    }
     selectedChatIdRef.current = chat.id;
     React.startTransition(() => {
       setSelectedChatId(chat.id);
       setShowFullHistory(false);
     });
     updateSelectedChatPath(chat.id);
-    void ensureMessagesForChat(chat.id);
+    activatedChatIdsRef.current.add(chat.id);
+    void ensureMessagesForChat(chat.id, { force: isFirstActivation });
   }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
 
   const jumpChatByOffset = useCallback((delta: number) => {
@@ -747,21 +767,6 @@ export default function CustomerChatLayout({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-
-  useEffect(() => {
-    if (!selectedChatId) return;
-    const state = useInboxStore.getState();
-    const hasMessages = state.messagesByChat[selectedChatId]?.length;
-    if (!hasMessages) return;
-    if (prefetchedHistoryRef.current.has(selectedChatId)) return;
-    const hasMore = state.hasMoreHistoryByChat[selectedChatId];
-    const beforeDate = state.oldestMessageDateByChat[selectedChatId];
-    const beforeId = state.oldestMessageIdByChat[selectedChatId];
-    if (hasMore && beforeDate && beforeId) {
-      prefetchedHistoryRef.current.add(selectedChatId);
-      loadChatMessages(selectedChatId, beforeDate, beforeId).catch((err) => console.error('[PREFETCH_HISTORY]', err));
-    }
-  }, [selectedChatId, loadChatMessages]);
 
   const initializeInbox = useCallback(async () => {
     if (!initialUser?.activeWorkspaceId) {
@@ -844,12 +849,20 @@ export default function CustomerChatLayout({
   const runDeltaSync = useCallback(async () => {
     if (!initialUser?.activeWorkspaceId) return;
     const snapshot = useInboxStore.getState();
+    const selectedChatId = snapshot.selectedChatId;
+    const hasActivatedChat =
+      !!selectedChatId && activatedChatIdsRef.current.has(selectedChatId);
+    const lastSyncMessage =
+      hasActivatedChat && selectedChatId
+        ? snapshot.lastSyncMessages[selectedChatId] ?? null
+        : null;
+    const shouldSyncMessages = hasActivatedChat && lastSyncMessage !== null;
     try {
       const result = await syncInboxData({
         workspaceId: initialUser.activeWorkspaceId,
         lastSyncChats: snapshot.lastSyncChats,
-        chatId: snapshot.selectedChatId,
-        lastSyncMessages: snapshot.selectedChatId ? snapshot.lastSyncMessages[snapshot.selectedChatId] ?? null : null,
+        chatId: shouldSyncMessages ? selectedChatId : null,
+        lastSyncMessages: shouldSyncMessages ? lastSyncMessage : null,
       });
       if (result.error) {
         console.error('[SYNC_INBOX] Error:', result.error);
@@ -1094,43 +1107,13 @@ export default function CustomerChatLayout({
 
     useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
 
-    // 2. Fetch full updated chat data from server to ensure joins (team color, tags) are correct
-    try {
-      const { refreshChatAction } = await import('@/actions/chats');
-      const result = await refreshChatAction(newChatData.id);
-      if (result.chat) {
-        useInboxStore.getState().upsertChats([result.chat]);
-
-        // --- REALTIME FIX: Sync latest message to open chat ---
-        // Since ChatList updates work (triggering this), we use the returned chat's last message
-        // to update the open chat view if it matches. This covers cases where the 'messages' channel fails.
-        const state = useInboxStore.getState();
-        console.log('[REALTIME-DEBUG] Refresh Chat Result:', {
-          resultChatId: result.chat.id,
-          selectedChatId: state.selectedChatId,
-          hasMessages: result.chat.messages?.length,
-          latestMessage: result.chat.messages?.[0]
-        });
-
-        if (state.selectedChatId === result.chat.id && result.chat.messages?.length > 0) {
-          console.log('[REALTIME-DEBUG] Appending late-arriving message to chat view');
-          useInboxStore.getState().appendMessagesToChat(result.chat.id, result.chat.messages);
-        } else {
-          console.log('[REALTIME-DEBUG] Skipped appending message. Match:', state.selectedChatId === result.chat.id);
-        }
-        // -----------------------------------------------------
-        // -----------------------------------------------------
-      } else {
-        console.warn('[REALTIME] Failed to refresh chat details:', result.error);
-      }
-    } catch (err) {
-      console.error('[REALTIME] Error refreshing chat:', err);
-    }
+    // 2. Refresh logic removed to enforce Event-Only architecture.
+    // We rely solely on the optimistic update above.
   }, [initialUser?.id, initialUser]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       console.warn(`[REALTIME] Connection lost (${status}). Running delta sync as fallback.`);
       if (document.visibilityState === 'visible') {
         runDeltaSync();

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Workspace, Chat, Contact } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { sendAutomatedMessageAction } from '@/actions/messages';
+import { logToDebugFile } from '@/lib/debug-file';
 
 export async function getAutopilotConfigService(workspaceId: string, agentId?: string): Promise<{
     config: AutopilotConfig | null,
@@ -74,6 +75,16 @@ export async function processAutopilotForChat(
 ) {
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
 
+    // Force fetch copilot_mode to ensure we have the latest value
+    const chatConfigRes = await db.query(`SELECT copilot_mode, is_autopilot_active FROM chats WHERE id = $1`, [chat.id]);
+    const chatConfig = chatConfigRes.rows[0];
+    const currentCopilotMode = chatConfig?.copilot_mode || 'auto';
+    const currentIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
+
+    console.error(`[AUTOPILOT_DEBUG] *** DB FETCH -> copilot_mode: ${currentCopilotMode}, is_autopilot_active: ${currentIsActive} ***`);
+
+    logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive}`);
+
     // 1. Fetch Config
     const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } = await getAutopilotConfigService(workspaceId, chat.autopilot_config_id || undefined);
 
@@ -82,7 +93,7 @@ export async function processAutopilotForChat(
         return;
     }
 
-    if (!chat.is_autopilot_active) {
+    if (!currentIsActive) {
         console.log(`[AUTOPILOT_SERVICE] Autopilot desativado para este chat (ID: ${chat.id})`);
         return;
     }
@@ -155,30 +166,36 @@ export async function processAutopilotForChat(
             workspaceGeminiApiKey,
         });
 
-        // 4. Send Response
+        // 4. Send or Suggest Response based on copilot_mode
         if (result?.response) {
-            console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${result.response}`);
-            // Use system agent ID if available or fallback?
-            // Autopilot usually sends as "system" or specific agent.
-            // sendAutomatedMessageAction handles "autopilot" metadata.
-            // We pass the config ID as agentId? No, agentId usually expects a UUID. 
-            // If we don't have a specific agent ID (system agent), we can pass a placeholder or the config ID if that's how it's used.
-            // But sendAutomatedMessageAction expects `agentId`.
-            // Let's use the workspace owner or a system agent?
-            // Actually, we can pass the config.user_id (creator) or null?
-            // Looking at `sendAutomatedMessageAction`: `senderUserId: agentId`.
-            // If it's a system agent, we pass `isSystemAgent: true`.
+            const copilotMode = currentCopilotMode;
 
-            // Let's use the configuration's user_id as the "sender" for now, or find a system agent.
-            const agentId = autopilotConfig.user_id; // The user who configured it.
-
-            await sendAutomatedMessageAction(
-                chat.id,
-                result.response,
-                agentId,
-                false, // isSystemAgent
-                instanceName
-            );
+            if (copilotMode === 'suggest') {
+                // Broadcast suggestion to the agent via Realtime
+                console.log(`[AUTOPILOT_SERVICE] Modo sugestão - enviando para agente: ${result.response.substring(0, 50)}...`);
+                const { getSupabaseAdmin } = await import('@/lib/supabase');
+                const supabase = getSupabaseAdmin();
+                await supabase.channel(`chat:${chat.id}`).send({
+                    type: 'broadcast',
+                    event: 'ai_suggestion',
+                    payload: {
+                        suggestion: result.response,
+                        chatId: chat.id,
+                        configName: autopilotConfig.name
+                    }
+                });
+            } else {
+                // Auto-send (default behavior)
+                console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${result.response}`);
+                const agentId = autopilotConfig.user_id;
+                await sendAutomatedMessageAction(
+                    chat.id,
+                    result.response,
+                    agentId,
+                    false, // isSystemAgent
+                    instanceName
+                );
+            }
         } else {
             console.log(`[AUTOPILOT_SERVICE] Nenhuma resposta gerada.`);
         }

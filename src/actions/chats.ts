@@ -624,6 +624,7 @@ type ChatRow = {
     last_message_sent_by_tab: string | null;
     contact_custom_fields: Record<string, any> | null;
     is_autopilot_active?: boolean | null;
+    copilot_mode?: 'off' | 'auto' | 'suggest' | null;
 };
 
 type MessageRow = {
@@ -815,6 +816,7 @@ async function fetchChats({
             c.color,
             c.protocol,
             c.is_autopilot_active,
+            c.copilot_mode,
             c.contact_id,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
@@ -994,24 +996,11 @@ export const getInitialChatsData = withDebug(
 
             const hasMoreChats = closedChatRows.length === closedChatsLimit;
 
-            let messages: Message[] = [];
-            let lastSyncMessageForSelected: string | null = null;
-            let oldestMessageDate: string | null = null;
-            let oldestMessageId: string | null = null;
-            let hasMoreHistory = false;
-
-            if (selectedChatId) {
-                const msgResult = await getChatMessagesWindow({
-                    chatId: selectedChatId,
-                    limit: 50,
-                    timezone,
-                });
-                messages = msgResult.messages;
-                lastSyncMessageForSelected = msgResult.lastSyncMessage;
-                oldestMessageDate = msgResult.oldestMessageDate;
-                oldestMessageId = msgResult.oldestMessageId;
-                hasMoreHistory = msgResult.hasMoreHistory;
-            }
+            const messages: Message[] = [];
+            const lastSyncMessageForSelected: string | null = null;
+            const oldestMessageDate: string | null = null;
+            const oldestMessageId: string | null = null;
+            const hasMoreHistory = false;
 
             return {
                 chats,
@@ -1655,6 +1644,7 @@ async function fetchChatsDelta({
             c.color,
             c.contact_id,
             c.is_autopilot_active,
+            c.copilot_mode,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
             lmd.instance_name,
@@ -1834,6 +1824,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             color: row.color || undefined,
             protocol: row.protocol || buildChatProtocol(row.id),
             is_autopilot_active: row.is_autopilot_active ?? false,
+            copilot_mode: row.copilot_mode || 'auto',
         };
     });
 
@@ -1889,16 +1880,9 @@ export async function getChatMessagesWindow({
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
-    // Fetch messages from ALL chats of the same contact (not just the current chat)
-    // This provides full conversation history across all sessions with this contact
-    // The chat_id $1 is used to find the contact_id via the subquery
+    // Fetch messages only for the current chat to keep large threads fast.
     const { rows } = await db.query(
         `
-        WITH target_contact AS (
-            SELECT contact_id, workspace_id 
-            FROM chats 
-            WHERE id = $1
-        )
         SELECT 
             m.*,
             c.workspace_id AS workspace_id,
@@ -1910,9 +1894,8 @@ export async function getChatMessagesWindow({
             cont.address AS contact_address
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
-        JOIN target_contact tc ON c.contact_id = tc.contact_id AND c.workspace_id = tc.workspace_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE 1=1
+        WHERE m.chat_id IN (SELECT id FROM chats WHERE contact_id = (SELECT contact_id FROM chats WHERE id = $1))
         ${beforeClause}
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
@@ -2209,6 +2192,39 @@ export const toggleChatAutopilot = withDebug(
     },
     {
         contextResolver: (chatId, isActive, agentId) => ({ payload: { chatId, isActive, agentId } })
+    }
+);
+
+import { logToDebugFile } from '@/lib/debug-file';
+
+export const updateChatCopilotModeAction = withDebug(
+    'update_chat_copilot_mode',
+    async function updateChatCopilotModeAction(chatId: string, mode: 'auto' | 'suggest' | 'off'): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
+
+        logToDebugFile(`[updateChatCopilotModeAction] Request: chatId=${chatId}, mode=${mode}`);
+
+        try {
+            await db.query(`
+                UPDATE chats 
+                SET copilot_mode = $1
+                WHERE id = $2
+            `, [mode, chatId]);
+
+            logToDebugFile(`[updateChatCopilotModeAction] Success update for chatId=${chatId}`);
+
+            revalidatePath('/', 'layout');
+            return { success: true };
+        } catch (error: any) {
+            logToDebugFile(`[updateChatCopilotModeAction] Error: ${error.message}`);
+            console.error("Erro ao atualizar modo do copilot:", error);
+            return { success: false, error: "Falha ao atualizar modo do copilot." };
+        }
+    },
+    {
+        contextResolver: (chatId, mode) => ({ payload: { chatId, mode } })
     }
 );
 

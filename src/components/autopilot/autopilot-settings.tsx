@@ -82,6 +82,12 @@ export function AutopilotSettings({
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value="googleai/gemini-3-flash-preview">
+                                    <div className="flex flex-col">
+                                        <span className="font-medium">Gemini 3 Flash (Preview)</span>
+                                        <span className="text-xs text-muted-foreground">Nova geracao, baixa latencia</span>
+                                    </div>
+                                </SelectItem>
                                 <SelectItem value="googleai/gemini-2.0-flash">
                                     <div className="flex flex-col">
                                         <span className="font-medium">Gemini 2.0 Flash</span>

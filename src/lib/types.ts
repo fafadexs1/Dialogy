@@ -185,7 +185,6 @@ export type Message = {
   externalChannelId?: string;
   mediaUrl?: string;
 };
-
 export type Chat = {
   id: string;
   contact: Contact;
@@ -209,6 +208,7 @@ export type Chat = {
   color?: string;
   is_autopilot_active?: boolean;
   autopilot_config_id?: string | null;
+  copilot_mode?: 'off' | 'auto' | 'suggest';
 };
 
 export type InternalChannel = {

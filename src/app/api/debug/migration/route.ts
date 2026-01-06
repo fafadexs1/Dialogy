@@ -7,6 +7,9 @@ export async function GET() {
         await db.query(`
             ALTER TABLE chats 
             ADD COLUMN IF NOT EXISTS is_autopilot_active BOOLEAN DEFAULT FALSE;
+            ALTER TABLE chats
+
+            ADD COLUMN IF NOT EXISTS copilot_mode TEXT NOT NULL DEFAULT 'auto';
         `);
         return NextResponse.json({ success: true, message: "Column added" });
     } catch (error: any) {
