@@ -1101,6 +1101,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
 
+  const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
+  const handleEndReached = useCallback(() => {
+    if (!canLoadMore) return;
+    if (activeTab !== 'encerrados') return;
+    if (filteredChats.length === 0) return;
+    loadMore?.({ statuses: ['encerrados'], ownership: ownershipFilter });
+  }, [activeTab, canLoadMore, filteredChats.length, loadMore, ownershipFilter]);
+
   return (
     <div
       className={cn(
@@ -1430,6 +1438,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Virtuoso
               style={{ height: '100%', width: '100%' }}
               data={filteredChats}
+              endReached={handleEndReached}
               itemContent={(index, chat) => (
                 <div className="pb-1 px-3">
                   <ChatListItem

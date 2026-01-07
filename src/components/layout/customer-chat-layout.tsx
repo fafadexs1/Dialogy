@@ -236,6 +236,7 @@ export default function CustomerChatLayout({
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
+  const pendingContactFetchRef = useRef<Set<string>>(new Set());
 
   const isHydratedRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -507,6 +508,10 @@ export default function CustomerChatLayout({
     const rawMessage = message as any;
     if (initialUser && rawMessage.sender_user_id) {
       message.from_me = rawMessage.sender_user_id === initialUser.id;
+    }
+
+    if (initialUser?.activeWorkspaceId && message.workspace_id && message.workspace_id !== initialUser.activeWorkspaceId) {
+      return;
     }
 
     console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me, 'Event:', payload.eventType);
@@ -1062,6 +1067,28 @@ export default function CustomerChatLayout({
     }
   }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
 
+  const fetchContactById = useCallback(async (contactId: string) => {
+    if (!initialUser?.activeWorkspaceId) return;
+    if (pendingContactFetchRef.current.has(contactId)) return;
+    pendingContactFetchRef.current.add(contactId);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id,workspace_id,name,avatar_url,email,phone,phone_number_jid,address,owner_id,created_at')
+        .eq('id', contactId)
+        .maybeSingle();
+
+      if (error || !data) return;
+      if (data.workspace_id !== initialUser.activeWorkspaceId) return;
+      updateChatContact(data as Contact);
+    } catch (err) {
+      console.error('[REALTIME] Failed to fetch contact for chat insert', err);
+    } finally {
+      pendingContactFetchRef.current.delete(contactId);
+    }
+  }, [initialUser?.activeWorkspaceId, updateChatContact]);
+
   // Centralized Realtime subscriptions - prevents duplicate channel conflicts
   const handleRealtimeChatUpdate = useCallback(async (payload: RealtimePostgresChangesPayload<any>) => {
     console.log('[REALTIME] Chat update received:', payload);
@@ -1072,6 +1099,13 @@ export default function CustomerChatLayout({
       ...newChatData,
       agentId: newChatData.agent_id,
     };
+    const contactId: string | null = newChatData.contact_id ?? null;
+    if (contactId) {
+      const existingContact = useInboxStore.getState().chats.find((chat) => chat.contact?.id === contactId)?.contact;
+      if (existingContact) {
+        optimisticUpdate.contact = existingContact;
+      }
+    }
     // Fix agent object minimally if needed for optimistic update
     if (newChatData.agent_id === initialUser?.id) {
       optimisticUpdate.agent = initialUser ?? undefined;
@@ -1086,17 +1120,22 @@ export default function CustomerChatLayout({
       optimisticUpdate.updatedAt = newChatData.updated_at || newChatData.created_at || new Date().toISOString();
 
       // Ensure contact object exists to prevent UI crashes (accessing property 'name' of undefined)
-      if (!optimisticUpdate.contact && newChatData.contact_id) {
+      if (!optimisticUpdate.contact && contactId) {
         // Try to find contact in existing chats if possible, or create a safe placeholder
         // Since we don't have access to a global contacts list here easily, we use a Safe Placeholder.
         // It will be replaced by the full fetch in the next step immediately.
         (optimisticUpdate as any).contact = {
-          id: newChatData.contact_id,
+          id: contactId,
           name: 'Novo Contato...',
           workspace_id: initialUser?.activeWorkspaceId || '',
           avatar_url: null,
           phone: '',
         };
+      }
+      if (contactId && !optimisticUpdate.contact) {
+        void fetchContactById(contactId);
+      } else if (contactId && optimisticUpdate.contact?.name === 'Novo Contato...') {
+        void fetchContactById(contactId);
       }
     }
 
@@ -1109,7 +1148,7 @@ export default function CustomerChatLayout({
 
     // 2. Refresh logic removed to enforce Event-Only architecture.
     // We rely solely on the optimistic update above.
-  }, [initialUser?.id, initialUser]);
+  }, [fetchContactById, initialUser?.id, initialUser]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
@@ -1121,12 +1160,23 @@ export default function CustomerChatLayout({
     }
   }, [runDeltaSync]);
 
+  const handleRealtimeContactUpdate = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
+    if (payload.eventType === 'DELETE') return;
+    const contact = payload.new as any;
+    if (!contact?.id) return;
+    if (initialUser?.activeWorkspaceId && contact.workspace_id && contact.workspace_id !== initialUser.activeWorkspaceId) {
+      return;
+    }
+    updateChatContact(contact);
+  }, [initialUser?.activeWorkspaceId, updateChatContact]);
+
   // Use centralized Realtime hook
   useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
     selectedChatId,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
+    onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
 
