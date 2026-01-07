@@ -1,7 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
-import { createServerClient } from '@supabase/ssr';
-import { baseCookieOptions } from '@/lib/supabase/cookie-options';
 import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies } from '@/lib/auth/token';
 
 export async function middleware(request: NextRequest) {
@@ -21,7 +19,13 @@ export async function middleware(request: NextRequest) {
 
   // 1. Standard Session Refresh (Supabase)
   // This helps keep the session alive.
-  let response = await updateSession(request, requestHeaders);
+  let response = isHtmlRequest
+    ? await updateSession(request, requestHeaders)
+    : NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      });
 
   // If updateSession returned a redirect or error, we might just return it?
   // updateSession usually just sets cookies on the response it creates.
@@ -29,44 +33,12 @@ export async function middleware(request: NextRequest) {
 
   // 2. Protect /superadmin routes
   if (request.nextUrl.pathname.startsWith('/superadmin')) {
-    // We need to verify the user strictly.
-    // We must create a client here because we can't access the one inside updateSession.
-    // NOTE: This creates a second instance, which is acceptable for protected routes.
+    const expMs = decoded?.exp ? decoded.exp * 1000 : null;
+    const isExpired = expMs ? expMs <= Date.now() : false;
 
-    // Create an unmodified response object to start with, or copy headers? 
-    // Actually, createServerClient needs to be able to read/write cookies.
-    // We pass the *request* cookies. We don't necessarily need to write cookies here *if* updateSession already did.
-    // But to be safe, we use the same pattern.
-
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll();
-          },
-          setAll(cookiesToSet) {
-            // We don't need to persist cookie updates from *this* check to the response 
-            // IF updateSession already handled the refresh. 
-            // But valid pattern is to allow it.
-            cookiesToSet.forEach(({ name, value, options }) => {
-              request.cookies.set({ name, value, ...options });
-              response = NextResponse.next({
-                request: { headers: requestHeaders }
-              });
-              response.cookies.set({ name, value, ...options });
-            });
-          },
-        },
-      }
-    );
-
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
+    if (!decoded?.sub || isExpired) {
       const url = request.nextUrl.clone();
-      url.pathname = '/login'; // Or wherever your login is
+      url.pathname = '/login';
       return NextResponse.redirect(url);
     }
 

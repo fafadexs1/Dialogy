@@ -31,40 +31,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let mounted = true;
         let initCompleted = false;
 
-        // 1. Initial fetch - ONLY ONE CALL
+        // 1. Initial fetch - session only (no /auth/v1/user call)
         const initAuth = async () => {
             try {
                 console.log('[AUTH_PROVIDER] Starting initAuth...');
-                const { data: { user: initialUser }, error } = await supabase.auth.getUser();
+                const { data: { session: initialSession }, error } = await supabase.auth.getSession();
 
                 if (error) {
-                    console.warn('[AUTH_PROVIDER] getUser returned error:', error.message);
-
-                    // 🔧 CRITICAL FIX: If getUser fails but we're on a protected route,
-                    // the server-side login set cookies that the client hasn't read yet.
-                    // Force a getSession() call which will re-read the cookies.
-                    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-                        console.log('[AUTH_PROVIDER] On protected route, trying getSession() as fallback...');
-                        const { data: { session: fallbackSession } } = await supabase.auth.getSession();
-                        if (fallbackSession?.user && mounted && !initCompleted) {
-                            console.log('[AUTH_PROVIDER] getSession fallback found user:', fallbackSession.user.id);
-                            setUser(fallbackSession.user);
-                            setSession(fallbackSession);
-                            initCompleted = true;
-                            setIsLoading(false);
-                            return;
-                        }
-                    }
+                    console.warn('[AUTH_PROVIDER] getSession returned error:', error.message);
                 }
 
                 if (mounted && !initCompleted) {
-                    if (initialUser) {
-                        console.log('[AUTH_PROVIDER] initAuth found user:', initialUser.id);
-                        setUser(initialUser);
-                        const { data: { session: currentSession } } = await supabase.auth.getSession();
-                        setSession(currentSession);
+                    if (initialSession?.user) {
+                        console.log('[AUTH_PROVIDER] initAuth found user:', initialSession.user.id);
+                        setUser(initialSession.user);
+                        setSession(initialSession);
                     } else {
-                        console.log('[AUTH_PROVIDER] initAuth: No user found');
+                        console.log('[AUTH_PROVIDER] initAuth: No session found');
                     }
                 }
             } catch (error) {

@@ -32,6 +32,20 @@ const base64UrlToUint8Array = (value: string): Uint8Array => {
 
 const base64UrlDecode = (value: string) => textDecoder.decode(base64UrlToUint8Array(value));
 
+const BASE64_COOKIE_PREFIX = 'base64-';
+
+const decodeCookieValue = (value: string): string => {
+  if (value.startsWith(BASE64_COOKIE_PREFIX)) {
+    const encoded = value.slice(BASE64_COOKIE_PREFIX.length);
+    try {
+      return base64UrlDecode(encoded);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+};
+
 const arrayBufferToBase64Url = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -93,24 +107,74 @@ function decodeWithoutVerify(token: string): SupabaseJwtPayload | null {
  * Returns the access token found in Supabase cookies.
  * Handles both "sb-*-auth-token" JSON cookie (preferred) and legacy "sb-access-token".
  */
+const getCookieBaseNames = (cookies: Array<{ name: string; value: string }>, marker: string): string[] => {
+  const baseNames: string[] = [];
+  const seen = new Set<string>();
+
+  cookies.forEach(({ name }) => {
+    if (!name.includes(marker)) return;
+    const baseName = name.replace(/\.(\d+)$/, '');
+    if (seen.has(baseName)) return;
+    seen.add(baseName);
+    baseNames.push(baseName);
+  });
+
+  return baseNames;
+};
+
+const combineCookieChunks = (cookies: Array<{ name: string; value: string }>, baseName: string): string | null => {
+  const direct = cookies.find((cookie) => cookie.name === baseName)?.value;
+  if (direct) return direct;
+
+  const chunks: string[] = [];
+  for (let i = 0; ; i += 1) {
+    const chunk = cookies.find((cookie) => cookie.name === `${baseName}.${i}`)?.value;
+    if (!chunk) break;
+    chunks.push(chunk);
+  }
+
+  return chunks.length ? chunks.join('') : null;
+};
+
+const parseSessionCookie = (value: string): { access_token?: string } | null => {
+  const decoded = decodeCookieValue(value);
+  let parsed = safeJsonParse<{ access_token?: string }>(decoded);
+  if (parsed?.access_token) return parsed;
+
+  try {
+    const uriDecoded = decodeURIComponent(decoded);
+    parsed = safeJsonParse<{ access_token?: string }>(uriDecoded);
+    if (parsed?.access_token) return parsed;
+  } catch {
+    // Ignore URI decode failures.
+  }
+
+  return null;
+};
+
 export function getSupabaseAccessTokenFromCookies(
   cookies: { getAll(): Array<{ name: string; value: string }> }
 ): string | null {
   const all = cookies.getAll();
 
-  // Preferred: cookie storing JSON with access_token
-  const sessionCookie = all.find((c) => c.name.includes('auth-token'));
-  if (sessionCookie) {
-    const parsed = safeJsonParse<{ access_token?: string }>(sessionCookie.value);
+  // Preferred: session cookie storing JSON with access_token (base64url + chunked).
+  const authTokenBases = getCookieBaseNames(all, 'auth-token');
+  for (const baseName of authTokenBases) {
+    const combined = combineCookieChunks(all, baseName);
+    if (!combined) continue;
+    const parsed = parseSessionCookie(combined);
     if (parsed?.access_token) {
       return parsed.access_token;
     }
   }
 
-  // Fallback: direct access token cookie
-  const accessCookie = all.find((c) => c.name.includes('access-token'));
-  if (accessCookie?.value) {
-    return accessCookie.value;
+  // Fallback: direct access token cookie.
+  const accessTokenBases = getCookieBaseNames(all, 'access-token');
+  for (const baseName of accessTokenBases) {
+    const combined = combineCookieChunks(all, baseName);
+    if (!combined) continue;
+    const decoded = decodeCookieValue(combined);
+    return decoded || combined;
   }
 
   return null;
