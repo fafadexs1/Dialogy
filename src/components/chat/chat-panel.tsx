@@ -1118,25 +1118,80 @@ export default function ChatPanel({
         }
 
         if (sendState === 'sending') return;
-        setSendState('sending');
+        // Optimization: Do not block for media sending.
+        // setSendState('sending'); // Removed blocking state for media
         setLastSendError(null);
         const sendStart = performance.now();
 
+        // Save context for background tasks
+        const filesToSend = [...currentMediaFiles];
+        const captionForFirst = currentMessageText;
+        const chatId = chat.id;
+
+        // Reset UI immediately
         lastSendDraftRef.current = { text: currentMessageText, media: currentMediaFiles, isNote: isInternalNote };
         setNewMessage('');
         setMediaFiles([]);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+        setDraft(chatId, '');
 
-        try {
-            // SEQUENTIAL SENDING LOGIC
-            // We process files one by one. If one fails, we stop and keep the remaining in the list.
+        // Generate optimistic messages for all files
+        const optimisticMessages: Message[] = filesToSend.map((mf, index) => {
+            const now = new Date();
+            const optimisticId = uuidv4();
+            // Use base64 preview for immediate display
+            const mediaUrl = mf.base64 ? `data:${mf.type};base64,${mf.base64}` : '';
 
-            let captionToSend = currentMessageText;
-            const totalFiles = currentMediaFiles.length;
-            let lastResult: { success: boolean; error?: string; messages?: Message[] } | null = null;
+            return {
+                id: optimisticId,
+                chat_id: chatId,
+                workspace_id: chat.workspace_id,
+                content: index === 0 ? captionForFirst : '', // Only first gets caption
+                type: mf.mediatype,
+                status: 'default',
+                from_me: true,
+                createdAt: now.toISOString(),
+                is_read: true,
+                timestamp: now.toISOString(),
+                formattedDate: formatMessageDate(now, workspaceTimezone),
+                sender: {
+                    id: currentUser.id,
+                    name: currentUser.name,
+                    avatar: currentUser.avatar || currentUser.avatar_url,
+                    type: 'user'
+                },
+                transcription: null,
+                metadata: {
+                    ... (isInternalNote ? { isInternalNote: true } : {}),
+                    mediaUrl: mediaUrl, // Optimistic preview
+                    mimetype: mf.type,
+                    fileName: mf.name,
+                    thumbnail: mf.thumbnail,
+                    optimisticId
+                },
+                api_message_status: 'PENDING',
+                instance_name: chat.instance_name || undefined,
+                platform: optimisticPlatform,
+                source_from_api: optimisticPlatform,
+                optimistic: true,
+                sentByTab: tabId
+            };
+        });
 
-            for (let i = 0; i < totalFiles; i++) {
-                const mf = currentMediaFiles[i];
+        // Update UI immediately
+        appendMessagesToChat(chatId, optimisticMessages);
+
+        // Scroll to bottom
+        userScrolledUpRef.current = false;
+        setTimeout(() => {
+            virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length + optimisticMessages.length, align: 'end', behavior: 'smooth' });
+        }, 50);
+
+        // Process in background (Fire-and-forget from UI perspective)
+        (async () => {
+            for (let i = 0; i < filesToSend.length; i++) {
+                const mf = filesToSend[i];
+                const optMsg = optimisticMessages[i];
 
                 try {
                     const extension = mf.name.split('.').pop() || 'dat';
@@ -1158,75 +1213,55 @@ export default function ChatPanel({
                         thumbnail: mf.thumbnail,
                     }];
 
-                    // Attach caption only to the first file (or as user prefers, usually first)
-                    // If user typed text, we send it with the first image. 
-                    // Subsequent images go without text.
-                    const currentCaption = i === 0 ? captionToSend : '';
+                    const currentCaption = i === 0 ? captionForFirst : '';
 
-                    const result = await sendMediaAction(chat.id, currentCaption, filePayload, tabId);
-                    lastResult = result;
+                    // Call backend action
+                    const result = await sendMediaAction(chatId, currentCaption, filePayload, tabId);
 
                     if (result.error) {
                         throw new Error(result.error);
                     }
 
-                    // 3. Success: Remove this file from the UI list
-                    setMediaFiles(prev => prev.filter(f => f.id !== mf.id));
-
-                    // Add a small delay between sends to prevent overwhelming the server/API if needed
-                    // await new Promise(r => setTimeout(r, 500));
+                    // 3. Success (Replace optimistic message with real one or just update status)
+                    // If backend returns the created message, we replace it.
+                    if ((result as any).messages && (result as any).messages.length > 0) {
+                        const realMsg = (result as any).messages[0];
+                        // Ensure formattedDate is present for UI
+                        const formattedRealMsg = {
+                            ...realMsg,
+                            sender: optMsg.sender,
+                            formattedDate: formatMessageDate(new Date(realMsg.createdAt), workspaceTimezone)
+                        };
+                        replaceOptimisticMessage(chatId, optMsg.id, formattedRealMsg);
+                    } else {
+                        // Just mark as sent if no object returned (shouldn't happen with current action)
+                        updateMessage(chatId, optMsg.id, {
+                            api_message_status: 'SENT',
+                        });
+                    }
 
                 } catch (fileErr: any) {
                     console.error(`Error sending file ${mf.name}:`, fileErr);
+                    // Mark specific message as FAILED
+                    updateMessage(chatId, optMsg.id, {
+                        api_message_status: 'FAILED',
+                        metadata: { ...optMsg.metadata, send_error: fileErr.message || 'Falha no envio.' }
+                    });
+
                     toast({
                         title: 'Erro ao enviar ' + mf.name,
                         description: fileErr.message || 'Falha no envio.',
                         variant: 'destructive'
                     });
-                    // Stop processing further files so user can see what failed
-                    setSendState('error');
-                    setLastSendError(`Erro ao enviar ${mf.name}`);
-                    // Restore the caption if it wasn't sent with the first file yet? 
-                    // Actually, better to just let the user retry.
-                    if (i === 0) {
-                        setNewMessage(currentMessageText); // Restore text if first failed
-                        if (contentEditableRef.current) contentEditableRef.current.innerHTML = currentMessageText;
-                    }
-                    return; // Exit function, don't clear draft ref completely yet
                 }
             }
 
-            // If loop finishes, all good
-            setSendState('idle');
-            setLastSendError(null);
+            // Cleanup logic if needed
             lastSendDraftRef.current = null;
-            onActionSuccess(); // Trigger update
+            onActionSuccess();
+            reportClientMetric('send_message', performance.now() - sendStart, { chatId, media: true });
 
-            if (lastResult?.error) throw new Error(lastResult.error);
-        } catch (error) {
-            console.error('Error during message submission:', error);
-            toast({ title: 'Erro Critico', description: 'Ocorreu um erro inesperado ao enviar a mensagem.', variant: 'destructive' });
-            setSendState('error');
-            setLastSendError(error instanceof Error ? error.message : 'Falha ao enviar mensagem');
-
-            // Only restore draft if we didn't partially succeed in the loop above (handled inside)
-            // But for text/note errors, we restore here.
-            if (isTextOnly || isInternalNote) {
-                const draft = lastSendDraftRef.current;
-                if (draft) {
-                    setNewMessage(draft.text);
-                    setMediaFiles(draft.media);
-                    if (contentEditableRef.current) {
-                        contentEditableRef.current.innerHTML = draft.text;
-                    }
-                }
-            }
-        } finally {
-            if (sendState !== 'error') {
-                // report metric only if flow completed? 
-            }
-            reportClientMetric('send_message', performance.now() - sendStart, { chatId: chat.id, media: !isTextOnly });
-        }
+        })();
     };
 
 

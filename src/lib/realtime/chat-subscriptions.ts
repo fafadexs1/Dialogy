@@ -127,6 +127,7 @@ export function subscribeToWorkspaceMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
+        filter: `workspace_id=eq.${workspaceId}`,
       },
       (payload) => {
         onMessage(payload);

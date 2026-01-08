@@ -235,6 +235,11 @@ async function internalSendMessage(
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
     }
     const client = await db.connect();
+
+    // Variáveis capturadas para uso no bloco assíncrono (background)
+    let persistedMessage: Message | null = null;
+    let backgroundTaskData: any = {};
+
     try {
         await client.query('BEGIN');
 
@@ -243,7 +248,8 @@ async function internalSendMessage(
             SELECT 
                 c.workspace_id, c.status, c.agent_id,
                 ct.phone_number_jid,
-                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name
+                (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name,
+                (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as source_from_api
             FROM chats c
             JOIN contacts ct ON c.contact_id = ct.id
             WHERE c.id = $1
@@ -254,11 +260,12 @@ async function internalSendMessage(
         }
 
         const chatInfo = chatInfoRes.rows[0];
-        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfo;
+        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source } = chatInfo;
+
+        // Emulate source property for downstream logic
+        chatInfo.source = source;
 
         // Se for humano e não tiver agente (independente do status), atribui o agente
-        // Ignora atribuição se for mensagem de encerramento (close_notice)
-        // Se o chat estiver encerrado, força a atribuição para o novo atendente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
         const isCloseNotice = metadata?.event === 'close_notice';
 
@@ -268,11 +275,6 @@ async function internalSendMessage(
                 [senderId, chatId]
             );
 
-            // Insert system message indicating attendance started
-            // We need to fetch the agent's name to be consistent with assignChatToSelfAction
-            // Since senderId is the user ID, we can try to get the name from a separate query or assume it's available.
-            // However, internalSendMessage doesn't receive the sender's name directly.
-            // We can fetch it or just use a generic message if name is unavailable, but fetching is better.
             const agentRes = await client.query('SELECT full_name, email FROM users WHERE id = $1', [senderId]);
             const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
 
@@ -285,259 +287,204 @@ async function internalSendMessage(
             );
         }
 
-        // Check for Mercado Livre
-        if (chatInfo.source === 'mercadolivre') {
-            try {
-                // 1. Get Account
-                const accountRes = await client.query(
-                    'SELECT id, workspace_id, user_id, access_token, refresh_token FROM mercadolivre_accounts WHERE workspace_id = $1 LIMIT 1',
-                    [workspaceId] // Assuming one account per workspace or we need to link chat to account more explicitly?
-                    // Ideally, chat should track which account it belongs to if multiple.
-                    // But for now, let's assume one active integration.
-                );
-
-                if ((accountRes.rowCount ?? 0) > 0) {
-                    const { MercadoLivreMessagingService } = await import('@/services/mercadolivre/messaging-service');
-                    const service = new MercadoLivreMessagingService(accountRes.rows[0]);
-
-                    // 2. Determine if we are replying to a Question or Message
-                    // We need the last received message metadata to know what we are replying to.
-                    // Or just the chat context.
-                    // If the last message was a Question, we answer it.
-                    const lastMsgRes = await client.query(
-                        `SELECT metadata, message_id_from_api FROM messages 
-                          WHERE chat_id = $1 AND from_me = FALSE 
-                          ORDER BY created_at DESC LIMIT 1`,
-                        [chatId]
-                    );
-
-                    const lastMetadata = lastMsgRes.rows[0]?.metadata || {};
-                    const isQuestion = lastMetadata.isQuestion;
-
-                    let apiResponse: any;
-
-                    // Use apiContent over content if provided
-                    const contentToSend = apiContent || content;
-
-                    if (isQuestion) {
-                        const questionId = lastMetadata.questionId || lastMsgRes.rows[0]?.message_id_from_api;
-                        if (questionId) {
-                            apiResponse = await service.answerQuestion(questionId, contentToSend);
-                        } else {
-                            throw new Error('Não foi possível identificar a pergunta para responder.');
-                        }
-                    } else {
-                        // Post-sale message
-                        const packId = lastMetadata.packId; // Order ID
-                        const buyerId = lastMetadata.buyerId || remoteJid; // We stored buyerId in remoteJid too
-                        apiResponse = await service.sendMessage(packId, buyerId, contentToSend);
-                    }
-
-                    // 3. Persist
-                    const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
-                    const res = await client.query(
-                        `INSERT INTO messages (
-                            workspace_id, chat_id, type, content, from_me, 
-                            metadata, is_read, ${senderColumn}, created_at
-                        ) VALUES ($1, $2, 'text', $3, true, $4, true, $5, NOW())
-                        RETURNING *`,
-                        [
-                            workspaceId, chatId, content, // Persist original content
-                            {
-                                sentBy: metadata?.sentBy || 'agent',
-                                platform: 'mercadolivre',
-                                isQuestionReply: !!isQuestion
-                            },
-                            senderId
-                        ]
-                    );
-
-                    await client.query('COMMIT');
-                    await client.query('COMMIT');
-                    return { success: true, message: mapDbMessageToFrontend(res.rows[0]) };
-                }
-            } catch (mlErr: any) {
-                await client.query('ROLLBACK');
-                console.error('[SEND_MESSAGE_ACTION][ML]', mlErr);
-                return { success: false, error: mlErr.message || 'Falha ao enviar resposta ao Mercado Livre' };
-            }
-        }
-
-        // Tenta contexto Meta (Instagram/Messenger)
-        const metaCtx = await resolveMetaSendContext(chatId, client);
-        if (metaCtx) {
-            try {
-                const service =
-                    metaCtx.platform === 'instagram'
-                        ? new InstagramMessagingService(metaCtx.channel)
-                        : new MessengerMessagingService(metaCtx.channel);
-
-                const apiResponse = await service.sendMessage({
-                    recipientId: metaCtx.externalUserId,
-                    type: 'text',
-                    text: apiContent || content,
-                });
-
-                const persisted = await persistNormalizedMessage({
-                    channel: metaCtx.channel,
-                    chat: metaCtx.chat,
-                    contact: metaCtx.contact,
-                    message: {
-                        type: 'text',
-                        content: content, // Save original content
-                        metadata,
-                    },
-                    platform: metaCtx.platform,
-                    direction: 'outgoing',
-                    externalMessageId: (apiResponse as any)?.message_id || (apiResponse as any)?.id || null,
-                    externalSenderId: metaCtx.externalUserId,
-                    externalChannelId: metaCtx.externalChannelId,
-                    rawPayload: { request: { content: apiContent || content }, response: apiResponse },
-                    fromMe: true,
-                    senderUserId: senderId,
-                    senderSystemAgentId: metadata?.sentBy === 'system_agent' ? senderId : null,
-                });
-
-                await client.query('COMMIT');
-                return { success: true, apiResponse, message: persisted as Message };
-            } catch (metaErr) {
-                await client.query('ROLLBACK');
-                console.error('[SEND_MESSAGE_ACTION][META]', metaErr);
-                return { success: false, error: formatMetaSendError(metaErr) };
-            }
-        }
-
-        // Fluxo WhatsApp legado
-        const instanceName = instanceNameParam || lastInstanceName;
-
-        if (!remoteJid || !instanceName) {
-            throw new Error('Nao foi possivel encontrar o numero de destino ou a instancia para este chat.');
-        }
-
-        const apiConfig = await getEvolutionApiConfig(instanceName);
-
-        if (!apiConfig) {
-            throw new Error('Configuracao da API nao encontrada para a instancia ' + instanceName + '.');
-        }
-
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
         const dbMetadata = { ...metadata, ...(template ? { isTemplate: true, templateName: template.name } : {}) };
 
-        if (shouldEnqueueJob('whatsapp_send')) {
-            let insertRes;
-            if (messageId) {
-                insertRes = await client.query(
-                    `INSERT INTO messages (
-                        id, workspace_id, chat_id, type, content, from_me, 
-                        message_id_from_api, api_message_status, instance_name, 
-                        metadata, is_read, ${senderColumn}, sent_by_tab
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    RETURNING *`,
-                    [
-                        messageId, workspaceId, chatId, 'text', content, true,
-                        null, 'PENDING', instanceName,
-                        dbMetadata, true, senderId, tabId
-                    ]
-                );
-            } else {
-                insertRes = await client.query(
-                    `INSERT INTO messages (
-                        workspace_id, chat_id, type, content, from_me, 
-                        message_id_from_api, api_message_status, instance_name, 
-                        metadata, is_read, ${senderColumn}, sent_by_tab
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    RETURNING *`,
-                    [
-                        workspaceId, chatId, 'text', content, true,
-                        null, 'PENDING', instanceName,
-                        dbMetadata, true, senderId, tabId
-                    ]
-                );
-            }
+        // Define instância para uso (prioridade: param > last_instance > default/error)
+        const instanceName = instanceNameParam || lastInstanceName;
 
-            const queuedMessageId = insertRes.rows[0]?.id || messageId;
-
-            await enqueueJob(
-                'whatsapp_send',
-                {
-                    messageId: queuedMessageId,
-                    workspaceId,
-                    instanceName,
-                    number: remoteJid,
-                    content,
-                    apiContent,
-                    template,
-                    metadata: dbMetadata,
-                    senderId,
-                    senderType: metadata?.sentBy === 'system_agent' ? 'system_agent' : 'user',
-                    tabId,
-                },
-                { client }
-            );
-
-            await client.query('COMMIT');
-            return { success: true, apiResponse: { queued: true }, message: mapDbMessageToFrontend(insertRes.rows[0]) };
-        }
-
-        let apiResponse: any;
-        if (template) {
-            apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
-                number: remoteJid,
-                name: template.name,
-                language: template.language,
-                components: template.components
-            });
-        } else {
-            apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, apiContent || content);
-        }
-
+        // Inserção da Mensagem Principal como PENDING
+        // Usamos api_message_status = 'PENDING' para indicar que ainda vamos processar
         let insertRes;
-        if (messageId) {
-            insertRes = await client.query(
-                `INSERT INTO messages (
-                    id, workspace_id, chat_id, type, content, from_me, 
-                    message_id_from_api, api_message_status, instance_name, 
-                    metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                RETURNING *`,
-                [
-                    messageId, workspaceId, chatId, 'text', content, true,
-                    apiResponse?.key?.id, 'SENT', instanceName,
-                    dbMetadata, true, senderId, tabId
-                ]
-            );
-        } else {
-            insertRes = await client.query(
-                `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me, 
-                    message_id_from_api, api_message_status, instance_name, 
-                    metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                RETURNING *`,
-                [
-                    workspaceId, chatId, 'text', content, true,
-                    apiResponse?.key?.id, 'SENT', instanceName,
-                    dbMetadata, true, senderId, tabId
-                ]
-            );
-        }
+
+        // Se já temos um ID (otimista), usamos ele
+        const messageIdToUse = messageId || randomUUID();
+
+        // Query de inserção
+        insertRes = await client.query(
+            `INSERT INTO messages (
+                id, workspace_id, chat_id, type, content, from_me, 
+                message_id_from_api, api_message_status, instance_name, 
+                metadata, is_read, ${senderColumn}, sent_by_tab
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING *`,
+            [
+                messageIdToUse, workspaceId, chatId, 'text', content, true,
+                null, 'PENDING', instanceName, // Salva instanceName mesmo que null por enquanto, mas valida depois
+                dbMetadata, true, senderId, tabId
+            ]
+        );
+
+        persistedMessage = mapDbMessageToFrontend(insertRes.rows[0]);
+        backgroundTaskData = {
+            chatInfo,
+            instanceName,
+            remoteJid,
+            apiContent: apiContent || content,
+            template,
+            messageId: persistedMessage?.id
+        };
 
         await client.query('COMMIT');
 
-        // Revalidação manual não é mais necessária com subscriptions.
-        // A UI será atualizada via websockets.
-        // revalidatePath('/', 'layout');
-
-        return { success: true, apiResponse, message: mapDbMessageToFrontend(insertRes.rows[0]) };
-
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('[SEND_MESSAGE_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
-        return { success: false, error: `Falha ao enviar mensagem: ${errorMessage}` };
+        console.error('[SEND_MESSAGE_ACTION] Erro síncrono:', error);
+        throw error; // Erro na validação ou DB inicial deve falhar a request
     } finally {
         client.release();
     }
+
+    // --- BLOCO ASSÍNCRONO (FIRE-AND-FORGET) ---
+    // Executa fora do fluxo principal de resposta
+    (async () => {
+        if (!persistedMessage || !backgroundTaskData?.messageId) return;
+
+        try {
+            const { chatInfo, instanceName, remoteJid, apiContent, template, messageId } = backgroundTaskData;
+
+            // 1. Lógica Específica por Canal
+            let apiResponse: any;
+            let externalId: string | null = null;
+
+            // -- Mercado Livre --
+            if (chatInfo.source === 'mercadolivre') {
+                const { MercadoLivreMessagingService } = await import('@/services/mercadolivre/messaging-service');
+                // Busca conta ML
+                const accountRes = await db.query(
+                    'SELECT id, workspace_id, user_id, access_token, refresh_token FROM mercadolivre_accounts WHERE workspace_id = $1 LIMIT 1',
+                    [persistedMessage.workspace_id]
+                );
+
+                if (accountRes.rowCount === 0) throw new Error('Conta Mercado Livre não configurada.');
+                const service = new MercadoLivreMessagingService(accountRes.rows[0]);
+
+                if (metadata?.isQuestionReply) {
+                    // Lógica simplificada: se metadado diz que é resposta, tentamos achar o ID da pergunta na última mensagem recebida
+                    // Como já persistimos a mensagem atual, buscamos a penúltima (recebida)
+                    const lastMsgRes = await db.query(
+                        `SELECT metadata, message_id_from_api FROM messages 
+                         WHERE chat_id = $1 AND from_me = FALSE AND created_at < $2
+                         ORDER BY created_at DESC LIMIT 1`,
+                        [chatId, persistedMessage.createdAt]
+                    );
+                    const qId = lastMsgRes.rows[0]?.metadata?.questionId || lastMsgRes.rows[0]?.message_id_from_api;
+                    if (!qId) throw new Error('Pergunta original não encontrada para resposta.');
+                    apiResponse = await service.answerQuestion(qId, apiContent);
+                } else {
+                    const packId = metadata?.packId;
+                    const buyerId = metadata?.buyerId || remoteJid;
+                    if (!packId) throw new Error('PackId não encontrado para mensagem pós-venda.');
+                    apiResponse = await service.sendMessage(packId, buyerId, apiContent);
+                }
+                externalId = apiResponse?.id || null;
+            }
+
+            // -- Meta (Instagram / Messenger) --
+            // Precisamos resolver o contexto Meta.
+            // Nota: resolveMetaSendContext usa 'client', vamos criar um novo pool client rápido ou usar pool direto se possível.
+            // resolveMetaSendContext executa query apenas, dá pra usar db.query se adaptar a assinatura, 
+            // mas ela pede client. Vamos abrir um client rápido para isso.
+            else if (!instanceName && !remoteJid) { // Assumindo que Meta channels não usam instanceName/remoteJid da mesma forma que WA
+                const metaClient = await db.connect();
+                let metaCtx = null;
+                try {
+                    metaCtx = await resolveMetaSendContext(chatId, metaClient);
+                } finally {
+                    metaClient.release();
+                }
+
+                if (metaCtx) {
+                    const service = metaCtx.platform === 'instagram'
+                        ? new InstagramMessagingService(metaCtx.channel)
+                        : new MessengerMessagingService(metaCtx.channel);
+
+                    apiResponse = await service.sendMessage({
+                        recipientId: metaCtx.externalUserId,
+                        type: 'text',
+                        text: apiContent,
+                    });
+
+                    externalId = (apiResponse as any)?.message_id || (apiResponse as any)?.id;
+
+                    // Persistência adicional do Meta (update)
+                    // A função original chamava 'persistNormalizedMessage', que faz INSERT/UPDATE.
+                    // Aqui já fizemos o INSERT. Precisamos apenas atualizar os IDs externos.
+                } else {
+                    // Se não é meta e não tem instanceName, falhou
+                    throw new Error('Canal de envio não identificado (sem instância WA e sem contexto Meta).');
+                }
+            }
+
+            // -- WhatsApp (Evolution API) --
+            else {
+                if (!remoteJid || !instanceName) {
+                    throw new Error('Destino ou Instância não definidos para envio WhatsApp.');
+                }
+
+                // Valida queue
+                if (shouldEnqueueJob('whatsapp_send')) {
+                    // Se Queue está ativa, o handler da queue fará o envio.
+                    // Apenas enfileiramos.
+                    // OBS: Aqui já inserimos a mensagem. Precisamos apenas chamar enqueueJob.
+                    // O handler da queue espera um messageId já criado geralmente.
+                    await enqueueJob('whatsapp_send', {
+                        messageId,
+                        workspaceId: persistedMessage.workspace_id,
+                        instanceName,
+                        number: remoteJid,
+                        content: apiContent, // ou content
+                        apiContent,
+                        template,
+                        metadata: persistedMessage.metadata,
+                        senderId,
+                        senderType: metadata?.sentBy === 'system_agent' ? 'system_agent' : 'user',
+                        tabId
+                    });
+                    // Retornamos aqui pois o worker vai atualizar o status depois
+                    return;
+                }
+
+                // Envio Direto via API
+                const apiConfig = await getEvolutionApiConfig(instanceName);
+                if (!apiConfig) throw new Error(`Configuração API não encontrada par instância ${instanceName}`);
+
+                if (template) {
+                    apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
+                        number: remoteJid,
+                        name: template.name,
+                        language: template.language,
+                        components: template.components
+                    });
+                } else {
+                    apiResponse = await sendTextMessage(apiConfig, instanceName, remoteJid, apiContent);
+                }
+                externalId = apiResponse?.key?.id;
+            }
+
+            // 2. Atualiza status para SENT no DB
+            await db.query(`
+                UPDATE messages 
+                SET api_message_status = 'SENT',
+                    message_id_from_api = $1
+                WHERE id = $2
+            `, [externalId, messageId]);
+
+        } catch (bgError) {
+            console.error('[INTERNAL_SEND_BG] Falha no envio em background:', bgError);
+            // Atualiza para FAILED
+            const errorMessage = bgError instanceof Error ? bgError.message : 'Erro desconhecido';
+            await db.query(`
+                UPDATE messages 
+                SET api_message_status = 'FAILED',
+                    metadata = jsonb_set(COALESCE(metadata, '{}'), '{send_error}', $1)
+                WHERE id = $2
+            `, [JSON.stringify(errorMessage), messageId]);
+        }
+    })();
+
+    // Retorna imediatamente com sucesso (Optimistic Server Response)
+    return { success: true, message: persistedMessage };
 }
 
 
@@ -563,11 +510,17 @@ async function internalSendMedia(
         return { success: false, error: 'Dados da mídia inválidos.' };
     }
 
-    // NOTE: We do NOT use a single transaction for the entire batch anymore.
-    // This prevents holding a DB connection while uploading files to the API.
+    const client = await db.connect();
+
+    // Data needed for background task
+    let pendingMessages: { dbMessage: Message, file: typeof mediaFiles[0] }[] = [];
+    let backgroundData: any = {};
+
     try {
+        await client.query('BEGIN');
+
         // 1. Initial checks (read-only, fast)
-        const chatInfoRes = await db.query(`
+        const chatInfoRes = await client.query(`
             SELECT c.workspace_id, ct.phone_number_jid, 
                    (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name
             FROM chats c
@@ -575,7 +528,9 @@ async function internalSendMedia(
             WHERE c.id = $1
         `, [chatId]);
 
-        if (chatInfoRes.rowCount === 0) throw new Error('Chat não encontrado.');
+        if (chatInfoRes.rowCount === 0) {
+            throw new Error('Chat não encontrado.');
+        }
 
         const { workspace_id: workspaceId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName } = chatInfoRes.rows[0];
         const instanceName = instanceNameParam || lastInstanceName;
@@ -587,87 +542,126 @@ async function internalSendMedia(
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
 
-        // 2. Process each file independently
-        const createdMessages: Message[] = [];
+        backgroundData = {
+            apiConfig,
+            instanceName,
+            remoteJid,
+            chatId
+        };
+
+        // 2. Insert all as PENDING
         for (const file of mediaFiles) {
-            let apiResponse: any;
-            let dbMessageType: Message['type'];
+            const messageId = randomUUID(); // Generate locally to ensure we have it
 
-            const mediaContent = file.base64; // Pode ser Base64 ou URL remota
-
-            // API Call (No DB connection held here)
-            switch (file.mediatype) {
-                case 'image':
-                    apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
-                    dbMessageType = 'image';
-                    break;
-                case 'video':
-                    apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
-                    dbMessageType = 'video';
-                    break;
-                case 'document':
-                    apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
-                    dbMessageType = 'document';
-                    break;
-                case 'audio':
-                    if (file.filename === 'audio_gravado.mp3') {
-                        apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent });
-                    } else {
-                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
-                    }
-                    dbMessageType = 'audio';
-                    break;
-                default:
-                    throw new Error(`Unsupported mediatype: ${file.mediatype}`);
+            // Infer type for DB
+            let dbMessageType: Message['type'] = file.mediatype as any;
+            if (!['image', 'video', 'document', 'audio'].includes(dbMessageType)) {
+                dbMessageType = 'document'; // Fallback
             }
-
-            const messageTypeKey = `${dbMessageType}Message` as keyof typeof apiResponse.message;
-            const messageDetails = apiResponse.message?.[messageTypeKey] as any;
-            const resolvedMediaUrl =
-                apiResponse?.message?.mediaUrl ||
-                messageDetails?.url ||
-                (apiResponse as any)?.tempMediaPublicUrl ||
-                (file.base64?.startsWith('http') ? file.base64 : undefined) ||
-                (metadata?.mediaUrl as string);
 
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),
-                mediaUrl: resolvedMediaUrl,
-                fileName: messageDetails?.fileName || file.filename,
-                mimetype: messageDetails?.mimetype || file.mimetype,
-                duration: messageDetails?.seconds,
-                thumbnail: file.thumbnail || (metadata?.thumbnail ?? undefined),
+                mediaUrl: file.base64?.startsWith('http') ? file.base64 : undefined, // Use URL if provided
+                fileName: file.filename,
+                mimetype: file.mimetype,
+                thumbnail: file.thumbnail,
             };
 
-            // Insert into DB (Quick operation, grabs connection and releases immediately)
-            const insertRes = await db.query(
+            const insertRes = await client.query(
                 `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me,
+                    id, workspace_id, chat_id, type, content, from_me,
                     message_id_from_api, api_message_status, instance_name,
                     metadata, is_read, ${senderColumn}, sent_by_tab
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *`,
                 [
-                    workspaceId, chatId, dbMessageType, caption, true,
-                    apiResponse?.key?.id, 'SENT', instanceName,
+                    messageId, workspaceId, chatId, dbMessageType, caption, true,
+                    null, 'PENDING', instanceName,
                     dbMetadata, true, senderId, tabId
                 ]
             );
-            createdMessages.push(mapDbMessageToFrontend(insertRes.rows[0]));
+
+            pendingMessages.push({
+                dbMessage: mapDbMessageToFrontend(insertRes.rows[0]),
+                file
+            });
         }
 
-
-        // Revalidação manual não é mais necessária com subscriptions.
-        // A UI será atualizada via websockets.
-        // revalidatePath('/', 'layout');
-
-        return { success: true, messages: createdMessages as Message[] };
+        await client.query('COMMIT');
 
     } catch (error) {
-        console.error('[SEND_MEDIA_ACTION] Erro:', error);
-        const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao enviar mídia.";
-        return { success: false, error: errorMessage };
+        await client.query('ROLLBACK');
+        console.error('[SEND_MEDIA_ACTION] Erro síncrono:', error);
+        return { success: false, error: error instanceof Error ? error.message : "Erro ao preparar envio de mídia." };
+    } finally {
+        client.release();
     }
+
+    // --- Background Block ---
+    (async () => {
+        if (pendingMessages.length === 0) return;
+
+        const { apiConfig, instanceName, remoteJid } = backgroundData;
+
+        for (const item of pendingMessages) {
+            const { dbMessage, file } = item;
+
+            try {
+                let apiResponse: any;
+                const mediaContent = file.base64;
+
+                switch (file.mediatype) {
+                    case 'image':
+                        apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        break;
+                    case 'video':
+                        // Video uploads can be slow
+                        apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        break;
+                    case 'document':
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        break;
+                    case 'audio':
+                        if (file.filename === 'audio_gravado.mp3' || file.mimetype.includes('webm')) { // Handle PTT/WebM
+                            apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent });
+                        } else {
+                            apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        }
+                        break;
+                    default:
+                        // Should default to document as per DB insert?
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                }
+
+                // Update Status to SENT
+                // Extract URL if Evolution returns it (sometimes it does in message details)
+                // NOTE: Evolution types might vary.
+                const messageTypeKey = `${file.mediatype}Message` as any;
+                const messageDetails = apiResponse.message?.[messageTypeKey] as any;
+                // If the API returns a direct URL for the media, we can update it in metadata, but usually we already have our public URL if using S3.
+                // If using base64 pass-through, Evolution might return a URL if it stores it (e.g. WA Cloud).
+
+                await db.query(`
+                    UPDATE messages 
+                    SET api_message_status = 'SENT',
+                        message_id_from_api = $1
+                    WHERE id = $2
+                `, [apiResponse?.key?.id, dbMessage.id]);
+
+            } catch (bgError: any) {
+                console.error(`[SEND_MEDIA_BG] Falha ao enviar ${file.filename}:`, bgError);
+                await db.query(`
+                    UPDATE messages 
+                    SET api_message_status = 'FAILED',
+                        metadata = jsonb_set(COALESCE(metadata, '{}'), '{send_error}', $1)
+                    WHERE id = $2
+                `, [JSON.stringify(bgError.message || 'Erro desconhecido'), dbMessage.id]);
+            }
+        }
+    })();
+
+    // Return immediately
+    return { success: true, messages: pendingMessages.map(p => p.dbMessage) };
 }
 
 

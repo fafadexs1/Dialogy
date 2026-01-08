@@ -154,6 +154,10 @@ export type MessageMetadata = {
   is_bulk_action?: boolean;
   optimisticId?: string;
   send_error?: string;
+  isQuestionReply?: boolean;
+  packId?: string;
+  buyerId?: string;
+  questionId?: string;
 }
 
 export type Message = {

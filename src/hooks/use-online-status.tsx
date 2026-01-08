@@ -259,6 +259,17 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
             return;
           }
 
+          // Optimization: Ignore heartbeat updates (only last_seen changed)
+          // We only trigger a refresh if the user matches our workspace AND:
+          // 1. It's an INSERT (new user online)
+          // 2. It's a DELETE (user went offline)
+          // 3. It's an UPDATE where 'is_online' changed
+          if (payload.eventType === 'UPDATE') {
+            if (newData.is_online === oldData.is_online) {
+              return;
+            }
+          }
+
           // Immediately refresh - Realtime already handles the push, just sync state
           refreshOnlineAgents();
         }
