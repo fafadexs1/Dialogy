@@ -95,12 +95,29 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
         }
       });
 
-      const mimeType = 'audio/webm';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        toast({ title: "Incompatível", description: "Navegador não suporta audio/webm.", variant: 'destructive' });
+      // Try OGG+Opus first (WhatsApp's preferred format), then WebM+Opus as fallback
+      const preferredMimeTypes = [
+        'audio/ogg; codecs=opus',
+        'audio/ogg',
+        'audio/webm; codecs=opus',
+        'audio/webm'
+      ];
+
+      let mimeType = '';
+      for (const type of preferredMimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          mimeType = type;
+          break;
+        }
+      }
+
+      if (!mimeType) {
+        toast({ title: "Incompatível", description: "Navegador não suporta formatos de áudio compatíveis.", variant: 'destructive' });
         setIsInitializing(false);
         return;
       }
+
+      console.log(`[AUDIO_RECORDER] Using mimeType: ${mimeType}`);
 
       const media = new MediaRecorder(stream, { mimeType });
       mediaRecorder.current = media;

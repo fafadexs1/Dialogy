@@ -5,6 +5,7 @@ import type { OnlineAgent, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/auth-provider';
+import { WORKSPACE_CHANGED_EVENT } from '@/components/layout/workspace-switcher';
 
 const PresenceContext = createContext<{ onlineAgents: OnlineAgent[], currentUser: User | null, isOffline: boolean }>({ onlineAgents: [], currentUser: null, isOffline: false });
 
@@ -25,6 +26,36 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const supabase = useMemo(() => createClient(), []);
+
+  // Listen for workspace change events to refetch user data
+  useEffect(() => {
+    const handleWorkspaceChange = async () => {
+      console.log('[PresenceProvider] Workspace changed, refetching user data...');
+      // Clear online agents immediately 
+      setOnlineAgents([]);
+
+      // Refetch user data from server
+      try {
+        const res = await fetch('/api/users/me', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            console.log('[PresenceProvider] User refetched, new workspace:', data.user.activeWorkspaceId);
+            setLocalUser(data.user);
+          }
+        }
+      } catch (error) {
+        console.error('[PresenceProvider] Error refetching user:', error);
+      }
+    };
+
+    window.addEventListener(WORKSPACE_CHANGED_EVENT, handleWorkspaceChange);
+    return () => window.removeEventListener(WORKSPACE_CHANGED_EVENT, handleWorkspaceChange);
+  }, []);
 
   // Unique Tab ID for multi-tab support
   const tabIdRef = useRef<string>('');
@@ -89,6 +120,23 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       fetchingUserRef.current = false;
     });
   }, [authUser, localUser, isAuthLoading]);
+
+  // Track previous workspace to detect changes and clear stale data
+  const previousWorkspaceIdRef = useRef<string | undefined>(undefined);
+
+  // Clear online agents immediately when workspace changes
+  useEffect(() => {
+    const currentWorkspaceId = localUser?.activeWorkspaceId;
+
+    if (previousWorkspaceIdRef.current !== undefined &&
+      previousWorkspaceIdRef.current !== currentWorkspaceId) {
+      // Workspace changed - clear old agents immediately
+      console.log(`[PresenceProvider] Workspace changed from ${previousWorkspaceIdRef.current} to ${currentWorkspaceId}, clearing agents`);
+      setOnlineAgents([]);
+    }
+
+    previousWorkspaceIdRef.current = currentWorkspaceId;
+  }, [localUser?.activeWorkspaceId]);
 
   // Monitor online/offline status
   useEffect(() => {

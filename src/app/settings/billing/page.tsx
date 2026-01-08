@@ -2,12 +2,13 @@
 'use client';
 
 import { useSettings } from "../settings-context";
-import { Loader2, CreditCard, Check, Zap, Users, MessageSquare, Shield, HelpCircle } from 'lucide-react';
+import { Loader2, CreditCard, Check, Zap, Users, MessageSquare, Shield, HelpCircle, Download } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
 import { getCurrentPlanAction } from "@/actions/billing-ui";
+import { getBillingHistoryAction } from "@/actions/stripe";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PLANS, PlanType } from "@/lib/plans-types";
@@ -25,6 +26,7 @@ function formatCurrency(value: number) {
 export default function BillingPage() {
     const { user, loading: userLoading } = useSettings();
     const [planData, setPlanData] = useState<any>(null);
+    const [invoices, setInvoices] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
 
@@ -42,9 +44,15 @@ export default function BillingPage() {
     useEffect(() => {
         if (user?.activeWorkspaceId) {
             setLoading(true);
-            getCurrentPlanAction(user.activeWorkspaceId)
-                .then((data) => {
-                    setPlanData(data);
+            Promise.all([
+                getCurrentPlanAction(user.activeWorkspaceId),
+                getBillingHistoryAction(user.activeWorkspaceId)
+            ])
+                .then(([planData, invoicesData]) => {
+                    setPlanData(planData);
+                    if (invoicesData && 'invoices' in invoicesData) {
+                        setInvoices(invoicesData.invoices || []);
+                    }
                 })
                 .finally(() => setLoading(false));
         }
@@ -226,6 +234,69 @@ export default function BillingPage() {
                         )
                     })}
                 </div>
+            </div>
+
+            {/* Billing History */}
+            <div className="pt-8">
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                    <CreditCard className="w-5 h-5" />
+                    Histórico de Faturas
+                </h2>
+                <Card>
+                    <CardContent className="p-0">
+                        {invoices.length === 0 ? (
+                            <div className="p-8 text-center text-muted-foreground">
+                                Nenhuma fatura encontrada.
+                            </div>
+                        ) : (
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/50 border-b">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left font-medium">Data</th>
+                                        <th className="px-4 py-3 text-left font-medium">Valor</th>
+                                        <th className="px-4 py-3 text-left font-medium">Status</th>
+                                        <th className="px-4 py-3 text-right font-medium">Fatura</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {invoices.map((invoice) => (
+                                        <tr key={invoice.id} className="border-b last:border-0 hover:bg-muted/30">
+                                            <td className="px-4 py-3">
+                                                {format(new Date(invoice.created * 1000), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                                            </td>
+                                            <td className="px-4 py-3 font-medium">
+                                                {(invoice.amount_paid / 100).toLocaleString('pt-BR', { style: 'currency', currency: invoice.currency })}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <Badge variant={invoice.status === 'paid' ? 'default' : 'secondary'} className={cn(
+                                                    invoice.status === 'paid' && "bg-green-100 text-green-700 hover:bg-green-100",
+                                                    invoice.status === 'open' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-100",
+                                                    invoice.status === 'void' && "bg-gray-100 text-gray-700 hover:bg-gray-100",
+                                                    invoice.status === 'uncollectible' && "bg-red-100 text-red-700 hover:bg-red-100",
+                                                )}>
+                                                    {invoice.status === 'paid' ? 'Pago' :
+                                                        invoice.status === 'open' ? 'Aberto' :
+                                                            invoice.status === 'void' ? 'Cancelado' :
+                                                                invoice.status === 'uncollectible' ? 'Não Pago' : invoice.status}
+                                                </Badge>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                {invoice.invoice_pdf && (
+                                                    <Button variant="ghost" size="sm" asChild>
+                                                        <a href={invoice.invoice_pdf} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1">
+                                                            <Download className="w-3 h-3" />
+                                                            <span className="hidden sm:inline">PDF</span>
+                                                        </a>
+                                                    </Button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
 
             <div className="bg-muted/30 p-4 rounded-lg flex items-start gap-3 mt-8">

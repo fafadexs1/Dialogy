@@ -7,9 +7,13 @@ import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import type { User } from '@/lib/types';
+import { useInboxStore } from '@/hooks/use-inbox-store';
 
 import { Crown } from 'lucide-react';
 import { PLANS, PlanType } from '@/lib/plans-types';
+
+// Custom event to signal workspace change
+export const WORKSPACE_CHANGED_EVENT = 'dialogy:workspace-changed';
 
 interface WorkspaceSwitcherProps {
   className?: string;
@@ -48,6 +52,16 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
     setOpen(false);
     const { switchWorkspaceAction } = await import('@/actions/workspace');
     await switchWorkspaceAction(workspaceId);
+
+    // Reset inbox store to clear old workspace data
+    useInboxStore.getState().reset();
+
+    // Dispatch custom event for PresenceProvider to refetch user data
+    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, {
+      detail: { workspaceId }
+    }));
+
+    // Smart refresh - updates server components without full page reload
     router.refresh();
   };
 

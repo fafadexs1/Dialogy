@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
 
 // Importando as novas funções de serviço
@@ -35,6 +36,17 @@ function mapDbMessageToFrontend(row: any): Message {
         updatedAt: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at) : undefined,
     } as Message;
 }
+
+type MediaFilePayload = {
+    base64: string;
+    mimetype: string;
+    filename: string;
+    mediatype: 'image' | 'video' | 'document' | 'audio';
+    thumbnail?: string;
+    deleteAfterSend?: boolean;
+    storageBucket?: string;
+    storagePath?: string;
+};
 
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
 
@@ -123,6 +135,19 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
             client.release();
         }
     }, autoCloseMs).unref?.();
+}
+
+async function cleanupTempMedia(file: MediaFilePayload) {
+    if (!file.deleteAfterSend || !file.storageBucket || !file.storagePath) return;
+
+    try {
+        const { error } = await getSupabaseAdmin().storage.from(file.storageBucket).remove([file.storagePath]);
+        if (error) {
+            console.error('[SEND_MEDIA_BG] Falha ao remover mídia temporária:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
+        }
+    } catch (error) {
+        console.error('[SEND_MEDIA_BG] Exceção ao remover mídia temporária:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
+    }
 }
 
 type MetaSendContext = {
@@ -494,13 +519,7 @@ async function internalSendMessage(
 async function internalSendMedia(
     chatId: string,
     caption: string,
-    mediaFiles: {
-        base64: string;
-        mimetype: string;
-        filename: string;
-        mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string;
-    }[],
+    mediaFiles: MediaFilePayload[],
     senderId: string,
     tabId: string | null,
     metadata?: MessageMetadata,
@@ -513,7 +532,7 @@ async function internalSendMedia(
     const client = await db.connect();
 
     // Data needed for background task
-    let pendingMessages: { dbMessage: Message, file: typeof mediaFiles[0] }[] = [];
+    let pendingMessages: { dbMessage: Message, file: MediaFilePayload }[] = [];
     let backgroundData: any = {};
 
     try {
@@ -622,8 +641,8 @@ async function internalSendMedia(
                         apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                         break;
                     case 'audio':
-                        if (file.filename === 'audio_gravado.mp3' || file.mimetype.includes('webm')) { // Handle PTT/WebM
-                            apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent });
+                        if (file.filename?.startsWith('audio_gravado') || file.mimetype.includes('webm') || file.mimetype.includes('ogg')) {
+                            apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent, mimetype: file.mimetype, fileName: file.filename });
                         } else {
                             apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                         }
@@ -656,6 +675,8 @@ async function internalSendMedia(
                         metadata = jsonb_set(COALESCE(metadata, '{}'), '{send_error}', $1)
                     WHERE id = $2
                 `, [JSON.stringify(bgError.message || 'Erro desconhecido'), dbMessage.id]);
+            } finally {
+                await cleanupTempMedia(file);
             }
         }
     })();
@@ -1075,13 +1096,7 @@ export const sendMediaAction = withDebug(
     async function sendMediaAction(
         chatId: string,
         caption: string,
-        mediaFiles: {
-            base64: string;
-            mimetype: string;
-            filename: string;
-            mediatype: 'image' | 'video' | 'document' | 'audio';
-            thumbnail?: string;
-        }[],
+        mediaFiles: MediaFilePayload[],
         tabId: string | null,
         metadata?: MessageMetadata
     ): Promise<{ success: boolean; error?: string }> {
@@ -1161,6 +1176,8 @@ export const sendMediaAction = withDebug(
                             senderUserId: user.id,
                             senderSystemAgentId: null,
                         });
+
+                        await cleanupTempMedia(file);
                     }
                     return { success: true };
                 } catch (metaErr) {
@@ -1191,13 +1208,7 @@ export const sendMediaAction = withDebug(
 export async function sendAutomatedMediaAction(
     chatId: string,
     caption: string,
-    mediaFiles: {
-        base64: string;
-        mimetype: string;
-        filename: string;
-        mediatype: 'image' | 'video' | 'document' | 'audio';
-        thumbnail?: string;
-    }[],
+    mediaFiles: MediaFilePayload[],
     agentId: string,
     instanceName?: string,
     metadata?: MessageMetadata,
@@ -1240,6 +1251,8 @@ export async function sendAutomatedMediaAction(
                     senderUserId: agentId,
                     senderSystemAgentId: null,
                 });
+
+                await cleanupTempMedia(file);
             }
             return { success: true };
         }

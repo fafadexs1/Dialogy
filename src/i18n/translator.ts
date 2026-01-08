@@ -3,7 +3,7 @@ import ptBR from "./messages/pt-BR.json";
 import enUS from "./messages/en-US.json";
 import esES from "./messages/es-ES.json";
 
-type MessageDictionary = Record<string, MessageValue>;
+type MessageDictionary = { [key: string]: string | MessageDictionary };
 type MessageValue = string | MessageDictionary;
 
 export const messagesByLocale = {

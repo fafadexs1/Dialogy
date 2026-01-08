@@ -45,6 +45,7 @@ describe('Inbox happy path', () => {
       lastSyncChats: null,
       lastSyncMessageForSelected: null,
       oldestMessageDate: null,
+      oldestMessageId: null,
       hasMoreHistory: false,
       hasMoreChats: false,
     });

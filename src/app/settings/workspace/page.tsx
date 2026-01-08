@@ -173,7 +173,11 @@ export default function WorkspaceSettingsPage() {
         e.preventDefault();
         if (!formRef.current || !activeWorkspace) return;
         const formData = new FormData(formRef.current);
-        updateAction(formData);
+        // Wrap in startTransition to avoid React 19 useActionState warning
+        const { startTransition } = await import('react');
+        startTransition(() => {
+            updateAction(formData);
+        });
     }
 
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';

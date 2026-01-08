@@ -117,6 +117,7 @@ describe('Inbox store realtime flow', () => {
       lastSyncChats: null,
       lastSyncMessageForSelected: initialMessage.createdAt,
       oldestMessageDate: initialMessage.createdAt,
+      oldestMessageId: null,
       hasMoreHistory: false,
       hasMoreChats: false,
     });
@@ -127,7 +128,7 @@ describe('Inbox store realtime flow', () => {
       [fetchedOlder, initialMessage],
       realtimeMessage.createdAt,
       fetchedOlder.createdAt,
-      false,
+      null,
     );
 
     const messages = useInboxStore.getState().messagesByChat[chatA.id];
@@ -147,11 +148,12 @@ describe('Inbox store realtime flow', () => {
       lastSyncChats: null,
       lastSyncMessageForSelected: msgA1.createdAt,
       oldestMessageDate: msgA1.createdAt,
+      oldestMessageId: null,
       hasMoreHistory: false,
       hasMoreChats: false,
     });
 
-    useInboxStore.getState().setMessagesForChat(chatB.id, [msgB1], msgB1.createdAt, msgB1.createdAt, false);
+    useInboxStore.getState().setMessagesForChat(chatB.id, [msgB1], msgB1.createdAt, msgB1.createdAt, null);
     useInboxStore.getState().setSelectedChatId(chatB.id);
 
     const msgA2 = createMessage('a-2', chatA.id, '2024-01-01T12:06:00Z');
@@ -173,6 +175,7 @@ describe('Inbox store realtime flow', () => {
       lastSyncChats: null,
       lastSyncMessageForSelected: initial.createdAt,
       oldestMessageDate: initial.createdAt,
+      oldestMessageId: null,
       hasMoreHistory: false,
       hasMoreChats: false,
     });

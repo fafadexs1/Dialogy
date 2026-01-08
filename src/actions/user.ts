@@ -347,21 +347,45 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const dbUser = userRes.rows[0];
 
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, r.name as role_name
+            SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, 
+                   w.close_message_template, w.transfer_team_message_template,
+                   w.timezone, w.marketing_auto_close_seconds,
+                   r.name as role_name,
+                   (SELECT plan FROM billing_info WHERE workspace_id = w.id LIMIT 1) as plan
             FROM workspaces w
             JOIN user_workspace_roles uwr ON w.id = uwr.workspace_id
             LEFT JOIN roles r ON uwr.role_id = r.id
             WHERE uwr.user_id = $1
         `, [authUser.id]);
 
-        const workspaces = workspacesRes.rows.map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            avatar: r.avatar_url || '',
-            isOwner: r.owner_id === authUser.id,
-            roleName: r.role_name,
-            nexus_settings: r.nexus_settings || {}
-        }));
+        const workspaces = workspacesRes.rows.map((r: any) => {
+            // Normalize plan key (same logic as /api/user/route.ts)
+            const rawPlan = r.plan;
+            let planKey = 'starter';
+            if (rawPlan) {
+                const normalizedPlan = rawPlan.toLowerCase();
+                // Check known plan keys
+                if (['starter', 'growth', 'pro', 'enterprise'].includes(normalizedPlan)) {
+                    planKey = normalizedPlan;
+                } else {
+                    planKey = rawPlan; // Keep original for debugging
+                }
+            }
+
+            return {
+                id: r.id,
+                name: r.name,
+                avatar: r.avatar_url || '',
+                isOwner: r.owner_id === authUser.id,
+                roleName: r.role_name,
+                nexus_settings: r.nexus_settings || {},
+                closeMessageTemplate: r.close_message_template || '',
+                transferTeamMessageTemplate: r.transfer_team_message_template || '',
+                timezone: r.timezone || undefined,
+                marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
+                plan: planKey,
+            };
+        });
 
         const activeWorkspaceId = dbUser.last_active_workspace_id || workspaces[0]?.id || null;
         let activeWorkspaceTimezone: string | undefined;

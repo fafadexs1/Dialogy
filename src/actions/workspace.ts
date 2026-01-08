@@ -137,8 +137,8 @@ export async function updateWorkspaceAction(
     }
   }
 
-  const nexusEmail = formData.get('nexusEmail') as string;
-  if (nexusEmail !== undefined) {
+  const nexusEmail = formData.get('nexusEmail') as string | null;
+  if (nexusEmail !== null && nexusEmail !== undefined) {
     // If empty string, we might want to plain null or empty object. 
     // Let's store object { email: ... }
     if (nexusEmail.trim() === '') {

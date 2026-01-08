@@ -58,7 +58,7 @@ import {
     Languages,
     Pencil
 } from 'lucide-react';
-import { uploadFileToStorage, deleteFileFromStorage } from '@/lib/supabase/storage';
+import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
@@ -1269,8 +1269,13 @@ export default function ChatPanel({
     const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
         if (!chat) return;
 
+        // Determine file extension based on mimetype (WhatsApp prefers ogg)
+        const audioExtension = mimetype.includes('ogg') || mimetype.includes('opus') ? 'ogg' : mimetype.includes('webm') ? 'webm' : 'mp3';
+
+        console.log(`[AUDIO_SEND] Received mimetype: ${mimetype}, using extension: ${audioExtension}`);
+
         // 1. Upload to Supabase Storage (Public Bucket)
-        const fileName = `audio_${Date.now()}.webm`;
+        const fileName = `audio_${Date.now()}.${audioExtension}`;
         const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
 
         if (uploadError || !publicUrl) {
@@ -1282,12 +1287,17 @@ export default function ChatPanel({
         // User requested: "leave file in public, send url, then delete file"
         // We pass publicUrl in the 'base64' field because the action expects a string there, 
         // and internal logic handles URLs if they start with http.
+        const audioFilename = `audio_gravado.${audioExtension}`;
+
         const result = await sendMediaAction(chat.id, '', [{
             base64: publicUrl,
             mimetype,
-            filename: 'audio_gravado.mp3',
+            filename: audioFilename,
             mediatype: 'audio' as any,
-            thumbnail: undefined
+            thumbnail: undefined,
+            deleteAfterSend: true,
+            storageBucket: 'temp-media',
+            storagePath: fileName
         }], tabId, { mediaUrl: publicUrl });
 
         if (result.error) {
@@ -1296,10 +1306,7 @@ export default function ChatPanel({
             appendMessagesToChat(chat.id, (result as any).messages);
         }
 
-        // 3. Delete the file from system (Supabase Storage) after sending
-        // Note: This breaks the 'mediaUrl' link in the database history if we rely on this specific file.
-        // However, this is the explicit user request.
-        await deleteFileFromStorage('temp-media', fileName);
+        // Cleanup happens server-side after the background send completes.
     };
 
     const onEmojiClick = (emojiData: EmojiClickData) => {
