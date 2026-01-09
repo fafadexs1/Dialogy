@@ -11,11 +11,7 @@ interface AudioPayload {
     fileName?: string;
 }
 
-interface ConversionResponse {
-    success: boolean;
-    convertedUrl?: string;
-    error?: string;
-}
+import { convertAudioFile, ConversionResult } from "@/services/audio/conversion-service";
 
 /**
  * Checks if the audio needs conversion (WebM format)
@@ -31,39 +27,10 @@ function needsConversion(mimetype?: string, url?: string): boolean {
 }
 
 /**
- * Calls the audio conversion API to convert WebM to OGG+Opus
+ * Calls the audio conversion service directly (no HTTP needed)
  */
-async function convertAudio(audioUrl: string): Promise<ConversionResponse> {
-    try {
-        // Get the base URL from environment or use relative path
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : 'http://localhost:9002';
-
-        console.log(`[AUDIO_CONVERT] Calling conversion API at ${baseUrl}/api/audio/convert`);
-
-        const response = await fetch(`${baseUrl}/api/audio/convert`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ audioUrl }),
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Conversion API returned ${response.status}: ${errorText}`);
-        }
-
-        const result = await response.json();
-        return result;
-    } catch (error: any) {
-        console.error(`[AUDIO_CONVERT] Conversion failed:`, error);
-        return {
-            success: false,
-            error: error.message || 'Conversion failed'
-        };
-    }
+async function convertAudio(audioUrl: string): Promise<ConversionResult> {
+    return convertAudioFile(audioUrl);
 }
 
 /**

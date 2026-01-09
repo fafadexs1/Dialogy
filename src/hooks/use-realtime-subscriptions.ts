@@ -228,11 +228,11 @@ export function useRealtimeSubscriptions(options: {
             statusHandlers.forEach((handler) => handler(status, 'messages'));
         };
 
-        const targetFilter = selectedChatId || 'all';
+        const targetFilter = selectedChatId;
 
         // Check if we need to switch channels (Initial load OR Filter changed)
-        // We use messagesChatId to store the current filter (chatId or 'all')
-        if (globalChannels.messagesChatId !== targetFilter || !globalChannels.messages) {
+        // We use messagesChatId to store the current filter (chatId)
+        if (targetFilter && (globalChannels.messagesChatId !== targetFilter || !globalChannels.messages)) {
 
             // Cleanup old channel if it exists
             if (globalChannels.messages) {
@@ -256,6 +256,12 @@ export function useRealtimeSubscriptions(options: {
             });
 
             globalChannels.messagesChatId = targetFilter;
+        } else if (!targetFilter && globalChannels.messages) {
+            // If no chat selected but we have a channel, tear it down (e.g. went back to list)
+            console.info('[REALTIME-GLOBAL] No chat selected, tearing down active messages channel');
+            teardownChannel(supabase, globalChannels.messages);
+            globalChannels.messages = null;
+            globalChannels.messagesChatId = null;
         }
 
         globalChannels.messagesSubscribers++;

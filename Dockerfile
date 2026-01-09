@@ -52,6 +52,10 @@ RUN adduser --system --uid 1001 nextjs
 # Install FFmpeg for audio conversion (WebM to OGG for WhatsApp)
 RUN apk add --no-cache ffmpeg
 
+# Set FFmpeg paths for fluent-ffmpeg
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/bin/ffprobe
+
 COPY --from=builder /app/public ./public
 
 # Set the correct permission for prerender cache
