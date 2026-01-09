@@ -273,10 +273,16 @@ async function internalSendMessage(
             SELECT 
                 c.workspace_id, c.status, c.agent_id,
                 ct.phone_number_jid,
+                mc.platform as meta_platform,
                 (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name,
-                (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as source_from_api
+                COALESCE(
+                    (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1),
+                    (SELECT m.platform::text FROM messages m WHERE m.chat_id = c.id AND m.platform IS NOT NULL ORDER BY m.created_at DESC LIMIT 1),
+                    mc.platform::text
+                ) as source_from_api
             FROM chats c
             JOIN contacts ct ON c.contact_id = ct.id
+            LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
             WHERE c.id = $1
         `, [chatId]);
 
@@ -285,7 +291,7 @@ async function internalSendMessage(
         }
 
         const chatInfo = chatInfoRes.rows[0];
-        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source } = chatInfo;
+        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
 
         // Emulate source property for downstream logic
         chatInfo.source = source;
@@ -367,6 +373,9 @@ async function internalSendMessage(
 
         try {
             const { chatInfo, instanceName, remoteJid, apiContent, template, messageId } = backgroundTaskData;
+            const source = (chatInfo.source || '').toString().toLowerCase();
+            const metaPlatform = (chatInfo.meta_platform || '').toString().toLowerCase();
+            const isMetaSource = source === 'instagram' || source === 'messenger' || metaPlatform === 'instagram' || metaPlatform === 'messenger';
 
             // 1. Lógica Específica por Canal
             let apiResponse: any;
@@ -410,7 +419,7 @@ async function internalSendMessage(
             // Nota: resolveMetaSendContext usa 'client', vamos criar um novo pool client rápido ou usar pool direto se possível.
             // resolveMetaSendContext executa query apenas, dá pra usar db.query se adaptar a assinatura, 
             // mas ela pede client. Vamos abrir um client rápido para isso.
-            else if (!instanceName && !remoteJid) { // Assumindo que Meta channels não usam instanceName/remoteJid da mesma forma que WA
+            else if (isMetaSource || (!instanceName && !remoteJid)) { // Assumindo que Meta channels não usam instanceName/remoteJid da mesma forma que WA
                 const metaClient = await db.connect();
                 let metaCtx = null;
                 try {
