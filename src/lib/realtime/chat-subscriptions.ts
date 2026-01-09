@@ -17,6 +17,7 @@ export type ChatMessageSubscriptionParams = {
 export type WorkspaceChatSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
+  chatIdsCsv?: string;
   onChatUpdate: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
@@ -24,6 +25,7 @@ export type WorkspaceChatSubscriptionParams = {
 export type WorkspaceMessageSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
+  chatIdsCsv?: string;
   onMessage: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
@@ -85,10 +87,14 @@ export function subscribeToChatMessages({
 export function subscribeToWorkspaceChatUpdates({
   client,
   workspaceId,
+  chatIdsCsv,
   onChatUpdate,
   onStatusChange,
 }: WorkspaceChatSubscriptionParams): RealtimeChannel {
   console.log('[REALTIME-DEBUG-CHATS] Subscribing to chats for workspace:', workspaceId);
+  const filter = chatIdsCsv && chatIdsCsv.length > 0
+    ? `id=in.(${chatIdsCsv})`
+    : `workspace_id=eq.${workspaceId}`;
   return client
     .channel(buildWorkspaceChatChannelName(workspaceId))
     .on(
@@ -97,7 +103,7 @@ export function subscribeToWorkspaceChatUpdates({
         event: '*', // Listen for INSERT, UPDATE, and DELETE
         schema: 'public',
         table: 'chats',
-        filter: `workspace_id=eq.${workspaceId}`,
+        filter,
       },
       (payload) => {
         // console.log('[REALTIME-DEBUG-CHATS] Chat update payload (Filter Enabled):', payload);
@@ -116,9 +122,13 @@ export function subscribeToWorkspaceChatUpdates({
 export function subscribeToWorkspaceMessages({
   client,
   workspaceId,
+  chatIdsCsv,
   onMessage,
   onStatusChange,
 }: WorkspaceMessageSubscriptionParams): RealtimeChannel {
+  const filter = chatIdsCsv && chatIdsCsv.length > 0
+    ? `chat_id=in.(${chatIdsCsv})`
+    : `workspace_id=eq.${workspaceId}`;
   return client
     .channel(buildWorkspaceMessageChannelName(workspaceId))
     .on(
@@ -127,7 +137,7 @@ export function subscribeToWorkspaceMessages({
         event: '*', // Listen for INSERT and UPDATE
         schema: 'public',
         table: 'messages',
-        filter: `workspace_id=eq.${workspaceId}`,
+        filter,
       },
       (payload) => {
         onMessage(payload);

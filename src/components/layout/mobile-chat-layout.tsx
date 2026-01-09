@@ -221,6 +221,7 @@ export default function MobileChatLayout({
   const [activeTab, setActiveTab] = useState<'chats' | 'crm' | 'settings'>('chats');
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
+  const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
@@ -264,6 +265,29 @@ export default function MobileChatLayout({
       { queue: 0, active: 0, closed: 0, unread: 0 }
     );
   }, [chats]);
+
+  const messagesListChatIdsCsv = useMemo(() => {
+    if (!initialUser?.id || ownershipFilter !== 'mine') return '';
+    const ids = chats
+      .filter((chat) => chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id)
+      .map((chat) => chat.id)
+      .sort();
+    return ids.join(',');
+  }, [chats, initialUser?.id, ownershipFilter]);
+
+  const chatUpdatesChatIdsCsv = useMemo(() => {
+    if (!initialUser?.id || ownershipFilter !== 'mine') return '';
+    const ids = new Set<string>();
+    chats.forEach((chat) => {
+      if (chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id) {
+        ids.add(chat.id);
+      }
+    });
+    if (selectedChatId) {
+      ids.add(selectedChatId);
+    }
+    return Array.from(ids).sort().join(',');
+  }, [chats, initialUser?.id, ownershipFilter, selectedChatId]);
 
   const headerTitle = activeTab === 'chats'
     ? 'Inbox'
@@ -1166,6 +1190,8 @@ export default function MobileChatLayout({
   useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
     selectedChatId,
+    chatUpdatesChatIdsCsv: ownershipFilter === 'mine' ? chatUpdatesChatIdsCsv : undefined,
+    messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
     onContactUpdate: handleRealtimeContactUpdate,
@@ -1376,6 +1402,7 @@ export default function MobileChatLayout({
                 setSelectedChat={handleSetSelectedChat}
                 currentUser={initialUser}
                 onUpdate={handleDataMutation}
+                onOwnershipFilterChange={setOwnershipFilter}
                 isForwarding={isForwarding}
                 selectedForwardingChatIds={selectedForwardingChatIds}
                 onToggleForwardSelection={handleToggleForwardSelection}

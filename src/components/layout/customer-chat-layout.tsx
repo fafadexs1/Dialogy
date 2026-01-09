@@ -184,6 +184,7 @@ export default function CustomerChatLayout({
   const router = useRouter();
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
+  const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMoreChats, setIsLoadingMoreChats] = useState(false); // New state for loading more chats
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -304,6 +305,29 @@ export default function CustomerChatLayout({
     messages: currentChatMessages,
     unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
   } : null, [selectedChat, currentChatMessages]);
+
+  const messagesListChatIdsCsv = useMemo(() => {
+    if (!initialUser?.id || ownershipFilter !== 'mine') return '';
+    const ids = chats
+      .filter((chat) => chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id)
+      .map((chat) => chat.id)
+      .sort();
+    return ids.join(',');
+  }, [chats, initialUser?.id, ownershipFilter]);
+
+  const chatUpdatesChatIdsCsv = useMemo(() => {
+    if (!initialUser?.id || ownershipFilter !== 'mine') return '';
+    const ids = new Set<string>();
+    chats.forEach((chat) => {
+      if (chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id) {
+        ids.add(chat.id);
+      }
+    });
+    if (selectedChatId) {
+      ids.add(selectedChatId);
+    }
+    return Array.from(ids).sort().join(',');
+  }, [chats, initialUser?.id, ownershipFilter, selectedChatId]);
 
   const formatMessageDay = useCallback((date: Date) => {
     const zonedDate = toZonedTime(date, workspaceTimezone);
@@ -1174,6 +1198,8 @@ export default function CustomerChatLayout({
   useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
     selectedChatId,
+    chatUpdatesChatIdsCsv: ownershipFilter === 'mine' ? chatUpdatesChatIdsCsv : undefined,
+    messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
     onContactUpdate: handleRealtimeContactUpdate,
@@ -1365,6 +1391,7 @@ export default function CustomerChatLayout({
               setSelectedChat={handleSetSelectedChat}
               currentUser={initialUser}
               onUpdate={handleDataMutation}
+              onOwnershipFilterChange={setOwnershipFilter}
               isForwarding={isForwarding}
               selectedForwardingChatIds={selectedForwardingChatIds}
               onToggleForwardSelection={handleToggleForwardSelection}

@@ -22,8 +22,10 @@ const globalChannels: {
     messagesList: RealtimeChannel | null;
     contacts: RealtimeChannel | null;
     chatsWorkspaceId: string | null;
+    chatsFilterKey: string | null;
     messagesChatId: string | null;
     messagesListWorkspaceId: string | null;
+    messagesListFilterKey: string | null;
     contactsWorkspaceId: string | null;
     chatsSubscribers: number;
     messagesSubscribers: number;
@@ -35,8 +37,10 @@ const globalChannels: {
     messagesList: null,
     contacts: null,
     chatsWorkspaceId: null,
+    chatsFilterKey: null,
     messagesChatId: null,
     messagesListWorkspaceId: null,
+    messagesListFilterKey: null,
     contactsWorkspaceId: null,
     chatsSubscribers: 0,
     messagesSubscribers: 0,
@@ -53,13 +57,14 @@ const statusHandlers = new Set<(status: string, type: 'chats' | 'messages') => v
 export function useRealtimeSubscriptions(options: {
     workspaceId: string | null | undefined;
     selectedChatId: string | null | undefined;
+    chatUpdatesChatIdsCsv?: string;
+    messagesListChatIdsCsv?: string;
     onChatUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onMessageUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onContactUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onStatusChange?: (status: string, type: 'chats' | 'messages') => void;
 }) {
-    const { workspaceId, selectedChatId, onChatUpdate, onMessageUpdate, onContactUpdate, onStatusChange } = options;
-    const hasSelectedChat = Boolean(selectedChatId);
+    const { workspaceId, selectedChatId, chatUpdatesChatIdsCsv, messagesListChatIdsCsv, onChatUpdate, onMessageUpdate, onContactUpdate, onStatusChange } = options;
 
     const onChatUpdateRef = useRef(onChatUpdate);
     const onMessageUpdateRef = useRef(onMessageUpdate);
@@ -101,6 +106,9 @@ export function useRealtimeSubscriptions(options: {
         if (!workspaceId) return;
 
         const supabase = createClient();
+        const hasChatIdFilter = typeof chatUpdatesChatIdsCsv === 'string';
+        const normalizedChatIdsCsv = hasChatIdFilter ? chatUpdatesChatIdsCsv.trim() : null;
+        const shouldSubscribeToChats = !hasChatIdFilter || (normalizedChatIdsCsv && normalizedChatIdsCsv.length > 0);
 
         // Register this component's handler
         if (onChatUpdateRef.current) {
@@ -115,28 +123,42 @@ export function useRealtimeSubscriptions(options: {
             statusHandlers.forEach((handler) => handler(status, 'chats'));
         };
 
-        // Only create channel if it doesn't exist or workspace changed
-        if (globalChannels.chatsWorkspaceId !== workspaceId || !globalChannels.chats) {
-            // Cleanup old channel if workspace changed
+        if (!shouldSubscribeToChats) {
             if (globalChannels.chats) {
-                console.info('[REALTIME-GLOBAL] Switching workspace, cleaning up old chats channel');
+                console.info('[REALTIME-GLOBAL] No chats to watch, tearing down chats channel');
                 teardownChannel(supabase, globalChannels.chats);
+                globalChannels.chats = null;
+                globalChannels.chatsWorkspaceId = null;
+                globalChannels.chatsFilterKey = null;
             }
+        } else {
+            const nextFilterKey = hasChatIdFilter ? normalizedChatIdsCsv : null;
 
-            const channelName = buildWorkspaceChatChannelName(workspaceId);
-            console.info(`[REALTIME-GLOBAL] Creating chats channel ${channelName}`);
+            // Only create channel if it doesn't exist or workspace/filter changed
+            if (globalChannels.chatsWorkspaceId !== workspaceId || globalChannels.chatsFilterKey !== nextFilterKey || !globalChannels.chats) {
+                // Cleanup old channel if workspace/filter changed
+                if (globalChannels.chats) {
+                    console.info('[REALTIME-GLOBAL] Switching chats channel filter or workspace, cleaning up old channel');
+                    teardownChannel(supabase, globalChannels.chats);
+                }
 
-            globalChannels.chats = subscribeToWorkspaceChatUpdates({
-                client: supabase,
-                workspaceId,
-                onChatUpdate: (payload) => {
-                    console.log('[REALTIME-GLOBAL] Chat update received:', payload);
-                    chatHandlers.forEach((handler) => handler(payload));
-                },
-                onStatusChange: handleChatStatusChange,
-            });
+                const channelName = buildWorkspaceChatChannelName(workspaceId);
+                console.info(`[REALTIME-GLOBAL] Creating chats channel ${channelName}`);
 
-            globalChannels.chatsWorkspaceId = workspaceId;
+                globalChannels.chats = subscribeToWorkspaceChatUpdates({
+                    client: supabase,
+                    workspaceId,
+                    chatIdsCsv: normalizedChatIdsCsv || undefined,
+                    onChatUpdate: (payload) => {
+                        console.log('[REALTIME-GLOBAL] Chat update received:', payload);
+                        chatHandlers.forEach((handler) => handler(payload));
+                    },
+                    onStatusChange: handleChatStatusChange,
+                });
+
+                globalChannels.chatsWorkspaceId = workspaceId;
+                globalChannels.chatsFilterKey = nextFilterKey;
+            }
         }
 
         globalChannels.chatsSubscribers++;
@@ -154,10 +176,11 @@ export function useRealtimeSubscriptions(options: {
                 teardownChannel(supabase, globalChannels.chats);
                 globalChannels.chats = null;
                 globalChannels.chatsWorkspaceId = null;
+                globalChannels.chatsFilterKey = null;
                 globalChannels.chatsSubscribers = 0;
             }
         };
-    }, [workspaceId, chatHandler, statusHandler]);
+    }, [workspaceId, chatHandler, statusHandler, chatUpdatesChatIdsCsv]);
 
     // Subscribe to contacts channel
     useEffect(() => {
@@ -285,18 +308,34 @@ export function useRealtimeSubscriptions(options: {
 
     // Subscribe to messages channel for list updates (other chats)
     useEffect(() => {
-        if (!workspaceId || !hasSelectedChat) return;
+        if (!workspaceId) return;
 
         const supabase = createClient();
+        const hasChatIdFilter = typeof messagesListChatIdsCsv === 'string';
+        const normalizedChatIdsCsv = hasChatIdFilter ? messagesListChatIdsCsv.trim() : null;
+        const shouldSubscribeToList = !hasChatIdFilter || (normalizedChatIdsCsv && normalizedChatIdsCsv.length > 0);
 
         const handleListMessageStatusChange = (status: string) => {
             console.info(`[REALTIME-GLOBAL] Messages list channel status: ${status}`);
             statusHandlers.forEach((handler) => handler(status, 'messages'));
         };
 
-        if (globalChannels.messagesListWorkspaceId !== workspaceId || !globalChannels.messagesList) {
+        if (!shouldSubscribeToList) {
             if (globalChannels.messagesList) {
-                console.info('[REALTIME-GLOBAL] Switching workspace, cleaning up old messages list channel');
+                console.info('[REALTIME-GLOBAL] No chats to watch, tearing down messages list channel');
+                teardownChannel(supabase, globalChannels.messagesList);
+                globalChannels.messagesList = null;
+                globalChannels.messagesListWorkspaceId = null;
+                globalChannels.messagesListFilterKey = null;
+            }
+            return;
+        }
+
+        const nextFilterKey = hasChatIdFilter ? normalizedChatIdsCsv : null;
+
+        if (globalChannels.messagesListWorkspaceId !== workspaceId || globalChannels.messagesListFilterKey !== nextFilterKey || !globalChannels.messagesList) {
+            if (globalChannels.messagesList) {
+                console.info('[REALTIME-GLOBAL] Switching messages list channel filter or workspace, cleaning up old channel');
                 teardownChannel(supabase, globalChannels.messagesList);
             }
 
@@ -306,14 +345,12 @@ export function useRealtimeSubscriptions(options: {
             globalChannels.messagesList = subscribeToWorkspaceMessages({
                 client: supabase,
                 workspaceId,
+                chatIdsCsv: normalizedChatIdsCsv || undefined,
                 onMessage: (payload) => {
                     const currentSelectedChatId = selectedChatIdRef.current;
-                    if (!currentSelectedChatId) {
-                        return;
-                    }
                     const payloadChatId = (payload.new as { chat_id?: string } | null)?.chat_id
                         ?? (payload.old as { chat_id?: string } | null)?.chat_id;
-                    if (payloadChatId && payloadChatId === currentSelectedChatId) {
+                    if (currentSelectedChatId && payloadChatId && payloadChatId === currentSelectedChatId) {
                         return;
                     }
                     messageHandlers.forEach((handler) => handler(payload));
@@ -322,6 +359,7 @@ export function useRealtimeSubscriptions(options: {
             });
 
             globalChannels.messagesListWorkspaceId = workspaceId;
+            globalChannels.messagesListFilterKey = nextFilterKey;
         }
 
         globalChannels.messagesListSubscribers++;
@@ -336,10 +374,11 @@ export function useRealtimeSubscriptions(options: {
                 teardownChannel(supabase, globalChannels.messagesList);
                 globalChannels.messagesList = null;
                 globalChannels.messagesListWorkspaceId = null;
+                globalChannels.messagesListFilterKey = null;
                 globalChannels.messagesListSubscribers = 0;
             }
         };
-    }, [workspaceId, hasSelectedChat]);
+    }, [workspaceId, messagesListChatIdsCsv]);
 
     return {
         isChatsConnected: globalChannels.chats !== null,

@@ -844,6 +844,7 @@ interface ChatListProps {
   setSelectedChat: (chat: Chat | null) => void;
   currentUser: User;
   onUpdate: () => void;
+  onOwnershipFilterChange?: (filter: 'mine' | 'everyone') => void;
   isForwarding?: boolean;
   selectedForwardingChatIds?: Set<string>;
   onToggleForwardSelection?: (chatId: string) => void;
@@ -857,7 +858,7 @@ interface ChatListProps {
 }
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1019,6 +1020,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
     fetchFilteredChats();
   }, [ownershipFilter, currentUser.activeWorkspaceId, setInitialData]);
+
+  useEffect(() => {
+    onOwnershipFilterChange?.(ownershipFilter);
+  }, [ownershipFilter, onOwnershipFilterChange]);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
