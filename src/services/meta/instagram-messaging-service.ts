@@ -4,12 +4,12 @@ import { MetaChannelRecord, refreshMetaChannelAccessToken } from './meta-channel
 type OutgoingType = 'text' | 'image' | 'video' | 'audio' | 'file';
 
 export class InstagramMessagingService {
-  constructor(private channel: MetaChannelRecord) {}
+  constructor(private channel: MetaChannelRecord) { }
 
   private get endpoint(): string {
-    const baseId = this.channel.ig_business_id || this.channel.external_page_id;
+    const baseId = this.channel.ig_business_id;
     if (!baseId) {
-      throw new Error('ID da conta Instagram Business nao configurado.');
+      throw new Error('Conta Instagram Business não configurada no canal. Verifique se a conta Instagram está vinculada corretamente à página do Facebook e atualize a conexão.');
     }
     return `https://graph.facebook.com/v20.0/${baseId}/messages`;
   }

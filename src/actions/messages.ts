@@ -507,7 +507,7 @@ async function internalSendMessage(
         } catch (bgError) {
             console.error('[INTERNAL_SEND_BG] Falha no envio em background:', bgError);
             // Atualiza para FAILED
-            const errorMessage = bgError instanceof Error ? bgError.message : 'Erro desconhecido';
+            const errorMessage = formatMetaSendError(bgError);
             await db.query(`
                 UPDATE messages 
                 SET api_message_status = 'FAILED',
