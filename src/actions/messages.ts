@@ -1058,7 +1058,7 @@ export async function sendAutomatedMessageAction(
                     externalChannelId: metaCtx.externalChannelId,
                     rawPayload: { request: { content }, response: apiResponse },
                     fromMe: true,
-                    senderUserId: agentId,
+                    senderUserId: isSystemAgent ? null : agentId,
                     senderSystemAgentId: isSystemAgent ? agentId : null,
                 });
                 return { success: true, apiResponse };

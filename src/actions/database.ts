@@ -272,6 +272,7 @@ create table if not exists public.contacts (
   address text,
   avatar_url text,
   owner_id uuid,
+  meta_contact_id uuid,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint contacts_workspace_id_fkey
@@ -281,6 +282,7 @@ create table if not exists public.contacts (
 );
 create index if not exists idx_contacts_workspace on public.contacts(workspace_id);
 create unique index if not exists uq_contacts_workspace_phone_jid on public.contacts(workspace_id, phone_number_jid);
+create index if not exists idx_contacts_meta_contact on public.contacts(meta_contact_id);
 
 
 -- Valores de campos customizados
@@ -564,6 +566,26 @@ create table if not exists public.meta_contacts (
 );
 create unique index if not exists uq_meta_contacts_channel_external on public.meta_contacts(channel_id, external_id);
 create index if not exists idx_meta_contacts_contact on public.meta_contacts(contact_id);
+
+-- Add FK constraint and migration for contacts.meta_contact_id
+alter table if exists public.contacts add column if not exists meta_contact_id uuid;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'contacts_meta_contact_id_fkey'
+  ) then
+    alter table public.contacts
+      add constraint contacts_meta_contact_id_fkey
+      foreign key (meta_contact_id) references public.meta_contacts(id) on delete set null;
+  end if;
+end$$;
+
+-- Migrate existing data: set meta_contact_id on contacts that have a meta_contact
+update public.contacts c
+set meta_contact_id = mc.id
+from public.meta_contacts mc
+where mc.contact_id = c.id
+  and c.meta_contact_id is null;
 
 create table if not exists public.meta_conversations (
   id uuid primary key default gen_random_uuid(),

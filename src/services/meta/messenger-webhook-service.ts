@@ -21,6 +21,11 @@ type MessengerEvent = {
   };
 };
 
+function isEchoMessage(message?: { is_echo?: unknown }): boolean {
+  if (!message) return false;
+  return message.is_echo === true || message.is_echo === 'true' || message.is_echo === 1 || message.is_echo === '1';
+}
+
 function normalizeMessengerMessage(event: MessengerEvent): {
   type: Message['type'];
   content: string | null;
@@ -87,8 +92,17 @@ export async function handleMessengerWebhook(channel: MetaChannelRecord, payload
         continue;
       }
 
-      const isEcho = event.message.is_echo === true;
-      const externalUserId = isEcho ? event.recipient?.id : event.sender?.id;
+      if (isEchoMessage(event.message)) {
+        await logWebhookEvent({
+          channelId: channel.id,
+          source: 'meta-messenger',
+          event: 'echo-ignored',
+          payload: event,
+        });
+        continue;
+      }
+
+      const externalUserId = event.sender?.id;
       if (!externalUserId) {
         await logWebhookEvent({
           channelId: channel.id,
@@ -121,12 +135,12 @@ export async function handleMessengerWebhook(channel: MetaChannelRecord, payload
           mediaUrl: normalized.mediaUrl,
         },
         platform: 'messenger',
-        direction: isEcho ? 'outgoing' : 'incoming',
+        direction: 'incoming',
         externalMessageId: event.message?.mid,
         externalSenderId: event.sender?.id || null,
         externalChannelId: channel.external_page_id || null,
         rawPayload: event,
-        fromMe: isEcho,
+        fromMe: false,
       });
     }
   }

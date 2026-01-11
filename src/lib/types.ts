@@ -86,6 +86,7 @@ export type Contact = {
   last_activity?: string;
   address?: string;
   owner_id?: string;
+  meta_contact_id?: string; // Reference to meta_contacts for Instagram/Messenger
   created_at?: string;
   custom_fields?: Record<string, any>;
 }
@@ -213,6 +214,8 @@ export type Chat = {
   is_autopilot_active?: boolean;
   autopilot_config_id?: string | null;
   copilot_mode?: 'off' | 'auto' | 'suggest';
+  metaContactExternalId?: string | null;
+  metaContactUsername?: string | null;
 };
 
 export type InternalChannel = {

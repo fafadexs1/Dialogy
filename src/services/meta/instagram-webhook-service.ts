@@ -22,6 +22,11 @@ type MessagingEvent = {
   };
 };
 
+function isEchoMessage(message?: { is_echo?: unknown }): boolean {
+  if (!message) return false;
+  return message.is_echo === true || message.is_echo === 'true' || message.is_echo === 1 || message.is_echo === '1';
+}
+
 function normalizeInstagramMessage(event: MessagingEvent): {
   type: Message['type'];
   content: string | null;
@@ -36,9 +41,7 @@ function normalizeInstagramMessage(event: MessagingEvent): {
   let type: Message['type'] = 'text';
   let content: string | null = msg.text || null;
   let mediaUrl: string | null = null;
-  const metadata: MessageMetadata = {
-    sentBy: msg.is_echo ? 'agent' : 'autopilot',
-  };
+  const metadata: MessageMetadata = {};
 
   const attachment = msg.attachments?.[0];
   if (attachment) {
@@ -110,8 +113,19 @@ export async function handleInstagramWebhook(channel: MetaChannelRecord, payload
         continue;
       }
 
-      const isEcho = event.message.is_echo === true;
-      const externalUserId = isEcho ? event.recipient?.id : event.sender?.id;
+      // Ignore echo messages - these are messages sent by us via API
+      // They are already persisted when we send them, so we don't need to save them again
+      if (isEchoMessage(event.message)) {
+        await logWebhookEvent({
+          channelId: channel.id,
+          source: 'meta-instagram',
+          event: 'echo-ignored',
+          payload: event,
+        });
+        continue;
+      }
+      // Since echoes are ignored above, we always use sender.id for incoming messages
+      const externalUserId = event.sender?.id;
       if (!externalUserId) {
         await logWebhookEvent({
           channelId: channel.id,
@@ -151,12 +165,12 @@ export async function handleInstagramWebhook(channel: MetaChannelRecord, payload
           mediaUrl: normalized.mediaUrl,
         },
         platform: 'instagram',
-        direction: isEcho ? 'outgoing' : 'incoming',
+        direction: 'incoming',
         externalMessageId: event.message?.mid,
         externalSenderId: event.sender?.id || null,
         externalChannelId: channel.ig_business_id || channel.external_page_id || null,
         rawPayload: event,
-        fromMe: isEcho,
+        fromMe: false,
       });
     }
   }

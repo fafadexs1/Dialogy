@@ -7,11 +7,12 @@ export class InstagramMessagingService {
   constructor(private channel: MetaChannelRecord) { }
 
   private get endpoint(): string {
-    const baseId = this.channel.ig_business_id;
-    if (!baseId) {
-      throw new Error('Conta Instagram Business não configurada no canal. Verifique se a conta Instagram está vinculada corretamente à página do Facebook e atualize a conexão.');
+    // Instagram Messaging API requires external_page_id (Facebook Page ID), NOT ig_business_id
+    const pageId = this.channel.external_page_id;
+    if (!pageId) {
+      throw new Error('Página do Facebook não configurada no canal. Verifique se a conta Instagram está vinculada corretamente à página do Facebook e atualize a conexão.');
     }
-    return `https://graph.facebook.com/v20.0/${baseId}/messages`;
+    return `https://graph.facebook.com/v24.0/${pageId}/messages`;
   }
 
   private async request(body: Record<string, any>, retryAuth = false): Promise<any> {

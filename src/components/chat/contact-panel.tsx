@@ -497,9 +497,16 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 : (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud')
                     ? 'Cloud API'
                     : 'Baileys';
-    const externalId = lastMessage?.externalSenderId
+
+    // For Meta chats (Instagram/Messenger), use the external_id from meta_contacts
+    // For other platforms, fall back to the message's external_sender_id
+    const externalId = chat.metaContactExternalId
+        || lastMessage?.externalSenderId
         || lastMessage?.external_sender_id
         || null;
+
+    // Instagram/Messenger username  
+    const metaUsername = chat.metaContactUsername || null;
 
     return (
         <div className="hidden lg:flex lg:flex-col lg:w-[clamp(320px,25vw,420px)] lg:min-w-[320px] lg:flex-shrink-0 border-l border-border/50 bg-background/30 backdrop-blur-md h-full dark:bg-black dark:border-white/10">
@@ -586,12 +593,19 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <span className="text-foreground/80">{chat.instance_name} <span className="opacity-50 text-xs">({instanceTypeDisplay})</span></span>
                                 </div>
                             )}
-                            {externalId && (
+                            {(externalId || metaUsername) && (
                                 <div className="flex items-center gap-3 text-foreground/80 group">
                                     <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
                                         <UserIcon className="h-4 w-4 text-blue-500" />
                                     </div>
-                                    <span className="text-foreground/80">ID externo: {externalId}</span>
+                                    <div className="flex flex-col leading-tight">
+                                        {metaUsername && (
+                                            <span className="text-foreground">@{metaUsername}</span>
+                                        )}
+                                        {externalId && (
+                                            <span className="text-foreground/60 text-xs">{metaUsername ? `ID: ${externalId}` : `ID externo: ${externalId}`}</span>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                             {contact.address && (

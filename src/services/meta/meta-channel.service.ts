@@ -352,7 +352,15 @@ async function ensureContact(
     ]
   );
 
-  return { contact: contactRow, metaContact: metaInsert.rows[0] };
+  const metaContact: MetaContactRecord = metaInsert.rows[0];
+
+  // Update the contact to reference the meta_contact for easier debugging and queries
+  await db.query(
+    `UPDATE contacts SET meta_contact_id = $1 WHERE id = $2`,
+    [metaContact.id, contactRow.id]
+  );
+
+  return { contact: contactRow, metaContact };
 }
 
 async function ensureConversation(
