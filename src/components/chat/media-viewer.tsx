@@ -67,7 +67,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
             <DialogTrigger asChild onClick={() => setIsOpen(true)}>
                 {children}
             </DialogTrigger>
-            <DialogContent className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 bg-black/95 border-none backdrop-blur-xl flex flex-col items-center justify-center overflow-hidden focus:outline-none">
+            <DialogContent className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 bg-black/95 border-none backdrop-blur-xl flex flex-col items-center justify-center overflow-hidden focus:outline-none [&>button]:hidden">
                 <DialogHeader className="absolute top-4 left-4 right-4 z-50 flex flex-row items-center justify-between bg-transparent border-none p-0">
                     <div className="flex items-center gap-2">
                         <DialogTitle className="text-white font-medium truncate max-w-[300px]">

@@ -903,13 +903,27 @@ export default function ChatPanel({
     const lastPlatformMessage = chat?.messages?.length
         ? chat.messages[chat.messages.length - 1]
         : undefined;
-    const resolvedPlatform = (
-        chat?.source ||
+    // Check for Meta contact signals
+    const hasMetaContact = !!(chat?.metaContactExternalId || chat?.metaContactUsername);
+    const isMetaUser = chat?.contact?.name?.startsWith('Meta User');
+
+    let resolvedPlatform = (
+        // Priority: message-level platform sources first, then chat-level
         lastPlatformMessage?.platform ||
         lastPlatformMessage?.source_from_api ||
+        chat?.source ||
         chat?.instance_type ||
         ''
     ).toString().toLowerCase();
+
+    // Force platform to instagram/messenger if we have reliable Meta signals and current platform is vague/missing
+    if (chat?.metaPlatform) {
+        resolvedPlatform = chat.metaPlatform;
+    } else if (hasMetaContact && !resolvedPlatform.includes('messenger') && !resolvedPlatform.includes('facebook')) {
+        resolvedPlatform = 'instagram';
+    } else if (isMetaUser && !resolvedPlatform.includes('instagram')) {
+        resolvedPlatform = 'messenger';
+    }
 
     const optimisticPlatform =
         resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger'

@@ -610,15 +610,20 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         {(() => {
           const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
           const platformSources = [
-            chat.source,
+            // Priority: message-level platform sources first
             lastMessage?.platform,
             lastMessage?.source_from_api,
+            // Then chat-level sources
+            chat.source,
             chat.instance_type,
           ].filter(Boolean).map(s => s.toLowerCase());
 
           const isInstagram = platformSources.some(s => s.includes('instagram'));
           const isMessenger = platformSources.some(s => s.includes('messenger') || s.includes('facebook'));
           const isWhatsapp = platformSources.some(s => s.includes('whatsapp') || s.includes('baileys') || s.includes('wa_cloud'));
+
+          // Additional Meta signals: if contact has meta external ID or username, it's likely Instagram/Messenger
+          const hasMetaContact = !!(chat.metaContactExternalId || chat.metaContactUsername);
 
           // Heuristic: "Meta User" usually implies Messenger/Facebook if not explicitly Instagram
           const isMetaUser = chat.contact?.name?.startsWith('Meta User');
@@ -627,11 +632,25 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           let bg = 'bg-green-500';
           let label = 'WhatsApp';
 
-          if (isInstagram) {
+          // Logic:
+          // 1. Precise Meta Platform (from meta_conversations table via actions)
+          // 2. Explicit Instagram signal
+          // 3. Explicit Messenger signal
+          // 4. Fallback: Has Meta Contact data -> Assume Instagram (common) or Messenger
+
+          if (chat.metaPlatform === 'instagram') {
             icon = <FaInstagram size={10} />;
             bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
             label = 'Instagram';
-          } else if (isMessenger || (isMetaUser && !isWhatsapp)) {
+          } else if (chat.metaPlatform === 'messenger') {
+            icon = <FaFacebookMessenger size={10} />;
+            bg = 'bg-blue-500';
+            label = 'Messenger';
+          } else if (isInstagram || (hasMetaContact && !isMessenger)) {
+            icon = <FaInstagram size={10} />;
+            bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
+            label = 'Instagram';
+          } else if (isMessenger || isMetaUser || hasMetaContact) {
             icon = <FaFacebookMessenger size={10} />;
             bg = 'bg-blue-500';
             label = 'Messenger';

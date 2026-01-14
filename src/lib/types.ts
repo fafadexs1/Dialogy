@@ -216,6 +216,7 @@ export type Chat = {
   copilot_mode?: 'off' | 'auto' | 'suggest';
   metaContactExternalId?: string | null;
   metaContactUsername?: string | null;
+  metaPlatform?: 'instagram' | 'messenger' | null;
 };
 
 export type InternalChannel = {

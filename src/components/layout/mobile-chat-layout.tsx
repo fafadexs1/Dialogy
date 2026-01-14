@@ -1365,32 +1365,7 @@ export default function MobileChatLayout({
       dir={isRTL ? 'rtl' : 'ltr'}
     >
       <div className="relative z-10 flex h-full flex-col">
-        <header className="px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <p className="text-[10px] uppercase tracking-[0.35em] text-muted-foreground">Dialogy Mobile</p>
-              <h1 className="text-2xl font-semibold text-foreground">{headerTitle}</h1>
-              <p className="text-xs text-muted-foreground">{headerSubtitle}</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                <span className={cn('h-2 w-2 rounded-full', isOffline ? 'bg-red-500' : 'bg-emerald-500')} />
-                {isOffline ? 'Offline' : 'Online'}
-              </div>
-              <Avatar className="h-9 w-9 border border-border/70 shadow-sm">
-                <AvatarImage src={initialUser.avatar_url ?? undefined} alt={initialUser.name ?? 'User'} />
-                <AvatarFallback className="bg-muted text-foreground">{initialUser.name?.charAt(0) ?? 'U'}</AvatarFallback>
-              </Avatar>
-            </div>
-          </div>
-          {activeTab === 'chats' && (
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-1 hide-scrollbar">
-              <MobileStatCard label="Fila" value={mobileStats.queue} icon={MessageSquare} tone="primary" />
-              <MobileStatCard label="Atendimentos" value={mobileStats.active} icon={Users} tone="info" />
-              <MobileStatCard label="Fechados" value={mobileStats.closed} icon={CheckCircle2} tone="neutral" />
-            </div>
-          )}
-        </header>
+        {/* Header removed per user request */}
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-hidden relative w-full">

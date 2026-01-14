@@ -22,7 +22,13 @@ import {
     MessageSquarePlus,
     BarChart3,
     Hash,
-    ArrowRightLeft
+    ArrowRightLeft,
+    Copy,
+    ExternalLink,
+    Zap,
+    LayoutGrid,
+    Cpu,
+    Target
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -48,6 +54,7 @@ import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { motion } from 'framer-motion';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -333,9 +340,9 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-muted/50 border-input text-foreground hover:bg-muted/80">
-                    <MessageSquarePlus className="mr-2 h-4 w-4" />
-                    Nova conversa
+                <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                    <MessageSquarePlus className="h-3 w-3 text-green-400" />
+                    Reabrir
                 </Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg bg-popover border-border text-foreground max-h-[85vh] overflow-y-auto">
@@ -440,6 +447,28 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     )
 }
 
+function CopyButton({ value, label }: { value: string, label?: string }) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(value);
+        setCopied(true);
+        toast({ title: label ? `${label} copiado!` : "Copiado para a área de transferência" });
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 rounded-md hover:bg-white/10 text-white/40 hover:text-white transition-all"
+            onClick={handleCopy}
+        >
+            {copied ? <CheckSquare className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
+        </Button>
+    );
+}
+
 
 export default function ContactPanel({ chat, currentUser, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -482,13 +511,28 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const isProtocolScoped = (chat as any).protocolScoped;
 
     const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
-    const platform = (
+
+    // Check for Meta contact signals
+    const hasMetaContact = !!(chat.metaContactExternalId || chat.metaContactUsername);
+    const isMetaUser = chat.contact?.name?.startsWith('Meta User');
+
+    let platform = (
+        // Priority: message-level platform sources first, then chat-level
         lastMessage?.platform ||
         lastMessage?.source_from_api ||
         chat.source ||
         chat.instance_type ||
         ''
     ).toString().toLowerCase();
+
+    // Force platform to instagram/messenger if we have reliable Meta signals and current platform is vague/missing
+    if (chat.metaPlatform) {
+        platform = chat.metaPlatform;
+    } else if (hasMetaContact && !platform.includes('messenger') && !platform.includes('facebook')) {
+        platform = 'instagram';
+    } else if (isMetaUser && !platform.includes('instagram')) {
+        platform = 'messenger';
+    }
     const instanceTypeDisplay =
         platform === 'instagram'
             ? 'Instagram'
@@ -509,223 +553,413 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const metaUsername = chat.metaContactUsername || null;
 
     return (
-        <div className="hidden lg:flex lg:flex-col lg:w-[clamp(320px,25vw,420px)] lg:min-w-[320px] lg:flex-shrink-0 border-l border-border/50 bg-background/30 backdrop-blur-md h-full dark:bg-black dark:border-white/10">
-            <div className="flex h-16 items-center justify-between border-b border-border dark:border-white/10 px-4 xl:px-6 flex-shrink-0">
-                <h3 className="font-semibold text-base xl:text-lg text-foreground">Detalhes</h3>
-                <div className="flex items-center gap-2">
-                    {chat.status === 'encerrados' && (
+        <motion.div
+            initial={{ x: 30, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            className="hidden lg:flex lg:flex-col lg:w-[450px] lg:max-w-[450px] lg:min-w-[400px] lg:flex-shrink-0 border-l border-white/10 bg-[#050505]/80 backdrop-blur-[40px] h-full shadow-[-20px_0_80px_rgba(0,0,0,0.4)] z-10 relative overflow-x-hidden overflow-y-hidden"
+        >
+            {/* Background Glows */}
+            <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-blue-600/5 blur-[120px] rounded-full -mr-20 -mt-20 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-purple-600/5 blur-[100px] rounded-full -ml-20 -mb-20 pointer-events-none" />
+
+            {/* Header */}
+            <div className="sticky top-0 z-20 flex flex-col px-4 pt-4 pb-3 bg-black/20 backdrop-blur-md border-b border-white/5">
+                {/* Quick Actions Bar */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5"
+                        onClick={() => setIsStatsOpen(true)}
+                    >
+                        <BarChart3 className="h-3 w-3 text-blue-400" />
+                        Relatórios
+                    </Button>
+                    <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
+
+                    {chat.status === 'encerrados' ? (
                         <ResumeConversationDialog chat={chat} currentUser={currentUser} onSuccess={onContactUpdate} />
+                    ) : (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5"
+                            onClick={() => {
+                                const protocol = chat.protocol || buildChatProtocol(chat.id);
+                                navigator.clipboard.writeText(protocol);
+                                toast({ title: "Protocolo copiado!" });
+                            }}
+                        >
+                            <Hash className="h-3 w-3 text-purple-400" />
+                            Protocolo
+                        </Button>
                     )}
-                    <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="text-blue-500 hover:text-blue-400 hover:bg-blue-500/10">
-                                <Edit className="mr-2 h-4 w-4" />
-                                Editar
-                            </Button>
-                        </DialogTrigger>
-                        <AddContactForm
-                            isOpen={isEditModalOpen}
-                            setIsOpen={setIsEditModalOpen}
-                            contact={contact}
-                            onSave={onContactUpdate}
-                            workspaceId={chat.workspace_id}
-                            agents={agents}
-                            user={currentUser}
-                        />
-                    </Dialog>
                 </div>
             </div>
 
-            <ScrollArea className="flex-1">
-                <div className="p-4 xl:p-6 space-y-6">
-                    <div className="flex flex-col items-center text-center">
-                        <Avatar className="h-24 w-24 shrink-0 border-2 border-border ring-4 ring-muted shadow-xl">
-                            <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} data-ai-hint="person" />
-                            <AvatarFallback className="text-3xl bg-gradient-to-br from-blue-600 to-violet-600 text-white">{contact.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div className="mt-4 space-y-1">
-                            <h2 className="font-bold text-lg xl:text-xl text-foreground">{contact.name}</h2>
-                            {chat.tag && chat.color && (
-                                <Badge style={{ backgroundColor: chat.color, color: chat.color.startsWith('#FEE') ? '#000' : '#fff' }} className="border-transparent shadow-sm">
-                                    {chat.tag}
-                                </Badge>
-                            )}
-                        </div>
-                    </div>
+            <ScrollArea className="flex-1 custom-scrollbar">
+                <div className="p-4 space-y-6 pb-24">
+                    {/* Profile Section */}
+                    <div className="relative">
+                        {/* Dynamic Platform Glow */}
+                        <div className={cn(
+                            "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700",
+                            platform === 'instagram' ? "bg-pink-500" :
+                                platform === 'messenger' ? "bg-blue-500" :
+                                    (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud' || platform === 'whatsapp') ? "bg-green-500" : "bg-blue-400"
+                        )} />
 
-                    <Separator className="bg-border" />
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ type: "spring", damping: 20 }}
+                            className="flex flex-col items-center text-center relative"
+                        >
+                            <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
+                                <div className="absolute -inset-2 bg-gradient-to-tr from-white/10 to-transparent rounded-[2.5rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+                                <div className="p-1 rounded-[2.5rem] bg-gradient-to-b from-white/20 to-transparent border border-white/10 backdrop-blur-md">
+                                    <Avatar className="h-32 w-32 shrink-0 rounded-[2rem] border-2 border-black/50 shadow-2xl relative">
+                                        <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
+                                        <AvatarFallback className="text-4xl font-bold bg-gradient-to-br from-neutral-800 to-black text-white">
+                                            {contact.name.charAt(0)}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                </div>
 
-                    <div className="space-y-4">
-                        <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider">Informações de Contato</h4>
-                        <div className="space-y-3 text-sm">
-                            {contact.email && (
-                                <div className="flex items-center gap-3 text-foreground group">
-                                    <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                                        <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                                    </div>
-                                    <span className="truncate text-foreground/80">{contact.email}</span>
-                                </div>
-                            )}
-                            {contact.phone_number_jid && (
-                                <div className="flex items-center gap-3 text-foreground/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center">
-                                        <Smartphone className="h-4 w-4 text-green-600 dark:text-green-400" />
-                                    </div>
-                                    <span className="text-foreground/80">{contact.phone_number_jid}</span>
-                                </div>
-                            )}
-                            {(chat.protocol || chat.id) && (
-                                <div className="flex items-center gap-3 text-foreground/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-indigo-500/10 flex items-center justify-center group-hover:bg-indigo-500/20 transition-colors">
-                                        <Hash className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                                    </div>
-                                    <div className="flex flex-col leading-tight">
-                                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Protocolo</span>
-                                        <span className="font-mono text-sm text-foreground">{chat.protocol || buildChatProtocol(chat.id)}</span>
-                                    </div>
-                                </div>
-                            )}
-                            {chat.instance_name && (
-                                <div className="flex items-center gap-3 text-foreground/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                                        <Server className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                                    </div>
-                                    <span className="text-foreground/80">{chat.instance_name} <span className="opacity-50 text-xs">({instanceTypeDisplay})</span></span>
-                                </div>
-                            )}
-                            {(externalId || metaUsername) && (
-                                <div className="flex items-center gap-3 text-foreground/80 group">
-                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
-                                        <UserIcon className="h-4 w-4 text-blue-500" />
-                                    </div>
-                                    <div className="flex flex-col leading-tight">
-                                        {metaUsername && (
-                                            <span className="text-foreground">@{metaUsername}</span>
-                                        )}
-                                        {externalId && (
-                                            <span className="text-foreground/60 text-xs">{metaUsername ? `ID: ${externalId}` : `ID externo: ${externalId}`}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                            {contact.address && (
-                                <div className="flex items-center gap-3 text-foreground group">
-                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
-                                        <MapPin className="h-4 w-4 text-red-500" />
-                                    </div>
-                                    <span>{contact.address}</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <Separator className="bg-border" />
-
-                    {customFields.length > 0 && (
-                        <>
-                            <div className="space-y-4">
-                                <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider">Informações Adicionais</h4>
-                                <div className="space-y-3 text-sm">
-                                    {customFields.map(field => {
-                                        const value = contact.custom_fields?.[field.id];
-                                        if (!value) return null;
-
-                                        let displayValue = value;
-                                        if (field.type === 'select') {
-                                            const option = field.options?.find(opt => opt.value === value);
-                                            displayValue = option ? option.label : value;
-                                        }
-
-                                        return (
-                                            <div key={field.id} className="flex flex-col gap-1 text-foreground group">
-                                                <span className="text-xs text-muted-foreground">{field.label}</span>
-                                                <div className="flex items-center gap-3">
-                                                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
-                                                        <Briefcase className="h-4 w-4 text-yellow-500" />
-                                                    </div>
-                                                    <span className="truncate">{displayValue}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    {customFields.every(f => !contact.custom_fields?.[f.id]) && (
-                                        <p className="text-muted-foreground italic text-xs">Nenhuma informação adicional preenchida.</p>
+                                {/* Platform Icon Badge */}
+                                <div className="absolute -bottom-2 -right-2 h-10 w-10 rounded-2xl bg-black border border-white/10 flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
+                                    {platform === 'instagram' ? (
+                                        <Globe className="h-5 w-5 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
+                                    ) : platform === 'messenger' ? (
+                                        <Globe className="h-5 w-5 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                                    ) : (
+                                        <Smartphone className="h-5 w-5 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
                                     )}
                                 </div>
                             </div>
-                            <Separator className="bg-border" />
-                        </>
+
+                            <div className="mt-8 space-y-3">
+                                <motion.h2
+                                    initial={{ y: 10, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    transition={{ delay: 0.2 }}
+                                    className="font-black text-3xl tracking-tight text-white/90"
+                                >
+                                    {contact.name}
+                                </motion.h2>
+
+                                <motion.div
+                                    initial={{ y: 10, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    transition={{ delay: 0.3 }}
+                                    className="flex flex-wrap items-center justify-center gap-2"
+                                >
+                                    {chat.tag && chat.color && (
+                                        <div
+                                            style={{ backgroundColor: `${chat.color}20`, color: chat.color, borderColor: `${chat.color}40` }}
+                                            className="px-3 py-1 rounded-full border text-[9px] font-black uppercase tracking-tighter shadow-[0_0_20px_rgba(0,0,0,0.3)] flex items-center gap-1.5"
+                                        >
+                                            <div className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: chat.color }} />
+                                            {chat.tag}
+                                        </div>
+                                    )}
+                                    <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-white/40 text-[9px] font-bold uppercase tracking-wider">
+                                        {instanceTypeDisplay}
+                                    </div>
+                                    <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+                                        <DialogTrigger asChild>
+                                            <button className="h-6 w-6 rounded-full bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 flex items-center justify-center transition-all">
+                                                <Edit className="h-3 w-3" />
+                                            </button>
+                                        </DialogTrigger>
+                                        <AddContactForm
+                                            isOpen={isEditModalOpen}
+                                            setIsOpen={setIsEditModalOpen}
+                                            contact={contact}
+                                            onSave={onContactUpdate}
+                                            workspaceId={chat.workspace_id}
+                                            agents={agents}
+                                            user={currentUser}
+                                        />
+                                    </Dialog>
+                                </motion.div>
+                            </div>
+                        </motion.div>
+                    </div>
+
+                    {/* Information Grid (Tiles) */}
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.4 }}
+                        className="space-y-4"
+                    >
+                        <div className="flex items-center justify-between px-1">
+                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
+                                Inteligência de Contato
+                            </h4>
+                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* Phone Tile */}
+                            <div className="group relative col-span-2 sm:col-span-1">
+                                <div className="absolute -inset-[1px] bg-gradient-to-b from-white/10 to-transparent rounded-2xl opacity-50 transition-opacity group-hover:opacity-100" />
+                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
+                                    <div className="flex items-center justify-between">
+                                        <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20">
+                                            <Smartphone className="h-4 w-4 text-green-400" />
+                                        </div>
+                                        <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
+                                    </div>
+                                    <div>
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">WhatsApp</span>
+                                        <span className="text-xs font-bold text-white/80 tabular-nums">
+                                            {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Email Tile */}
+                            <div className="group relative col-span-2 sm:col-span-1">
+                                <div className="absolute -inset-[1px] bg-gradient-to-b from-white/10 to-transparent rounded-2xl opacity-50 transition-opacity group-hover:opacity-100" />
+                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
+                                    <div className="flex items-center justify-between">
+                                        <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                                            <Mail className="h-4 w-4 text-blue-400" />
+                                        </div>
+                                        {contact.email && <CopyButton value={contact.email} label="Email" />}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Email</span>
+                                        <span className="text-xs font-bold text-white/80 truncate block">
+                                            {contact.email || 'Não informado'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Protocol Tile */}
+                            <div className="group relative col-span-2 sm:col-span-1">
+                                <div className="absolute -inset-[1px] bg-gradient-to-r from-purple-500/20 to-blue-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all overflow-hidden border-dashed">
+                                    <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity">
+                                        <Hash className="h-12 w-12 -mr-4 -mt-4 rotate-12" />
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
+                                            <Hash className="h-4 w-4 text-purple-400" />
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
+                                            onClick={() => {
+                                                const val = chat.protocol || buildChatProtocol(chat.id);
+                                                navigator.clipboard.writeText(val);
+                                                toast({ title: "Copiado!" });
+                                            }}
+                                        >
+                                            <Copy className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                    <div>
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Protocolo</span>
+                                        <span className="text-xs font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
+                                            {chat.protocol || buildChatProtocol(chat.id)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Device Tile */}
+                            <div className="group relative col-span-2 sm:col-span-1">
+                                <div className="absolute -inset-[1px] bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
+                                    <div className="flex items-center justify-between">
+                                        <div className="h-8 w-8 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
+                                            <Cpu className="h-4 w-4 text-cyan-400" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Dispositivo</span>
+                                        <span className="text-xs font-bold text-white/80 capitalize">
+                                            {(() => {
+                                                const lastMsg = [...(chat.messages || [])].reverse().find(m => !m.from_me && m.source_from_api);
+                                                return lastMsg?.source_from_api || 'Desconhecido';
+                                            })()}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    {/* Custom Fields Section */}
+                    {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id]) && (
+                        <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.3 }}
+                            className="space-y-4"
+                        >
+                            <h4 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-white/40 mb-2 px-1">
+                                Campos Adicionais
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                {customFields.map(field => {
+                                    const value = contact.custom_fields?.[field.id];
+                                    if (!value) return null;
+
+                                    let displayValue = value;
+                                    if (field.type === 'select') {
+                                        const option = field.options?.find(opt => opt.value === value);
+                                        displayValue = option ? option.label : value;
+                                    }
+
+                                    return (
+                                        <div key={field.id} className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col gap-1 hover:bg-white/5 transition-colors">
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
+                                            <div className="flex items-center gap-2">
+                                                <Target className="h-3 w-3 text-white/40" />
+                                                <span className="text-xs font-bold text-white/70 truncate">{displayValue}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </motion.div>
                     )}
 
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h4 className="font-medium text-muted-foreground flex items-center gap-2 text-sm uppercase tracking-wider">
-                                Atendente Responsável
+                    {/* Assigned Agent Card */}
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.6 }}
+                        className="space-y-4"
+                    >
+                        <div className="flex items-center justify-between px-1">
+                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
+                                Agente Responsável
                             </h4>
+                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
                         </div>
 
-                        <div className="bg-muted/30 border border-border rounded-xl p-4">
-                            {agent && agent.id !== 'unknown' ? (
-                                <div className="flex items-center gap-3">
-                                    <Avatar className="h-10 w-10 border border-border">
-                                        <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
-                                        <AvatarFallback className="bg-muted text-foreground">{agent.name.charAt(0)}</AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-medium text-foreground truncate">{agent.name}</p>
-                                        {chat.assigned_at && <p className="text-xs text-muted-foreground">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>}
+                        <div className="group relative">
+                            <div className="absolute -inset-[1px] bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur-sm opacity-50 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="relative bg-[#0A0A0A] border border-white/10 rounded-2xl p-5 overflow-hidden shadow-2xl">
+                                {/* Decorative elements */}
+                                <div className="absolute top-0 right-0 p-1 opacity-5">
+                                    <Cpu className="h-16 w-16 -mr-4 -mt-4" />
+                                </div>
+
+                                {agent && agent.id !== 'unknown' ? (
+                                    <div className="flex items-start gap-3 min-w-0">
+                                        <div className="relative shrink-0">
+                                            <div className="absolute -inset-1 bg-blue-500/20 rounded-lg blur-sm" />
+                                            <Avatar className="h-10 w-10 rounded-lg border border-white/10 shadow-lg relative">
+                                                <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
+                                                <AvatarFallback className="bg-neutral-800 text-white/60 font-black text-sm">{agent.name.charAt(0)}</AvatarFallback>
+                                            </Avatar>
+                                            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-black shadow-[0_0_6px_#22c55e]" />
+                                        </div>
+                                        <div className="flex-1 min-w-0 overflow-hidden">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                <p className="font-bold text-white/90 truncate text-sm">{agent.name}</p>
+                                                <Badge className="bg-blue-500/10 text-blue-400 text-[7px] font-bold uppercase px-1.5 h-3 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                            </div>
+                                            {chat.assigned_at ? (
+                                                <div className="flex items-center gap-1 text-white/40">
+                                                    <Calendar className="h-2.5 w-2.5 shrink-0" />
+                                                    <p className="text-[9px] font-medium truncate">
+                                                        Desde {new Date(chat.assigned_at).toLocaleDateString()}
+                                                    </p>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-1 text-blue-400/60">
+                                                    <Zap className="h-2.5 w-2.5 animate-pulse shrink-0" />
+                                                    <span className="text-[9px] font-bold uppercase">Ativo</span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                    <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center text-center py-2">
-                                    <p className="text-muted-foreground text-sm mb-3">Nenhum atendente atribuído.</p>
-                                    <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
-                                </div>
-                            )}
+                                ) : (
+                                    <div className="flex flex-col items-center text-center py-4 space-y-4">
+                                        <div className="h-14 w-14 rounded-2xl bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
+                                            <UserCheck className="h-8 w-8 text-white/10" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-black text-white/40 uppercase tracking-widest">Sem agente responsável</p>
+                                            <p className="text-[10px] text-white/20 font-bold">Fila de espera</p>
+                                        </div>
+                                        <div className="w-full pt-2">
+                                            <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    </motion.div>
 
-                    <Separator className="bg-border" />
+                    {/* CRM & Stats Section */}
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.7 }}
+                        className="space-y-4"
+                    >
+                        <div className="flex items-center justify-between px-1">
+                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
+                                Insights e Central Nexus
+                            </h4>
+                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
+                        </div>
 
-                    <div className="space-y-4">
-                        <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wider mb-2">CRM & Tarefas</h4>
-
-                        <Card
-                            className="bg-card border-border shadow-none hover:bg-muted/50 transition-colors cursor-pointer group"
-                            onClick={() => setIsStatsOpen(true)}
-                        >
-                            <CardContent className="p-4 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
-                                        <BarChart3 className="h-4 w-4" />
-                                    </div>
-                                    <span className="font-medium text-foreground">Estatísticas</span>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Card
+                                className="bg-[#0A0A0A] border-white/5 shadow-none hover:bg-blue-500/5 hover:border-blue-500/30 transition-all duration-300 cursor-pointer group rounded-2xl overflow-hidden relative"
+                                onClick={() => setIsStatsOpen(true)}
+                            >
+                                <div className="absolute top-0 right-0 p-3 opacity-5 pointer-events-none">
+                                    <BarChart3 className="h-12 w-12" />
                                 </div>
-                                <Badge variant="secondary" className="bg-muted text-foreground group-hover:bg-muted/80">Ver</Badge>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="bg-card border-border shadow-none hover:bg-muted/50 transition-colors cursor-pointer group">
-                            <CardContent className="p-4 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="h-8 w-8 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400">
-                                        <CheckSquare className="h-4 w-4" />
+                                <CardContent className="p-5 flex flex-col items-start gap-4">
+                                    <div className="h-10 w-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 group-hover:scale-110 transition-transform">
+                                        <BarChart3 className="h-5 w-5" />
                                     </div>
-                                    <span className="font-medium text-foreground">Tarefas</span>
+                                    <div className="flex items-center justify-between w-full">
+                                        <span className="text-xs font-black uppercase tracking-widest text-white/60">Estatísticas</span>
+                                        <ArrowRightLeft className="h-3 w-3 text-white/20 rotate-180 group-hover:translate-x-1 transition-transform" />
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            <Card className="bg-[#0A0A0A] border-white/5 shadow-none hover:bg-green-500/5 hover:border-green-500/30 transition-all duration-300 cursor-pointer group rounded-2xl overflow-hidden relative">
+                                <div className="absolute top-0 right-0 p-3 opacity-5 pointer-events-none">
+                                    <CheckSquare className="h-12 w-12" />
                                 </div>
-                                <Badge variant="secondary" className="bg-muted text-foreground group-hover:bg-muted/80">0</Badge>
-                            </CardContent>
-                        </Card>
-                    </div>
+                                <CardContent className="p-5 flex flex-col items-start gap-4">
+                                    <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 border border-green-500/20 group-hover:scale-110 transition-transform">
+                                        <CheckSquare className="h-5 w-5" />
+                                    </div>
+                                    <div className="flex items-center justify-between w-full">
+                                        <span className="text-xs font-black uppercase tracking-widest text-white/60">Tarefas</span>
+                                        <div className="h-5 px-2 bg-green-500/20 text-green-400 text-[10px] font-black flex items-center justify-center rounded-lg border border-green-500/20 group-hover:shadow-[0_0_10px_rgba(34,197,94,0.3)] transition-all">0</div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
 
-                    <Separator className="bg-border" />
-
-                    <Link href="/crm" className="block">
-                        <Button variant="outline" className="w-full bg-transparent border-input text-foreground hover:bg-muted hover:text-foreground">
-                            Ver Perfil Completo no CRM
-                        </Button>
-                    </Link>
+                        <Link href="/crm" className="block">
+                            <Button variant="outline" className="w-full h-14 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.2em] gap-3 group relative overflow-hidden">
+                                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-white/5 to-blue-500/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                                <LayoutGrid className="h-4 w-4" />
+                                Interface Avançada CRM
+                                <ArrowRightLeft className="h-3.5 w-3.5 rotate-180 group-hover:translate-x-1 transition-transform" />
+                            </Button>
+                        </Link>
+                    </motion.div>
                 </div>
             </ScrollArea>
             <ContactStatisticsDialog
@@ -734,6 +968,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 contactId={contact.id}
                 contactName={contact.name}
             />
-        </div>
+        </motion.div>
     );
 }
+

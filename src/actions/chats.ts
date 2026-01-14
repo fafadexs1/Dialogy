@@ -627,6 +627,7 @@ type ChatRow = {
     copilot_mode?: 'off' | 'auto' | 'suggest' | null;
     meta_contact_external_id?: string | null;
     meta_contact_username?: string | null;
+    meta_platform?: string | null;
 };
 
 type MessageRow = {
@@ -883,16 +884,28 @@ async function fetchChats({
                 JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
                 WHERE cfv.contact_id = c.contact_id
             ) AS contact_custom_fields,
-            mct.external_id AS meta_contact_external_id,
-            mct.username AS meta_contact_username
+            COALESCE(mct.external_id, mct_stable.external_id) AS meta_contact_external_id,
+            COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
+            COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
         FROM merged_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
+        LEFT JOIN LATERAL (
+            SELECT mct2.username, mct2.external_id, mch.type as platform_type
+            FROM meta_contacts mct2
+            JOIN meta_channels mch ON mch.id = mct2.channel_id
+            WHERE mct2.contact_id = c.contact_id
+            ORDER BY mct2.created_at DESC
+            LIMIT 1
+        ) mct_stable ON true
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
-        LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
+        LEFT JOIN evolution_api_instances eai ON eai.instance_name = COALESCE(
+            lmd.instance_name,
+            (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1)
+        ) AND eai.workspace_id = c.workspace_id
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         params
@@ -1832,6 +1845,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             copilot_mode: row.copilot_mode || 'auto',
             metaContactExternalId: row.meta_contact_external_id || undefined,
             metaContactUsername: row.meta_contact_username || undefined,
+            metaPlatform: (row.meta_platform as any) || undefined,
         };
     });
 
