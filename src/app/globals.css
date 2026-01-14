@@ -4,14 +4,23 @@
 
 @layer base {
 
-  html,
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    height: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Fonts currently handled by Next.js font loader optimization but mapped here for reference if needed */
+    --font-heading: 'Inter', sans-serif;
+    --font-body: 'Inter', sans-serif;
+
+    /* Light Mode - Keeping it clean but high contrast if ever switched, though focus is Dark */
+    --background: 220 20% 98%;
+    --foreground: 224 71% 4%;
 
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
@@ -19,32 +28,39 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    /* Brand Primary - Green #20C307 */
-    --primary: 112 93% 40%;
-    --primary-foreground: 0 0% 100%;
+    /* Brand Primary - Green #19F5B2 (HSL approx 162 90% 53%) */
+    --primary: 162 90% 53%;
+    --primary-foreground: 224 71% 4%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 14% 3.9%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 8% 46%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 14% 3.9%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 112 93% 40%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 162 90% 53%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
+
+    /* Chart colors */
+    --chart-1: 162 90% 53%;
+    --chart-2: 210 100% 61%;
+    --chart-3: 257 100% 68%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
 
     /* Sidebar - Light Mode */
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 222.2 84% 4.9%;
-    --sidebar-primary: 112 93% 40%;
+    --sidebar-primary: 162 90% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 210 40% 96.1%;
     --sidebar-accent-foreground: 222.2 47.4% 11.2%;
@@ -52,49 +68,48 @@
     --sidebar-ring: 112 93% 40%;
   }
 
-  .dark {
-    /* Cosmic Glass Dark Mode */
-    /* Deep Void Background - Slightly blue-ish black for premium feel */
-    --background: 222.2 47.4% 11.2%;
+  /* Force Dark Mode aesthetic by default for the landing page or use .dark class */
+  /* We will assume the site is predominantly dark mode for the premium feel */
+  :root {
+    /* Deep Void Background #050507 -> HSL 240 17% 2% */
+    --background: 240 17% 2%;
     --foreground: 210 40% 98%;
-    
-    /* Surface Colors - Glassy and Deep */
-    --card: 222.2 47.4% 11.2%;
+
+    --card: 240 10% 4%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 47.4% 11.2%;
+    --popover: 240 10% 4%;
     --popover-foreground: 210 40% 98%;
 
-    /* Primary - Electric Blue/Indigo */
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    /* Primary - Green #19F5B2 */
+    --primary: 162 90% 53%;
+    --primary-foreground: 240 17% 2%;
 
-    /* Secondary - Muted deep blue */
-    --secondary: 217.2 32.6% 17.5%;
+    /* Secondary - Muted deep blue #0B0B10 */
+    --secondary: 240 15% 6%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
+    --muted: 240 6% 15%;
     --muted-foreground: 215 20.2% 65.1%;
 
-    --accent: 217.2 32.6% 17.5%;
+    --accent: 240 6% 12%;
     --accent-foreground: 210 40% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 240 6% 12%;
+    --input: 240 6% 12%;
+    --ring: 162 90% 53%;
 
-    /* Sidebar specific - Slightly distinct from main bg */
-    --sidebar-background: 222.2 47.4% 11.2%;
+    --sidebar-background: 240 17% 2%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217.2 91.2% 59.8%;
-    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
-    --sidebar-accent: 217.2 32.6% 17.5%;
+    --sidebar-primary: 162 90% 53%;
+    --sidebar-primary-foreground: 240 17% 2%;
+    --sidebar-accent: 240 6% 12%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217.2 32.6% 17.5%;
-    --sidebar-ring: 212.7 26.8% 83.9%;
+    --sidebar-border: 240 6% 12%;
+    --sidebar-ring: 162 90% 53%;
   }
 }
 
@@ -104,111 +119,84 @@
   }
 
   body {
-    @apply bg-background text-foreground transition-colors duration-300;
-  }
-
-  @keyframes float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-
-    50% {
-      transform: translateY(-12px);
-    }
-  }
-
-  .float-animation {
-    animation: float 4s ease-in-out infinite;
-  }
-  
-  /* Glassmorphism Utilities */
-  .glass {
-    @apply bg-opacity-20 backdrop-blur-lg border border-opacity-30 border-white/10;
-  }
-  
-  .glass-card {
-    @apply bg-card/60 backdrop-blur-md border-border/50 shadow-xl;
+    @apply bg-background text-foreground transition-colors duration-300 antialiased selection:bg-brand-green/20 selection:text-brand-green;
   }
 
   /* Scrollbars */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
-  
+
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-  
+
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
+    @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40 transition-colors;
+  }
+}
+
+@layer utilities {
+
+  /* Glassmorphism */
+  .glass {
+    @apply backdrop-blur-md bg-white/5 border border-white/10;
   }
 
-  /* Hide scrollbar for specific browsers if needed, but keeping custom one is better for desktop apps */
-  .hide-scrollbar::-webkit-scrollbar {
+  .glass-dark {
+    @apply backdrop-blur-xl bg-black/40 border border-white/5;
+  }
+
+  .glass-card {
+    @apply backdrop-blur-2xl bg-[#0B0B10]/60 border border-white/5 shadow-2xl;
+  }
+
+  /* Neon Glows */
+  .glow-green {
+    box-shadow: 0 0 20px -5px rgba(25, 245, 178, 0.3);
+  }
+
+  .glow-blue {
+    box-shadow: 0 0 20px -5px rgba(58, 169, 255, 0.3);
+  }
+
+  .glow-text-green {
+    text-shadow: 0 0 20px rgba(25, 245, 178, 0.5);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-200 to-gray-400;
+  }
+
+  .text-gradient-brand {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-green via-brand-blue to-brand-purple;
+  }
+
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+
+  .rotate-x-12 {
+    transform: rotateX(12deg);
+  }
+
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+
+  /* Layout utilities */
+  .container-width {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Utility for hiding scrollbar but keeping functionality */
+  .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
-  .hide-scrollbar {
+
+  .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
-  }
-}
-
-@layer base {
-  html.mobile-app,
-  body.mobile-app {
-    height: 100%;
-    overflow: hidden;
-    overscroll-behavior: none;
-  }
-
-  body.mobile-app {
-    background: hsl(var(--background));
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-  }
-
-  body.mobile-app main {
-    height: 100%;
-    overflow: hidden;
-  }
-}
-
-@layer components {
-  .mobile-app-shell {
-    background-color: hsl(var(--background));
-    background-image:
-      radial-gradient(120% 120% at 0% 0%, hsl(var(--primary) / 0.18) 0%, transparent 48%),
-      radial-gradient(120% 120% at 100% 0%, hsl(var(--foreground) / 0.08) 0%, transparent 45%),
-      radial-gradient(140% 140% at 50% 100%, hsl(var(--primary) / 0.08) 0%, transparent 55%);
-    isolation: isolate;
-    overflow: hidden;
-  }
-
-  .mobile-app-shell::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: linear-gradient(
-      180deg,
-      transparent 0%,
-      hsl(var(--background) / 0.9) 65%,
-      hsl(var(--background)) 100%
-    );
-    z-index: 0;
-    pointer-events: none;
-  }
-
-  .mobile-app-shell::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-      radial-gradient(circle at 20% 20%, hsl(var(--primary) / 0.14), transparent 35%),
-      radial-gradient(circle at 80% 10%, hsl(var(--foreground) / 0.06), transparent 40%);
-    opacity: 0.7;
-    z-index: 0;
-    pointer-events: none;
   }
 }

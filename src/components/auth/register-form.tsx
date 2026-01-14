@@ -46,9 +46,18 @@ const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
 export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
   const { t } = useI18n();
   const { toast } = useToast();
+  const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState('');
   const [passwordStrength, setPasswordStrength] = useState(0);
+
+  // Form states to persist between steps
+  const [formData, setLocalFormData] = useState({
+    name: '',
+    lastname: '',
+    email: '',
+    phone: '',
+  });
 
   const checkPasswordStrength = (pass: string) => {
     let score = 0;
@@ -57,10 +66,8 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
     if (pass.match(/[A-Z]/)) score++;
     if (pass.match(/[0-9]/)) score++;
     if (pass.match(/[^a-zA-Z0-9]/)) score++;
-
     setPasswordStrength(Math.max(0, score - 1));
   };
-
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newPassword = e.target.value;
@@ -68,11 +75,24 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
     checkPasswordStrength(newPassword);
   }
 
+  const handleNext = () => {
+    // Basic validation for step 1
+    if (!formData.name || !formData.lastname || !formData.email || !formData.phone) {
+      toast({
+        title: t("Campos obrigatórios"),
+        description: t("Por favor, preencha todos os campos para continuar."),
+        variant: "destructive"
+      });
+      return;
+    }
+    setStep(2);
+  };
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const pass = formData.get('password') as string;
-    const confirmPass = formData.get('confirmPassword') as string;
+    const fullFormData = new FormData(event.currentTarget);
+    const pass = fullFormData.get('password') as string;
+    const confirmPass = fullFormData.get('confirmPassword') as string;
 
     if (pass !== confirmPass) {
       toast({
@@ -83,78 +103,135 @@ export function RegisterForm({ onRegister, pending }: RegisterFormProps) {
       return;
     }
 
-    onRegister(formData);
+    onRegister(fullFormData);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="name" className="font-medium text-white/80 text-sm">{t("Nome")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-          <Input id="name" name="name" type="text" placeholder={t("Primeiro nome")} required autoComplete="given-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="lastname" className="font-medium text-white/80 text-sm">{t("Sobrenome")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-          <Input id="lastname" name="lastname" type="text" placeholder={t("Sobrenome")} required autoComplete="family-name" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
-        </div>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="email" className="font-medium text-white/80 text-sm">{t("E-mail")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-        <Input id="email" name="email" type="email" placeholder={t("Insira seu melhor e-mail")} required autoComplete="email" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="phone" className="font-medium text-white/80 text-sm">{t("Telefone pessoal")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-        <Input id="phone" name="phone" type="tel" placeholder={t("Insira o seu numero")} required autoComplete="tel" className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="password" className="font-medium text-white/80 text-sm">{t("Senha")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-        <div className='relative'>
-          <Input
-            id="password"
-            name="password"
-            type={showPassword ? 'text' : 'password'}
-            placeholder={t("Crie uma senha forte")}
-            required
-            autoComplete="new-password"
-            className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
-            value={password}
-            onChange={handlePasswordChange}
-          />
-          <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-white/40 hover:text-white hover:bg-white/10" onClick={() => setShowPassword(!showPassword)}>
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </Button>
-        </div>
-        <PasswordStrengthIndicator strength={passwordStrength} />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="confirmPassword" className="font-medium text-white/80 text-sm">{t("Confirmar senha")} <span className="text-white/30">{t("(obrigatorio)")}</span></Label>
-        <div className='relative'>
-          <Input
-            id="confirmPassword"
-            name="confirmPassword"
-            type={showPassword ? 'text' : 'password'}
-            placeholder={t("Repita sua senha")}
-            required
-            autoComplete="new-password"
-            className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/20"
-          />
-          <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-white/40 hover:text-white hover:bg-white/10" onClick={() => setShowPassword(!showPassword)}>
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </Button>
-        </div>
-      </div>
-      <div className="flex items-center space-x-2 pt-4">
-        <Checkbox id="terms" required className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" />
-        <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-white/60">
-          {t("Li e aceito os termos de uso da Dialogy.")}{' '}
-          <a href="#" className="underline text-blue-400 hover:text-blue-300">{t("Ler termos")}</a>
-        </label>
+    <div className="space-y-6">
+      {/* Step Indicator */}
+      <div className="flex items-center justify-between px-2 mb-2">
+        {[1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-2">
+            <div className={cn(
+              "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all border",
+              step === i ? "bg-[#20E401] border-[#20E401] text-black shadow-[0_0_15px_rgba(32,228,1,0.3)]" :
+                step > i ? "bg-[#20E401]/20 border-[#20E401]/30 text-[#20E401]" : "bg-white/5 border-white/10 text-gray-500"
+            )}>
+              {step > i ? "✓" : i}
+            </div>
+            <span className={cn(
+              "text-[10px] font-bold uppercase tracking-widest",
+              step === i ? "text-[#20E401]" : "text-gray-600"
+            )}>
+              {i === 1 ? t("Dados") : t("Segurança")}
+            </span>
+            {i === 1 && <div className="w-12 h-[1px] bg-white/5 mx-2" />}
+          </div>
+        ))}
       </div>
 
-      <Button type="submit" className="w-full h-12 text-base bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-lg shadow-blue-600/20 transition-all" disabled={pending}>
-        {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-        {pending ? t("Criando conta...") : t("Criar conta e entrar")}
-      </Button>
-    </form>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {step === 1 && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Nome")}</Label>
+                <Input
+                  id="name" name="name" type="text" placeholder={t("Nome")} required
+                  value={formData.name} onChange={(e) => setLocalFormData({ ...formData, name: e.target.value })}
+                  className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lastname" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Sobrenome")}</Label>
+                <Input
+                  id="lastname" name="lastname" type="text" placeholder={t("Sobrenome")} required
+                  value={formData.lastname} onChange={(e) => setLocalFormData({ ...formData, lastname: e.target.value })}
+                  className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("E-mail")}</Label>
+              <Input
+                id="email" name="email" type="email" placeholder={t("Ex: seu@email.com")} required
+                value={formData.email} onChange={(e) => setLocalFormData({ ...formData, email: e.target.value })}
+                className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("WhatsApp")}</Label>
+              <Input
+                id="phone" name="phone" type="tel" placeholder={t("(00) 00000-0000")} required
+                value={formData.phone} onChange={(e) => setLocalFormData({ ...formData, phone: e.target.value })}
+                className="h-12 bg-white/5 border-white/10 rounded-xl px-4 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+              />
+            </div>
+            <Button
+              type="button" onClick={handleNext}
+              className="w-full h-12 text-sm font-bold bg-white text-black hover:bg-gray-100 rounded-xl transition-all flex items-center justify-center gap-2 group mt-4 shadow-[0_4px_20px_rgba(255,255,255,0.1)]"
+            >
+              {t("Continuar")}
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </Button>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+            {/* Hidden fields for Step 1 data so FormData grabs them */}
+            <input type="hidden" name="name" value={formData.name} />
+            <input type="hidden" name="lastname" value={formData.lastname} />
+            <input type="hidden" name="email" value={formData.email} />
+            <input type="hidden" name="phone" value={formData.phone} />
+
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Senha")}</Label>
+              <div className='relative'>
+                <Input
+                  id="password" name="password" type={showPassword ? 'text' : 'password'} placeholder="************" required
+                  className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-12 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+                  value={password} onChange={handlePasswordChange}
+                />
+                <button type="button" className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400" onClick={() => setShowPassword(!showPassword)}>
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <PasswordStrengthIndicator strength={passwordStrength} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Confirmar Senha")}</Label>
+              <Input
+                id="confirmPassword" name="confirmPassword" type={showPassword ? 'text' : 'password'} placeholder="************" required
+                className="h-12 bg-white/5 border-white/10 rounded-xl px-4 pr-12 text-sm text-white focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all font-medium"
+              />
+            </div>
+
+            <div className="flex items-start space-x-3 pt-2">
+              <Checkbox id="terms" required className="mt-0.5 border-white/10 data-[state=checked]:bg-[#20E401] data-[state=checked]:border-[#20E401]" />
+              <label htmlFor="terms" className="text-[10px] font-medium leading-relaxed text-gray-500 cursor-pointer">
+                {t("Li e aceito os termos de uso e política de privacidade.")}
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-2">
+              <Button
+                type="button" variant="outline" onClick={() => setStep(1)}
+                className="h-12 bg-white/5 border-white/10 text-white hover:bg-white/10 rounded-xl font-bold"
+              >
+                {t("Voltar")}
+              </Button>
+              <Button
+                type="submit" disabled={pending}
+                className="h-12 bg-white text-black hover:bg-gray-100 rounded-xl font-bold shadow-[0_4px_20px_rgba(255,255,255,0.1)] transition-all"
+              >
+                {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : t("Finalizar")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </form>
+    </div>
   );
 }
