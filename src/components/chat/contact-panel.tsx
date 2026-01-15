@@ -108,8 +108,8 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-muted/50 border-input text-foreground hover:bg-muted/80">
-                    <ArrowRightLeft className="h-4 w-4 mr-2" />
+                <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                    <ArrowRightLeft className="h-3 w-3 text-orange-400" />
                     Transferir
                 </Button>
             </DialogTrigger>
@@ -616,9 +616,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             className="flex flex-col items-center text-center relative"
                         >
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
-                                <div className="absolute -inset-2 bg-gradient-to-tr from-white/10 to-transparent rounded-[2.5rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-                                <div className="p-1 rounded-[2.5rem] bg-gradient-to-b from-white/20 to-transparent border border-white/10 backdrop-blur-md">
-                                    <Avatar className="h-32 w-32 shrink-0 rounded-[2rem] border-2 border-black/50 shadow-2xl relative">
+                                <div className="absolute -inset-2 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+                                <div className="p-1 rounded-full bg-gradient-to-b from-white/20 to-transparent border border-white/10 backdrop-blur-md">
+                                    <Avatar className="h-32 w-32 shrink-0 rounded-full border-2 border-black/50 shadow-2xl relative">
                                         <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
                                         <AvatarFallback className="text-4xl font-bold bg-gradient-to-br from-neutral-800 to-black text-white">
                                             {contact.name.charAt(0)}

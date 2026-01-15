@@ -1818,6 +1818,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
                 id: agentRow.id,
                 name: agentRow.full_name,
                 avatar_url: agentRow.avatar_url || undefined,
+                avatar: agentRow.avatar_url || undefined,
             } as User
             : undefined;
 

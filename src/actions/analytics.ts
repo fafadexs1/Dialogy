@@ -87,6 +87,8 @@ export async function getAnalyticsData(
 
     try {
         const baseParams: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
+        console.log('[GET_ANALYTICS_DATA] Input:', { workspaceId, filters, dateRange });
+
 
         // Total Conversations
         const [totalConvQuery, totalConvParams] = addFilters(
@@ -95,6 +97,7 @@ export async function getAnalyticsData(
             filters
         );
         const totalConversationsRes = await db.query(totalConvQuery, totalConvParams);
+        console.log('[GET_ANALYTICS_DATA] Total Conversations Query:', { query: totalConvQuery, params: totalConvParams, rowCount: totalConversationsRes.rows[0]?.count });
         const totalConversations = parseInt(totalConversationsRes.rows[0].count, 10);
 
         // New Contacts (workspace-wide, not filtered by agent/team but by daterange)
@@ -173,12 +176,51 @@ export async function getAnalyticsData(
         const conversationsByHourRes = await db.query(convByHourQuery, convByHourParams);
         const conversationsByHour = conversationsByHourRes.rows.map(r => ({ hour: `${r.hour}h`, count: parseInt(r.count, 10) }));
 
+        // Channels Distribution
+        // We use a direct query here to ensure we capture ALL incoming traffic by channel,
+        // including unassigned chats that might be filtered out by Team/Agent filters.
+        const channelsQuery = `SELECT
+                CASE 
+                    WHEN mc.platform = 'instagram' THEN 'Instagram'
+                    WHEN mc.platform = 'messenger' THEN 'Messenger'
+                    WHEN ct.phone_number_jid LIKE '%@s.whatsapp.net' OR ct.phone_number_jid LIKE '%@g.us' THEN 'WhatsApp'
+                    ELSE 'Instagram' -- Fallback for likely Meta contacts without JID
+                END as channel,
+                COUNT(*) as count
+             FROM chats c
+             LEFT JOIN meta_conversations mc ON c.id = mc.chat_id
+             LEFT JOIN contacts ct ON c.contact_id = ct.id
+             WHERE c.workspace_id = $1 AND c.created_at BETWEEN $2 AND $3
+             GROUP BY 1
+             ORDER BY count DESC`;
+
+        const channelsParams = baseParams;
+
+        const channelsRes = await db.query(channelsQuery, channelsParams);
+
+        const channelColors: Record<string, string> = {
+            'WhatsApp': '#25D366',
+            'instagram': '#E1306C',
+            'messenger': '#0084FF',
+            'Instagram': '#E1306C',
+            'Messenger': '#0084FF'
+        };
+
+        const conversationsByChannel = channelsRes.rows.map(r => ({
+            name: r.channel === 'instagram' ? 'Instagram' : r.channel === 'messenger' ? 'Messenger' : r.channel,
+            value: parseInt(r.count, 10),
+            color: channelColors[r.channel] || channelColors[r.channel === 'instagram' ? 'Instagram' : r.channel === 'messenger' ? 'Messenger' : r.channel] || '#8884d8'
+        }));
+
+        console.log('[GET_ANALYTICS_DATA] Channels Result:', conversationsByChannel);
+
         return {
             totalConversations,
             newContacts,
             avgFirstResponseTime,
             firstContactResolutionRate,
             conversationsByHour,
+            conversationsByChannel
         };
     } catch (error) {
         console.error("[GET_ANALYTICS_DATA] Error:", error);

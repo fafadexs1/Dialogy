@@ -147,7 +147,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
 
   const renderCustomField = (field: CustomFieldDefinition) => {
     const fieldName = `custom_field_${field.id}`;
-    const defaultValue = contact?.custom_fields?.[field.id] || '';
+    const defaultValue = contact?.custom_fields?.[field.id];
 
     switch (field.type) {
       case 'select':

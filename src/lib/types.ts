@@ -531,6 +531,7 @@ export interface AnalyticsData {
   avgFirstResponseTime: string | null;
   firstContactResolutionRate: number;
   conversationsByHour: { hour: string; count: number }[];
+  conversationsByChannel: { name: string; value: number; color: string }[];
 }
 
 export interface AgentPerformance {

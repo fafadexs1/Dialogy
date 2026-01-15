@@ -23,6 +23,9 @@ export function generateChatHtml(chat: Chat, currentUser: User): string {
             border-radius: 8px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
         }
         .chat-header {
             background-color: #202c33;
@@ -58,27 +61,73 @@ export function generateChatHtml(chat: Chat, currentUser: User): string {
             flex-direction: column;
             gap: 8px;
         }
+        .message-row {
+            display: flex;
+            align-items: flex-end;
+            margin-bottom: 2px;
+            max-width: 80%;
+        }
+        .message-row.from-me {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+        .message-row.from-contact {
+            align-self: flex-start;
+            flex-direction: row;
+        }
+        .msg-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            overflow: hidden;
+            margin: 0 6px 2px 6px;
+            flex-shrink: 0;
+            background-color: #e0e0e0;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        .msg-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .msg-avatar-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #666;
+            font-weight: bold;
+        }
         .message {
-            max-width: 65%;
             padding: 6px 7px 8px 9px;
             border-radius: 7.5px;
             position: relative;
             font-size: 14.2px;
             line-height: 19px;
             word-wrap: break-word;
+            box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
         }
         .message.from-me {
-            align-self: flex-end;
             background-color: #d9fdd3;
             border-top-right-radius: 0;
         }
         .message.from-contact {
-            align-self: flex-start;
             background-color: white;
             border-top-left-radius: 0;
         }
         .message-content {
             margin-bottom: 4px;
+        }
+        .message-sender-name {
+            font-size: 11px;
+            font-weight: bold;
+            color: #128C7E; /* WhatsApp Greenish for names */
+            margin-bottom: 2px;
+        }
+        .from-me .message-sender-name {
+            color: #007a5d;
         }
         .message-nav {
             display: flex;
@@ -191,15 +240,15 @@ export function generateChatHtml(chat: Chat, currentUser: User): string {
 
         let content = '';
 
-        if (['image', 'video'].includes(msg.type) && msg.metadata?.mediaUrl) {
-            // If it's a blob URL (optimistic), this won't work in a new window unless we convert to base64 or it's a public URL.
-            // Assuming messages loaded from DB have public URLs or base64.
-            // If base64 is separate, check that.
-            // Simplified: use metadata.mediaUrl
+        if (['image', 'video', 'audio', 'document'].includes(msg.type) && msg.metadata?.mediaUrl) {
             if (msg.type === 'image') {
                 content += `<img src="${msg.metadata.mediaUrl}" class="media-image" alt="Imagem">`;
             } else if (msg.type === 'video') {
-                content += `<div style="background:rgba(0,0,0,0.1); padding:10px; border-radius:4px; text-align:center;">[Vídeo]</div>`;
+                content += `<div style="background:rgba(0,0,0,0.1); padding:10px; border-radius:4px; text-align:center;">🎥 [Vídeo]</div>`;
+            } else if (msg.type === 'audio') {
+                content += `<div style="background:rgba(0,0,0,0.1); padding:8px; border-radius:4px;">🎵 [Áudio]</div>`;
+            } else {
+                content += `<div style="background:rgba(0,0,0,0.1); padding:8px; border-radius:4px;">📄 [Arquivo]</div>`;
             }
         }
 
@@ -207,12 +256,51 @@ export function generateChatHtml(chat: Chat, currentUser: User): string {
             content += `<div>${msg.content.replace(/\n/g, '<br>')}</div>`;
         }
 
+        // --- Avatar Logic ---
+        let avatarUrl = '';
+        let senderInitial = '?';
+        let senderName = '';
+
+        if (isMe) {
+            // Agent or User
+            if (msg.sender && (msg.sender as any).avatar_url) {
+                avatarUrl = (msg.sender as any).avatar_url;
+            } else if (msg.sender && (msg.sender as any).avatar) {
+                avatarUrl = (msg.sender as any).avatar;
+            } else if (currentUser.avatar_url || currentUser.avatar) {
+                // Fallback to current user if sender is missing but it's "from_me"
+                // This might be slightly inaccurate for historic chats with other agents, but decent fallback
+                avatarUrl = currentUser.avatar_url || currentUser.avatar || '';
+            }
+
+            senderName = msg.sender?.name || currentUser.name || 'Você';
+            senderInitial = senderName.charAt(0);
+        } else {
+            // Contact
+            avatarUrl = contactAvatar || '';
+            senderName = contactName;
+            senderInitial = contactName.charAt(0);
+        }
+
+        const avatarHtml = avatarUrl
+            ? `<div class="msg-avatar"><img src="${avatarUrl}" alt="${senderName}"></div>`
+            : `<div class="msg-avatar"><div class="msg-avatar-placeholder">${senderInitial}</div></div>`;
+
+        // Structure: 
+        // Row (flex)
+        //   [Avatar] 
+        //   [Bubble]
+
         html += `
-            <div class="message ${isMe ? 'from-me' : 'from-contact'}">
-                <div class="message-content">${content}</div>
-                <div class="message-nav">
-                    <span>${time}</span>
-                    ${isMe ? `<span>${msg.is_read ? '✓✓' : '✓'}</span>` : ''}
+            <div class="message-row ${isMe ? 'from-me' : 'from-contact'}">
+                ${avatarHtml}
+                <div class="message ${isMe ? 'from-me' : 'from-contact'}">
+                    ${!isMe ? `<div class="message-sender-name">${senderName}</div>` : ''} 
+                    <div class="message-content">${content}</div>
+                    <div class="message-nav">
+                        <span>${time}</span>
+                        ${isMe ? `<span>${msg.is_read ? '✓✓' : '✓'}</span>` : ''}
+                    </div>
                 </div>
             </div>
         `;

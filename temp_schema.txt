@@ -1,0 +1,29 @@
+CONTACTS COLUMNS:
+address
+avatar_url
+created_at
+email
+id
+meta_contact_id
+name
+owner_id
+phone
+phone_number_jid
+updated_at
+workspace_id
+
+DATA SAMPLE:
+{
+  "id": "47b5cb8d-9c6d-4daa-9a05-848b9f15d1ee",
+  "workspace_id": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "name": "Brunno ✈️",
+  "email": "",
+  "phone": "556182063609",
+  "phone_number_jid": "556182063609@s.whatsapp.net",
+  "address": "",
+  "avatar_url": "https://pps.whatsapp.net/v/t61.24694-24/546170527_1468492467593424_3983962916250427972_n.jpg?ccb=11-4&oh=01_Q5Aa3AGlu0l12-UxT5PigMTnIEU3-UpRppxG_L4mnC6V7Mdjvw&oe=6936660F&_nc_sid=5e03e0&_nc_cat=103",
+  "owner_id": null,
+  "created_at": "2025-11-28T09:21:44.974Z",
+  "updated_at": "2025-11-28T09:21:44.974Z",
+  "meta_contact_id": null
+}

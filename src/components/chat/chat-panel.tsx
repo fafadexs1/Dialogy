@@ -1481,10 +1481,7 @@ export default function ChatPanel({
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border">
-                                <DropdownMenuItem onClick={() => { }} disabled>
-                                    <Phone className="mr-2 h-4 w-4" />
-                                    <span>Ligar (Em breve)</span>
-                                </DropdownMenuItem>
+
                                 <DropdownMenuItem onClick={() => onToggleContactPanel()}>
                                     <ArrowRightLeft className="mr-2 h-4 w-4" />
                                     <span>Detalhes do Contato</span>
@@ -1494,16 +1491,7 @@ export default function ChatPanel({
                                     <span>Salvar conversa</span>
                                 </DropdownMenuItem>
 
-                                <DropdownMenuSeparator />
 
-                                <DropdownMenuItem onClick={onToggleHighContrast}>
-                                    <Contrast className="mr-2 h-4 w-4" />
-                                    <span>Alto Contraste</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={onToggleRTL}>
-                                    <Languages className="mr-2 h-4 w-4" />
-                                    <span>Inverter Lado (RTL)</span>
-                                </DropdownMenuItem>
 
                                 {isChatOpen && isChatAssignedToMe && (
                                     <>
@@ -1524,16 +1512,7 @@ export default function ChatPanel({
                     {/* DESKTOP MENU (Original) */}
                     <div className="hidden md:flex items-center gap-2">
                         <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground hover:bg-muted">
-                                        <Phone className="h-4 w-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Ligar (Em breve)</p></TooltipContent>
-                            </Tooltip>
 
-                            <div className="w-px h-6 bg-border mx-1" />
 
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1580,34 +1559,7 @@ export default function ChatPanel({
                                 </TooltipTrigger>
                                 <TooltipContent><p>Treinar Agente</p></TooltipContent>
                             </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={highContrast ? "secondary" : "ghost"}
-                                        size="icon"
-                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                        onClick={onToggleHighContrast}
-                                        aria-label="Alternar alto contraste"
-                                    >
-                                        <Contrast className="h-4 w-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Alto contraste</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={isRTL ? "secondary" : "ghost"}
-                                        size="icon"
-                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                        onClick={onToggleRTL}
-                                        aria-label="Alternar direcao RTL"
-                                    >
-                                        <Languages className="h-4 w-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Texto da direita para esquerda</p></TooltipContent>
-                            </Tooltip>
+
 
                             {isChatOpen && isChatAssignedToMe && (
                                 <Tooltip>

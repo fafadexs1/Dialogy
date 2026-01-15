@@ -30,7 +30,10 @@ import {
     Bot,
     TrendingUp,
     Loader2,
-    Users2
+    Users2,
+    Instagram,
+    Facebook,
+    MessageCircle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -135,10 +138,6 @@ const AgentPerformanceTable = ({ performance, loading }: { performance: AgentPer
     </div>
 );
 
-const channelsData = [
-    { name: 'WhatsApp', value: 100, color: '#25D366' },
-];
-
 // Página Principal de Analytics
 export default function AnalyticsPage() {
     const user = useCurrentUser();
@@ -214,16 +213,9 @@ export default function AnalyticsPage() {
 
     const filteredMembers = useMemo(() => {
         if (selectedTeamId === 'all') return allMembers;
-        // This logic is flawed because `team.members` is not populated in this context.
-        // It should rely on a separate query or a better data structure.
-        // Let's get the member IDs from the `team_members` table association if possible, or filter by a property.
-        // For now, we'll assume the members have a team_id property for filtering.
         const selectedTeam = teams.find(t => t.id === selectedTeamId);
         if (!selectedTeam) return [];
-
-        // We need to fetch team members properly. Let's assume `getWorkspaceMembers` returns team info.
         return allMembers.filter(member => (member as any).team_id === selectedTeamId);
-
     }, [allMembers, teams, selectedTeamId]);
 
 
@@ -236,6 +228,10 @@ export default function AnalyticsPage() {
     }
 
     const conversationsByHour = analyticsData?.conversationsByHour || [];
+
+    const channelsData = analyticsData?.conversationsByChannel?.length
+        ? analyticsData.conversationsByChannel
+        : [{ name: 'Sem dados', value: 100, color: '#333' }];
 
     const performanceToDisplay = selectedAgentId === 'all'
         ? agentPerformance
@@ -335,23 +331,68 @@ export default function AnalyticsPage() {
                         </CardHeader>
                         <CardContent className="h-[300px]">
                             {isPending ? <Skeleton className="h-full w-full bg-white/10" /> : (
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie data={channelsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={60} stroke="none" labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                                            const radius = innerRadius + (outerRadius - innerRadius) * 1.2;
-                                            const x = cx + radius * Math.cos(-midAngle * Math.PI / 180);
-                                            const y = cy + radius * Math.sin(-midAngle * Math.PI / 180);
+                                <div className="h-full flex flex-col">
+                                    <div className="flex-1 min-h-[200px]">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={channelsData}
+                                                    dataKey="value"
+                                                    nameKey="name"
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    outerRadius={80}
+                                                    innerRadius={60}
+                                                    stroke="none"
+                                                    paddingAngle={5}
+                                                >
+                                                    {channelsData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                                    ))}
+                                                </Pie>
+                                                <Tooltip
+                                                    content={({ active, payload }) => {
+                                                        if (active && payload && payload.length) {
+                                                            const data = payload[0].payload;
+                                                            return (
+                                                                <div className="bg-black/90 border border-white/10 p-2 rounded text-xs text-white">
+                                                                    <span className="font-semibold">{data.name}</span>: {data.value}
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    }}
+                                                />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
+
+                                    <div className="px-4 pb-4 space-y-3">
+                                        {channelsData.map((channel) => {
+                                            const total = channelsData.reduce((acc, curr) => acc + curr.value, 0);
+                                            const percent = total > 0 ? ((channel.value / total) * 100).toFixed(1) : "0.0";
+
+                                            let Icon = MessageCircle;
+                                            if (channel.name === 'Instagram') Icon = Instagram;
+                                            if (channel.name === 'Messenger') Icon = Facebook;
+
                                             return (
-                                                <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" className="text-xs font-semibold">
-                                                    {`${(percent * 100).toFixed(0)}%`}
-                                                </text>
+                                                <div key={channel.name} className="flex items-center justify-between text-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="p-1.5 rounded-full bg-white/5">
+                                                            <Icon size={14} style={{ color: channel.color }} />
+                                                        </div>
+                                                        <span className="text-white/70">{channel.name}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-white font-medium">{percent}%</span>
+                                                        <span className="text-white/40 text-xs text-right min-w-[30px]">{channel.value}</span>
+                                                    </div>
+                                                </div>
                                             );
-                                        }}>
-                                            {channelsData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                                        </Pie>
-                                        <Legend iconType="circle" wrapperStyle={{ color: 'white' }} />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                        })}
+                                    </div>
+                                </div>
                             )}
                         </CardContent>
                     </Card>

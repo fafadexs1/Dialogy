@@ -13,6 +13,7 @@ import { useI18n } from '@/i18n/i18n-provider';
 import { StarsBackground } from '@/components/landing/ui/StarsBackground';
 import { ShootingStars } from '@/components/landing/ui/ShootingStars';
 import Particles from '@/components/landing/ui/Particles';
+import { AuthInput } from '@/components/auth/auth-input';
 
 export default function ForgotPasswordPage() {
   const { t } = useI18n();
@@ -81,7 +82,7 @@ export default function ForgotPasswordPage() {
               {t("Informe o e-mail da sua conta. Vamos enviar um link seguro para voce redefinir a senha.")}
             </p>
 
-            import {AuthInput} from '@/components/auth/auth-input'
+
 
             // ... existing code ...
 
