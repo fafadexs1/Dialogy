@@ -1303,7 +1303,7 @@ export default function ChatPanel({
         // and internal logic handles URLs if they start with http.
         const audioFilename = `audio_gravado.${audioExtension}`;
 
-        const result = await sendMediaAction(chat.id, '', [{
+        const mediaPayload = [{
             base64: publicUrl,
             mimetype,
             filename: audioFilename,
@@ -1312,11 +1312,19 @@ export default function ChatPanel({
             deleteAfterSend: true,
             storageBucket: 'temp-media',
             storagePath: fileName
-        }], tabId, { mediaUrl: publicUrl });
+        }];
+
+        console.log('[AUDIO_SEND] Sending media payload:', JSON.stringify(mediaPayload, null, 2));
+
+        const result = await sendMediaAction(chat.id, '', mediaPayload, tabId, { mediaUrl: publicUrl });
+
+        console.log('[AUDIO_SEND] Server result:', result);
 
         if (result.error) {
+            console.error('[AUDIO_SEND] Error from server:', result.error);
             toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
         } else if ((result as any).messages && (result as any).messages.length > 0) {
+            console.log('[AUDIO_SEND] Success, appending messages');
             appendMessagesToChat(chat.id, (result as any).messages);
         }
 

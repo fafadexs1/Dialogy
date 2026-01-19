@@ -4,6 +4,48 @@ import os from 'os';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
+// @ts-ignore
+import ffmpegPath from 'ffmpeg-static';
+// @ts-ignore
+import ffprobePath from 'ffprobe-static';
+
+// Configure FFmpeg path
+const platform = os.platform();
+let customFfmpegPath = process.env.FFMPEG_PATH;
+let customFfprobePath = process.env.FFPROBE_PATH;
+
+// Robustness: Ignore Windows paths if running on Linux (Docker)
+// This prevents Docker containers from breaking if .env contains "C:/..."
+if (platform !== 'win32') {
+    if (customFfmpegPath && (customFfmpegPath.includes(':') || customFfmpegPath.includes('\\'))) {
+        console.warn('[FFMPEG] Detected Windows path configuration in non-Windows environment. Falling back to default.');
+        customFfmpegPath = undefined;
+    }
+    if (customFfprobePath && (customFfprobePath.includes(':') || customFfprobePath.includes('\\'))) {
+        customFfprobePath = undefined;
+    }
+}
+
+// Set FFMPEG Path
+if (customFfmpegPath) {
+    ffmpeg.setFfmpegPath(customFfmpegPath);
+} else if (platform !== 'win32') {
+    // Docker/Linux default fallback
+    ffmpeg.setFfmpegPath('/usr/bin/ffmpeg');
+} else if (ffmpegPath) {
+    // @ts-ignore
+    ffmpeg.setFfmpegPath(ffmpegPath);
+}
+
+// Set FFPROBE Path
+if (customFfprobePath) {
+    ffmpeg.setFfprobePath(customFfprobePath);
+} else if (platform !== 'win32') {
+    // Docker/Linux default fallback
+    ffmpeg.setFfprobePath('/usr/bin/ffprobe');
+} else if (ffprobePath && ffprobePath.path) {
+    ffmpeg.setFfprobePath(ffprobePath.path);
+}
 
 export interface ConversionResult {
     success: boolean;
@@ -25,13 +67,7 @@ export async function convertAudioFile(audioUrl: string, bucket: string = 'temp-
             throw new Error('audioUrl is required');
         }
 
-        // Configure FFmpeg path if environment variable is set (Docker)
-        if (process.env.FFMPEG_PATH) {
-            ffmpeg.setFfmpegPath(process.env.FFMPEG_PATH);
-        }
-        if (process.env.FFPROBE_PATH) {
-            ffmpeg.setFfprobePath(process.env.FFPROBE_PATH);
-        }
+
 
         console.log(`[AUDIO_CONVERT_SERVICE] Starting conversion for: ${audioUrl}`);
 

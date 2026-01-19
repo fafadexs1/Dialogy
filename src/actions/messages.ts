@@ -638,6 +638,11 @@ async function internalSendMedia(
                 let apiResponse: any;
                 const mediaContent = file.base64;
 
+                console.log(`[INTERNAL_SEND_BG] Processing media file: ${file.filename}, type: ${file.mediatype}, mime: ${file.mimetype}`);
+                if (file.mediatype === 'audio') {
+                    console.log(`[INTERNAL_SEND_BG] Audio check - isWebm/Ogg: ${file.mimetype.includes('webm') || file.mimetype.includes('ogg')}, name startswith audio_gravado: ${file.filename?.startsWith('audio_gravado')}`);
+                }
+
                 switch (file.mediatype) {
                     case 'image':
                         apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
@@ -652,6 +657,7 @@ async function internalSendMedia(
                     case 'audio':
                         if (file.filename?.startsWith('audio_gravado') || file.mimetype.includes('webm') || file.mimetype.includes('ogg')) {
                             apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent, mimetype: file.mimetype, fileName: file.filename });
+                            console.log('[INTERNAL_SEND_BG] sendAudioMessage response:', JSON.stringify(apiResponse, null, 2));
                         } else {
                             apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
                         }
