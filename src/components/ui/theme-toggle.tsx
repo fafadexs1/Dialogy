@@ -15,6 +15,10 @@ import {
 export function ThemeToggle() {
     const { setTheme } = useTheme()
 
+    // Forced Dark Mode: Toggle hidden
+    return null
+
+    /*
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -41,4 +45,5 @@ export function ThemeToggle() {
             </DropdownMenuContent>
         </DropdownMenu>
     )
+    */
 }

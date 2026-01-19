@@ -116,10 +116,7 @@ export function CommandPalette() {
                             <span>Recarregar Inbox</span>
                             <CommandShortcut>F5</CommandShortcut>
                         </CommandItem>
-                        <CommandItem onSelect={() => runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))}>
-                            {theme === 'dark' ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                            <span>Alternar Tema</span>
-                        </CommandItem>
+
                     </CommandGroup>
                 </CommandList>
             </CommandDialog>

@@ -3,6 +3,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface SectionWrapperProps {
     children: React.ReactNode;
@@ -41,11 +42,22 @@ export const FadeIn = ({
     className?: string,
     direction?: 'up' | 'down' | 'left' | 'right'
 }) => {
+    const isMobile = useIsMobile();
+
     const directionMap = {
         up: { y: 20, x: 0 },
         down: { y: -20, x: 0 },
         left: { x: 20, y: 0 },
         right: { x: -20, y: 0 }
+    }
+
+    // On mobile, skip animations entirely - render visible immediately
+    if (isMobile) {
+        return (
+            <div className={className}>
+                {children}
+            </div>
+        );
     }
 
     return (
@@ -60,3 +72,4 @@ export const FadeIn = ({
         </motion.div>
     )
 }
+

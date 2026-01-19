@@ -64,24 +64,26 @@ export function Omnichannel() {
     return (
         <section id="omnichannel" className="py-32 bg-black relative overflow-hidden min-h-[900px] flex items-center">
 
-            {/* Dynamic Ambient Background */}
-            <AnimatePresence mode="wait">
-                <motion.div
-                    key={active}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 1 }}
-                    className="absolute inset-0 z-0"
-                >
-                    <div className={`absolute top-0 right-0 w-[800px] h-[800px] bg-gradient-radial ${activeData.accent} blur-[120px] opacity-40 rounded-full translate-x-1/3 -translate-y-1/4`} />
-                    <div className={`absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-radial ${activeData.accent} blur-[100px] opacity-20 rounded-full -translate-x-1/3 translate-y-1/4`} />
-                </motion.div>
-            </AnimatePresence>
+            {/* Dynamic Ambient Background - HIDDEN on mobile */}
+            <div className="hidden md:block">
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={active}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 1 }}
+                        className="absolute inset-0 z-0"
+                    >
+                        <div className={`absolute top-0 right-0 w-[800px] h-[800px] bg-gradient-radial ${activeData.accent} blur-[120px] opacity-40 rounded-full translate-x-1/3 -translate-y-1/4`} />
+                        <div className={`absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-radial ${activeData.accent} blur-[100px] opacity-20 rounded-full -translate-x-1/3 translate-y-1/4`} />
+                    </motion.div>
+                </AnimatePresence>
+            </div>
 
-            {/* Grid Pattern Overlay */}
-            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] z-[1]"></div>
-            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 z-[1]"></div>
+            {/* Grid Pattern Overlay - HIDDEN on mobile for performance */}
+            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] z-[1] hidden md:block"></div>
+            <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 z-[1] hidden md:block"></div>
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 relative z-10 w-full">
 

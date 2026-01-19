@@ -874,10 +874,11 @@ interface ChatListProps {
   loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => void;
   hasMore?: boolean;
   isLoadingMore?: boolean;
+  bottomPadding?: number;
 }
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1137,7 +1138,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     <div
       className={cn(
         "flex h-full shrink-0 flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 transition-none",
-        "w-full md:w-[450px] md:min-w-[450px] md:max-w-[450px]",
+        "w-full md:w-[280px] lg:w-[320px] xl:w-[380px] 2xl:w-[420px] md:min-w-[240px] md:max-w-[420px]",
         className
       )}
     >
@@ -1462,6 +1463,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Virtuoso
               style={{ height: '100%', width: '100%' }}
               data={filteredChats}
+              components={{
+                Footer: () => <div style={{ height: bottomPadding || 0 }} />
+              }}
               endReached={handleEndReached}
               itemContent={(index, chat) => (
                 <div className="pb-1 px-3">

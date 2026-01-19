@@ -76,7 +76,7 @@ export function LanguageToggle() {
         <Button
           variant="outline"
           size="icon"
-          className="relative h-9 w-9 border-border bg-white/70 text-foreground hover:bg-muted dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+          className="relative h-7 w-7 2xl:h-9 2xl:w-9 border-border bg-white/70 text-foreground hover:bg-muted dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 rounded-lg 2xl:rounded-xl"
           aria-label={t("language.switcher")}
         >
           <FlagIcon code={activeLocale.flag} className="rounded-sm shadow-sm" />

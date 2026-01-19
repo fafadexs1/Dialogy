@@ -75,9 +75,10 @@ export default async function RootLayout({
         <ErrorBoundary>
           <ThemeProvider
             attribute="class"
-            defaultTheme="system"
+            defaultTheme="dark"
+            forcedTheme="dark"
             storageKey="dialogy-theme-v2"
-            enableSystem
+            enableSystem={false}
             disableTransitionOnChange
           >
             <I18nProvider initialLocale={locale}>

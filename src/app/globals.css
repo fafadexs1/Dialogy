@@ -6,11 +6,13 @@
 
   html {
     scroll-behavior: smooth;
+    overflow-x: hidden;
   }
 
   body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
 
   :root {
@@ -218,4 +220,61 @@
     background: rgba(59, 130, 246, 0.5);
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
   }
+}
+
+/* =========================================
+   MOBILE PERFORMANCE CRITICAL STYLES
+   These MUST load before JavaScript!
+   ========================================= */
+@media (max-width: 768px) {
+
+  /* Force Framer Motion animated content visible immediately */
+  /* Target only elements with opacity in inline style (Framer Motion) */
+  main>section [style*="opacity: 0"],
+  main>section [style*="filter: blur"] {
+    opacity: 1 !important;
+    filter: none !important;
+  }
+}
+
+/* =========================================
+   NAVBAR LOGIN BUTTON ANIMATIONS
+   ========================================= */
+@keyframes login-text-collapse {
+  0% {
+    max-width: 60px;
+    opacity: 1;
+    margin-left: 0.5rem;
+  }
+
+  70% {
+    max-width: 60px;
+    opacity: 1;
+    margin-left: 0.5rem;
+  }
+
+  100% {
+    max-width: 0;
+    opacity: 0;
+    margin-left: 0;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-login-text {
+  animation: login-text-collapse 3s ease-out forwards;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
 }

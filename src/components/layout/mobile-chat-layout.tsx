@@ -5,6 +5,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import ContactPanel from '../chat/contact-panel';
+import MobileContactPanel from '../chat/mobile-contact-panel';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
@@ -228,7 +229,7 @@ export default function MobileChatLayout({
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [debugCounter, setDebugCounter] = useState(0);
-  const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
+  const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [selectedForwardingChatIds, setSelectedForwardingChatIds] = useState<Set<string>>(new Set());
   const [isForwarding, setIsForwarding] = useState(false);
@@ -330,9 +331,16 @@ export default function MobileChatLayout({
     // Strict Mode Safety: Only reset if we haven't successfully hydrated in this mount cycle.
     // This prevents double-fetching or clearing valid data on dev hot-reloads/strict mode remounts.
     if (!isHydratedRef.current) {
-      useInboxStore.getState().reset();
-      isHydratedRef.current = false;
-      console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      const state = useInboxStore.getState();
+      // Only reset if the store is empty or we explicitly want a fresh start.
+      // If we have chats or a selected chat, preserve state to avoid navigation glitches.
+      if (state.chats.length === 0 && !state.selectedChatId) {
+        state.reset();
+        console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      } else {
+        console.log('[NOTIFICATION] Layout mounted. Preserving existing store state.');
+      }
+      isHydratedRef.current = true;
     }
   }, []);
 
@@ -1200,10 +1208,40 @@ export default function MobileChatLayout({
 
   useEffect(() => {
     if (initialData) {
+      // FIX: Prevent overwriting client-side state with stale/empty server selection during revalidation.
+      const clientHasSelection = !!selectedChatIdRef.current;
+      const serverClearedSelection = initialData.selectedChatId === null;
+      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection && serverClearedSelection;
+
+      let effectiveSelectedChatId = initialData.selectedChatId;
+      let effectiveChats = initialData.chats;
+
+      if (shouldPreserveSelection) {
+        console.log('[hydrate-mobile] Preserving client selection against null server selection.', {
+          client: selectedChatIdRef.current,
+          server: initialData.selectedChatId
+        });
+
+        effectiveSelectedChatId = selectedChatIdRef.current;
+
+        // Crucially: Ensure the selected chat object is in the new list.
+        const isInNewList = effectiveChats.some(c => c.id === effectiveSelectedChatId);
+
+        if (!isInNewList) {
+          const currentStoreChats = useInboxStore.getState().chats;
+          const cachedChat = currentStoreChats.find(c => c.id === effectiveSelectedChatId);
+
+          if (cachedChat) {
+            console.log('[hydrate-mobile] Injecting cached chat object into new server list.');
+            effectiveChats = [cachedChat, ...effectiveChats];
+          }
+        }
+      }
+
       setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
       setInitialData({
-        chats: initialData.chats,
-        selectedChatId: initialData.selectedChatId,
+        chats: effectiveChats,
+        selectedChatId: effectiveSelectedChatId,
         messages: initialData.messages,
         lastSyncChats: initialData.lastSyncChats,
         lastSyncMessageForSelected: initialData.lastSyncMessageForSelected,
@@ -1213,9 +1251,12 @@ export default function MobileChatLayout({
         hasMoreChats: initialData.hasMoreChats,
       });
       setFetchError(initialData.error ?? null);
-      setSelectedChatId(initialData.selectedChatId);
-      selectedChatIdRef.current = initialData.selectedChatId ?? null;
-      updateSelectedChatPath(initialData.selectedChatId ?? null);
+      setSelectedChatId(effectiveSelectedChatId);
+      selectedChatIdRef.current = effectiveSelectedChatId ?? null;
+
+      if (!effectiveSelectedChatId) {
+        updateSelectedChatPath(null);
+      }
       isHydratedRef.current = true;
       setIsLoading(false);
       return;
@@ -1348,6 +1389,14 @@ export default function MobileChatLayout({
               onToggleRTL={() => setIsRTL((v) => !v)}
             />
           </ErrorBoundary>
+          <MobileContactPanel
+            isOpen={isContactPanelOpen}
+            onClose={() => setIsContactPanelOpen(false)}
+            chat={enrichedSelectedChat}
+            currentUser={initialUser}
+            onTransferSuccess={handleDataMutation}
+            onContactUpdate={handleDataMutation}
+          />
           <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
           <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
         </div>
@@ -1371,21 +1420,24 @@ export default function MobileChatLayout({
         <div className="flex-1 overflow-hidden relative w-full">
           {activeTab === 'chats' && (
             <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
-              <ChatList
-                chats={chats}
-                selectedChat={enrichedSelectedChat}
-                setSelectedChat={handleSetSelectedChat}
-                currentUser={initialUser}
-                onUpdate={handleDataMutation}
-                onOwnershipFilterChange={setOwnershipFilter}
-                isForwarding={isForwarding}
-                selectedForwardingChatIds={selectedForwardingChatIds}
-                onToggleForwardSelection={handleToggleForwardSelection}
-                onConfirmForward={handleConfirmForward}
-                onCancelForward={handleCancelForward}
-                onPrefetch={prefetchChat}
-                className="w-full h-full border-r-0 bg-background/70 backdrop-blur-xl pb-0"
-              />
+              <div className="w-full h-full border-r-0 bg-background/70 backdrop-blur-xl">
+                <ChatList
+                  chats={chats}
+                  selectedChat={enrichedSelectedChat}
+                  setSelectedChat={handleSetSelectedChat}
+                  currentUser={initialUser}
+                  onUpdate={handleDataMutation}
+                  onOwnershipFilterChange={setOwnershipFilter}
+                  isForwarding={isForwarding}
+                  selectedForwardingChatIds={selectedForwardingChatIds}
+                  onToggleForwardSelection={handleToggleForwardSelection}
+                  onConfirmForward={handleConfirmForward}
+                  onCancelForward={handleCancelForward}
+                  onPrefetch={prefetchChat}
+                  className="w-full h-full"
+                  bottomPadding={100}
+                />
+              </div>
             </ErrorBoundary>
           )}
           {activeTab === 'crm' && (
@@ -1485,8 +1537,8 @@ export default function MobileChatLayout({
         </div>
 
         {/* Bottom Navigation Bar */}
-        <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-2">
-          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-border/60 bg-background/80 p-1 shadow-lg backdrop-blur-md">
+        <div className="px-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1 fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+          <div className="grid grid-cols-3 gap-1 rounded-2xl border border-white/5 bg-zinc-950/90 p-1 shadow-2xl shadow-black/50 backdrop-blur-xl pointer-events-auto mx-auto max-w-[280px]">
             {mobileTabs.map((tab) => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -1498,16 +1550,16 @@ export default function MobileChatLayout({
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    'relative flex flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200',
+                    'relative flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[9px] font-medium transition-all duration-300',
                     isActive
-                      ? 'bg-primary/10 text-primary shadow-[0_10px_30px_-20px_rgba(34,197,94,0.5)]'
-                      : 'text-muted-foreground hover:bg-muted/50'
+                      ? 'bg-blue-600/20 text-blue-400 shadow-[0_0_15px_-5px_rgba(59,130,246,0.5)] ring-1 ring-blue-500/20'
+                      : 'text-white/40 hover:bg-white/5 hover:text-white/70'
                   )}
                 >
-                  <Icon className="h-5 w-5" />
-                  <span>{tab.label}</span>
+                  <Icon className={cn("h-4 w-4 transition-transform duration-300", isActive ? "scale-110" : "scale-100")} />
+                  <span className={cn("tracking-wide leading-none", isActive ? "font-semibold" : "font-normal")}>{tab.label}</span>
                   {badge ? (
-                    <span className="absolute right-4 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground">
+                    <span className="absolute right-3 top-1.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-blue-600 px-0.5 text-[8px] font-bold text-white ring-2 ring-black">
                       {badge > 99 ? '99+' : badge}
                     </span>
                   ) : null}

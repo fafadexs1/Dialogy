@@ -42,7 +42,7 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
 
   if (!currentWorkspace) {
     return (
-      <Button asChild variant="ghost" className={cn('h-10 w-10 p-0', className)}>
+      <Button asChild variant="ghost" className={cn('h-8 w-8 2xl:h-10 2xl:w-10 p-0', className)}>
         <Link href="/settings/workspace/new">+</Link>
       </Button>
     );
@@ -69,14 +69,14 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
     <div className={cn('relative', className)} ref={panelRef}>
       <Button
         variant="ghost"
-        className="h-10 w-10 p-0 rounded-xl bg-sidebar-accent border border-sidebar-border hover:border-sidebar-border/80 transition-all"
+        className="h-8 w-8 2xl:h-10 2xl:w-10 p-0 rounded-lg 2xl:rounded-xl bg-sidebar-accent border border-sidebar-border hover:border-sidebar-border/80 transition-all"
         onClick={() => setOpen((o) => !o)}
         aria-label="Selecionar workspace"
       >
         <div className="relative">
-          <Avatar className="h-8 w-8 border border-sidebar-border">
-            <AvatarImage src={currentWorkspace.avatar} alt={currentWorkspace.name} />
-            <AvatarFallback>{currentWorkspace.name.charAt(0).toUpperCase()}</AvatarFallback>
+          <Avatar className="h-6 w-6 2xl:h-8 2xl:w-8 border border-sidebar-border rounded-md">
+            <AvatarImage src={currentWorkspace.avatar} alt={currentWorkspace.name} className="object-cover" />
+            <AvatarFallback className="rounded-md">{currentWorkspace.name.charAt(0).toUpperCase()}</AvatarFallback>
           </Avatar>
           <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-sidebar rounded-full" />
         </div>
@@ -102,9 +102,9 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
                   )}
                 >
                   <div className="relative">
-                    <Avatar className="h-10 w-10 border border-sidebar-border">
-                      <AvatarImage src={ws.avatar} alt={ws.name} />
-                      <AvatarFallback className="bg-muted text-sidebar-foreground">{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
+                    <Avatar className="h-10 w-10 border border-sidebar-border rounded-md">
+                      <AvatarImage src={ws.avatar} alt={ws.name} className="object-cover" />
+                      <AvatarFallback className="bg-muted text-sidebar-foreground rounded-md">{ws.name.charAt(0).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     {ws.isOwner && (
                       <div className="absolute -top-1 -right-1 bg-sidebar rounded-full p-0.5 border border-sidebar-border shadow-sm">

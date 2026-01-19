@@ -346,10 +346,19 @@ export function Hero() {
 
     return (
         <SectionWrapper id="hero" className="pt-32 pb-20 md:pt-48 md:pb-32 overflow-visible" fullWidth>
-            <Spotlight className="-top-40 left-0 md:left-60 md:-top-20" fill="#19F5B2" />
+            {/* Spotlight - HIDDEN on mobile for performance */}
+            <div className="hidden md:block">
+                <Spotlight className="-top-40 left-0 md:left-60 md:-top-20" fill="#19F5B2" />
+            </div>
 
-            {/* Background Elements */}
-            <div className="absolute inset-0 pointer-events-none">
+            {/* Mobile-friendly lightweight background glow */}
+            <div className="absolute inset-0 pointer-events-none md:hidden">
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] h-[300px] bg-gradient-radial from-brand-green/20 to-transparent rounded-full opacity-60" />
+                <div className="absolute top-20 right-0 w-[200px] h-[200px] bg-gradient-radial from-brand-blue/15 to-transparent rounded-full opacity-50" />
+            </div>
+
+            {/* Desktop: Full background effects */}
+            <div className="absolute inset-0 pointer-events-none hidden md:block">
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-brand-green/10 blur-[120px] rounded-full opacity-40 mix-blend-screen animate-pulse" />
                 <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] bg-brand-blue/10 blur-[100px] rounded-full opacity-30 animate-float" />
                 <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" style={{ opacity: 0.05 }} />
@@ -388,15 +397,15 @@ export function Hero() {
                             Começar Agora
                         </NeonButton>
                     </a>
-                    <a href="https://wa.me/5511999999999" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto">
+                    <a href="https://wa.me/551151994714" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto">
                         <NeonButton variant="secondary" leftIcon={<MessageCircle size={16} />} className="w-full min-w-[180px]">
                             Falar no WhatsApp
                         </NeonButton>
                     </a>
                 </FadeIn>
 
-                {/* High Fidelity 3D Dashboard Mockup */}
-                <div className="relative mx-auto mt-16 max-w-6xl w-full">
+                {/* High Fidelity 3D Dashboard Mockup - HIDDEN on mobile for performance */}
+                <div className="relative mx-auto mt-16 max-w-6xl w-full hidden md:block">
                     <motion.div
                         style={{ opacity: 1 }}
                         className="relative z-10 overflow-hidden rounded-2xl border border-white/10 bg-[#0B0B10]/50 shadow-2xl backdrop-blur-2xl w-full"

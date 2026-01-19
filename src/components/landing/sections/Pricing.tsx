@@ -96,7 +96,7 @@ export function Pricing() {
                                 ))}
                             </ul>
 
-                            <a href="https://wa.me/5511999999999" target="_blank" rel="noopener noreferrer" className="w-full">
+                            <a href="https://wa.me/551151994714" target="_blank" rel="noopener noreferrer" className="w-full">
                                 <NeonButton
                                     variant={plan.variant}
                                     glowColor={plan.glow || 'green'}

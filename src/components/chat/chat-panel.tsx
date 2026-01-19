@@ -1443,27 +1443,27 @@ export default function ChatPanel({
                             <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                     </motion.div>
-                    <div>
-                        <h2 className="font-semibold text-foreground flex items-center gap-2">
-                            {chat.contact.name}
+                    <div className="min-w-0 flex-1">
+                        <h2 className="font-semibold text-foreground flex items-center gap-2 min-w-0">
+                            <span className="truncate">{chat.contact.name}</span>
                             {chat.status === 'atendimentos' && (
-                                <Badge variant="secondary" className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/20 text-[10px] px-1.5 h-5">
-                                    Em atendimento
+                                <Badge variant="secondary" className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden 2xl:inline-flex">
+                                    Atendendo
                                 </Badge>
                             )}
                         </h2>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 overflow-hidden">
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 overflow-hidden min-w-0">
                             {chat.instance_name && (
-                                <span className="flex items-center gap-1 truncate shrink-0">
+                                <span className="flex items-center gap-1 shrink-0">
                                     {headerPlatformIcon}
-                                    {chat.instance_name}
+                                    <span className="hidden lg:inline truncate max-w-[80px]">{chat.instance_name}</span>
                                 </span>
                             )}
-                            <span className="mx-1">•</span>
+                            <span className="hidden lg:inline mx-1">•</span>
                             <span className="truncate">{chat.contact.phone}</span>
-                            <span className="hidden md:inline flex items-center">
+                            <span className="hidden 2xl:inline flex items-center shrink-0">
                                 <span className="mx-1">•</span>
-                                <span className="text-[10px] opacity-70">ID: {chat.id}</span>
+                                <span className="text-[9px] opacity-70 truncate max-w-[100px]">ID: {chat.id.slice(0, 8)}...</span>
                             </span>
                         </p>
                     </div>
@@ -1517,74 +1517,109 @@ export default function ChatPanel({
                         </DropdownMenu>
                     </div>
 
-                    {/* DESKTOP MENU (Original) */}
-                    <div className="hidden md:flex items-center gap-2">
-                        <TooltipProvider>
-
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                        onClick={() => {
-                                            onToggleContactPanel();
-                                        }}
-                                    >
-                                        <ArrowRightLeft className="h-4 w-4" />
+                    {/* DESKTOP MENU - Dropdown for lg, full buttons for xl+ */}
+                    <div className="hidden md:flex items-center gap-1">
+                        {/* Dropdown for smaller desktops (md to 2xl) */}
+                        <div className="2xl:hidden">
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+                                        <MoreVertical className="h-5 w-5" />
                                     </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
-                            </Tooltip>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border">
+                                    <DropdownMenuItem onClick={() => onToggleContactPanel()}>
+                                        <ArrowRightLeft className="mr-2 h-4 w-4" />
+                                        <span>Detalhes do Contato</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={handleExportChat}>
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        <span>Salvar conversa</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={handleTrainAgent}>
+                                        <Brain className="mr-2 h-4 w-4" />
+                                        <span>Treinar Agente</span>
+                                    </DropdownMenuItem>
+                                    {isChatOpen && isChatAssignedToMe && (
+                                        <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                                onClick={() => setIsCloseDialogOpen(true)}
+                                                className="text-red-500 focus:text-red-500 focus:bg-red-500/10"
+                                            >
+                                                <XCircle className="mr-2 h-4 w-4" />
+                                                <span>Encerrar Atendimento</span>
+                                            </DropdownMenuItem>
+                                        </>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
 
-                            <div className="w-px h-6 bg-border mx-1" />
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-muted-foreground hover:text-foreground hover:bg-muted"
-                                        onClick={handleExportChat}
-                                    >
-                                        <FileText className="h-4 w-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Salvar como HTML</p></TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
-                                        onClick={handleTrainAgent}
-                                    >
-                                        <Brain className="h-4 w-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Treinar Agente</p></TooltipContent>
-                            </Tooltip>
-
-
-                            {isChatOpen && isChatAssignedToMe && (
+                        {/* Full buttons for 2xl+ screens */}
+                        <div className="hidden 2xl:flex items-center gap-2">
+                            <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            onClick={() => setIsCloseDialogOpen(true)}
-                                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                            onClick={() => onToggleContactPanel()}
                                         >
-                                            <XCircle className="h-4 w-4" />
+                                            <ArrowRightLeft className="h-4 w-4" />
                                         </Button>
                                     </TooltipTrigger>
-                                    <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
+                                    <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
                                 </Tooltip>
-                            )}
-                        </TooltipProvider>
+
+                                <div className="w-px h-6 bg-border mx-1" />
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                            onClick={handleExportChat}
+                                        >
+                                            <FileText className="h-4 w-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent><p>Salvar como HTML</p></TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
+                                            onClick={handleTrainAgent}
+                                        >
+                                            <Brain className="h-4 w-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent><p>Treinar Agente</p></TooltipContent>
+                                </Tooltip>
+
+                                {isChatOpen && isChatAssignedToMe && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => setIsCloseDialogOpen(true)}
+                                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                            >
+                                                <XCircle className="h-4 w-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
+                                    </Tooltip>
+                                )}
+                            </TooltipProvider>
+                        </div>
                     </div>
 
                 </div>

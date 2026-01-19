@@ -56,13 +56,13 @@ import Image from "next/image";
 
 function DialogyLogo() {
   return (
-    <div className="relative h-8 w-8 overflow-hidden rounded-md">
+    <div className="relative h-6 w-6 2xl:h-8 2xl:w-8 overflow-hidden rounded-md">
       <Image
         src="/logo-new.jpg"
         alt="Logo"
         fill
         className="object-cover"
-        sizes="32px"
+        sizes="(max-width: 1535px) 24px, 32px"
       />
     </div>
   );
@@ -104,14 +104,14 @@ function SidebarIconLink({
         href={item.href}
         prefetch={false}
         className={cn(
-          "flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 relative",
+          "flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg 2xl:rounded-xl transition-all duration-300 relative",
           isActive
             ? "bg-blue-600 text-white shadow-[0_0_15px_-3px_rgba(37,99,235,0.35)]"
             : "text-zinc-400 hover:text-white hover:bg-white/10"
         )}
         aria-label={label}
       >
-        <Icon className="h-5 w-5" />
+        <Icon className="h-4 w-4 2xl:h-5 2xl:w-5" />
         {isActive && (
           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 h-6 w-[2px] rounded-full bg-blue-300/80" />
         )}
@@ -162,7 +162,7 @@ function FlyoutMenu({
         type="button"
         onClick={onToggle}
         className={cn(
-          "flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 relative",
+          "flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg 2xl:rounded-xl transition-all duration-300 relative",
           isActive
             ? "bg-blue-600 text-white shadow-[0_0_15px_-3px_rgba(37,99,235,0.35)]"
             : "text-zinc-400 hover:text-white hover:bg-white/10"
@@ -170,7 +170,7 @@ function FlyoutMenu({
         aria-expanded={isOpen}
         aria-label={label}
       >
-        <Icon className={cn("h-5 w-5", highlight && "text-purple-300")} />
+        <Icon className={cn("h-4 w-4 2xl:h-5 2xl:w-5", highlight && "text-purple-300")} />
         {isActive && (
           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 h-6 w-[2px] rounded-full bg-blue-300/80" />
         )}
@@ -236,8 +236,8 @@ function AccountMenu({
         aria-label={t("account.label")}
       >
         <div className="absolute inset-0 blur-xl opacity-20 bg-primary/40" />
-        <Avatar className="relative h-10 w-10 border border-sidebar-border bg-sidebar-accent">
-          {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} /> : null}
+        <Avatar className="relative h-8 w-8 2xl:h-10 2xl:w-10 border border-sidebar-border bg-sidebar-accent">
+          {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} className="object-cover" /> : null}
           <AvatarFallback className="bg-muted text-xs font-semibold text-sidebar-foreground">
             {user.name?.charAt(0).toUpperCase() || "?"}
           </AvatarFallback>
@@ -249,7 +249,7 @@ function AccountMenu({
         <div className="absolute left-14 bottom-0 z-50 w-72 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl p-3 space-y-2">
           <div className="flex items-center gap-3 rounded-lg border border-sidebar-border bg-sidebar-accent/50 px-3 py-2.5">
             <Avatar className="h-10 w-10 border border-sidebar-border">
-              {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} /> : null}
+              {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} className="object-cover" /> : null}
               <AvatarFallback className="bg-muted text-sidebar-foreground">
                 {user.name?.charAt(0).toUpperCase() || "?"}
               </AvatarFallback>
@@ -417,12 +417,12 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   return (
-    <aside className="relative z-50 flex h-full w-[78px] flex-col items-center gap-6 border-r border-sidebar-border bg-sidebar dark:bg-black px-2 py-4 shadow-2xl">
-      <div className="flex flex-col items-center gap-4">
+    <aside className="relative z-50 flex h-full w-[64px] 2xl:w-[78px] flex-col items-center gap-4 2xl:gap-6 border-r border-sidebar-border bg-sidebar dark:bg-black px-1.5 2xl:px-2 py-3 2xl:py-4 shadow-2xl">
+      <div className="flex flex-col items-center gap-3 2xl:gap-4">
         <Link
           href="/inbox"
           prefetch={false}
-          className="group relative flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-all duration-300 hover:bg-primary/20 hover:shadow-[0_0_20px_-4px_rgba(var(--primary),0.45)]"
+          className="group relative flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg 2xl:rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-all duration-300 hover:bg-primary/20 hover:shadow-[0_0_20px_-4px_rgba(var(--primary),0.45)]"
           aria-label={t("nav.chat")}
         >
           <DialogyLogo />

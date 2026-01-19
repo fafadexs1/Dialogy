@@ -28,7 +28,8 @@ import {
     Zap,
     LayoutGrid,
     Cpu,
-    Target
+    Target,
+    Check
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -55,6 +56,8 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { motion } from 'framer-motion';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CopyProtocolButton } from './copy-protocol-button';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -63,7 +66,7 @@ interface ContactPanelProps {
     onContactUpdate: () => void;
 }
 
-function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean }) {
+export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled, trigger }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean, trigger?: React.ReactNode }) {
     const { onlineAgents: allOnlineAgents } = usePresence();
     const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
     const [loading, setLoading] = useState(true);
@@ -108,10 +111,12 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
-                    <ArrowRightLeft className="h-3 w-3 text-orange-400" />
-                    Transferir
-                </Button>
+                {trigger || (
+                    <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                        <ArrowRightLeft className="h-3 w-3 text-blue-400" />
+                        Transferir
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className="max-w-md bg-popover border-border text-foreground">
                 <DialogHeader>
@@ -194,7 +199,7 @@ function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled }: 
     )
 }
 
-function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat, currentUser: User | null, onSuccess: () => void }) {
+export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger }: { chat: Chat, currentUser: User | null, onSuccess: () => void, trigger?: React.ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [selectedInstance, setSelectedInstance] = useState('');
@@ -340,10 +345,12 @@ function ResumeConversationDialog({ chat, currentUser, onSuccess }: { chat: Chat
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
-                    <MessageSquarePlus className="h-3 w-3 text-green-400" />
-                    Reabrir
-                </Button>
+                {trigger || (
+                    <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                        <MessageSquarePlus className="h-3 w-3 text-green-400" />
+                        Reabrir
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className="max-w-lg bg-popover border-border text-foreground max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
@@ -490,7 +497,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-1/4 lg:flex-shrink-0 bg-background/30 backdrop-blur-xl border-l border-border/50 dark:bg-black dark:border-white/10">
+            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 bg-background/30 backdrop-blur-xl border-l border-border/50 dark:bg-black dark:border-white/10">
                 <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
                     <h3 className="font-semibold text-foreground">Informações do Contato</h3>
                 </div>
@@ -556,43 +563,55 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         <motion.div
             initial={{ x: 30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            className="hidden lg:flex lg:flex-col lg:w-[450px] lg:max-w-[450px] lg:min-w-[400px] lg:flex-shrink-0 border-l border-white/10 bg-[#050505]/80 backdrop-blur-[40px] h-full shadow-[-20px_0_80px_rgba(0,0,0,0.4)] z-10 relative overflow-x-hidden overflow-y-hidden"
+            className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 border-l border-white/10 bg-[#050505]/80 backdrop-blur-[40px] h-full shadow-[-20px_0_80px_rgba(0,0,0,0.4)] z-10 relative overflow-x-hidden overflow-y-hidden"
         >
             {/* Background Glows */}
             <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-blue-600/5 blur-[120px] rounded-full -mr-20 -mt-20 pointer-events-none" />
             <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-purple-600/5 blur-[100px] rounded-full -ml-20 -mb-20 pointer-events-none" />
 
             {/* Header */}
-            <div className="sticky top-0 z-20 flex flex-col px-4 pt-4 pb-3 bg-black/20 backdrop-blur-md border-b border-white/5">
-                {/* Quick Actions Bar */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5"
-                        onClick={() => setIsStatsOpen(true)}
-                    >
-                        <BarChart3 className="h-3 w-3 text-blue-400" />
-                        Relatórios
-                    </Button>
+            <div className="sticky top-0 z-20 flex flex-col px-3 pt-3 pb-2 bg-black/20 backdrop-blur-md border-b border-white/5">
+                {/* Quick Actions Bar - Icon only */}
+                <div className="flex items-center gap-1 justify-end">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 bg-white/5 border border-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg"
+                                    onClick={() => setIsStatsOpen(true)}
+                                >
+                                    <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Relatórios</p></TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
                     <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
 
                     {chat.status === 'encerrados' ? (
                         <ResumeConversationDialog chat={chat} currentUser={currentUser} onSuccess={onContactUpdate} />
                     ) : (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5"
-                            onClick={() => {
-                                const protocol = chat.protocol || buildChatProtocol(chat.id);
-                                navigator.clipboard.writeText(protocol);
-                                toast({ title: "Protocolo copiado!" });
-                            }}
-                        >
-                            <Hash className="h-3 w-3 text-purple-400" />
-                            Protocolo
-                        </Button>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 bg-white/5 border border-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg"
+                                        onClick={() => {
+                                            const protocol = chat.protocol || buildChatProtocol(chat.id);
+                                            navigator.clipboard.writeText(protocol);
+                                            toast({ title: "Protocolo copiado!" });
+                                        }}
+                                    >
+                                        <Hash className="h-3.5 w-3.5 text-purple-400" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Copiar Protocolo</p></TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     )}
                 </div>
             </div>
@@ -744,29 +763,18 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             <div className="group relative col-span-2 sm:col-span-1">
                                 <div className="absolute -inset-[1px] bg-gradient-to-r from-purple-500/20 to-blue-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
                                 <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all overflow-hidden border-dashed">
-                                    <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity">
+                                    <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity pointer-events-none">
                                         <Hash className="h-12 w-12 -mr-4 -mt-4 rotate-12" />
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
                                             <Hash className="h-4 w-4 text-purple-400" />
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
-                                            onClick={() => {
-                                                const val = chat.protocol || buildChatProtocol(chat.id);
-                                                navigator.clipboard.writeText(val);
-                                                toast({ title: "Copiado!" });
-                                            }}
-                                        >
-                                            <Copy className="h-3 w-3" />
-                                        </Button>
+                                        <CopyProtocolButton protocol={chat.protocol || buildChatProtocol(chat.id)} />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0 overflow-hidden">
                                         <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Protocolo</span>
-                                        <span className="text-xs font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
+                                        <span className="text-[10px] font-mono font-bold text-purple-300 tracking-tighter truncate block max-w-full" title={chat.protocol || buildChatProtocol(chat.id)}>
                                             {chat.protocol || buildChatProtocol(chat.id)}
                                         </span>
                                     </div>
