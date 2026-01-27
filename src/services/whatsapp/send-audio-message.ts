@@ -1,4 +1,3 @@
-
 'use server';
 
 import { fetchEvolutionAPI } from "@/actions/evolution-api";
@@ -11,31 +10,9 @@ interface AudioPayload {
     fileName?: string;
 }
 
-import { convertAudioFile, ConversionResult } from "@/services/audio/conversion-service";
-
-/**
- * Checks if the audio needs conversion (WebM format)
- */
-function needsConversion(mimetype?: string, url?: string): boolean {
-    if (mimetype?.includes('webm') || mimetype?.includes('video/')) {
-        return true;
-    }
-    if (url?.endsWith('.webm')) {
-        return true;
-    }
-    return false;
-}
-
-/**
- * Calls the audio conversion service directly (no HTTP needed)
- */
-async function convertAudio(audioUrl: string): Promise<ConversionResult> {
-    return convertAudioFile(audioUrl);
-}
-
 /**
  * Sends a recorded audio message as a native WhatsApp voice note.
- * Automatically converts WebM to OGG+Opus if needed for WhatsApp Cloud API compatibility.
+ * Sends the audio URL directly to the Evolution API without conversion.
  * 
  * @param apiConfig - The API configuration.
  * @param instanceName - The name of the Evolution API instance.
@@ -47,36 +24,16 @@ export async function sendAudioMessage(
     instanceName: string,
     payload: AudioPayload
 ) {
-    let audioUrl = payload.audio;
-
-    console.log(`[SEND_AUDIO_DEBUG] Original audio URL: ${audioUrl}`);
-    console.log(`[SEND_AUDIO_DEBUG] Original mimetype: ${payload.mimetype}`);
-
-    // Check if we need to convert the audio format
-    if (needsConversion(payload.mimetype, audioUrl)) {
-        console.log(`[SEND_AUDIO_DEBUG] Audio needs conversion (WebM detected)`);
-
-        const conversionResult = await convertAudio(audioUrl);
-
-        if (conversionResult.success && conversionResult.convertedUrl) {
-            audioUrl = conversionResult.convertedUrl;
-            console.log(`[SEND_AUDIO_DEBUG] Audio converted successfully: ${audioUrl}`);
-        } else {
-            console.warn(`[SEND_AUDIO_DEBUG] Conversion failed, using original: ${conversionResult.error}`);
-            // Continue with original URL - it might still work
-        }
-    } else {
-        console.log(`[SEND_AUDIO_DEBUG] Audio format OK, no conversion needed`);
-    }
+    const audioUrl = payload.audio;
 
     // Use /message/sendWhatsAppAudio endpoint - only requires number and audio
+    // Evolution API often prefers pure numbers for this endpoint
+    const formattedNumber = payload.number.replace('@s.whatsapp.net', '');
+
     const apiPayload = {
-        number: payload.number,
+        number: formattedNumber,
         audio: audioUrl,
     };
-
-    console.log(`[SEND_AUDIO_DEBUG] Sending audio to ${instanceName}. Number: ${payload.number}`);
-    console.log(`[SEND_AUDIO_DEBUG] Final audio URL: ${audioUrl}`);
 
     try {
         const response = await fetchEvolutionAPI(
@@ -87,15 +44,11 @@ export async function sendAudioMessage(
                 body: JSON.stringify(apiPayload),
             }
         );
-        console.log(`[SEND_AUDIO_DEBUG] Success response:`, response);
         return response;
     } catch (error: any) {
-        console.error(`[SEND_AUDIO_DEBUG] Error sending audio:`, error);
+        console.error(`[SEND_AUDIO_ERROR] Error sending audio:`, error);
         if (error?.response?.data) {
-            console.error(`[SEND_AUDIO_DEBUG] API Error Data:`, JSON.stringify(error.response.data, null, 2));
-        }
-        if (error?.message) {
-            console.error(`[SEND_AUDIO_DEBUG] Error Message:`, error.message);
+            console.error(`[SEND_AUDIO_ERROR] API Error Data:`, JSON.stringify(error.response.data, null, 2));
         }
         throw error;
     }

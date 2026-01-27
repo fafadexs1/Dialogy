@@ -1461,9 +1461,9 @@ export default function ChatPanel({
                             )}
                             <span className="hidden lg:inline mx-1">•</span>
                             <span className="truncate">{chat.contact.phone}</span>
-                            <span className="hidden 2xl:inline flex items-center shrink-0">
+                            <span className="hidden sm:inline-flex items-center shrink-0">
                                 <span className="mx-1">•</span>
-                                <span className="text-[9px] opacity-70 truncate max-w-[100px]">ID: {chat.id.slice(0, 8)}...</span>
+                                <span className="text-xs whitespace-nowrap">ID: {chat.id}</span>
                             </span>
                         </p>
                     </div>

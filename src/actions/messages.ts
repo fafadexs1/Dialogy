@@ -639,6 +639,8 @@ async function internalSendMedia(
                 const mediaContent = file.base64;
 
                 console.log(`[INTERNAL_SEND_BG] Processing media file: ${file.filename}, type: ${file.mediatype}, mime: ${file.mimetype}`);
+
+                // ... (switch case logic) ...
                 if (file.mediatype === 'audio') {
                     console.log(`[INTERNAL_SEND_BG] Audio check - isWebm/Ogg: ${file.mimetype.includes('webm') || file.mimetype.includes('ogg')}, name startswith audio_gravado: ${file.filename?.startsWith('audio_gravado')}`);
                 }
@@ -668,19 +670,54 @@ async function internalSendMedia(
                 }
 
                 // Update Status to SENT
+                // Update Status to SENT
+
                 // Extract URL if Evolution returns it (sometimes it does in message details)
                 // NOTE: Evolution types might vary.
                 const messageTypeKey = `${file.mediatype}Message` as any;
-                const messageDetails = apiResponse.message?.[messageTypeKey] as any;
+
+                // Robust extraction: Check specific audio keys or generic keys
+                // PRIORITY: Check message.mediaUrl first, then specific message type 'media' key (Evolution MinIO link)
+                let returnedUrl = apiResponse.message?.mediaUrl ||
+                    apiResponse.message?.[messageTypeKey]?.media ||
+                    apiResponse.message?.[messageTypeKey]?.url ||
+                    apiResponse.message?.[messageTypeKey]?.directPath;
+
+                let returnedMimetype = apiResponse.message?.[messageTypeKey]?.mimetype;
+
+                // Fallback for audio where key might differ or be inside 'message' directly
+                if (!returnedUrl && file.mediatype === 'audio') {
+                    returnedUrl = apiResponse.message?.audioMessage?.media ||
+                        apiResponse.message?.audioMessage?.url ||
+                        apiResponse.message?.documentMessage?.url ||
+                        apiResponse.url;
+
+                    returnedMimetype = apiResponse.message?.audioMessage?.mimetype ||
+                        apiResponse.message?.documentMessage?.mimetype;
+                }
                 // If the API returns a direct URL for the media, we can update it in metadata, but usually we already have our public URL if using S3.
                 // If using base64 pass-through, Evolution might return a URL if it stores it (e.g. WA Cloud).
 
-                await db.query(`
-                    UPDATE messages 
-                    SET api_message_status = 'SENT',
-                        message_id_from_api = $1
-                    WHERE id = $2
-                `, [apiResponse?.key?.id, dbMessage.id]);
+                // Atualiza status e, se houver nova URL, atualiza o metadata
+                if (returnedUrl) {
+                    await db.query(`
+                        UPDATE messages 
+                        SET api_message_status = 'SENT',
+                            message_id_from_api = $1,
+                            metadata = jsonb_set(
+                                jsonb_set(COALESCE(metadata, '{}'), '{mediaUrl}', $2),
+                                '{mimetype}', $3
+                            )
+                        WHERE id = $4
+                    `, [apiResponse?.key?.id, JSON.stringify(returnedUrl), JSON.stringify(returnedMimetype || file.mimetype), dbMessage.id]);
+                } else {
+                    await db.query(`
+                        UPDATE messages 
+                        SET api_message_status = 'SENT',
+                            message_id_from_api = $1
+                        WHERE id = $2
+                    `, [apiResponse?.key?.id, dbMessage.id]);
+                }
 
             } catch (bgError: any) {
                 console.error(`[SEND_MEDIA_BG] Falha ao enviar ${file.filename}:`, bgError);

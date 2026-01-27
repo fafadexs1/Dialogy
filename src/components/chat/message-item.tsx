@@ -441,13 +441,15 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                                         ) : (
                                             (() => {
                                                 // Case-insensitive pending check
-                                                if (status === 'PENDING') return <Clock className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
+                                                if (message.optimistic) return null; // Optimistic: No icon (immediate feedback)
 
-                                                if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />;
-                                                if (status === 'DELIVERED') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />;
-                                                // SENT: WhatsApp Single Check (Sent to Server)
-                                                // DELIVERED: WhatsApp Double Check (Delivered to Recipient)
-                                                // Fallback/Sent -> Check (Single)
+                                                if (status === 'PENDING') return <Check className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Saved in DB: Single Check
+
+                                                if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />; // Read: Blue Double Check
+                                                if (status === 'DELIVERED') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Delivered: Gray Double Check
+                                                if (status === 'SENT') return <CheckCheck className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Sent to API: Gray Double Check
+
+                                                // Fallback
                                                 return <Check className="h-3 w-3" />;
                                             })()
                                         )}
