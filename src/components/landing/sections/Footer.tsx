@@ -6,7 +6,7 @@ import { InstagramIcon } from './ui/Icons';
 
 export function Footer() {
     return (
-        <footer className="bg-[#050507] border-t border-white/10 pt-20 pb-10 px-4">
+        <footer className="relative z-10 bg-[#050507] border-t border-white/10 pt-20 pb-10 px-4">
             <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-10 mb-16">
                 <div className="col-span-2 lg:col-span-2">
                     <div className="mb-6">

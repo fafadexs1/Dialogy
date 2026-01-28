@@ -25,17 +25,23 @@ export async function sendVideoMessage(
     instanceName: string,
     payload: VideoPayload
 ) {
-    const { publicUrl } = await uploadTempMedia({
-        media: payload.media,
-        mimetype: payload.mimetype,
-        fileName: payload.filename,
-    });
+    let mediaUrl = payload.media;
+
+    // Se não for URL (assumindo base64), faz upload para gerar link
+    if (!payload.media.startsWith('http')) {
+        const result = await uploadTempMedia({
+            media: payload.media,
+            mimetype: payload.mimetype,
+            fileName: payload.filename,
+        });
+        mediaUrl = result.publicUrl;
+    }
 
     const apiPayload = {
         number: payload.number,
         mediatype: 'video',
         mimetype: payload.mimetype,
-        media: publicUrl,
+        media: mediaUrl,
         caption: payload.caption,
         fileName: payload.filename,
     };
@@ -49,5 +55,5 @@ export async function sendVideoMessage(
         }
     );
 
-    return { ...response, tempMediaPublicUrl: publicUrl };
+    return { ...response, tempMediaPublicUrl: mediaUrl };
 }

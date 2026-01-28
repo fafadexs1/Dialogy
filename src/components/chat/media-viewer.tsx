@@ -4,6 +4,7 @@ import { X, ZoomIn, ZoomOut, Download, Play, Pause, Volume2, VolumeX } from 'luc
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import VideoPlayerPro from '../ui/video-player-pro';
 
 interface MediaViewerProps {
     children: React.ReactNode;
@@ -67,46 +68,24 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
             <DialogTrigger asChild onClick={() => setIsOpen(true)}>
                 {children}
             </DialogTrigger>
-            <DialogContent className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 bg-black/95 border-none backdrop-blur-xl flex flex-col items-center justify-center overflow-hidden focus:outline-none [&>button]:hidden">
-                <DialogHeader className="absolute top-4 left-4 right-4 z-50 flex flex-row items-center justify-between bg-transparent border-none p-0">
-                    <div className="flex items-center gap-2">
-                        <DialogTitle className="text-white font-medium truncate max-w-[300px]">
-                            {fileName || (type === 'image' ? 'Visualização de Imagem' : 'Player de Vídeo')}
-                        </DialogTitle>
-                        <DialogDescription className="sr-only">
-                            {type === 'image' ? 'Visualizando imagem em tela cheia' : 'Reproduzindo vídeo em tela cheia'}
-                        </DialogDescription>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={handleDownload}
-                            className="text-white/70 hover:text-white hover:bg-white/10 rounded-full h-10 w-10"
-                            title="Baixar"
-                        >
-                            <Download className="h-5 w-5" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setIsOpen(false)}
-                            className="text-white/70 hover:text-white hover:bg-white/10 rounded-full h-10 w-10"
-                            title="Fechar"
-                        >
-                            <X className="h-6 w-6" />
-                        </Button>
-                    </div>
+            <DialogContent className="max-w-[100vw] max-h-[100vh] w-screen h-screen p-0 bg-transparent border-none shadow-none flex flex-col items-center justify-center overflow-hidden focus:outline-none [&>button]:hidden">
+                <DialogHeader className="sr-only">
+                    <DialogTitle>
+                        {fileName || (type === 'image' ? 'Visualização de Imagem' : 'Player de Vídeo')}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {type === 'image' ? 'Visualizando imagem em tela cheia' : 'Reproduzindo vídeo em tela cheia'}
+                    </DialogDescription>
                 </DialogHeader>
 
-                <div className="relative w-full h-full flex items-center justify-center p-4 md:p-10">
+                <div className="relative w-full h-full flex items-center justify-center p-4 md:p-10" onClick={() => setIsOpen(false)}>
                     {!safeSrc ? (
                         <p className="text-sm text-white/70">Media unavailable</p>
                     ) : type === 'image' ? (
                         <div
                             className="relative transition-transform duration-200 ease-out"
                             style={{ transform: `scale(${scale})` }}
+                            onClick={(e) => e.stopPropagation()}
                         >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -117,14 +96,8 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                         </div>
                     ) : (
 
-                        <div className="relative w-full max-w-5xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl ring-1 ring-white/10">
-                            <video
-                                ref={videoRef}
-                                src={safeSrc}
-                                className="w-full h-full object-contain"
-                                controls
-                                playsInline
-                            />
+                        <div className="relative w-fit h-fit" onClick={(e) => e.stopPropagation()}>
+                            <VideoPlayerPro src={safeSrc} />
                         </div>
                     )}
                 </div>
