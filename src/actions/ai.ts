@@ -3,6 +3,7 @@
 import { db } from '@/lib/db';
 import { getCurrentUser } from './user';
 import { generateSummary } from '@/lib/genkit';
+import { getAutopilotConfig } from '@/actions/autopilot';
 
 export async function generateChatSummaryAction(chatId: string) {
     const currentUser = await getCurrentUser();
@@ -38,15 +39,18 @@ export async function generateChatSummaryAction(chatId: string) {
             return { success: false, error: 'Workspace não encontrado.' };
         }
 
-        // 2. Get Config from workspace_integrations
-        const configRes = await db.query(`
-            SELECT config->>'apiKey' as api_key 
-            FROM workspace_integrations 
-            WHERE workspace_id = $1 AND provider = 'gemini' AND is_active = true 
-            LIMIT 1
-        `, [workspaceId]);
+        // 2. Get Config (Try to find any valid AI config for this workspace)
+        const { config, hasGlobalKey } = await getAutopilotConfig(workspaceId);
 
-        const apiKey = configRes.rows[0]?.api_key;
+        // Prioritize: Config Key -> Global Env Key (handled by genkit if key is undefined, but let's be explicit if needed)
+        const apiKey = config?.gemini_api_key;
+        const aiModel = config?.ai_model;
+
+        // Note: genkit.ts handles undefined apiKey by falling back to env var if initialized there.
+        // But if strict mode, we might want to check.
+        if (!apiKey && !hasGlobalKey) {
+            return { success: false, error: 'Chave de API do Gemini não configurada (Integração ou Agente IA).' };
+        }
 
         // Reverse to chronological order
         const recentMessages = messagesRes.rows.reverse();
@@ -58,7 +62,7 @@ export async function generateChatSummaryAction(chatId: string) {
             return `${sender}: ${text}`;
         }).join('\n');
 
-        const summaryText = await generateSummary(conversationText, apiKey);
+        const summaryText = await generateSummary(conversationText, apiKey || undefined, aiModel || undefined);
 
         return { success: true, summary: summaryText };
 

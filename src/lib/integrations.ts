@@ -53,5 +53,15 @@ export const availableIntegrations: Integration[] = [
         tag_type: "primary",
         href: "/integrations/meta-messenger",
         status: 'active'
+    },
+    {
+        id: 'sgp',
+        name: "SGP",
+        description: "Plugin de integração com o sistema SGP.",
+        icon_url: "https://raichu-uploads.s3.amazonaws.com/logo_tsmx_G0fUrW.png",
+        tag: "SGP",
+        tag_type: "beta",
+        href: "/integrations/sgp",
+        status: 'active'
     }
 ];

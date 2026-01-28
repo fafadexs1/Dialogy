@@ -9,6 +9,7 @@ export const closeChatSchema = z.object({
   reasonTagId: z.string().min(1).optional().nullable(),
   notes: z.string().max(1000).optional().nullable(),
   sendCloseMessage: z.boolean().optional(),
+  additionalMetadata: z.record(z.any()).optional(),
 });
 
 export const transferChatSchema = z.object({

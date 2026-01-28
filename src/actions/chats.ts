@@ -320,7 +320,8 @@ export const closeChatAction = withDebug(
         chatId: string,
         reasonTagId: string | null,
         notes: string | null,
-        sendCloseMessage: boolean = true
+        sendCloseMessage: boolean = true,
+        additionalMetadata: Record<string, any> = {}
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -412,6 +413,7 @@ export const closeChatAction = withDebug(
                     closed_by: currentAgentId,
                     reason_tag_id: reasonTagId,
                     notes: notes,
+                    ...additionalMetadata
                 }
             ]);
 
@@ -440,7 +442,7 @@ export const closeChatAction = withDebug(
         }
     },
     {
-        contextResolver: (chatId, reasonTagId, notes, sendCloseMessage) => ({ payload: { chatId, reasonTagId, notes, sendCloseMessage } })
+        contextResolver: (chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata) => ({ payload: { chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata } })
     }
 );
 

@@ -41,13 +41,13 @@ export async function guardedAssignChat(chatId: string) {
   }
 }
 
-export async function guardedCloseChat(chatId: string, reasonTagId: string | null, notes: string | null, sendCloseMessage = true) {
+export async function guardedCloseChat(chatId: string, reasonTagId: string | null, notes: string | null, sendCloseMessage = true, additionalMetadata: Record<string, any> = {}) {
   const currentUser = await getCurrentUser();
   if (!currentUser?.id) {
     return { success: false, error: 'Usuario nao autenticado.' };
   }
 
-  const parsed = closeChatSchema.safeParse({ chatId, reasonTagId, notes, sendCloseMessage });
+  const parsed = closeChatSchema.safeParse({ chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata });
   if (!parsed.success) {
     return { success: false, error: 'Dados de encerramento invalidos.' };
   }
@@ -58,7 +58,7 @@ export async function guardedCloseChat(chatId: string, reasonTagId: string | nul
   }
 
   try {
-    const result = await closeChatAction(chatId, reasonTagId, notes, sendCloseMessage);
+    const result = await closeChatAction(chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata);
     if (result.success) {
       await logAction({
         workspaceId: currentUser.activeWorkspaceId,

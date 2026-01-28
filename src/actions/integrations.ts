@@ -164,6 +164,15 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
                 href: '/integrations/nexusflow',
                 is_active: activeProviders.has('nexusflow'),
                 provider: 'nexusflow'
+            },
+            {
+                id: 'sgp',
+                name: 'SGP',
+                description: 'Plugin de integração com o sistema SGP.',
+                icon_url: 'https://raichu-uploads.s3.amazonaws.com/logo_tsmx_G0fUrW.png',
+                href: '/integrations/sgp',
+                is_active: activeProviders.has('sgp'),
+                provider: 'sgp'
             }
         ];
 

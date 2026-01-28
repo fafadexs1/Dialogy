@@ -90,17 +90,20 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         `, [workspaceId]);
 
         let geminiKeyFromIntegration = null;
+        let aiModelFromIntegration = null;
         let transcriptionModelFromIntegration = null;
 
         if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
             const intConfig = integrationRes.rows[0].config;
             geminiKeyFromIntegration = intConfig.apiKey;
+            aiModelFromIntegration = intConfig.aiModel;
             transcriptionModelFromIntegration = intConfig.transcriptionModel;
         }
 
         const mergedConfig = {
             ...selectedConfig,
             gemini_api_key: geminiKeyFromIntegration || selectedConfig.gemini_api_key,
+            ai_model: aiModelFromIntegration || selectedConfig.ai_model,
             transcription_model: transcriptionModelFromIntegration || selectedConfig.transcription_model
         };
 

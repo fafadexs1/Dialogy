@@ -67,6 +67,7 @@ import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { fetchSGPContracts, createSGPServiceOrder } from '@/plugins/sgp/actions';
 import { Separator } from '../ui/separator';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
@@ -153,8 +154,27 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     const { toast } = useToast();
     const [isGeneratingSummary, setIsGeneratingSummary] = React.useState(false);
 
+    // SGP State
+    const [sgpContracts, setSgpContracts] = React.useState<{ id: string, label: string }[]>([]);
+    const [selectedSgpContract, setSelectedSgpContract] = React.useState<string>('');
+    const [isLoadingSgp, setIsLoadingSgp] = React.useState(false);
+
     const show = isOpen !== undefined ? isOpen : internalIsOpen;
     const setShow = onOpenChange || setInternalIsOpen;
+
+    useEffect(() => {
+        if (show) {
+            setSgpContracts([]);
+            setSelectedSgpContract('');
+            setIsLoadingSgp(true);
+            fetchSGPContracts(chat.id).then(res => {
+                if (res.success && res.contracts && res.contracts.length > 0) {
+                    setSgpContracts(res.contracts);
+                }
+                setIsLoadingSgp(false);
+            });
+        }
+    }, [show, chat.id]);
 
     const filteredReasons = useMemo(() => {
         return reasons.filter(reason => {
@@ -177,8 +197,35 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (sgpContracts.length > 0 && !selectedSgpContract) {
+            toast({ title: "Selecione um contrato SGP", description: "É necessário selecionar um contrato para gerar a ordem de serviço.", variant: "destructive" });
+            return;
+        }
+
         setIsSubmitting(true);
-        const result = await guardedCloseChat(chat.id, reasonTagId, notes);
+
+        let additionalMetadata: Record<string, any> = {};
+
+        if (selectedSgpContract) {
+            const osResult = await createSGPServiceOrder(chat.id, selectedSgpContract, notes);
+            if (!osResult.success) {
+                toast({ title: "Erro ao criar OS no SGP", description: osResult.error, variant: "destructive" });
+                setIsSubmitting(false);
+                return; // Stop close if OS creation fails? User probably wants to know.
+            }
+            // SGP OS Created
+            const protocol = osResult.apiResponse?.protocolo || osResult.apiResponse?.id || 'Unknown';
+            additionalMetadata = {
+                sgp_contract_id: selectedSgpContract,
+                sgp_os_protocol: protocol,
+                sgp_os_created: true
+            };
+            toast({ title: "OS criada no SGP", description: `Protocolo: ${protocol}` });
+        }
+
+        const result = await guardedCloseChat(chat.id, reasonTagId, notes, filteredReasons?.length > 0 && !reasonTagId ? false : true, additionalMetadata);
+
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
             setShow(false);
@@ -220,6 +267,30 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        {/* SGP Contract Selection */}
+                        {(isLoadingSgp || sgpContracts.length > 0) && (
+                            <div className="space-y-2">
+                                <Label htmlFor="sgp-contract">Contrato SGP <span className="text-xs text-muted-foreground">(Ordem de Serviço será gerada)</span></Label>
+                                {isLoadingSgp ? (
+                                    <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Buscando contratos...</span>
+                                    </div>
+                                ) : (
+                                    <Select onValueChange={setSelectedSgpContract} value={selectedSgpContract}>
+                                        <SelectTrigger id="sgp-contract">
+                                            <SelectValue placeholder="Selecione o contrato..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {sgpContracts.map(contract => (
+                                                <SelectItem key={contract.id} value={contract.id}>{contract.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <div className="flex justify-between items-center">
                                 <Label htmlFor="close-notes">Notas Internas (Opcional)</Label>
