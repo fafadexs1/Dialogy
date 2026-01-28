@@ -406,8 +406,25 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
   };
 
   return (
-    <div className="flex items-start gap-1.5 text-sm text-muted-foreground overflow-hidden">
-      <div className="mt-0.5 flex-shrink-0">{getIcon()}</div>
+    <div className="flex items-center gap-1.5 text-sm text-muted-foreground overflow-hidden">
+      <div className="flex-shrink-0 mt-0.5">
+        {message.metadata?.thumbnail && typeof message.metadata.thumbnail === 'string' ? (
+          <div className="relative">
+            <img
+              src={message.metadata.thumbnail.startsWith('data:') ? message.metadata.thumbnail : `data:image/jpeg;base64,${message.metadata.thumbnail}`}
+              alt="Preview"
+              className="h-5 w-5 object-cover rounded-sm"
+            />
+            {(message.type === 'video' || message.metadata?.mimetype?.startsWith('video/')) && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-sm">
+                <Video className="h-3 w-3 text-white/90 drop-shadow-md" />
+              </div>
+            )}
+          </div>
+        ) : (
+          getIcon()
+        )}
+      </div>
       <p className="truncate">{getTextContent()}</p>
     </div>
   );

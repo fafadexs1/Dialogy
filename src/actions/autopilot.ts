@@ -438,6 +438,10 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
     }
 }
 
+import { generateEmbedding } from '@/lib/embeddings';
+import { defaultSplitter } from '@/lib/text-splitter';
+import { VectorStore } from '@/lib/vector-store';
+
 export async function addDocumentToKnowledgeBase(
     workspaceId: string,
     title: string,
@@ -475,13 +479,34 @@ export async function addDocumentToKnowledgeBase(
                 ? config.knowledge_base_documents
                 : [];
 
+        const docId = uuidv4();
         const newDoc: KnowledgeBaseDocument = {
-            id: uuidv4(),
+            id: docId,
             name: title,
             content: content,
             uploaded_at: new Date().toISOString(),
             tokens: 0 // We could estimate tokens here if needed
         };
+
+        // --- RAG INGESTION START ---
+        try {
+            console.log(`[RAG] Processing document: ${title} (${content.length} chars)`);
+            const chunks = await defaultSplitter.splitText(content);
+            console.log(`[RAG] Created ${chunks.length} chunks. Generating embeddings...`);
+
+            for (const chunk of chunks) {
+                const vector = await generateEmbedding(chunk, 'doc');
+                if (vector.length > 0) {
+                    await VectorStore.addDocumentEmbedding(docId, chunk, vector);
+                }
+            }
+            console.log(`[RAG] Successfully embedded document: ${docId}`);
+        } catch (ragError) {
+            console.error('[RAG] Failed to ingest document:', ragError);
+            // We continue to save the doc metadata even if embedding fails, 
+            // but we might want to warn the user. For now, we log.
+        }
+        // --- RAG INGESTION END ---
 
         const updatedDocs = [...currentDocs, newDoc];
 

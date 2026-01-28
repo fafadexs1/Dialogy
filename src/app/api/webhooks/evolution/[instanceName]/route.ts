@@ -13,6 +13,8 @@ import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
+import { generateEmbedding } from '@/lib/embeddings';
+import { VectorStore } from '@/lib/vector-store';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 
@@ -593,11 +595,42 @@ async function handleMessagesUpsert(payload: any) {
             );
         }
 
+
+
+        // ... existing code ...
+
         // Trigger Autopilot for incoming messages
         if (!key.fromMe) {
-            postTransactionTasks.push(
-                processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName)
-            );
+            if (savedChat.is_autopilot_active) {
+                console.log(`[WEBHOOK_MSG_UPSERT] Enqueueing Autopilot for chat ${savedChat.id}`);
+                postTransactionTasks.push(
+                    processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName)
+                );
+            } else {
+                console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${savedChat.id}`);
+            }
+
+            // --- RAG INGESTION (INBOUND) ---
+            if (dbMessageType === 'text' && content) {
+                postTransactionTasks.push((async () => {
+                    try {
+                        console.log(`[RAG] Embedding inbound message: ${savedMessage?.id} (user)`);
+                        const vector = await generateEmbedding(content, 'chat');
+                        if (vector.length > 0 && savedMessage) {
+                            await VectorStore.addMessageEmbedding(
+                                savedMessage.id,
+                                savedChat!.id,
+                                content,
+                                'user',
+                                vector
+                            );
+                        }
+                    } catch (ragError) {
+                        console.error(`[RAG] Failed to embed inbound message:`, ragError);
+                    }
+                })());
+            }
+            // --- END RAG ---
         }
 
         await Promise.all(postTransactionTasks).catch(err => {

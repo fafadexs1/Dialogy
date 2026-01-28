@@ -159,13 +159,13 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('image/')) {
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
-                    <div className="cursor-pointer">
+                    <div className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px]">
                         <SafeMediaImage
                             src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto hover:brightness-90 transition-all"
+                            className="object-cover w-full h-full aspect-square hover:scale-105 transition-transform duration-300"
                         />
                     </div>
                 </MediaViewer>
@@ -175,20 +175,20 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('video/')) {
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
-                    <div className="relative group cursor-pointer">
+                    <div className="relative group cursor-pointer overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px]">
                         <SafeMediaImage
                             src={safeThumbnail || '/placeholder-video.png'}
                             alt="Vídeo"
                             width={300}
-                            height={200}
-                            className="rounded-lg object-cover w-full max-w-[80vw] md:max-w-[300px] h-auto brightness-75 group-hover:brightness-90 transition-all"
+                            height={169} // ~16:9 ratio
+                            className="object-cover w-full h-full aspect-video brightness-90 group-hover:scale-105 transition-all duration-300"
                         />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                                <PlayCircle className="h-8 w-8 text-white" />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                            <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                                <PlayCircle className="h-8 w-8 text-white fill-white/20" />
                             </div>
                         </div>
-                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium pointer-events-none">
+                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium pointer-events-none backdrop-blur-sm z-10">
                             {duration ? formatDuration(duration) : 'Vídeo'}
                         </div>
                     </div>

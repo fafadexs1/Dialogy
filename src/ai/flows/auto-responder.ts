@@ -53,6 +53,10 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('The history of the chat between the agent and customer.'),
+  relevantHistory: z
+    .string()
+    .optional()
+    .describe('Relevant past messages retrieved from vector search (RAG).'),
   rules: z.array(AutomationRuleSchema).describe('A list of active automation rules to evaluate against.'),
   knowledgeBase: z
     .string()
@@ -261,7 +265,8 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 3. **Resposta Natural**:
     - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
 
----\n
+---
+
 **DOCUMENTOS CARREGADOS (Base de Conhecimento)**:
 {{#each knowledgeBaseDocuments}}
 ### {{name}}
@@ -278,6 +283,13 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 ---
 **DADOS DO CONTATO**:
 {{json contact}}
+---
+**CONTEXTO HISTÓRICO RELEVANTE (Memória)**:
+{{#if relevantHistory}}
+{{{relevantHistory}}}
+{{else}}
+(Nenhum contexto histórico relevante encontrado)
+{{/if}}
 ---
 **HISTÓRICO DO CHAT (Contexto Recente)**:
 {{#if chatHistory}}
@@ -376,8 +388,8 @@ const autoResponderFlow = ai.defineFlow(
         ),
         emojiBudget
       );
-      const response = sanitized.trim() ? sanitized : output.response;
-      return { ...output, response };
+      const outputResponse = sanitized.trim() ? sanitized : output.response;
+      return { ...output, response: outputResponse };
     }
     const fallback = input.config?.default_fallback_reply?.trim();
     if (fallback) {
@@ -389,9 +401,9 @@ const autoResponderFlow = ai.defineFlow(
         ),
         emojiBudget
       );
-      const response = sanitized.trim() ? sanitized : fallback;
+      const outputResponse = sanitized.trim() ? sanitized : fallback;
       return {
-        response,
+        response: outputResponse,
         triggeredRule: output?.triggeredRule ?? null,
       };
     }

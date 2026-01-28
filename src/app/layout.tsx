@@ -48,8 +48,17 @@ export async function generateMetadata(): Promise<Metadata> {
       images: settings.defaultOgImage ? [settings.defaultOgImage] : undefined,
     },
     other: {
-      'theme-color': settings.themeColor || '#ffffff',
-    }
+      'theme-color': settings.themeColor || '#09090b',
+    },
+    manifest: '/manifest.json',
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'default',
+      title: settings.siteName || 'Dialogy',
+    },
+    formatDetection: {
+      telephone: false,
+    },
   };
 }
 

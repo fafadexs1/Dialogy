@@ -457,7 +457,11 @@ export default function ChatPanel({
         }
 
         if (chat) {
-            updateChat(chat.id, { is_autopilot_active: checked, autopilot_config_id: agentId });
+            updateChat(chat.id, {
+                is_autopilot_active: checked,
+                autopilot_config_id: agentId,
+                copilot_mode: checked ? 'suggest' : 'off'
+            });
             await toggleChatAutopilot(chat.id, checked, agentId || null);
 
             if (checked && agentId) {
@@ -657,37 +661,38 @@ export default function ChatPanel({
     const visibleMessages = messagesToRender;
 
     // First Item Index Strategy for Bidirectional Scrolling/Prepend
-    // We use a Ref to track index and update it SYNCHRONOUSLY during render to avoid jumps.
+    // Strategy: Update state DURING render if changes are detected.
+    // This pattern forces React to restart the render with the new value immediately,
+    // ensuring Virtuoso never renders with mismatched data/index.
     const START_INDEX = 10000;
-    const firstItemIndexRef = useRef(START_INDEX);
-    const prevMessagesLengthRef = useRef(visibleMessages.length);
-    const prevChatIdRef = useRef(chat?.id);
-    const prevFirstMessageIdRef = useRef<string | null>(visibleMessages.length > 0 ? visibleMessages[0].id : null);
+    const [firstItemIndex, setFirstItemIndex] = useState(START_INDEX);
+    const [prevVisibleMessages, setPrevVisibleMessages] = useState<Message[]>(visibleMessages);
 
-    // Reset when chat changes (during render to be ready for first paint)
-    if (chat?.id !== prevChatIdRef.current) {
-        firstItemIndexRef.current = START_INDEX;
-        prevMessagesLengthRef.current = visibleMessages.length;
-        prevChatIdRef.current = chat?.id;
-        prevFirstMessageIdRef.current = visibleMessages.length > 0 ? visibleMessages[0].id : null;
+    // Reset when chat ID changes completely
+    const [prevChatId, setPrevChatId] = useState(chat?.id);
+    if (chat?.id !== prevChatId) {
+        setPrevChatId(chat?.id);
+        setFirstItemIndex(START_INDEX);
+        setPrevVisibleMessages(visibleMessages);
     }
 
-    // Detect prepend during render
-    const currentLen = visibleMessages.length;
-    const prevLen = prevMessagesLengthRef.current;
-    const currentFirstId = visibleMessages.length > 0 ? visibleMessages[0].id : null;
-    const prevFirstId = prevFirstMessageIdRef.current;
+    // Detect Prepend logic
+    if (visibleMessages !== prevVisibleMessages) {
+        const currentLen = visibleMessages.length;
+        const prevLen = prevVisibleMessages.length;
+        const currentFirstId = visibleMessages.length > 0 ? visibleMessages[0].id : null;
+        const prevFirstId = prevVisibleMessages.length > 0 ? prevVisibleMessages[0].id : null;
 
-    // Check if length increased AND first ID changed (Prepend Scenario)
-    // This is more robust than relying on isFetchingHistoryRef which might clear too early
-    if (currentLen > prevLen && currentFirstId !== prevFirstId && prevFirstId !== null) {
-        const diff = currentLen - prevLen;
-        console.log('[VIRTUOSO] Prepend detected (sync):', diff, 'Adjusting firstItemIndex.');
-        firstItemIndexRef.current -= diff;
+        // Update the tracking state
+        setPrevVisibleMessages(visibleMessages);
+
+        // Calculate offset if it's a prepend
+        if (currentLen > prevLen && currentFirstId !== prevFirstId && prevFirstId !== null) {
+            const diff = currentLen - prevLen;
+            console.log('[VIRTUOSO] Prepend detected (render-phase):', diff, 'Adjusting firstItemIndex.');
+            setFirstItemIndex(prev => prev - diff);
+        }
     }
-
-    prevMessagesLengthRef.current = currentLen;
-    prevFirstMessageIdRef.current = currentFirstId;
 
     const startIndex = 0;
     const padTop = 0;
@@ -1704,8 +1709,8 @@ export default function ChatPanel({
                     ref={virtuosoRef}
                     style={{ height: '100%', width: '100%' }}
                     data={visibleMessages}
-                    firstItemIndex={firstItemIndexRef.current}
-                    initialTopMostItemIndex={firstItemIndexRef.current + visibleMessages.length - 1}
+                    firstItemIndex={firstItemIndex}
+                    initialTopMostItemIndex={firstItemIndex + visibleMessages.length - 1}
                     increaseViewportBy={500}
                     alignToBottom={true}
                     followOutput={(isAtBottom) => {
@@ -1733,16 +1738,13 @@ export default function ChatPanel({
                         }
                     }}
                     components={{
-                        Header: () => isLoadingOlderMessages ? (
-                            <div className="py-4 flex justify-center text-muted-foreground text-xs gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>Carregando mensagens anteriores...</span>
-                            </div>
-                        ) : null,
+                        Header: () => (
+                            <div className="h-0" />
+                        ),
                         Footer: () => <div className="h-4" />
                     }}
                     itemContent={(index, message) => {
-                        const arrayIndex = index - firstItemIndexRef.current;
+                        const arrayIndex = index - firstItemIndex;
                         const prevMessage = arrayIndex > 0 ? visibleMessages[arrayIndex - 1] : undefined;
                         return (
                             <div className="px-2 md:px-6 py-0.5">

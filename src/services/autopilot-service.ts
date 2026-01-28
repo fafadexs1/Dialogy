@@ -4,6 +4,8 @@ import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Workspa
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
+import { generateEmbedding } from '@/lib/embeddings';
+import { VectorStore } from '@/lib/vector-store';
 
 export async function getAutopilotConfigService(workspaceId: string, agentId?: string): Promise<{
     config: AutopilotConfig | null,
@@ -79,11 +81,14 @@ export async function processAutopilotForChat(
     const chatConfigRes = await db.query(`SELECT copilot_mode, is_autopilot_active FROM chats WHERE id = $1`, [chat.id]);
     const chatConfig = chatConfigRes.rows[0];
     const currentCopilotMode = chatConfig?.copilot_mode || 'auto';
-    const currentIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
 
-    console.error(`[AUTOPILOT_DEBUG] *** DB FETCH -> copilot_mode: ${currentCopilotMode}, is_autopilot_active: ${currentIsActive} ***`);
+    // STRICT CHECK: explicitly compare to true. DB might return null, false, or undefined.
+    const rawIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
+    const currentIsActive = rawIsActive === true;
 
-    logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive}`);
+    console.error(`[AUTOPILOT_DEBUG] *** DB FETCH -> copilot_mode: ${currentCopilotMode}, is_autopilot_active (RAW): ${rawIsActive}, (RESOLVED): ${currentIsActive} ***`);
+
+    logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive} (Raw: ${rawIsActive})`);
 
     // 1. Fetch Config
     const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } = await getAutopilotConfigService(workspaceId, chat.autopilot_config_id || undefined);
@@ -94,7 +99,7 @@ export async function processAutopilotForChat(
     }
 
     if (!currentIsActive) {
-        console.log(`[AUTOPILOT_SERVICE] Autopilot desativado para este chat (ID: ${chat.id})`);
+        console.log(`[AUTOPILOT_SERVICE] Autopilot desativado para este chat (ID: ${chat.id}). Status: ${currentIsActive}`);
         return;
     }
 
@@ -150,6 +155,74 @@ export async function processAutopilotForChat(
         }
     }
 
+    // --- RAG RETRIEVAL START ---
+    let ragDocuments: KnowledgeBaseDocument[] = autopilotConfig.knowledge_base_documents || [];
+    let relevantHistory = '';
+
+    try {
+        if (lastMessageContent && lastMessageContent.trim().length > 3) {
+            console.log(`[AUTOPILOT_RAG] Generating embedding for query: "${lastMessageContent.substring(0, 50)}..."`);
+            // 1. Generate Query Embedding (using 'chat' model as it's the user query, and we want to match docs/chat)
+            // Note: ideally we might use 'doc' model for doc search if the query is long, but 'chat' model (MiniLM) is better for questions.
+            // Actually, E5 (used for docs) expects "query: " prefix or similar if asymmetric.
+            // Our embedding service handles this if we implement it, but for now we used raw 'doc' (E5) and 'chat' (MiniLM).
+            // Since we stored docs with 'doc' (E5) and chat with 'chat' (MiniLM), we should ideally search with compatible embeddings.
+            // The current VectorStore implementation is generic.
+            // ISSUE: mixing models (768 vs 384 dimensions) in search?
+            // Wait, E5 is 768, MiniLM is 384. Vectors must match dimension.
+            // We stored documents with E5 (768) and messages with MiniLM (384).
+            // We need TWO embeddings for the query: one for Doc Search (E5), one for Chat Search (MiniLM).
+
+            const [docQueryVector, chatQueryVector] = await Promise.all([
+                generateEmbedding(lastMessageContent, 'doc'),
+                generateEmbedding(lastMessageContent, 'chat')
+            ]);
+
+            // 2. Search Documents (E5)
+            if (docQueryVector.length > 0) {
+                const similarDocs = await VectorStore.searchSimilarDocuments(docQueryVector, 4); // Top 4 chunks
+                if (similarDocs.length > 0) {
+                    console.log(`[AUTOPILOT_RAG] Found ${similarDocs.length} similar doc chunks.`);
+                    // Map chunks to KnowledgeBaseDocument structure
+                    ragDocuments = similarDocs.map(d => ({
+                        id: d.id,
+                        name: `Excerpt from ${d.document_id}`, // We might want to fetch real title if possible, but document_id is okay for now
+                        content: d.content,
+                    }));
+                }
+            }
+
+            // 3. Search Chat History (MiniLM)
+            if (chatQueryVector.length > 0) {
+                // Search global history (or maybe scoped to workspace? Implementation verifies workspace implicitly if we add filter? 
+                // Currently searchSimilarMessages just expects vector. We added chat_id filter support but we might want GLOBAL or WORKSPACE search.
+                // VectorStore.searchSimilarMessages(vector, chatId?)
+                // If we pass chatId, it restricts to THIS conversation. That is good for "what did I say earlier".
+                // But for "how did we solve this before", we want OTHER chats.
+                // Let's search THIS chat for immediate context reinforcement (though simple history covers it) AND global?
+                // For now, let's search *THIS* chat history as 'Long Term Memory' of the specific contact context.
+                // BUT to get "solutions from other tickets", we need broader search.
+                // Current requirement: "Index knowledge base documents AND chat history".
+                // Let's assume we want broader context. searchSimilarMessages has optional chatId.
+                // Let's search ALL chats (no chatId param) but limit to 5.
+                const similarMessages = await VectorStore.searchSimilarMessages(chatQueryVector, undefined, 5);
+
+                // Filter out messages from current chat to avoid duplication with recent history?
+                // Or keep them. 
+                const validMessages = similarMessages.filter(m => m.chat_id !== chat.id && m.content.length > 10);
+
+                if (validMessages.length > 0) {
+                    console.log(`[AUTOPILOT_RAG] Found ${validMessages.length} similar historical messages from other chats.`);
+                    relevantHistory = validMessages.map(m => `[Memória] ${m.role === 'user' ? 'Cliente' : 'Agente'}: ${m.content}`).join('\n');
+                }
+            }
+        }
+    } catch (ragError) {
+        console.error('[AUTOPILOT_RAG] Error during retrieval:', ragError);
+        // Fallback to default (already set in ragDocuments)
+    }
+    // --- RAG RETRIEVAL END ---
+
     try {
         // 3. Generate Response
         const result = await generateAgentResponse({
@@ -157,9 +230,10 @@ export async function processAutopilotForChat(
             chatId: chat.id,
             customerMessage: lastMessageContent || '',
             chatHistory: chatHistoryForAI,
+            relevantHistory: relevantHistory, // Passed to new field
             rules: activeRules,
             knowledgeBase: autopilotConfig.knowledge_base || '',
-            knowledgeBaseDocuments: autopilotConfig.knowledge_base_documents || [],
+            knowledgeBaseDocuments: ragDocuments, // Use RAG results (or original if RAG failed/empty and we initialized it with original)
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             model: autopilotConfig.ai_model || 'googleai/gemini-2.0-flash',
             contact: sanitizedContact,

@@ -88,4 +88,21 @@ if (!enableWebpackOverrides) {
   console.log('Skipping custom webpack config (dev uses Turbopack).');
 }
 
-module.exports = nextConfig;
+const withPWA = require('@ducanh2912/next-pwa').default({
+  dest: 'public',
+  // Disable in development if you want to debug, but enables PWA features (like manifest) even in dev often. 
+  // keeping it enabled for dev to verify PWA works (manifest is static anyway).
+  // But usually disabled to avoid caching issues during dev.
+  disable: process.env.NODE_ENV === 'development',
+  register: true,
+  skipWaiting: true,
+  cacheOnFrontEndNav: true,
+  aggressiveFrontEndNavCaching: true,
+  reloadOnOnline: true,
+  swcMinify: true,
+  workboxOptions: {
+    disableDevLogs: true,
+  },
+});
+
+module.exports = withPWA(nextConfig);

@@ -7,6 +7,8 @@ import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
+import { generateEmbedding } from '@/lib/embeddings';
+import { VectorStore } from '@/lib/vector-store';
 
 // Importando as novas funções de serviço
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
@@ -366,13 +368,44 @@ async function internalSendMessage(
         client.release();
     }
 
+
+    // ... existing imports
+
     // --- BLOCO ASSÍNCRONO (FIRE-AND-FORGET) ---
     // Executa fora do fluxo principal de resposta
     (async () => {
         if (!persistedMessage || !backgroundTaskData?.messageId) return;
 
+        // --- RAG INGESTION (ASYNC) ---
+        try {
+            // Only embed text content for now (we could caption images later)
+            if ((persistedMessage.type === 'text' || persistedMessage.type === 'system') && persistedMessage.content) {
+                const role = persistedMessage.type === 'system' ? 'system' : 'agent';
+                console.log(`[RAG] Embedding outbound message: ${persistedMessage.id} (${role})`);
+
+                // Use apiContent if available (cleaner), else raw content
+                const textToEmbed = backgroundTaskData.apiContent || persistedMessage.content;
+                const vector = await generateEmbedding(textToEmbed, 'chat');
+
+                if (vector.length > 0) {
+                    await VectorStore.addMessageEmbedding(
+                        persistedMessage.id,
+                        persistedMessage.chat_id,
+                        textToEmbed,
+                        role,
+                        vector
+                    );
+                    console.log(`[RAG] Message embedded successfully.`);
+                }
+            }
+        } catch (ragError) {
+            console.error(`[RAG] Failed to embed outbound message ${persistedMessage.id}:`, ragError);
+        }
+        // --- END RAG ---
+
         try {
             const { chatInfo, instanceName, remoteJid, apiContent, template, messageId } = backgroundTaskData;
+            // ... rest of the code
             const source = (chatInfo.source || '').toString().toLowerCase();
             const metaPlatform = (chatInfo.meta_platform || '').toString().toLowerCase();
             const isMetaSource = source === 'instagram' || source === 'messenger' || metaPlatform === 'instagram' || metaPlatform === 'messenger';

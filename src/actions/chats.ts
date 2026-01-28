@@ -2200,12 +2200,14 @@ export const toggleChatAutopilot = withDebug(
         if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
+            const copilotMode = isActive ? 'suggest' : 'off';
             await db.query(`
                 UPDATE chats 
                 SET is_autopilot_active = $1, 
-                    autopilot_config_id = $2
+                    autopilot_config_id = $2,
+                    copilot_mode = $4
                 WHERE id = $3
-            `, [isActive, agentId, chatId]);
+            `, [isActive, agentId, chatId, copilotMode]);
 
             revalidatePath('/', 'layout');
             return { success: true };
