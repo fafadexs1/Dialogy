@@ -1,9 +1,9 @@
-FROM node:20-alpine AS base
+FROM node:20-slim AS base
 
 # Install dependencies only when needed
 FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
+# Install necessary libraries for native modules (Sharp, Prisma)
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
@@ -50,7 +50,7 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Install FFmpeg for audio conversion (WebM to OGG for WhatsApp)
-RUN apk add --no-cache ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # Set FFmpeg paths for fluent-ffmpeg
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
