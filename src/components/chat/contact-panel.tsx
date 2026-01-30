@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { type Chat, type User, type Team, type Contact, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -311,12 +311,22 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                 type: 'text',
                 text: templateVariables[key] || ''
             }));
+
+            // Render the template body with substituted variables
+            const bodyText = selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '';
+            let renderedContent = bodyText;
+            variableKeys.forEach((key, index) => {
+                const value = templateVariables[key] || '';
+                renderedContent = renderedContent.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+            });
+
             templatePayload = {
                 name: selectedTemplate.name,
                 language: selectedTemplate.language,
                 components: [
                     { type: 'body', parameters }
-                ]
+                ],
+                renderedContent: renderedContent || `[Template: ${selectedTemplate.name}]`
             };
         }
 
@@ -482,6 +492,15 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [isStatsOpen, setIsStatsOpen] = useState(false);
     const [agents, setAgents] = useState<User[]>([]);
     const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
+
+    const handleContactSave = useCallback((updatedContact?: Contact | null) => {
+        // If we received an updated contact, update it directly in the store
+        if (updatedContact) {
+            useInboxStore.getState().updateChatContact(updatedContact);
+        }
+        // Still call the original callback for any other sync operations
+        onContactUpdate();
+    }, [onContactUpdate]);
 
     useEffect(() => {
         if (currentUser?.activeWorkspaceId) {
@@ -695,7 +714,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             isOpen={isEditModalOpen}
                                             setIsOpen={setIsEditModalOpen}
                                             contact={contact}
-                                            onSave={onContactUpdate}
+                                            onSave={handleContactSave}
                                             workspaceId={chat.workspace_id}
                                             agents={agents}
                                             user={currentUser}

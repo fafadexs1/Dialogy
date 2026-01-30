@@ -255,7 +255,7 @@ async function internalSendMessage(
     metadata?: MessageMetadata,
     instanceNameParam?: string, // Opcional: nome da instância para usar
     messageId?: string, // Opcional: ID da mensagem gerado pelo cliente
-    template?: { name: string; language: string; components: any[] }, // New: support for templates
+    template?: { name: string; language: string; components: any[]; renderedContent?: string }, // New: support for templates
     apiContent?: string // Content to send to API (if different from DB content)
 ): Promise<{ success: boolean; error?: string; apiResponse?: any; message?: Message }> {
     if (!content || !chatId) {
@@ -333,6 +333,9 @@ async function internalSendMessage(
         // Se já temos um ID (otimista), usamos ele
         const messageIdToUse = messageId || randomUUID();
 
+        // Use rendered template content if available, otherwise fallback to regular content
+        const dbContent = template?.renderedContent || content;
+
         // Query de inserção
         insertRes = await client.query(
             `INSERT INTO messages (
@@ -342,7 +345,7 @@ async function internalSendMessage(
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *`,
             [
-                messageIdToUse, workspaceId, chatId, 'text', content, true,
+                messageIdToUse, workspaceId, chatId, 'text', dbContent, true,
                 null, 'PENDING', instanceName, // Salva instanceName mesmo que null por enquanto, mas valida depois
                 dbMetadata, true, senderId, tabId
             ]
@@ -1493,7 +1496,7 @@ export const startNewConversation = withDebug(
             phoneNumber: string,
             message: string,
             tabId: string | null,
-            template?: { name: string; language: string; components: any[] }
+            template?: { name: string; language: string; components: any[]; renderedContent?: string }
         }
     ): Promise<{ success: boolean, error?: string }> {
         const supabase = await createClient();

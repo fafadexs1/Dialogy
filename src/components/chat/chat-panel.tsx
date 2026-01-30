@@ -198,10 +198,8 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (sgpContracts.length > 0 && !selectedSgpContract) {
-            toast({ title: "Selecione um contrato SGP", description: "É necessário selecionar um contrato para gerar a ordem de serviço.", variant: "destructive" });
-            return;
-        }
+        // Contract selection is optional - if not selected, no SGP OS will be created
+        // This allows closing without generating an OS when not needed
 
         setIsSubmitting(true);
 
@@ -224,7 +222,8 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
             toast({ title: "OS criada no SGP", description: `Protocolo: ${protocol}` });
         }
 
-        const result = await guardedCloseChat(chat.id, reasonTagId, notes, filteredReasons?.length > 0 && !reasonTagId ? false : true, additionalMetadata);
+        // Always send close message - the template will only be sent if configured in workspace settings
+        const result = await guardedCloseChat(chat.id, reasonTagId, notes, true, additionalMetadata);
 
         if (result.success) {
             toast({ title: "Atendimento encerrado com sucesso!" });
@@ -909,10 +908,17 @@ export default function ChatPanel({
 
             const finalMimeType = file.type || (isAudioExt ? 'audio/mpeg' : file.type) || 'application/octet-stream';
 
+            // Generate unique filename for clipboard-pasted images (which have generic names like 'image.png')
+            // Also ensures uniqueness for any file sent in sequence
+            const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            const fileExtension = ext ? `.${ext}` : '';
+            const baseName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+            const uniqueFileName = `${baseName}_${uniqueSuffix}${fileExtension}`;
+
             return {
-                id: `${file.name}-${file.lastModified}`,
+                id: `${uniqueFileName}-${file.lastModified}`,
                 file,
-                name: file.name,
+                name: uniqueFileName,
                 type: finalMimeType,
                 mediatype,
                 base64,

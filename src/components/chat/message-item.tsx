@@ -150,7 +150,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     }
 
     const validUrl = (url: any) => typeof url === 'string' && url.length > 0 ? url : undefined;
-    let urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
+    const urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
     const safeThumbnail = validUrl(thumbnail);
 
     if (!urlToUse) return <p>{message.content || 'Mídia inválida'}</p>;
