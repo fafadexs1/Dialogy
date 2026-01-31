@@ -158,6 +158,14 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
         text: templateVariables[key] || ''
       }));
 
+      // Render the template body with substituted variables
+      const bodyText = selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '';
+      let renderedContent = bodyText;
+      variableKeys.forEach((key) => {
+        const value = templateVariables[key] || '';
+        renderedContent = renderedContent.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+      });
+
       templatePayload = {
         name: selectedTemplate.name,
         language: selectedTemplate.language,
@@ -166,7 +174,8 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
             type: 'body',
             parameters
           }
-        ]
+        ],
+        renderedContent: renderedContent || `[Template: ${selectedTemplate.name}]`
       };
     }
 

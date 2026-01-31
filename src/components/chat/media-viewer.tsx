@@ -152,6 +152,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                         >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
+                                key={safeSrc}
                                 src={safeSrc}
                                 alt={alt || 'Media content'}
                                 className="max-w-full max-h-[85vh] object-contain rounded-md shadow-2xl pointer-events-none select-none"

@@ -152,7 +152,11 @@ export const deleteSegment = withDebug(
 
 export const saveContactAction = withDebug(
     'save_contact',
+<<<<<<< HEAD
     async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; contact?: Contact }> {
+=======
+    async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; contact?: Contact | null }> {
+>>>>>>> 7d465fd5ea419a61d140291c292d936eb6f8a9a4
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { success: false, error: "Usuário não autenticado." };
@@ -230,6 +234,7 @@ export const saveContactAction = withDebug(
                 }
             }
 
+<<<<<<< HEAD
             // Fetch the updated contact to return to frontend
             const updatedContactRes = await client.query(`
                 SELECT c.*, 
@@ -261,6 +266,30 @@ export const saveContactAction = withDebug(
             await client.query('COMMIT');
             // revalidatePath('/crm'); // Removed to prevent full page reload on inbox
             // revalidatePath('/chat'); 
+=======
+            await client.query('COMMIT');
+
+            // Fetch the updated contact with custom fields to return to the frontend
+            const updatedContactRes = await db.query(`
+                SELECT 
+                    c.id, c.workspace_id, c.name, c.email, c.phone_number_jid, c.phone, 
+                    c.address, c.owner_id, c.avatar_url, c.created_at,
+                    COALESCE(
+                        jsonb_object_agg(ccfv.field_id, ccfv.value) FILTER (WHERE ccfv.field_id IS NOT NULL),
+                        '{}'::jsonb
+                    ) as custom_fields
+                FROM contacts c
+                LEFT JOIN contact_custom_field_values ccfv ON c.id = ccfv.contact_id
+                WHERE c.id = $1
+                GROUP BY c.id
+            `, [contactId]);
+
+            const updatedContact = updatedContactRes.rows[0] ? {
+                ...updatedContactRes.rows[0],
+                custom_fields: updatedContactRes.rows[0].custom_fields || {}
+            } as Contact : null;
+
+>>>>>>> 7d465fd5ea419a61d140291c292d936eb6f8a9a4
             return { success: true, error: null, contact: updatedContact };
         } catch (error) {
             await client.query('ROLLBACK');

@@ -33,10 +33,10 @@ import { useCurrentUser } from '@/hooks/use-online-status';
 
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
-    const [step, setStep] = useState(1);
-    const [useProxy, setUseProxy] = useState(false);
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string>('');
+    const [manualMode, setManualMode] = useState(false);
 
     // Form data state
     const [formData, setFormData] = useState<Partial<EvolutionInstanceCreationPayload>>({
@@ -50,6 +50,10 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         syncFullHistory: false,
         webhook: { events: [] }
     });
+
+    // Manual Steps
+    const [step, setStep] = useState(1);
+    const [useProxy, setUseProxy] = useState(false);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value, type } = e.target;
@@ -79,6 +83,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
+        setStatusMessage('Provisionando instância...');
 
         const payload: EvolutionInstanceCreationPayload = {
             ...formData,
@@ -89,6 +94,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
 
         const result = await createEvolutionApiInstance(payload, workspaceId);
         setIsSubmitting(false);
+        setStatusMessage('');
 
         if (result.success) {
             toast({ title: 'Instância Criada!', description: 'Sua instância está sendo provisionada.' });
@@ -98,6 +104,93 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         }
     };
 
+    // --- AUTOMATED META FLOW ---
+    const handleMetaLogin = () => {
+        const appId = process.env.NEXT_PUBLIC_META_APP_ID || '740952588412789';
+        const configId = process.env.NEXT_PUBLIC_META_CONFIG_ID || '3807812312846037';
+        const baseUrl = 'https://business.facebook.com/messaging/whatsapp/onboard/';
+        const extras = JSON.stringify({ sessionInfoVersion: "3", version: "v3" });
+        const url = `${baseUrl}?app_id=${appId}&config_id=${configId}&extras=${encodeURIComponent(extras)}`;
+
+        const width = 800;
+        const height = 600;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+
+        window.open(url, 'MetaEmbeddedSignup', `width=${width},height=${height},top=${top},left=${left}`);
+
+        const messageHandler = async (event: MessageEvent) => {
+            if (event.origin !== "https://business.facebook.com" && event.origin !== "https://www.facebook.com") {
+                // return; 
+            }
+
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'WA_EMBEDDED_SIGNUP') {
+                    if (data.event === 'FINISH') {
+                        const { code, waba_id, phone_number_id } = data.data || {};
+
+                        if (code) {
+                            setIsSubmitting(true);
+                            setStatusMessage('Autenticando com Meta...');
+
+                            // Remove listener immediately to avoid double calls
+                            window.removeEventListener('message', messageHandler);
+
+                            const result = await exchangeMetaAuthCode(code);
+
+                            if (result.success && result.accessToken) {
+                                setStatusMessage('Criando Instância Evolution...');
+
+                                // Auto-generate display name if needed, or stick to a default
+                                const instanceName = `WhatsApp Business ${phone_number_id.slice(-4)}`;
+
+                                const payload: EvolutionInstanceCreationPayload = {
+                                    displayName: instanceName,
+                                    integration: 'WHATSAPP-BUSINESS',
+                                    businessId: waba_id,
+                                    number: phone_number_id,
+                                    token: result.accessToken,
+                                    qrcode: false,
+                                    // Default recommended settings
+                                    readMessages: true,
+                                    readStatus: false,
+                                    rejectCall: false,
+                                    groupsIgnore: false,
+                                    alwaysOnline: true,
+                                    webhook: { events: [] }
+                                };
+
+                                const creationResult = await createEvolutionApiInstance(payload, workspaceId);
+
+                                if (creationResult.success) {
+                                    toast({ title: 'Conectado!', description: 'WhatsApp Business conectado com sucesso.' });
+                                    onSuccess(undefined); // No QR code for Cloud API
+                                } else {
+                                    toast({ title: 'Erro na Criação', description: creationResult.error, variant: 'destructive' });
+                                    setIsSubmitting(false);
+                                    setStatusMessage('');
+                                }
+
+                            } else {
+                                toast({ title: 'Erro de Autenticação', description: result.error || 'Falha ao trocar token.', variant: 'destructive' });
+                                setIsSubmitting(false);
+                                setStatusMessage('');
+                            }
+                        }
+                    } else if (data.event === 'CANCEL') {
+                        toast({ title: 'Cancelado', description: 'Conexão cancelada pelo usuário.' });
+                    }
+                }
+            } catch (err) {
+                // Ignore
+            }
+        };
+        window.addEventListener('message', messageHandler);
+    };
+
+
+    // --- MANUAL STEPS LOGIC (LEGACY) ---
     const isBaileys = formData.integration === 'WHATSAPP-BAILEYS';
     const totalSteps = isBaileys ? 3 : 2;
 
@@ -110,116 +203,79 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const nextStep = () => {
         if (step === 1) {
             if (!formData.displayName?.trim()) {
-                toast({
-                    title: "Campo Obrigatório",
-                    description: "Por favor, preencha o apelido da instância para continuar.",
-                    variant: "destructive",
-                });
+                toast({ title: "Campo Obrigatório", description: "O apelido é obrigatório.", variant: "destructive" });
                 return;
             }
         }
-
-
-
-        if (step === 2 && !isBaileys) { // Validation for Cloud API step
+        if (step === 2 && !isBaileys) {
             if (!formData.number?.trim() || !formData.businessId?.trim() || !formData.token?.trim()) {
-                toast({
-                    title: "Campos Obrigatórios",
-                    description: "Todos os campos da Meta Business API são obrigatórios. Use o botão 'Conectar com WhatsApp' para preenchê-los automaticamente.",
-                    variant: "destructive",
-                });
+                toast({ title: "Campos Obrigatórios", description: "Todos os campos da Meta Business API são obrigatórios.", variant: "destructive" });
                 return;
             }
         }
-
         setStep(s => Math.min(s + 1, totalSteps));
     };
-
-    const handleMetaLogin = () => {
-        const appId = process.env.NEXT_PUBLIC_META_APP_ID || '740952588412789';
-        const configId = process.env.NEXT_PUBLIC_META_CONFIG_ID || '3807812312846037';
-        // Base URL for Embedded Signup
-        const baseUrl = 'https://business.facebook.com/messaging/whatsapp/onboard/';
-        const extras = JSON.stringify({ sessionInfoVersion: "3", version: "v3" });
-        const url = `${baseUrl}?app_id=${appId}&config_id=${configId}&extras=${encodeURIComponent(extras)}`;
-
-        // Open Popup
-        const width = 800;
-        const height = 600;
-        const left = (window.screen.width - width) / 2;
-        const top = (window.screen.height - height) / 2;
-
-        window.open(url, 'MetaEmbeddedSignup', `width=${width},height=${height},top=${top},left=${left}`);
-
-        // Listen for messages
-        const messageHandler = async (event: MessageEvent) => {
-            if (event.origin !== "https://business.facebook.com" && event.origin !== "https://www.facebook.com") {
-                // Ignore messages from other origins for security
-                // BUT: sometimes local dev or different responses might come. Trusted origins only.
-                // return; 
-            }
-
-            try {
-                const data = JSON.parse(event.data);
-                // The event data format from Meta Embedded Signup usually looks like:
-                // { type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { ... } }
-                // OR simply the payload itself depending on the listener level.
-
-                // Let's assume standard response structure
-                if (data.type === 'WA_EMBEDDED_SIGNUP') {
-                    if (data.event === 'FINISH') {
-                        const { code, waba_id, phone_number_id } = data.data || {};
-
-                        if (code) {
-                            toast({ title: 'Autenticando...', description: 'Trocando código de autorização...' });
-
-                            // Fill IDs immediately if available
-                            if (waba_id && phone_number_id) {
-                                setFormData(prev => ({ ...prev, businessId: waba_id, number: phone_number_id }));
-                            }
-
-                            // Exchange token
-                            const result = await exchangeMetaAuthCode(code);
-                            if (result.success && result.accessToken) {
-                                setFormData(prev => ({
-                                    ...prev,
-                                    token: result.accessToken,
-                                    // If IDs weren't in the FINISH event, maybe they come here? No, token exchange is just token.
-                                    // Usually FINISH has the IDs.
-                                    businessId: waba_id || prev.businessId,
-                                    number: phone_number_id || prev.number
-                                }));
-                                toast({ title: 'Conectado!', description: 'Credenciais preenchidas com sucesso.' });
-                            } else {
-                                toast({ title: 'Erro de Autenticação', description: result.error || 'Falha ao obter token de acesso.', variant: 'destructive' });
-                            }
-                        } else if (data.event === 'CANCEL') {
-                            toast({ title: 'Cancelado', description: 'O processo de conexão foi cancelado.' });
-                        } else if (data.event === 'ERROR') {
-                            toast({ title: 'Erro', description: 'Ocorreu um erro no fluxo do WhatsApp.', variant: 'destructive' });
-                        }
-                    }
-                }
-            } catch (err) {
-                // Not JSON or irrelevant message
-            }
-        };
-
-        window.addEventListener('message', messageHandler);
-
-        // Clean up listener? Ideally yes, but hard to know when to stop if popup stays open.
-        // We can remove it after success.
-        // For now, React useEffect cleanup is tricky inside a handler. 
-        // We might just leave it or use a ref to track if we're listening.
-    };
-
-
     const prevStep = () => setStep(s => Math.max(s - 1, 1));
+
+
+    // --- RENDER ---
+
+    if (isSubmitting) {
+        return (
+            <div className="h-[400px] flex flex-col items-center justify-center space-y-4">
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                <div className="text-center">
+                    <h3 className="text-lg font-medium">Aguarde um momento</h3>
+                    <p className="text-sm text-muted-foreground">{statusMessage || 'Processando...'}</p>
+                </div>
+            </div>
+        )
+    }
+
+    if (!manualMode) {
+        return (
+            <div className="py-8 px-4 flex flex-col items-center space-y-8">
+                <div className="text-center space-y-2">
+                    <h2 className="text-2xl font-bold">Conectar WhatsApp</h2>
+                    <p className="text-muted-foreground max-w-md mx-auto">
+                        A maneira mais segura e oficial de conectar seu número. Sem QR Code, sem desconexões.
+                    </p>
+                </div>
+
+                <Card className="w-full max-w-md border-2 border-blue-100 hover:border-blue-300 transition-colors shadow-lg cursor-pointer group" onClick={handleMetaLogin}>
+                    <CardHeader className="text-center pb-2">
+                        <div className="mx-auto w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <svg className="w-8 h-8 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24" role="img" xmlns="http://www.w3.org/2000/svg"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.791-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
+                        </div>
+                        <CardTitle className="text-xl">WhatsApp Cloud API (Oficial)</CardTitle>
+                        <CardDescription>Recomendado para empresas</CardDescription>
+                    </CardHeader>
+                    <CardFooter className="justify-center pt-2 pb-6">
+                        <Button className="bg-[#1877F2] hover:bg-[#1877F2]/90 w-full font-semibold">
+                            Conectar com Facebook
+                        </Button>
+                    </CardFooter>
+                </Card>
+
+                <div className="relative w-full max-w-md">
+                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                    <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Ou</span></div>
+                </div>
+
+                <Button variant="ghost" size="sm" onClick={() => setManualMode(true)} className="text-muted-foreground hover:text-foreground">
+                    Conectar manualmente (QRCode / Baileys / Token)
+                </Button>
+            </div>
+        )
+    }
 
     return (
         <form onSubmit={handleSubmit}>
             <DialogHeader>
-                <DialogTitle>Criar Nova Instância</DialogTitle>
+                <div className="flex items-center gap-2">
+                    <Button type="button" variant="ghost" size="icon" onClick={() => setManualMode(false)} className="-ml-2"><ArrowLeft className="h-4 w-4" /></Button>
+                    <DialogTitle>Configuração Manual</DialogTitle>
+                </div>
                 <div className="flex items-center justify-center pt-2">
                     {STEPS.map((s, index) => (
                         <React.Fragment key={s.id}>
@@ -285,23 +341,9 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                         <Card>
                             <CardHeader>
                                 <CardTitle className="text-base">Configurações da Meta Business API</CardTitle>
-                                <CardDescription>Conecte sua conta oficial do WhatsApp Business.</CardDescription>
+                                <CardDescription>Insira as credenciais do seu aplicativo Meta manualmente.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                <div className="p-4 border rounded-lg bg-blue-50/50 flex flex-col items-center justify-center gap-3">
-                                    <p className="text-sm text-center text-muted-foreground">
-                                        Use o botão abaixo para conectar sua conta, selecionar o número e preencher as credenciais automaticamente.
-                                    </p>
-                                    <Button type="button" variant="default" className="bg-[#1877F2] hover:bg-[#1877F2]/90 text-white w-full sm:w-auto" onClick={handleMetaLogin}>
-                                        <svg className="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24" role="img" xmlns="http://www.w3.org/2000/svg"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.791-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
-                                        Conectar com WhatsApp
-                                    </Button>
-                                    <div className="flex items-center gap-2 w-full">
-                                        <Separator className="flex-1" />
-                                        <span className="text-xs text-muted-foreground">OU PREENCHA MANUALMENTE</span>
-                                        <Separator className="flex-1" />
-                                    </div>
-                                </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="numberId">ID do Número de Telefone (Phone Number ID)</Label>
                                     <Input id="numberId" name="number" placeholder="ID do número no seu App da Meta" required value={formData.number || ''} onChange={handleInputChange} />
@@ -346,6 +388,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                                         </AccordionItem>
                                     </CardHeader>
                                 </Card>
+                                {/* Other settings cards kept as is */}
                                 <Card>
                                     <CardHeader className="p-4">
                                         <AccordionItem value="behavior-settings" className="border-b-0">

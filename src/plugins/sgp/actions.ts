@@ -253,9 +253,12 @@ export async function createSGPServiceOrder(chatId: string, contractId: string, 
     // 'yyyy-MM-dd HH:mm'
     const formattedDate = format(now, 'yyyy-MM-dd HH:mm');
 
+    // Clean phone - remove @s.whatsapp.net suffix if present
+    const cleanPhone = contact_phone ? contact_phone.replace(/@.*$/, '') : '';
+
     const payload = {
         contrato: Number(cleanContractId), // User said "APENAS OS NÚMEROS". API might expect number or string? JSON usually handles number.
-        ocorrenciatipo: 12,
+        ocorrenciatipo: 6,
         metodo: 5,
         setor: Number(sectorId), // Assuming number based on "valor do setor"
         conteudo: notes || "Sem observações.",
@@ -264,9 +267,10 @@ export async function createSGPServiceOrder(chatId: string, contractId: string, 
         responsavel: sgpUser.username,
         responsaveloc: sgpUser.username,
         conteudolimpo: 1,
+        desativa_os: 1,
         contato_nome: contact_name || "Cliente",
         status_encerrado: 1,
-        contato_telefone: contact_phone || "",
+        ...(cleanPhone ? { contato_telefone: cleanPhone } : {}),
         data_hora_agendamento: formattedDate
     };
 

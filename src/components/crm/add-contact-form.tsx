@@ -35,7 +35,11 @@ import { Badge } from '../ui/badge';
 interface AddContactFormProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
+<<<<<<< HEAD
   onSave: (contact?: Contact) => void;
+=======
+  onSave: (updatedContact?: Contact | null) => void;
+>>>>>>> 7d465fd5ea419a61d140291c292d936eb6f8a9a4
   contact: Contact | null;
   workspaceId: string;
   agents: User[];
