@@ -1,12 +1,7 @@
 'use client';
 
-<<<<<<< HEAD
-import React, { useState, useEffect, useMemo } from 'react';
-import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition, type Contact } from '@/lib/types';
-=======
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { type Chat, type User, type Team, type Contact, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
->>>>>>> 7d465fd5ea419a61d140291c292d936eb6f8a9a4
 import {
     Mail,
     Phone,
