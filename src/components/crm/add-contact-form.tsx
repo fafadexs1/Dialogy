@@ -35,7 +35,7 @@ import { Badge } from '../ui/badge';
 interface AddContactFormProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
-  onSave: () => void;
+  onSave: (contact?: Contact) => void;
   contact: Contact | null;
   workspaceId: string;
   agents: User[];
@@ -140,7 +140,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   useEffect(() => {
     if (state.success) {
       toast({ title: "Contato salvo!", description: "As informações do contato foram salvas com sucesso." });
-      onSave();
+      onSave(state.contact);
       setIsOpen(false);
     }
   }, [state, onSave, setIsOpen]);

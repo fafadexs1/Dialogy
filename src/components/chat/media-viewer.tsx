@@ -17,6 +17,9 @@ interface MediaViewerProps {
 export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [scale, setScale] = useState(1);
+    const [position, setPosition] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartRef = React.useRef({ x: 0, y: 0 });
 
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const safeSrc = typeof src === 'string' && src.trim().length > 0 ? src : '';
@@ -25,6 +28,7 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
     useEffect(() => {
         if (!isOpen) {
             setScale(1);
+            setPosition({ x: 0, y: 0 });
 
             if (videoRef.current) {
                 videoRef.current.pause();
@@ -33,8 +37,54 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
         }
     }, [isOpen]);
 
+    // Reset position when zooming out completely
+    useEffect(() => {
+        if (scale === 1) {
+            setPosition({ x: 0, y: 0 });
+        }
+    }, [scale]);
+
     const handleZoomIn = () => setScale(prev => Math.min(prev + 0.5, 3));
     const handleZoomOut = () => setScale(prev => Math.max(prev - 0.5, 1));
+
+    // Mouse Events
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (scale > 1) {
+            setIsDragging(true);
+            dragStartRef.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+            e.preventDefault(); // Prevent default drag behavior
+        }
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (isDragging && scale > 1) {
+            const x = e.clientX - dragStartRef.current.x;
+            const y = e.clientY - dragStartRef.current.y;
+            setPosition({ x, y });
+        }
+    };
+
+    const handleMouseUp = () => {
+        setIsDragging(false);
+    };
+
+    // Touch Events
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if (scale > 1 && e.touches.length === 1) {
+            setIsDragging(true);
+            const touch = e.touches[0];
+            dragStartRef.current = { x: touch.clientX - position.x, y: touch.clientY - position.y };
+        }
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (isDragging && scale > 1 && e.touches.length === 1) {
+            const touch = e.touches[0];
+            const x = touch.clientX - dragStartRef.current.x;
+            const y = touch.clientY - dragStartRef.current.y;
+            setPosition({ x, y });
+        }
+    };
 
 
 
@@ -83,15 +133,29 @@ export function MediaViewer({ children, src, alt, type, fileName }: MediaViewerP
                         <p className="text-sm text-white/70">Media unavailable</p>
                     ) : type === 'image' ? (
                         <div
-                            className="relative transition-transform duration-200 ease-out"
-                            style={{ transform: `scale(${scale})` }}
+                            className={cn(
+                                "relative transition-transform duration-75 ease-out",
+                                scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+                            )}
+                            style={{
+                                transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+                            }}
                             onClick={(e) => e.stopPropagation()}
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseUp}
+                            // Touch events for mobile
+                            onTouchStart={handleTouchStart}
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={handleMouseUp}
                         >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                                 src={safeSrc}
                                 alt={alt || 'Media content'}
-                                className="max-w-full max-h-[85vh] object-contain rounded-md shadow-2xl"
+                                className="max-w-full max-h-[85vh] object-contain rounded-md shadow-2xl pointer-events-none select-none"
+                                draggable={false}
                             />
                         </div>
                     ) : (

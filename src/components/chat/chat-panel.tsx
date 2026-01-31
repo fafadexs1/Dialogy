@@ -1711,35 +1711,33 @@ export default function ChatPanel({
                     data={visibleMessages}
                     firstItemIndex={firstItemIndex}
                     initialTopMostItemIndex={firstItemIndex + visibleMessages.length - 1}
-                    increaseViewportBy={500}
+                    increaseViewportBy={1000} // Increased for smoother fast scrolling
+                    defaultItemHeight={80} // STABILITY: Prevents height guessing during scroll
                     alignToBottom={true}
+                    computeItemKey={(index, item) => item.id} // STABILITY: Prevent re-renders on prepend
                     followOutput={(isAtBottom) => {
-                        if (isAtBottom) {
-                            return 'auto';
-                        }
-                        return false;
+                        // If we are at the bottom, stay there.
+                        // If user is scrolled up, don't force them down unless it's their own message (handled by logic elsewhere)
+                        return isAtBottom ? 'auto' : false;
                     }}
                     atBottomStateChange={(atBottom) => {
                         userScrolledUpRef.current = !atBottom;
                     }}
                     startReached={() => {
-                        console.log('[VIRTUOSO_START_REACHED] triggered', {
-                            canLoadOlder,
-                            isLoadingOlderMessages,
-                            isFetchingHistoryRef: isFetchingHistoryRef.current,
-                            showFullHistory,
-                            messagesCount: visibleMessages.length
-                        });
                         if (canLoadOlder && !isLoadingOlderMessages && !isFetchingHistoryRef.current) {
-                            console.log('[VIRTUOSO_START_REACHED] calling tryLoadOlder');
                             tryLoadOlder();
-                        } else {
-                            console.log('[VIRTUOSO_START_REACHED] skipped tryLoadOlder');
                         }
                     }}
                     components={{
                         Header: () => (
-                            <div className="h-0" />
+                            <div className="h-4 flex justify-center p-2">
+                                {isLoadingOlderMessages && (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 backdrop-blur-sm px-3 py-1 rounded-full border border-border shadow-sm animate-in fade-in zoom-in duration-300">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        <span>Carregando histórico...</span>
+                                    </div>
+                                )}
+                            </div>
                         ),
                         Footer: () => <div className="h-4" />
                     }}
@@ -1747,7 +1745,7 @@ export default function ChatPanel({
                         const arrayIndex = index - firstItemIndex;
                         const prevMessage = arrayIndex > 0 ? visibleMessages[arrayIndex - 1] : undefined;
                         return (
-                            <div className="px-2 md:px-6 py-0.5">
+                            <div className="px-2 md:px-6 py-0.5" id={`message-${message.id}`}>
                                 <MessageItem
                                     key={message.id}
                                     message={message}

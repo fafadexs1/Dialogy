@@ -457,7 +457,12 @@ const isMarketingMessage = (message: Message) => {
 };
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign, onPrefetch }) => {
-  const isMarketingChat = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
+  const isMarketingChat = useMemo(() => {
+    const hasMarketingMessage = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
+    // Hide marketing badge if chat is assigned to an agent OR is in 'atendimentos'/'encerrados'
+    const isHandedOff = !!chat.agentId || chat.status === 'atendimentos' || chat.status === 'encerrados';
+    return hasMarketingMessage && !isHandedOff;
+  }, [chat.messages, chat.agentId, chat.status]);
   const visibleMessages = React.useMemo(() => {
     if (!chat.messages) return [];
     if (showMarketing) return chat.messages;

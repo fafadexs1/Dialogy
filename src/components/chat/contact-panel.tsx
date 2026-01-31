@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
+import { type Chat, type User, type Team, EvolutionInstance, CustomFieldDefinition, type Contact } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -63,7 +63,7 @@ interface ContactPanelProps {
     chat: Chat | null;
     currentUser: User | null;
     onTransferSuccess: () => void;
-    onContactUpdate: () => void;
+    onContactUpdate: (contact?: Contact) => void;
 }
 
 export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled, trigger }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean, trigger?: React.ReactNode }) {

@@ -152,7 +152,7 @@ export const deleteSegment = withDebug(
 
 export const saveContactAction = withDebug(
     'save_contact',
-    async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; }> {
+    async function saveContactAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string | null; contact?: Contact }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { success: false, error: "Usuário não autenticado." };
@@ -230,11 +230,38 @@ export const saveContactAction = withDebug(
                 }
             }
 
+            // Fetch the updated contact to return to frontend
+            const updatedContactRes = await client.query(`
+                SELECT c.*, 
+                       u.full_name as owner_name,
+                       COALESCE(
+                           (SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'color', t.color, 'value', t.value))
+                            FROM contact_tags ct
+                            JOIN tags t ON ct.tag_id = t.id
+                            WHERE ct.contact_id = c.id
+                           ), '[]'
+                       ) as tags,
+                       COALESCE(
+                           (SELECT json_object_agg(ccfv.field_id, ccfv.value)
+                            FROM contact_custom_field_values ccfv
+                            WHERE ccfv.contact_id = c.id
+                           ), '{}'
+                       ) as custom_fields
+                FROM contacts c
+                LEFT JOIN users u ON c.owner_id = u.id
+                WHERE c.id = $1
+            `, [contactId]);
+
+            const updatedContact = updatedContactRes.rows[0];
+            if (updatedContact) {
+                // Formatting for frontend compatibility
+                updatedContact.owner = updatedContact.owner_id ? { id: updatedContact.owner_id, name: updatedContact.owner_name } : undefined;
+            }
 
             await client.query('COMMIT');
             // revalidatePath('/crm'); // Removed to prevent full page reload on inbox
             // revalidatePath('/chat'); 
-            return { success: true, error: null };
+            return { success: true, error: null, contact: updatedContact };
         } catch (error) {
             await client.query('ROLLBACK');
             console.error("[SAVE_CONTACT] Error:", error);

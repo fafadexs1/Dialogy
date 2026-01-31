@@ -31,6 +31,12 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
     const [duration, setDuration] = useState<number>(0);
     const [showControls, setShowControls] = useState<boolean>(true);
     const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+    const [hasError, setHasError] = useState<boolean>(false);
+
+    // Reset error when src changes
+    useEffect(() => {
+        setHasError(false);
+    }, [src]);
 
     // Play / Pause / Restart
     const togglePlay = () => {
@@ -124,17 +130,42 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
         >
             <video
                 ref={videoRef}
-                className="w-auto h-auto max-h-[85vh] max-w-full mx-auto block"
+                className={cn("w-auto h-auto max-h-[85vh] max-w-full mx-auto block", hasError && "hidden")}
                 src={src}
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={handleEnded}
+                onError={() => setHasError(true)}
                 onClick={togglePlay}
                 playsInline
             />
 
+            {/* Error Fallback */}
+            {hasError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/90 text-center p-6 space-y-4">
+                    <div className="bg-red-500/10 p-4 rounded-full">
+                        <VolumeX className="w-8 h-8 text-red-400" />
+                    </div>
+                    <div className="space-y-1">
+                        <h3 className="text-lg font-semibold text-white">Não foi possível reproduzir</h3>
+                        <p className="text-sm text-white/60 max-w-[250px] mx-auto">
+                            O formato deste vídeo não é suportado pelo seu navegador.
+                        </p>
+                    </div>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleDownload}
+                        className="gap-2 bg-white text-black hover:bg-white/90"
+                    >
+                        <Download className="w-4 h-4" />
+                        Baixar para Assistir
+                    </Button>
+                </div>
+            )}
+
             {/* Controls */}
             <AnimatePresence>
-                {showControls && (
+                {showControls && !hasError && (
                     <motion.div
                         className="absolute bottom-4 left-1/2 w-[96%] backdrop-blur-md bg-black/40 border border-white/10 rounded-2xl p-4 flex flex-col gap-3 shadow-lg"
                         initial={{ y: 20, opacity: 0, x: "-50%" }}

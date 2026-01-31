@@ -159,13 +159,13 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('image/')) {
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
-                    <div className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px]">
+                    <div className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-square min-h-[200px] bg-muted/20">
                         <SafeMediaImage
                             src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
                             width={300}
                             height={300}
-                            className="object-cover w-full h-full aspect-square hover:scale-105 transition-transform duration-300"
+                            className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
                         />
                     </div>
                 </MediaViewer>
@@ -175,13 +175,13 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('video/')) {
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
-                    <div className="relative group cursor-pointer overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px]">
+                    <div className="relative group cursor-pointer overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-video min-h-[169px] bg-muted/20">
                         <SafeMediaImage
                             src={safeThumbnail || '/placeholder-video.png'}
                             alt="Vídeo"
                             width={300}
                             height={169} // ~16:9 ratio
-                            className="object-cover w-full h-full aspect-video brightness-90 group-hover:scale-105 transition-all duration-300"
+                            className="object-cover w-full h-full brightness-90 group-hover:scale-105 transition-all duration-300"
                         />
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                             <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">

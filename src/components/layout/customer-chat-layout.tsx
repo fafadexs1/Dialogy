@@ -749,23 +749,38 @@ export default function CustomerChatLayout({
       return;
     }
 
-    const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
-    if (selectedChatIdRef.current === chat.id) {
+    // FIX: Force-persist the chat in the store immediately.
+    // This prevents "Ghosting" if the chat list was just refreshed and this chat was excluded,
+    // or if it's a search result. We ensure it exists so the UI can render it.
+    upsertChats([chat]);
+
+    // Fix: Check against the *Store State* (selectedChatId) rather than just the Ref.
+    // We only skip if BOTH the store and the ref agree it's already selected.
+    if (selectedChatId === chat.id && selectedChatIdRef.current === chat.id) {
+      const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
       if (isFirstActivation) {
         activatedChatIdsRef.current.add(chat.id);
         void ensureMessagesForChat(chat.id, { force: true });
       }
+      // If it's already selected and in the store (thanks to upsert), we can safely return.
+      // The upsert above triggers the re-render if it was missing.
       return;
     }
+
+    const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
+
+    // Update Ref immediately to prevent rapid-fire duplicates
     selectedChatIdRef.current = chat.id;
+
     React.startTransition(() => {
       setSelectedChatId(chat.id);
       setShowFullHistory(false);
     });
+
     updateSelectedChatPath(chat.id);
     activatedChatIdsRef.current.add(chat.id);
     void ensureMessagesForChat(chat.id, { force: isFirstActivation });
-  }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+  }, [selectedChatId, ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath, upsertChats]);
 
   const jumpChatByOffset = useCallback((delta: number) => {
     if (!chats.length) return;
@@ -937,6 +952,13 @@ export default function CustomerChatLayout({
     await runDeltaSync();
     notifyPeers();
   }, [notifyPeers, runDeltaSync]);
+
+  const handleLocalContactUpdate = useCallback((updatedContact?: Contact) => {
+    if (updatedContact) {
+      updateChatContact(updatedContact);
+    }
+    handleDataMutation();
+  }, [updateChatContact, handleDataMutation]);
 
   const handleForwardMessage = useCallback((message: Message) => {
     setForwardingMessage(message);
@@ -1198,7 +1220,7 @@ export default function CustomerChatLayout({
   useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
     selectedChatId,
-    chatUpdatesChatIdsCsv: ownershipFilter === 'mine' ? chatUpdatesChatIdsCsv : undefined,
+    chatUpdatesChatIdsCsv: undefined, // Always subscribe to all workspace updates to catch TRANSFERS (incoming chats not yet in my list)
     messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
@@ -1208,25 +1230,27 @@ export default function CustomerChatLayout({
 
   useEffect(() => {
     if (initialData) {
+      setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
+
       // FIX: Prevent overwriting client-side state with stale/empty server selection during revalidation.
-      // If the server sends selectedChatId: null (common in root revalidations), but we have a client-side selection,
-      // we must preserve the client selection AND ensure the chat object exists in the new list.
+      // If we are already hydrated, the CLIENT selection is the source of truth, unless the user explicitly navigated.
+      // initialData often comes from generic revalidations (like cookie updates) that reset selectedChatId to null.
 
       // Determine if we should preserve the current selection
       const clientHasSelection = !!selectedChatIdRef.current;
-      const serverClearedSelection = initialData.selectedChatId === null;
 
-      // We assume client selection is valid if we are hydrated and the URL/Ref indicates a chat.
-      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection && serverClearedSelection;
+      // If hydrated, we almost ALWAYS trust the client ref over the server's suggestion for selection,
+      // because the server prompt is often lagging or generic.
+      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection;
 
       let effectiveSelectedChatId = initialData.selectedChatId;
       let effectiveChats = initialData.chats;
 
-      if (shouldPreserveSelection) {
-        console.log('[hydrate] Preserving client selection against null server selection.', {
-          client: selectedChatIdRef.current,
-          server: initialData.selectedChatId
-        });
+      if (shouldPreserveSelection && selectedChatIdRef.current) {
+        // console.log('[hydrate] Preserving client selection.', {
+        //   client: selectedChatIdRef.current,
+        //   server: initialData.selectedChatId
+        // });
 
         effectiveSelectedChatId = selectedChatIdRef.current;
 
@@ -1239,16 +1263,16 @@ export default function CustomerChatLayout({
           const cachedChat = currentStoreChats.find(c => c.id === effectiveSelectedChatId);
 
           if (cachedChat) {
-            console.log('[hydrate] Injecting cached chat object into new server list to prevent disappearance.');
+            // console.log('[hydrate] Injecting cached chat object into new server list to prevent disappearance.');
             // Add to start so it's visible. Logic will sort it anyway.
             effectiveChats = [cachedChat, ...effectiveChats];
           } else {
             console.warn('[hydrate] Selected chat ID preserved but object missing from cache and server. UI may be empty.');
+            // Fallback: If we can't find it anywhere, maybe we SHOULD let the server overwrite it?
+            // For now, keep it to prevent erratic jumping. The user will see a skeleton or empty state which is better than losing context.
           }
         }
       }
-
-      setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
       setInitialData({
         chats: effectiveChats,
         selectedChatId: effectiveSelectedChatId,
@@ -1428,7 +1452,7 @@ export default function CustomerChatLayout({
               chat={enrichedSelectedChat}
               currentUser={initialUser}
               onTransferSuccess={handleDataMutation}
-              onContactUpdate={handleDataMutation}
+              onContactUpdate={handleLocalContactUpdate}
             />
           )}
         </div>

@@ -7,11 +7,21 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/auth-provider';
 import { WORKSPACE_CHANGED_EVENT } from '@/components/layout/workspace-switcher';
 
-const PresenceContext = createContext<{ onlineAgents: OnlineAgent[], currentUser: User | null, isOffline: boolean }>({ onlineAgents: [], currentUser: null, isOffline: false });
+const PresenceContext = createContext<{
+  onlineAgents: OnlineAgent[],
+  currentUser: User | null,
+  isOffline: boolean,
+  connectionStatus: 'connected' | 'reconnecting' | 'offline'
+}>({
+  onlineAgents: [],
+  currentUser: null,
+  isOffline: false,
+  connectionStatus: 'connected'
+});
 
 export const usePresence = () => {
-  const { onlineAgents, isOffline } = useContext(PresenceContext);
-  return { onlineAgents, isOffline };
+  const { onlineAgents, isOffline, connectionStatus } = useContext(PresenceContext);
+  return { onlineAgents, isOffline, connectionStatus };
 };
 
 export const useCurrentUser = () => {
@@ -25,6 +35,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
   const supabase = useMemo(() => createClient(), []);
 
   // Listen for workspace change events to refetch user data
@@ -63,8 +74,6 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     tabIdRef.current = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  // Ref to track if we are currently updating to avoid loop
-  const isUpdatingRef = useRef(false);
   const bootstrappedUserRef = useRef<string | null>(null);
   const fetchingUserRef = useRef(false);
 
@@ -138,13 +147,26 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     previousWorkspaceIdRef.current = currentWorkspaceId;
   }, [localUser?.activeWorkspaceId]);
 
-  // Monitor online/offline status
+  // Monitor online/offline status - Enhanced with forced reconnection
   useEffect(() => {
     // Initial check
     setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
 
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
+    const handleOnline = () => {
+      setIsOffline(false);
+      console.log('[PresenceProvider] Browser online, forcing channel reconnection...');
+      // Force channel cleanup so main effect can reconnect
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      setConnectionStatus('reconnecting');
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      setConnectionStatus('offline');
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -153,7 +175,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     const currentUserKey = localUser ? `${localUser.id}-${localUser.activeWorkspaceId}` : 'null';
@@ -212,8 +234,19 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, presenceBootstrapDone, isAuthLoading]
   );
 
+  // Debounce ref for refreshOnlineAgents
+  const lastRefreshRef = useRef<number>(0);
+
   const refreshOnlineAgents = useCallback(async () => {
     if (!localUser?.activeWorkspaceId) return;
+
+    // Debounce: Skip if called within last 2 seconds
+    const now = Date.now();
+    if (now - lastRefreshRef.current < 2000) {
+      return;
+    }
+    lastRefreshRef.current = now;
+
     try {
       const { getOnlineAgents } = await import('@/actions/user');
       const agents = await getOnlineAgents(localUser.activeWorkspaceId);
@@ -233,7 +266,8 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     let intervalId: NodeJS.Timeout;
     const isDeveloper = pathname.startsWith('/developer');
-    const pollInterval = isDeveloper ? 60000 : 10000; // 10 seconds normal, 1 minute for developer
+    // HARDENING: Optimize polling. If connected, relax to 60s. If resetting/offline, aggressive 10s.
+    const pollInterval = (connectionStatus === 'connected' && !isDeveloper) ? 60000 : 10000;
 
     const initialTimer = setTimeout(() => {
       refreshOnlineAgents();
@@ -244,7 +278,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       clearTimeout(initialTimer);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname, isAuthLoading]);
+  }, [refreshOnlineAgents, localUser?.activeWorkspaceId, isPublicPage, pathname, isAuthLoading, connectionStatus]);
 
   // Use refs to track if we've already set up the subscription to avoid dupes/loops
   const channelRef = useRef<any>(null);
@@ -322,7 +356,22 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
           refreshOnlineAgents();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[PresenceProvider] Realtime status: ${status}`);
+
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected');
+          refreshOnlineAgents();
+        }
+
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setConnectionStatus('reconnecting');
+        }
+
+        if (status === 'CLOSED') {
+          setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine ? 'reconnecting' : 'offline');
+        }
+      });
 
     channelRef.current = channel;
 
@@ -376,8 +425,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const contextValue = useMemo(() => ({
     onlineAgents,
     currentUser: localUser,
-    isOffline
-  }), [onlineAgents, localUser, isOffline]);
+    isOffline,
+    connectionStatus
+  }), [onlineAgents, localUser, isOffline, connectionStatus]);
 
   return (
     <PresenceContext.Provider value={contextValue}>
