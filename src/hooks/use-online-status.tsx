@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/auth-provider';
 import { WORKSPACE_CHANGED_EVENT } from '@/components/layout/workspace-switcher';
+import { runCacheCleanup, scheduleCacheCleanupOnIdle } from '@/lib/cache';
 
 const PresenceContext = createContext<{
   onlineAgents: OnlineAgent[],
@@ -142,6 +143,14 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       // Workspace changed - clear old agents immediately
       console.log(`[PresenceProvider] Workspace changed from ${previousWorkspaceIdRef.current} to ${currentWorkspaceId}, clearing agents`);
       setOnlineAgents([]);
+
+      // Clean up cache from old workspace
+      runCacheCleanup(previousWorkspaceIdRef.current);
+    }
+
+    // Schedule cleanup on idle if first load
+    if (previousWorkspaceIdRef.current === undefined && currentWorkspaceId) {
+      scheduleCacheCleanupOnIdle();
     }
 
     previousWorkspaceIdRef.current = currentWorkspaceId;

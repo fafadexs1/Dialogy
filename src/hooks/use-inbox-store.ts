@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Chat, Contact, Message } from '@/lib/types';
+import { cacheService } from '@/lib/cache';
 
 type MessagesRecord = Record<string, Message[]>;
 type TimestampRecord = Record<string, string | null>;
@@ -129,6 +130,15 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         hasMoreChats,
       };
     });
+
+    // Persist to IndexedDB (fire-and-forget)
+    if (chats.length > 0 && chats[0]?.workspace_id) {
+      const workspaceId = chats[0].workspace_id;
+      cacheService.setChats(workspaceId, chats).catch(() => { });
+      if (selectedChatId && messages.length > 0) {
+        cacheService.setMessages(selectedChatId, workspaceId, messages).catch(() => { });
+      }
+    }
   },
   setSelectedChatId: (chatId) => set({ selectedChatId: chatId }),
   upsertChats: (incomingChats, lastSyncChats) => {
@@ -163,6 +173,11 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         lastSyncChats: lastSyncChats ?? state.lastSyncChats,
       };
     });
+
+    // Persist to IndexedDB (fire-and-forget)
+    if (incomingChats.length > 0 && incomingChats[0]?.workspace_id) {
+      cacheService.setChats(incomingChats[0].workspace_id, incomingChats).catch(() => { });
+    }
   },
   appendChats: (incomingChats) => {
     if (!incomingChats.length) return;
@@ -270,6 +285,16 @@ export const useInboxStore = create<InboxState>((set, get) => ({
           : state.lastSyncMessages,
       };
     });
+
+    // Persist new messages to IndexedDB (fire-and-forget, only non-optimistic)
+    const nonOptimisticMessages = messages.filter((m) => !m.optimistic);
+    if (nonOptimisticMessages.length > 0 && nonOptimisticMessages[0]?.workspace_id) {
+      cacheService.appendMessages(
+        chatId,
+        nonOptimisticMessages[0].workspace_id,
+        nonOptimisticMessages
+      ).catch(() => { });
+    }
   },
   prependMessagesToChat: (chatId, messages, oldestDate, oldestId, hasMoreHistory) => {
     set((state) => {
