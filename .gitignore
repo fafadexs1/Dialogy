@@ -1,8 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
-/.pnp
+node_modules
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,26 +8,24 @@
 !.yarn/releases
 !.yarn/versions
 
+# build artifacts
+.next
+out
+build
+dist
+
 # testing
-/coverage
+coverage
 
-# next.js
-/.next/
-/out/
-.env
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+# misc
+.DS_Store
+*.pem
 
 # vercel
 .vercel
@@ -38,11 +34,19 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.genkit/*
-
 # firebase
 firebase-debug.log
 firestore-debug.log
 
-# local ffmpeg builds
+# local binaries
 ffmpeg-2026-*
+
+# agents / temp
+.agent
+.temp_ag_kit
+.genkit
+.gemini
+
+# git
+.git
+.gitignore

@@ -5,30 +5,113 @@ import { resilientFetch } from '@/lib/http/resilient-fetch';
 export type ExchangeMetaTokenResult = {
     success: boolean;
     accessToken?: string;
+    wabaId?: string;
+    phoneNumberId?: string;
+    // Extra metadata for user visibility
+    metaInfo?: {
+        businessName?: string;
+        wabaName?: string;
+        displayPhoneNumber?: string;
+        verifiedName?: string;
+    };
     error?: string;
     debug?: any;
 };
 
+/**
+ * Fetches WABA and Phone Number IDs from Graph API using the access token.
+ * This is used when the embedded signup postMessage doesn't provide these IDs.
+ */
+async function fetchWabaInfo(accessToken: string): Promise<{ wabaId?: string; phoneNumberId?: string; metaInfo?: ExchangeMetaTokenResult['metaInfo'] }> {
+    try {
+        // Step 1: Get shared WABA accounts
+        const wabaResponse = await resilientFetch(
+            `https://graph.facebook.com/v24.0/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}&access_token=${accessToken}`
+        );
+        const wabaData = await wabaResponse.json().catch(() => ({}));
+        console.log('[META_AUTH] WABA fetch response:', JSON.stringify(wabaData, null, 2));
+
+        // Try to find WABA from business data
+        if (wabaData.data && wabaData.data.length > 0) {
+            for (const business of wabaData.data) {
+                const wabaAccounts = business.owned_whatsapp_business_accounts?.data;
+                if (wabaAccounts && wabaAccounts.length > 0) {
+                    const waba = wabaAccounts[0];
+                    const phoneNumbers = waba.phone_numbers?.data;
+
+                    const metaInfo: ExchangeMetaTokenResult['metaInfo'] = {
+                        businessName: business.name,
+                        wabaName: waba.name,
+                    };
+
+                    if (phoneNumbers && phoneNumbers.length > 0) {
+                        const phone = phoneNumbers[0];
+                        return {
+                            wabaId: waba.id,
+                            phoneNumberId: phone.id,
+                            metaInfo: {
+                                ...metaInfo,
+                                displayPhoneNumber: phone.display_phone_number,
+                                verifiedName: phone.verified_name
+                            }
+                        };
+                    }
+                    // WABA found but no phone numbers yet
+                    return { wabaId: waba.id, metaInfo };
+                }
+            }
+        }
+
+        // Alternative: Try direct WABA query
+        const directResponse = await resilientFetch(
+            `https://graph.facebook.com/v24.0/me?fields=id,name&access_token=${accessToken}`
+        );
+        const directData = await directResponse.json().catch(() => ({}));
+        console.log('[META_AUTH] Direct me query:', JSON.stringify(directData, null, 2));
+
+        // Try to fetch WABAs associated with the token
+        const sharedWabaResponse = await resilientFetch(
+            `https://graph.facebook.com/v24.0/debug_token?input_token=${accessToken}&access_token=${accessToken}`
+        );
+        const debugData = await sharedWabaResponse.json().catch(() => ({}));
+        console.log('[META_AUTH] Token debug:', JSON.stringify(debugData, null, 2));
+
+        // Check granular scopes for WABA info
+        const granularScopes = debugData.data?.granular_scopes || [];
+        for (const scope of granularScopes) {
+            if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length > 0) {
+                const wabaId = scope.target_ids[0];
+                // Try to get phone numbers for this WABA
+                const phoneResponse = await resilientFetch(
+                    `https://graph.facebook.com/v24.0/${wabaId}/phone_numbers?access_token=${accessToken}`
+                );
+                const phoneData = await phoneResponse.json().catch(() => ({}));
+                console.log('[META_AUTH] Phone numbers for WABA:', JSON.stringify(phoneData, null, 2));
+
+                if (phoneData.data && phoneData.data.length > 0) {
+                    return {
+                        wabaId: wabaId,
+                        phoneNumberId: phoneData.data[0].id,
+                        metaInfo: {
+                            displayPhoneNumber: phoneData.data[0].display_phone_number,
+                            verifiedName: phoneData.data[0].verified_name
+                        }
+                    };
+                }
+                return { wabaId: wabaId };
+            }
+        }
+
+        return {};
+    } catch (error) {
+        console.error('[META_AUTH] Error fetching WABA info:', error);
+        return {};
+    }
+}
+
 export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTokenResult> {
-    const appId = process.env.NEXT_PUBLIC_META_APP_ID;
-    const appSecret = process.env.META_APP_SECRET;
-
-    // We can allow the frontend to pass the redirect_uri or hardcode it.
-    // Usually it must match the one used in the popup exactly.
-    // The user provided 'https://developers.facebook.com/es/oauth/callback/...' in the prompt example,
-    // but typically for embedded signup it might be the standard fb callback or the domain of the app.
-    // However, for the initial token exchange, if we use the "Certified Provider" flow or standard flow,
-    // we might need to be careful.
-    // The previous user request showed a curl with `redirect_uri` as `https://developers.facebook.com/es/oauth/callback/...`.
-    // I will try to use that one if it's the standard for the Embedded Signup flow they are using, 
-    // OR I will try to infer it. 
-    // Actually, often passing no redirect_uri or the exact same one is required.
-    // Let's try to use the one from the prompt as a default if not env var is set.
-
-    const redirectUri = 'https://www.facebook.com/connect/login_success.html'; // Common default for manual flows/popups
-    // WA Embedded signup often uses postmessage and the exchange happens server-to-server.
-    // The docs say: When the user completes the flow... include a code.
-    // "You will need to exchange this code for an access token".
+    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || process.env.NEXT_PUBLIC_META_APP_ID;
+    const appSecret = process.env.FACEBOOK_APP_SECRET || process.env.META_APP_SECRET;
 
     if (!appId || !appSecret) {
         return { success: false, error: 'Server configuration missing (App ID or Secret).' };
@@ -42,17 +125,6 @@ export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTo
             code: code,
             grant_type: 'authorization_code',
         };
-
-        // For embedded signup, usually redirect_uri is NOT sent in step 2 (exchange), 
-        // OR it must be the sdk source. 
-        // I will omit it first as per some embedded signup docs, or use a generic one if it fails.
-        // Wait, the user prompt curl DID have a redirect_uri.
-        // "https://developers.facebook.com/es/oauth/callback/?business_id=...&nonce=..."
-        // That looks like a strictly specific callback. 
-        // IF I cannot dynamic that, I might fail.
-
-        // Let's try WITHOUT first, as common Oauth code flow requires matching redirect_uri but embedded often simplifies.
-        // Attempt 1: Just code, id, secret.
 
         const response = await resilientFetch(url, {
             method: 'POST',
@@ -69,9 +141,16 @@ export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTo
             return { success: false, error: json.error?.message || 'Meta API Error', debug: json };
         }
 
+        // After getting the token, fetch WABA info
+        const wabaInfo = await fetchWabaInfo(json.access_token);
+        console.log('[META_AUTH] WABA Info fetched:', wabaInfo);
+
         return {
             success: true,
-            accessToken: json.access_token
+            accessToken: json.access_token,
+            wabaId: wabaInfo.wabaId,
+            phoneNumberId: wabaInfo.phoneNumberId,
+            metaInfo: wabaInfo.metaInfo
         };
 
     } catch (error: any) {
@@ -79,3 +158,4 @@ export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTo
         return { success: false, error: error.message };
     }
 }
+

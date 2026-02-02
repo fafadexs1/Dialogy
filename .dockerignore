@@ -1,10 +1,53 @@
 Dockerfile
-.dockerignore
+# dependencies
 node_modules
-npm-debug.log
-README.md
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# build artifacts
 .next
-.git
+out
+build
+dist
+
+# testing
+coverage
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# misc
+.DS_Store
+*.pem
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# firebase
+firebase-debug.log
+firestore-debug.log
+
+# local binaries
+ffmpeg-2026-*
+
+# agents / temp
 .agent
 .temp_ag_kit
+.genkit
 .gemini
+
+# git
+.git
+.gitignore

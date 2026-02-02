@@ -174,62 +174,64 @@ export default function MetaInstagramIntegrationPage() {
   };
 
   // --- Automatic Instagram Logic ---
-  const handleFacebookLoginSuccess = async (response: any) => {
-    const userAccessToken = response.accessToken;
-    const fbUserId = response.userID;
-    const expiresIn = Number(response.expiresIn);
-    const dataAccessExpiry = Number(response.data_access_expiration_time);
-    const expiresAt =
-      Number.isFinite(expiresIn) && expiresIn > 0
-        ? new Date(Date.now() + expiresIn * 1000).toISOString()
-        : Number.isFinite(dataAccessExpiry) && dataAccessExpiry > 0
-          ? new Date(dataAccessExpiry * 1000).toISOString()
-          : '';
-    // 1. Get Pages first
-    try {
-      const pagesRes = await fetch(`https://graph.facebook.com/v20.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,about,location,website,fan_count,verification_status,instagram_business_account{id,name,username,profile_picture_url,followers_count,website,biography}`);
-      const pagesData = await pagesRes.json();
+  const handleFacebookLoginSuccess = (response: any) => {
+    (async () => {
+      const userAccessToken = response.accessToken;
+      const fbUserId = response.userID;
+      const expiresIn = Number(response.expiresIn);
+      const dataAccessExpiry = Number(response.data_access_expiration_time);
+      const expiresAt =
+        Number.isFinite(expiresIn) && expiresIn > 0
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : Number.isFinite(dataAccessExpiry) && dataAccessExpiry > 0
+            ? new Date(dataAccessExpiry * 1000).toISOString()
+            : '';
+      // 1. Get Pages first
+      try {
+        const pagesRes = await fetch(`https://graph.facebook.com/v20.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,about,location,website,fan_count,verification_status,instagram_business_account{id,name,username,profile_picture_url,followers_count,website,biography}`);
+        const pagesData = await pagesRes.json();
 
-      if (pagesData.data) {
-        setForm(prev => ({
-          ...prev,
-          fbUserId,
-          fbUserAccessToken: userAccessToken,
-          fbUserTokenExpiresAt: expiresAt,
-        }));
-        const accounts: InstagramAccount[] = [];
+        if (pagesData.data) {
+          setForm(prev => ({
+            ...prev,
+            fbUserId,
+            fbUserAccessToken: userAccessToken,
+            fbUserTokenExpiresAt: expiresAt,
+          }));
+          const accounts: InstagramAccount[] = [];
 
-        for (const page of pagesData.data) {
-          if (page.instagram_business_account) {
-            accounts.push({
-              id: page.instagram_business_account.id,
-              name: page.instagram_business_account.name || page.instagram_business_account.username,
-              username: page.instagram_business_account.username,
-              profile_picture_url: page.instagram_business_account.profile_picture_url,
-              page_id: page.id,
-              page_name: page.name,
-              access_token: page.access_token, // We use the Page Token to manage the IG account!
-              // Prioritize Instagram specific data, fallback to Page data where appropriate for "Public Metadata" proof
-              about: page.instagram_business_account.biography || page.about,
-              location: page.location,
-              website: page.instagram_business_account.website || page.website,
-              followers_count: page.instagram_business_account.followers_count || page.fan_count,
-              verification_status: page.verification_status
-            });
+          for (const page of pagesData.data) {
+            if (page.instagram_business_account) {
+              accounts.push({
+                id: page.instagram_business_account.id,
+                name: page.instagram_business_account.name || page.instagram_business_account.username,
+                username: page.instagram_business_account.username,
+                profile_picture_url: page.instagram_business_account.profile_picture_url,
+                page_id: page.id,
+                page_name: page.name,
+                access_token: page.access_token, // We use the Page Token to manage the IG account!
+                // Prioritize Instagram specific data, fallback to Page data where appropriate for "Public Metadata" proof
+                about: page.instagram_business_account.biography || page.about,
+                location: page.location,
+                website: page.instagram_business_account.website || page.website,
+                followers_count: page.instagram_business_account.followers_count || page.fan_count,
+                verification_status: page.verification_status
+              });
+            }
+          }
+
+          if (accounts.length > 0) {
+            setAvailableAccounts(accounts);
+            toast({ title: 'Contas Encontradas', description: `${accounts.length} contas de Instagram Business encontradas.` });
+          } else {
+            toast({ title: 'Nenhuma conta Business', description: 'Encontramos suas páginas, mas nenhuma tem conta Instagram Business vinculada.', variant: 'destructive' });
           }
         }
-
-        if (accounts.length > 0) {
-          setAvailableAccounts(accounts);
-          toast({ title: 'Contas Encontradas', description: `${accounts.length} contas de Instagram Business encontradas.` });
-        } else {
-          toast({ title: 'Nenhuma conta Business', description: 'Encontramos suas páginas, mas nenhuma tem conta Instagram Business vinculada.', variant: 'destructive' });
-        }
+      } catch (err) {
+        console.error(err);
+        toast({ title: 'Erro na API', description: 'Falha ao buscar contas do Instagram.', variant: 'destructive' });
       }
-    } catch (err) {
-      console.error(err);
-      toast({ title: 'Erro na API', description: 'Falha ao buscar contas do Instagram.', variant: 'destructive' });
-    }
+    })();
   };
 
   const handleAccountSelection = (accountId: string) => {

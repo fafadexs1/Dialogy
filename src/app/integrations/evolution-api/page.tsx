@@ -122,39 +122,45 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
         };
 
         const messageHandler = (event: MessageEvent) => {
-            if (!event.origin.endsWith('facebook.com')) return;
+            // Log all messages from facebook for debugging
+            if (event.origin.includes('facebook')) {
+                console.log('[Meta] Raw message from Facebook:', event.data);
+            }
+            if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
             try {
-                const data = JSON.parse(event.data);
+                const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                console.log('[Meta] Parsed message:', data);
                 if (data.type === 'WA_EMBEDDED_SIGNUP') {
-                    console.log('[Meta] Event received:', data);
-                    if (data.event === 'FINISH') {
+                    console.log('[Meta] WA_EMBEDDED_SIGNUP event:', data);
+                    if (data.event === 'FINISH' || data.event === 'SUBMIT') {
                         const d = data.data || {};
-                        capture.waba_id = d.waba_id;
-                        capture.phone_number_id = d.phone_number_id;
+                        capture.waba_id = d.waba_id || d.wabaId;
+                        capture.phone_number_id = d.phone_number_id || d.phoneNumberId;
+                        console.log('[Meta] Captured IDs:', { waba_id: capture.waba_id, phone_number_id: capture.phone_number_id });
                     }
                 }
             } catch (e) {
-                // ignore
+                // Not JSON, ignore
             }
         };
 
         window.addEventListener('message', messageHandler);
 
-        window.FB.login(async (response: any) => {
-            console.log('[Meta] Login response:', response);
-            window.removeEventListener('message', messageHandler);
+        window.FB.login((response: any) => {
+            (async () => {
+                console.log('[Meta] Login response:', response);
 
-            if (response.authResponse && response.authResponse.code) {
-                capture.code = response.authResponse.code;
-
-                // Ensure we have captured the ID data from the message event
-                // (Destructure to ensure type safety after check)
-                const { waba_id, phone_number_id } = capture;
-
-                if (!waba_id || !phone_number_id) {
-                    toast({ title: 'Erro de Dados', description: 'Não foi possível capturar os IDs do WhatsApp. Tente novamente.', variant: 'destructive' });
+                // Early return if no valid auth code - FB.login can call callback multiple times
+                if (!response.authResponse || !response.authResponse.code) {
+                    console.log('[Meta] Waiting for auth code...');
                     return;
                 }
+
+                capture.code = response.authResponse.code;
+                console.log('[Meta] Auth code received, proceeding with token exchange...');
+
+                // Remove listener - we'll get WABA IDs from the API if not from postMessage
+                window.removeEventListener('message', messageHandler);
 
                 setIsSubmitting(true);
                 setStatusMessage('Autenticando com Meta...');
@@ -163,14 +169,32 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     const result = await exchangeMetaAuthCode(response.authResponse.code);
 
                     if (result.success && result.accessToken) {
+                        // Use WABA IDs from API response (or from postMessage if available)
+                        const wabaId = capture.waba_id || result.wabaId;
+                        const phoneId = capture.phone_number_id || result.phoneNumberId;
+
+                        if (result.metaInfo) {
+                            console.log('[Meta] Meta Info captured:', result.metaInfo);
+                        }
+
+                        if (!wabaId || !phoneId) {
+                            console.error('[Meta] No WABA IDs found. Result:', result, 'Capture:', capture);
+                            toast({
+                                title: 'Erro de Configuração',
+                                description: 'Não foi possível obter os IDs do WhatsApp Business. Verifique se a conta tem um número de telefone registrado.',
+                                variant: 'destructive'
+                            });
+                            return;
+                        }
+
                         setStatusMessage('Criando Instância Evolution...');
 
-                        const instanceName = `WhatsApp Business ${phone_number_id.slice(-4)}`;
+                        const instanceName = `WhatsApp Business ${phoneId.slice(-4)}`;
                         const payload: EvolutionInstanceCreationPayload = {
                             displayName: instanceName,
                             integration: 'WHATSAPP-BUSINESS',
-                            businessId: waba_id,
-                            number: phone_number_id,
+                            businessId: wabaId,
+                            number: phoneId,
                             token: result.accessToken,
                             qrcode: false,
                             // Definições padrão
@@ -179,7 +203,9 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                             rejectCall: false,
                             groupsIgnore: false,
                             alwaysOnline: true,
-                            webhook: { events: [] }
+                            webhook: { events: [] },
+                            // Only include metaInfo if it exists (prevents "$undefined" serialization)
+                            ...(result.metaInfo && { metaInfo: result.metaInfo })
                         };
 
                         const creationResult = await createEvolutionApiInstance(payload, workspaceId);
@@ -200,16 +226,13 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     setIsSubmitting(false);
                     setStatusMessage('');
                 }
-            } else {
-                // User cancelled or error
-                console.warn('[Meta] Valid auth code not received.');
-            }
+            })();
         }, {
             config_id: configId,
             response_type: 'code',
             override_default_response_type: true,
             extras: {
-                setup: {}
+                version: "v3"
             }
         });
     };
@@ -834,6 +857,8 @@ export default function EvolutionApiPage() {
                         </DialogTrigger>
                     )}
                     <DialogContent className="max-w-3xl">
+                        <DialogTitle className="sr-only">Criar Nova Instância WhatsApp</DialogTitle>
+                        <DialogDescription className="sr-only">Escolha uma opção para conectar seu WhatsApp.</DialogDescription>
                         <AddInstanceForm workspaceId={user.activeWorkspaceId!} onSuccess={handleSuccess} onClose={() => setIsModalOpen(false)} />
                     </DialogContent>
                 </Dialog>

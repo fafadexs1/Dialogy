@@ -163,39 +163,39 @@ export default function MetaMessengerIntegrationPage() {
     toast({ title: 'Copiado!', description: `${label} copiado para a área de transferência.` });
   };
 
-  // --- Facebook Login Automatic Flow Helpers ---
-  const handleFacebookLoginSuccess = async (response: any) => {
-    const userAccessToken = response.accessToken;
-    const fbUserId = response.userID; // Capture User ID
-    const expiresIn = Number(response.expiresIn);
-    const dataAccessExpiry = Number(response.data_access_expiration_time);
-    const expiresAt =
-      Number.isFinite(expiresIn) && expiresIn > 0
-        ? new Date(Date.now() + expiresIn * 1000).toISOString()
-        : Number.isFinite(dataAccessExpiry) && dataAccessExpiry > 0
-          ? new Date(dataAccessExpiry * 1000).toISOString()
-          : '';
-    try {
-      // Fetch Pages
-      const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture,about,location,website,fan_count,verification_status`);
-      const data = await res.json();
-      if (data.data) {
-        setAvailablePages(data.data);
-        // Store fbUserId temporarily in form state even if page not selected yet, or handle via selection
-        setForm(prev => ({
-          ...prev,
-          fbUserId,
-          fbUserAccessToken: userAccessToken,
-          fbUserTokenExpiresAt: expiresAt,
-        }));
-        toast({ title: 'Páginas Carregadas', description: `${data.data.length} páginas encontradas.` });
-      } else {
-        toast({ title: 'Nenhuma página', description: 'Não encontramos páginas administrativas nesta conta.', variant: 'destructive' });
+  const handleFacebookLoginSuccess = (response: any) => {
+    (async () => {
+      if (!response.authResponse) {
+        toast({ title: 'Login Cancelado', description: 'Você cancelou o login ou não concedeu as permissões necessárias.', variant: 'destructive' });
+        return;
       }
-    } catch (err) {
-      console.error(err);
-      toast({ title: 'Erro ao buscar páginas', description: 'Falha na comunicação com o Facebook API.', variant: 'destructive' });
-    }
+
+      const { accessToken: userAccessToken, userID: fbUserId, data_access_expiration_time: dataAccessExpiry } = response.authResponse;
+      const expiresAt = dataAccessExpiry
+        ? new Date(dataAccessExpiry * 1000).toISOString()
+        : '';
+      try {
+        // Fetch Pages
+        const res = await fetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture,about,location,website,fan_count,verification_status`);
+        const data = await res.json();
+        if (data.data) {
+          setAvailablePages(data.data);
+          // Store fbUserId temporarily in form state even if page not selected yet, or handle via selection
+          setForm(prev => ({
+            ...prev,
+            fbUserId,
+            fbUserAccessToken: userAccessToken,
+            fbUserTokenExpiresAt: expiresAt,
+          }));
+          toast({ title: 'Páginas Carregadas', description: `${data.data.length} páginas encontradas.` });
+        } else {
+          toast({ title: 'Nenhuma página', description: 'Não encontramos páginas administrativas nesta conta.', variant: 'destructive' });
+        }
+      } catch (err) {
+        console.error(err);
+        toast({ title: 'Erro ao buscar páginas', description: 'Falha na comunicação com o Facebook API.', variant: 'destructive' });
+      }
+    })();
   };
 
   const handlePageSelection = (pageId: string) => {
@@ -210,6 +210,8 @@ export default function MetaMessengerIntegrationPage() {
       }));
     }
   };
+
+
 
   return (
     <div className="flex flex-col h-full bg-muted/10">

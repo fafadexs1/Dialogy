@@ -495,6 +495,14 @@ export interface EvolutionInstanceCreationPayload {
     headers?: Record<string, string>;
     events?: string[];
   };
+
+  // Meta Info (for storage only)
+  metaInfo?: {
+    businessName?: string;
+    wabaName?: string;
+    displayPhoneNumber?: string;
+    verifiedName?: string;
+  };
 }
 
 

@@ -127,13 +127,17 @@ export async function createEvolutionApiInstance(
         const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
 
         // 2. Gerar o próximo `instanceName` sequencial para o cluster selecionado.
-        const lastInstanceRes = await client.query(
-            `SELECT instance_name FROM evolution_api_instances 
-             WHERE cluster_id = $1 AND instance_name LIKE 'zap%' 
-             ORDER BY LENGTH(instance_name) DESC, instance_name DESC 
-             LIMIT 1`,
-            [cluster.id]
-        );
+        // 2. Gerar o próximo `instanceName` sequencial para o cluster selecionado.
+        const [lastInstanceRes, evoInstances] = await Promise.all([
+            client.query(
+                `SELECT instance_name FROM evolution_api_instances 
+                 WHERE cluster_id = $1 AND instance_name LIKE 'zap%' 
+                 ORDER BY LENGTH(instance_name) DESC, instance_name DESC 
+                 LIMIT 1`,
+                [cluster.id]
+            ),
+            fetchEvolutionAPI('/instance/fetchInstances', apiConfig)
+        ]);
 
         let newInstanceNumber = 1;
         if ((lastInstanceRes.rowCount ?? 0) > 0) {
@@ -143,6 +147,24 @@ export async function createEvolutionApiInstance(
                 newInstanceNumber = lastNumber + 1;
             }
         }
+
+        // Validate against Evolution API existing instances to prevent collisions
+        // (in case DB is out of sync with Evolution)
+        const instancesArray = Array.isArray(evoInstances) ? evoInstances : (evoInstances?.data || []);
+
+        let existingEvoNames = new Set<string>();
+        if (Array.isArray(instancesArray)) {
+            // Updated based on real payload: properties are at root level, and 'name' is the field
+            existingEvoNames = new Set(
+                instancesArray.map((i: any) => i.name || i.instanceName || i?.instance?.instanceName).filter(Boolean)
+            );
+        }
+
+        while (existingEvoNames.has(`zap${newInstanceNumber}`)) {
+            console.log(`[EVO_ACTION] Instance name zap${newInstanceNumber} exists in Evolution but not in DB. Skipping...`);
+            newInstanceNumber++;
+        }
+
         const instanceName = `zap${newInstanceNumber}`;
         payload.instanceName = instanceName;
 
@@ -208,18 +230,46 @@ export async function createEvolutionApiInstance(
         });
 
 
-        // 4. Chamar a API da Evolution para criar a instância
-        console.log("Enviando payload para a Evolution API:", JSON.stringify(payload, null, 2));
+        // 4. Prepare payload for Evolution API
+        // displayName and metaInfo are internal to Dialogy
+        // evolutionPayload contains ONLY what Evolution API expects
+        const { displayName, metaInfo, ...evolutionPayload } = payload;
+
+        console.log("═══════════════════════════════════════════════════════════════");
+        console.log("[EVO_ACTION] PAYLOAD FINAL PARA EVOLUTION API:");
+        console.log(JSON.stringify(evolutionPayload, null, 2));
+        console.log("═══════════════════════════════════════════════════════════════");
+
         await fetchEvolutionAPI('/instance/create', apiConfig, {
             method: 'POST',
-            body: JSON.stringify(payload)
+            body: JSON.stringify(evolutionPayload)
         });
 
         // 5. Se a criação na API for bem-sucedida, salvar no DB local
         const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
+
+        // Extract meta info if available
+        const meta = payload.metaInfo || {};
+
         await client.query(
-            'INSERT INTO evolution_api_instances (workspace_id, cluster_id, instance_name, display_name, type, webhook_url) VALUES ($1, $2, $3, $4, $5, $6)',
-            [workspaceId, cluster.id, payload.instanceName, payload.displayName, instanceType, webhookUrlForInstance]
+            `INSERT INTO evolution_api_instances (
+                workspace_id, cluster_id, instance_name, display_name, type, webhook_url,
+                business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [
+                workspaceId,
+                cluster.id,
+                payload.instanceName,
+                payload.displayName,
+                instanceType,
+                webhookUrlForInstance,
+                meta.businessName || null,
+                meta.wabaName || null,
+                meta.displayPhoneNumber || null,
+                meta.verifiedName || null,
+                payload.businessId || null,
+                payload.number || null
+            ]
         );
 
         // 6. Fetch QR Code immediately
