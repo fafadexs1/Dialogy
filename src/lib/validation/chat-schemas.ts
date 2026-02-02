@@ -7,7 +7,7 @@ export const assignChatSchema = z.object({
 export const closeChatSchema = z.object({
   chatId: z.string().min(1),
   reasonTagId: z.string().min(1).optional().nullable(),
-  notes: z.string().max(1000).optional().nullable(),
+  notes: z.string().max(10000).optional().nullable(),
   sendCloseMessage: z.boolean().optional(),
   additionalMetadata: z.record(z.any()).optional(),
 });

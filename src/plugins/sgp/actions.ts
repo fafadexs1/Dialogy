@@ -287,7 +287,14 @@ export async function createSGPServiceOrder(chatId: string, contractId: string, 
         if (!response.ok) {
             const txt = await response.text();
             console.error('[SGP] Error creating Service Order:', txt);
-            return { success: false, error: `SGP Erro: ${response.statusText}` };
+            let errorMsg = response.statusText;
+            try {
+                const json = JSON.parse(txt);
+                errorMsg = json.message || json.error || json.erro || json.msg || txt;
+            } catch (e) {
+                if (txt && txt.length < 200) errorMsg = txt;
+            }
+            return { success: false, error: `SGP Erro: ${errorMsg}` };
         }
 
         const data = await response.json();

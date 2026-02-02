@@ -92,7 +92,7 @@ export default async function RootLayout({
           >
             <I18nProvider initialLocale={locale}>
               <AuthProvider>
-                <FacebookSDK appId={process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || ''} />
+                <FacebookSDK appId={process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || process.env.NEXT_PUBLIC_META_APP_ID || '740952588412789'} />
                 <PresenceProvider initialUser={user}>
                   <MainAppLayout>
                     {children}

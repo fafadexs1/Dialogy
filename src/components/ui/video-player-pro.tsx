@@ -118,10 +118,18 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
         }
     };
 
+    // Initial check for src
+    useEffect(() => {
+        if (!src) setHasError(true);
+    }, [src]);
+
     return (
         <motion.div
             ref={containerRef}
-            className="relative w-fit h-fit max-w-full max-h-[85vh] mx-auto overflow-hidden rounded-xl bg-black shadow-2xl group flex flex-col justify-center"
+            className={cn(
+                "relative mx-auto overflow-hidden rounded-xl bg-black shadow-2xl group flex flex-col justify-center",
+                hasError ? "w-full aspect-video min-h-[300px]" : "w-fit h-fit max-w-full max-h-[85vh]"
+            )}
             onMouseEnter={() => setShowControls(true)}
             onMouseLeave={() => setShowControls(false)}
             initial={{ opacity: 0, scale: 0.95 }}
@@ -141,25 +149,29 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
 
             {/* Error Fallback */}
             {hasError && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/90 text-center p-6 space-y-4">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/90 text-center p-6 space-y-4 z-10">
                     <div className="bg-red-500/10 p-4 rounded-full">
                         <VolumeX className="w-8 h-8 text-red-400" />
                     </div>
                     <div className="space-y-1">
                         <h3 className="text-lg font-semibold text-white">Não foi possível reproduzir</h3>
                         <p className="text-sm text-white/60 max-w-[250px] mx-auto">
-                            O formato deste vídeo não é suportado pelo seu navegador.
+                            O formato deste vídeo não é suportado ou o arquivo está corrompido.
                         </p>
                     </div>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleDownload}
-                        className="gap-2 bg-white text-black hover:bg-white/90"
-                    >
-                        <Download className="w-4 h-4" />
-                        Baixar para Assistir
-                    </Button>
+                    {src && (
+                        <div className="flex gap-2">
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={handleDownload}
+                                className="gap-2 bg-white text-black hover:bg-white/90"
+                            >
+                                <Download className="w-4 h-4" />
+                                Baixar Arquivo
+                            </Button>
+                        </div>
+                    )}
                 </div>
             )}
 

@@ -108,85 +108,110 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
     const handleMetaLogin = () => {
         const appId = process.env.NEXT_PUBLIC_META_APP_ID || '740952588412789';
         const configId = process.env.NEXT_PUBLIC_META_CONFIG_ID || '3807812312846037';
-        const baseUrl = 'https://business.facebook.com/messaging/whatsapp/onboard/';
-        const extras = JSON.stringify({ sessionInfoVersion: "3", version: "v3" });
-        const url = `${baseUrl}?app_id=${appId}&config_id=${configId}&extras=${encodeURIComponent(extras)}`;
 
-        const width = 800;
-        const height = 600;
-        const left = (window.screen.width - width) / 2;
-        const top = (window.screen.height - height) / 2;
+        if (!window.FB) {
+            toast({ title: 'Erro', description: 'SDK do Facebook não carregado. Verifique bloqueadores de anúncios.', variant: 'destructive' });
+            return;
+        }
 
-        window.open(url, 'MetaEmbeddedSignup', `width=${width},height=${height},top=${top},left=${left}`);
+        // Shared data capture container
+        const capture = {
+            waba_id: null as string | null,
+            phone_number_id: null as string | null,
+            code: null as string | null
+        };
 
-        const messageHandler = async (event: MessageEvent) => {
-            if (event.origin !== "https://business.facebook.com" && event.origin !== "https://www.facebook.com") {
-                // return; 
-            }
-
+        const messageHandler = (event: MessageEvent) => {
+            if (!event.origin.endsWith('facebook.com')) return;
             try {
                 const data = JSON.parse(event.data);
                 if (data.type === 'WA_EMBEDDED_SIGNUP') {
+                    console.log('[Meta] Event received:', data);
                     if (data.event === 'FINISH') {
-                        const { code, waba_id, phone_number_id } = data.data || {};
-
-                        if (code) {
-                            setIsSubmitting(true);
-                            setStatusMessage('Autenticando com Meta...');
-
-                            // Remove listener immediately to avoid double calls
-                            window.removeEventListener('message', messageHandler);
-
-                            const result = await exchangeMetaAuthCode(code);
-
-                            if (result.success && result.accessToken) {
-                                setStatusMessage('Criando Instância Evolution...');
-
-                                // Auto-generate display name if needed, or stick to a default
-                                const instanceName = `WhatsApp Business ${phone_number_id.slice(-4)}`;
-
-                                const payload: EvolutionInstanceCreationPayload = {
-                                    displayName: instanceName,
-                                    integration: 'WHATSAPP-BUSINESS',
-                                    businessId: waba_id,
-                                    number: phone_number_id,
-                                    token: result.accessToken,
-                                    qrcode: false,
-                                    // Default recommended settings
-                                    readMessages: true,
-                                    readStatus: false,
-                                    rejectCall: false,
-                                    groupsIgnore: false,
-                                    alwaysOnline: true,
-                                    webhook: { events: [] }
-                                };
-
-                                const creationResult = await createEvolutionApiInstance(payload, workspaceId);
-
-                                if (creationResult.success) {
-                                    toast({ title: 'Conectado!', description: 'WhatsApp Business conectado com sucesso.' });
-                                    onSuccess(undefined); // No QR code for Cloud API
-                                } else {
-                                    toast({ title: 'Erro na Criação', description: creationResult.error, variant: 'destructive' });
-                                    setIsSubmitting(false);
-                                    setStatusMessage('');
-                                }
-
-                            } else {
-                                toast({ title: 'Erro de Autenticação', description: result.error || 'Falha ao trocar token.', variant: 'destructive' });
-                                setIsSubmitting(false);
-                                setStatusMessage('');
-                            }
-                        }
-                    } else if (data.event === 'CANCEL') {
-                        toast({ title: 'Cancelado', description: 'Conexão cancelada pelo usuário.' });
+                        const d = data.data || {};
+                        capture.waba_id = d.waba_id;
+                        capture.phone_number_id = d.phone_number_id;
                     }
                 }
-            } catch (err) {
-                // Ignore
+            } catch (e) {
+                // ignore
             }
         };
+
         window.addEventListener('message', messageHandler);
+
+        window.FB.login(async (response: any) => {
+            console.log('[Meta] Login response:', response);
+            window.removeEventListener('message', messageHandler);
+
+            if (response.authResponse && response.authResponse.code) {
+                capture.code = response.authResponse.code;
+
+                // Ensure we have captured the ID data from the message event
+                // (Destructure to ensure type safety after check)
+                const { waba_id, phone_number_id } = capture;
+
+                if (!waba_id || !phone_number_id) {
+                    toast({ title: 'Erro de Dados', description: 'Não foi possível capturar os IDs do WhatsApp. Tente novamente.', variant: 'destructive' });
+                    return;
+                }
+
+                setIsSubmitting(true);
+                setStatusMessage('Autenticando com Meta...');
+
+                try {
+                    const result = await exchangeMetaAuthCode(response.authResponse.code);
+
+                    if (result.success && result.accessToken) {
+                        setStatusMessage('Criando Instância Evolution...');
+
+                        const instanceName = `WhatsApp Business ${phone_number_id.slice(-4)}`;
+                        const payload: EvolutionInstanceCreationPayload = {
+                            displayName: instanceName,
+                            integration: 'WHATSAPP-BUSINESS',
+                            businessId: waba_id,
+                            number: phone_number_id,
+                            token: result.accessToken,
+                            qrcode: false,
+                            // Definições padrão
+                            readMessages: true,
+                            readStatus: false,
+                            rejectCall: false,
+                            groupsIgnore: false,
+                            alwaysOnline: true,
+                            webhook: { events: [] }
+                        };
+
+                        const creationResult = await createEvolutionApiInstance(payload, workspaceId);
+
+                        if (creationResult.success) {
+                            toast({ title: 'Conectado!', description: 'WhatsApp Business conectado com sucesso.' });
+                            onSuccess(undefined);
+                        } else {
+                            toast({ title: 'Erro na Criação', description: creationResult.error, variant: 'destructive' });
+                        }
+                    } else {
+                        toast({ title: 'Erro de Autenticação', description: result.error || 'Falha ao trocar token.', variant: 'destructive' });
+                    }
+                } catch (error) {
+                    console.error(error);
+                    toast({ title: 'Erro Interno', description: 'Falha ao processar integração.', variant: 'destructive' });
+                } finally {
+                    setIsSubmitting(false);
+                    setStatusMessage('');
+                }
+            } else {
+                // User cancelled or error
+                console.warn('[Meta] Valid auth code not received.');
+            }
+        }, {
+            config_id: configId,
+            response_type: 'code',
+            override_default_response_type: true,
+            extras: {
+                setup: {}
+            }
+        });
     };
 
 

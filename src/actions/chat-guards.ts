@@ -49,7 +49,8 @@ export async function guardedCloseChat(chatId: string, reasonTagId: string | nul
 
   const parsed = closeChatSchema.safeParse({ chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata });
   if (!parsed.success) {
-    return { success: false, error: 'Dados de encerramento invalidos.' };
+    const fields = parsed.error.errors.map(e => e.path.join('.')).join(', ');
+    return { success: false, error: `Dados de encerramento inválidos. Verifique: ${fields}` };
   }
 
   const rate = consumeRateLimit(`close:${currentUser.id}`, 30, 300_000);

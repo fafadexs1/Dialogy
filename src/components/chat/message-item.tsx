@@ -153,13 +153,47 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     const urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
     const safeThumbnail = validUrl(thumbnail);
 
+    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+    const isLongPressRef = React.useRef(false);
+
+    const startPress = React.useCallback(() => {
+        isLongPressRef.current = false;
+        timerRef.current = setTimeout(() => {
+            isLongPressRef.current = true;
+            if (urlToUse) window.open(urlToUse, '_blank');
+            if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+                window.navigator.vibrate(50);
+            }
+        }, 600);
+    }, [urlToUse]);
+
+    const cancelPress = React.useCallback(() => {
+        if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+    }, []);
+
     if (!urlToUse) return <p>{message.content || 'Mídia inválida'}</p>;
 
     const renderMedia = () => {
         if (effectiveMimeType.startsWith('image/')) {
             return (
-                <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName}>
-                    <div className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-square min-h-[200px] bg-muted/20">
+                <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
+                    <div
+                        className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-square min-h-[200px] bg-muted/20"
+                        onMouseDown={startPress}
+                        onMouseUp={cancelPress}
+                        onMouseLeave={cancelPress}
+                        onTouchStart={startPress}
+                        onTouchEnd={cancelPress}
+                        onClick={(e) => {
+                            if (isLongPressRef.current) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                            }
+                        }}
+                    >
                         <SafeMediaImage
                             src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
@@ -174,7 +208,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
         if (effectiveMimeType.startsWith('video/')) {
             return (
-                <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName}>
+                <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName} chatId={message.chat_id}>
                     <div className="relative group cursor-pointer overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-video min-h-[169px] bg-muted/20">
                         <SafeMediaImage
                             src={safeThumbnail || '/placeholder-video.png'}
