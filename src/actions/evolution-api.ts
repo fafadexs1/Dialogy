@@ -236,8 +236,15 @@ export async function createEvolutionApiInstance(
         const { displayName, metaInfo, ...evolutionPayload } = payload;
 
         console.log("═══════════════════════════════════════════════════════════════");
-        console.log("[EVO_ACTION] PAYLOAD FINAL PARA EVOLUTION API:");
+        console.log("[EVO_ACTION] 1. PAYLOAD RECEBIDO DO FRONTEND:");
+        console.log(JSON.stringify(payload, null, 2));
+        console.log("───────────────────────────────────────────────────────────────");
+        console.log("[EVO_ACTION] 2. INSTANCE NAME GERADO:", payload.instanceName);
+        console.log("[EVO_ACTION] 3. DISPLAY NAME (interno Dialogy):", displayName);
+        console.log("───────────────────────────────────────────────────────────────");
+        console.log("[EVO_ACTION] 4. PAYLOAD FINAL PARA EVOLUTION API:");
         console.log(JSON.stringify(evolutionPayload, null, 2));
+        console.log("[EVO_ACTION] 5. URL DA CHAMADA:", `${apiConfig.api_url}/instance/create`);
         console.log("═══════════════════════════════════════════════════════════════");
 
         await fetchEvolutionAPI('/instance/create', apiConfig, {

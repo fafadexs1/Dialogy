@@ -458,9 +458,10 @@ export type EvolutionApiConfig = {
 };
 
 export interface EvolutionInstanceCreationPayload {
-  // Top-level
+  // Top-level - instanceName é gerado automaticamente pela action (zap1, zap2, etc.)
   instanceName?: string;
-  displayName: string;
+  // displayName é o nome amigável mostrado no Dialogy (ex: "WhatsApp Vendas")
+  displayName?: string;
   number?: string;
   token?: string; // Can be for Baileys instance or Cloud API
   integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
