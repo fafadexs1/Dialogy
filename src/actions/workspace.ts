@@ -112,6 +112,7 @@ export async function updateWorkspaceAction(
   const closeMessageTemplate = formData.get('closeMessageTemplate') as string;
   const transferMessageTemplate = formData.get('transferMessageTemplate') as string;
   const marketingAutoCloseSecondsRaw = formData.get('marketingAutoCloseSeconds') as string;
+  const queueAutoCloseSecondsRaw = formData.get('queueAutoCloseSeconds') as string;
   const avatarFile = formData.get('avatarFile');
 
 
@@ -132,8 +133,12 @@ export async function updateWorkspaceAction(
     if (normalized !== null) {
       fieldsToUpdate.marketing_auto_close_seconds = normalized;
     }
+  }
+  if (formData.has('queueAutoCloseSeconds')) {
+    const parsed = Number(queueAutoCloseSecondsRaw);
+    const normalized = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
     if (normalized !== null) {
-      fieldsToUpdate.marketing_auto_close_seconds = normalized;
+      fieldsToUpdate.queue_auto_close_seconds = normalized;
     }
   }
 

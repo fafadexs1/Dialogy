@@ -349,7 +349,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const workspacesRes = await db.query(`
             SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, 
                    w.close_message_template, w.transfer_team_message_template,
-                   w.timezone, w.marketing_auto_close_seconds,
+                   w.timezone, w.marketing_auto_close_seconds, w.queue_auto_close_seconds,
                    r.name as role_name,
                    (SELECT plan FROM billing_info WHERE workspace_id = w.id LIMIT 1) as plan
             FROM workspaces w
@@ -383,6 +383,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
                 transferTeamMessageTemplate: r.transfer_team_message_template || '',
                 timezone: r.timezone || undefined,
                 marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
+                queueAutoCloseSeconds: r.queue_auto_close_seconds ?? undefined,
                 plan: planKey,
             };
         });

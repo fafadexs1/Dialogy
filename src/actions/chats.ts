@@ -23,8 +23,14 @@ const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
+        SELECT 1
+        FROM user_workspace_roles uwr
+        JOIN role_permissions rp ON rp.role_id = uwr.role_id
+        WHERE uwr.user_id = $1
+          AND uwr.workspace_id = $2
+          AND rp.permission_id = $3
+        LIMIT 1
+    `, [userId, workspaceId, permission]);
     return (res.rowCount ?? 0) > 0;
 }
 
@@ -228,6 +234,9 @@ export const transferChatAction = withDebug(
                 return { success: false, error: "Não foi possível determinar um agente para a transferência." };
             }
 
+            const isFirstAssignment = !current_chat_agent_id;
+            const isActualTransfer = !!current_chat_agent_id && current_chat_agent_id !== finalAgentId;
+
             const { transferTeamMessageTemplate } = await getWorkspaceTemplates(workspaceId);
             transferTemplate = transferTeamMessageTemplate || undefined;
 
@@ -242,7 +251,7 @@ export const transferChatAction = withDebug(
         `, [finalAgentId, chatId]);
 
             // Log system message
-            const systemMessageContent = current_chat_agent_id
+            const systemMessageContent = !isFirstAssignment
                 ? `Atendimento transferido por ${currentAgentName} para ${transferTargetName}.`
                 : `Atendimento atribuído a ${transferTargetName} por ${currentAgentName}.`;
 
@@ -264,7 +273,7 @@ export const transferChatAction = withDebug(
 
             await client.query('COMMIT');
             console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
-            if (transferTemplate) {
+            if (transferTemplate && isActualTransfer) {
                 const appliedTemplate = transferTemplate.replace(/{{\s*dest\s*}}/gi, transferTargetName || 'novo atendente');
                 try {
                     await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, isSystemAgent, lastInstanceName || undefined, {
@@ -1099,14 +1108,17 @@ export const syncInboxData = withDebug(
             let newLastSyncChats = lastSyncChats;
             let updatedContacts: Contact[] = [];
 
-            if (lastSyncChats) {
+            {
+                const chatSyncAnchor = lastSyncChats || '1970-01-01T00:00:00.000Z';
                 const chatRows = await fetchChatsDelta({
                     workspaceId,
-                    since: lastSyncChats,
+                    since: chatSyncAnchor,
                 });
                 const { chats, lastSyncChats: updatedSync } = await hydrateChats(chatRows, timezone);
                 deltaChats = chats;
-                newLastSyncChats = updatedSync || lastSyncChats;
+                newLastSyncChats = updatedSync
+                    || lastSyncChats
+                    || new Date().toISOString();
 
                 // Extract contacts from delta chats
                 updatedContacts = chats.map(c => c.contact).filter(Boolean) as Contact[];
@@ -1891,6 +1903,42 @@ export async function getChatMessagesWindow({
     hasMoreHistory: boolean;
     contact?: Contact;
 }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return {
+            messages: [],
+            lastSyncMessage: null,
+            oldestMessageDate: null,
+            oldestMessageId: null,
+            hasMoreHistory: false,
+        };
+    }
+
+    const accessCheck = await db.query(
+        `
+        SELECT c.workspace_id
+        FROM chats c
+        JOIN user_workspace_roles uwr
+          ON uwr.workspace_id = c.workspace_id
+         AND uwr.user_id = $2
+        WHERE c.id = $1
+        LIMIT 1
+        `,
+        [chatId, user.id]
+    );
+
+    if ((accessCheck.rowCount ?? 0) === 0) {
+        return {
+            messages: [],
+            lastSyncMessage: null,
+            oldestMessageDate: null,
+            oldestMessageId: null,
+            hasMoreHistory: false,
+        };
+    }
+
     const params: (string | number)[] = [chatId, limit];
     let beforeClause = '';
     if (before && beforeId) {
@@ -1904,7 +1952,9 @@ export async function getChatMessagesWindow({
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
-    // Fetch messages only for the current chat to keep large threads fast.
+    // Fetch paginated history for the whole contact thread within the same workspace.
+    // This preserves the inbox UX where scrolling up keeps loading older messages,
+    // including previous chat sessions for the same contact.
     const { rows } = await db.query(
         `
         SELECT 
@@ -1919,7 +1969,19 @@ export async function getChatMessagesWindow({
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE m.chat_id IN (SELECT id FROM chats WHERE contact_id = (SELECT contact_id FROM chats WHERE id = $1))
+        WHERE c.workspace_id = (
+            SELECT workspace_id
+            FROM chats
+            WHERE id = $1
+        )
+          AND (
+              c.contact_id = (
+                  SELECT contact_id
+                  FROM chats
+                  WHERE id = $1
+              )
+              OR c.id = $1
+          )
         ${beforeClause}
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
@@ -2253,4 +2315,5 @@ export const updateChatCopilotModeAction = withDebug(
         contextResolver: (chatId, mode) => ({ payload: { chatId, mode } })
     }
 );
+
 

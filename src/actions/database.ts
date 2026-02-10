@@ -106,6 +106,12 @@ create table if not exists public.workspaces (
 
 create index if not exists idx_workspaces_owner on public.workspaces(owner_id);
 
+-- Garantir colunas opcionais de configuração do workspace (bases já criadas)
+alter table if exists public.workspaces add column if not exists close_message_template text not null default '';
+alter table if exists public.workspaces add column if not exists transfer_team_message_template text not null default '';
+alter table if exists public.workspaces add column if not exists marketing_auto_close_seconds integer not null default 300;
+alter table if exists public.workspaces add column if not exists queue_auto_close_seconds integer not null default 0;
+
 -- 3) Agora adiciona a FK users.last_active_workspace_id -> workspaces.id
 DO $$
 BEGIN

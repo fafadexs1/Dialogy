@@ -4,7 +4,6 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import { createClient } from '@/lib/supabase/server';
 import type { Message } from '@/lib/types';
-import { revalidatePath } from 'next/cache';
 
 interface MarkAsReadPayload {
     chatId: string;
@@ -28,6 +27,24 @@ export async function POST(request: Request) {
         const client = await db.connect();
         try {
             await client.query('BEGIN');
+
+            const chatAccessRes = await client.query(
+                `
+                SELECT c.workspace_id
+                FROM chats c
+                JOIN user_workspace_roles uwr
+                  ON uwr.workspace_id = c.workspace_id
+                 AND uwr.user_id = $2
+                WHERE c.id = $1
+                LIMIT 1
+                `,
+                [chatId, user.id]
+            );
+
+            if ((chatAccessRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
 
             // 1. Find all unread messages for this chat, skipping any that are currently locked (e.g. by webhook updates)
             const unreadMessagesRes = await client.query(

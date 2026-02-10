@@ -174,9 +174,11 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       };
     });
 
-    // Persist to IndexedDB (fire-and-forget)
-    if (incomingChats.length > 0 && incomingChats[0]?.workspace_id) {
-      cacheService.setChats(incomingChats[0].workspace_id, incomingChats).catch(() => { });
+    // Persist full merged chats to IndexedDB (fire-and-forget)
+    const workspaceId = incomingChats[0]?.workspace_id;
+    if (incomingChats.length > 0 && workspaceId) {
+      const fullChats = get().chats;
+      cacheService.setChats(workspaceId, fullChats).catch(() => { });
     }
   },
   appendChats: (incomingChats) => {

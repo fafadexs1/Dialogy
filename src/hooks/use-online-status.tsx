@@ -30,6 +30,24 @@ export const useCurrentUser = () => {
   return currentUser;
 };
 
+function buildUserSnapshot(user: User | null | undefined): string {
+  if (!user) return 'null';
+  const workspaces = (user.workspaces || []).map((workspace) => ({
+    id: workspace.id,
+    timezone: workspace.timezone || '',
+    closeMessageTemplate: workspace.closeMessageTemplate || '',
+    transferTeamMessageTemplate: workspace.transferTeamMessageTemplate || '',
+    marketingAutoCloseSeconds: workspace.marketingAutoCloseSeconds ?? null,
+    queueAutoCloseSeconds: workspace.queueAutoCloseSeconds ?? null,
+  }));
+
+  return JSON.stringify({
+    id: user.id,
+    activeWorkspaceId: user.activeWorkspaceId || null,
+    workspaces,
+  });
+}
+
 export const PresenceProvider = ({ children, initialUser = null }: { children: ReactNode, initialUser?: User | null }) => {
   const { user: authUser, isLoading: isAuthLoading } = useAuth();
   const [localUser, setLocalUser] = useState<User | null>(initialUser);
@@ -38,6 +56,17 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const [isOffline, setIsOffline] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
   const supabase = useMemo(() => createClient(), []);
+
+  useEffect(() => {
+    setLocalUser((prev) => {
+      const prevSnapshot = buildUserSnapshot(prev);
+      const nextSnapshot = buildUserSnapshot(initialUser);
+      if (prevSnapshot === nextSnapshot) {
+        return prev;
+      }
+      return initialUser ?? null;
+    });
+  }, [initialUser]);
 
   // Listen for workspace change events to refetch user data
   useEffect(() => {

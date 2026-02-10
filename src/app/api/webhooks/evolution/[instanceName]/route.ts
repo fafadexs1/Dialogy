@@ -41,6 +41,111 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
     return instanceRes.rows[0];
 }
 
+const DEFAULT_QUEUE_AUTO_CLOSE_MS = 0;
+
+async function getQueueAutoCloseMs(workspaceId: string): Promise<number> {
+    try {
+        const res = await db.query(
+            'SELECT queue_auto_close_seconds FROM workspaces WHERE id = $1',
+            [workspaceId]
+        );
+        if ((res.rowCount ?? 0) === 0) return DEFAULT_QUEUE_AUTO_CLOSE_MS;
+        const raw = res.rows[0].queue_auto_close_seconds;
+        if (raw === null || raw === undefined) return DEFAULT_QUEUE_AUTO_CLOSE_MS;
+        const seconds = Number(raw);
+        if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+        return Math.round(seconds) * 1000;
+    } catch (error) {
+        console.error('[QUEUE_AUTO_CLOSE] Falha ao buscar configuração:', error);
+        return DEFAULT_QUEUE_AUTO_CLOSE_MS;
+    }
+}
+
+async function scheduleQueueAutoClose(
+    chatId: string,
+    workspaceId: string,
+    lastIncomingAt: Date,
+    autoCloseMs: number
+) {
+    if (!autoCloseMs || autoCloseMs <= 0) return;
+    const anchor = Number.isFinite(lastIncomingAt.getTime()) ? lastIncomingAt : new Date();
+
+    setTimeout(async () => {
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const chatRes = await client.query(
+                `SELECT status, agent_id FROM chats WHERE id = $1 FOR UPDATE`,
+                [chatId]
+            );
+            if ((chatRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            const { status, agent_id } = chatRes.rows[0];
+            if (status !== 'gerais' || agent_id) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            const hasNewInbound = await client.query(
+                `SELECT 1
+                 FROM messages
+                 WHERE chat_id = $1
+                   AND from_me = FALSE
+                   AND created_at > $2
+                 LIMIT 1`,
+                [chatId, anchor.toISOString()]
+            );
+
+            if ((hasNewInbound.rowCount ?? 0) > 0) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            const closeRes = await client.query(
+                `UPDATE chats
+                 SET status = 'encerrados', closed_at = NOW()
+                 WHERE id = $1
+                   AND status = 'gerais'
+                   AND agent_id IS NULL`,
+                [chatId]
+            );
+
+            if ((closeRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return;
+            }
+
+            const seconds = Math.max(1, Math.round(autoCloseMs / 1000));
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, is_read, metadata
+                 ) VALUES ($1, $2, 'system', $3, true, true, $4)`,
+                [
+                    workspaceId,
+                    chatId,
+                    `Atendimento encerrado automaticamente após ${seconds} segundos na fila sem atendimento.`,
+                    {
+                        event: 'queue_auto_close',
+                        autoClosedAfterMs: autoCloseMs,
+                        lastIncomingAt: anchor.toISOString(),
+                    },
+                ]
+            );
+
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
+        } finally {
+            client.release();
+        }
+    }, autoCloseMs).unref?.();
+}
+
 import { logAction } from '@/lib/observability/logger';
 import { recordWebhookMetrics } from '@/lib/observability/metrics';
 
@@ -601,6 +706,18 @@ async function handleMessagesUpsert(payload: any) {
 
         // Trigger Autopilot for incoming messages
         if (!key.fromMe) {
+            const queueStatus = (savedChat as any).status;
+            const queueAgent = (savedChat as any).agent_id || (savedChat as any).agentId || null;
+            if (workspaceId && queueStatus === 'gerais' && !queueAgent) {
+                postTransactionTasks.push((async () => {
+                    const autoCloseMs = await getQueueAutoCloseMs(workspaceId as string);
+                    if (!autoCloseMs || autoCloseMs <= 0) return;
+                    const rawCreatedAt = (savedMessage as any)?.created_at || (savedMessage as any)?.createdAt;
+                    const anchor = rawCreatedAt ? new Date(rawCreatedAt) : new Date();
+                    await scheduleQueueAutoClose(savedChat.id, workspaceId as string, anchor, autoCloseMs);
+                })());
+            }
+
             if (savedChat.is_autopilot_active) {
                 console.log(`[WEBHOOK_MSG_UPSERT] Enqueueing Autopilot for chat ${savedChat.id}`);
                 postTransactionTasks.push(

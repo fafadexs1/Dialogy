@@ -1014,18 +1014,35 @@ export default function MobileChatLayout({
     }
   }, [initialUser?.activeWorkspaceId]);
 
+  const markSelectedChatAsRead = useCallback(() => {
+    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
+    const hasUnread = currentChatMessages.some((m) => !m.from_me && !m.is_read);
+
+    if (!hasUnread) return;
+
+    markChatAsReadInStore(selectedChatId);
+    fetch('/api/chats/mark-as-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId: selectedChatId })
+    }).catch(() => {
+      console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+    });
+  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         runDeltaSync();
+        markSelectedChatAsRead();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+  }, [initialUser?.activeWorkspaceId, runDeltaSync, markSelectedChatAsRead]);
 
   // Polling mechanism
   useEffect(() => {
@@ -1083,21 +1100,17 @@ export default function MobileChatLayout({
   }, [initialUser?.activeWorkspaceId, runDeltaSync]);
 
   useEffect(() => {
-    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
-    const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
+    markSelectedChatAsRead();
+  }, [markSelectedChatAsRead]);
 
-    if (hasUnread) {
-      markChatAsReadInStore(selectedChatId);
+  useEffect(() => {
+    const handleFocus = () => {
+      markSelectedChatAsRead();
+    };
 
-      fetch('/api/chats/mark-as-read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: selectedChatId })
-      }).catch(() => {
-        console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
-      });
-    }
-  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [markSelectedChatAsRead]);
 
   const fetchContactById = useCallback(async (contactId: string) => {
     if (!initialUser?.activeWorkspaceId) return;

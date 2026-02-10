@@ -114,6 +114,25 @@ export default function WorkspaceSettingsPage() {
 
     const { toast } = useToast();
 
+    const refreshWorkspaceFromServer = useCallback(async (workspaceId: string) => {
+        try {
+            const response = await fetch('/api/user', {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store',
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const workspace = data?.workspaces?.find((ws: Workspace) => ws.id === workspaceId);
+            if (workspace) {
+                setActiveWorkspace(workspace);
+                setAvatarUrl(workspace.avatar || '');
+            }
+        } catch (error) {
+            console.error('[WORKSPACE_SETTINGS] Falha ao atualizar workspace do servidor:', error);
+        }
+    }, []);
+
     const fetchInvites = useCallback(async (workspaceId: string) => {
         const result = await getWorkspaceInvites(workspaceId);
         if (!result.error) {
@@ -128,18 +147,22 @@ export default function WorkspaceSettingsPage() {
                 setActiveWorkspace(workspace);
                 setAvatarUrl(workspace.avatar || '');
                 fetchInvites(workspace.id);
+                void refreshWorkspaceFromServer(workspace.id);
             }
         }
-    }, [user, fetchInvites]);
+    }, [user, fetchInvites, refreshWorkspaceFromServer]);
 
     useEffect(() => {
         if (updateState.success) {
+            if (activeWorkspace?.id) {
+                void refreshWorkspaceFromServer(activeWorkspace.id);
+            }
             toast({ title: "Workspace Atualizado!", description: "As configurações foram aplicadas com sucesso." });
             router.refresh();
         } else if (updateState.error) {
             toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
-    }, [updateState, toast, router]);
+    }, [updateState, toast, router, activeWorkspace?.id, refreshWorkspaceFromServer]);
 
     useEffect(() => {
         if (inviteError === null) {
@@ -212,7 +235,13 @@ export default function WorkspaceSettingsPage() {
                 </TabsList>
 
                 <TabsContent value="general">
-                    <form ref={formRef} onSubmit={handleSubmit} encType="multipart/form-data" className="space-y-6">
+                    <form
+                        key={`workspace-form-${activeWorkspace.id}-${activeWorkspace.closeMessageTemplate || ''}-${activeWorkspace.transferTeamMessageTemplate || ''}-${activeWorkspace.marketingAutoCloseSeconds ?? ''}-${activeWorkspace.queueAutoCloseSeconds ?? ''}`}
+                        ref={formRef}
+                        onSubmit={handleSubmit}
+                        encType="multipart/form-data"
+                        className="space-y-6"
+                    >
                         <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
 
                         <Card className="border-none shadow-sm bg-card/50">
@@ -306,6 +335,25 @@ export default function WorkspaceSettingsPage() {
                                         <p className="text-xs text-muted-foreground">
                                             Tempo sem resposta para encerrar conversas de campanhas.
                                             <span className="font-semibold block mt-1">0 = Desativado.</span>
+                                        </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="queueAutoCloseSeconds">Auto-encerrar Fila (Segundos)</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="queueAutoCloseSeconds"
+                                                name="queueAutoCloseSeconds"
+                                                type="number"
+                                                min={0}
+                                                step={1}
+                                                defaultValue={(activeWorkspace as any).queueAutoCloseSeconds ?? 0}
+                                                className="pl-10 h-11"
+                                            />
+                                            <Clock className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Tempo para encerrar automaticamente atendimentos que ficarem na fila geral sem atendimento.
+                                            <span className="font-semibold block mt-1">0 = Nunca encerrar.</span>
                                         </p>
                                     </div>
                                 </CardContent>

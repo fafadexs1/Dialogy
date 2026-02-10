@@ -10,6 +10,7 @@ export type Workspace = {
   closeMessageTemplate?: string;
   transferTeamMessageTemplate?: string;
   marketingAutoCloseSeconds?: number;
+  queueAutoCloseSeconds?: number;
   roleName?: string;
   isOwner?: boolean;
   plan?: string;

@@ -240,14 +240,15 @@ export default function CustomerChatLayout({
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
 
   const isHydratedRef = useRef(false);
+  const initialResetDoneRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
-    // Strict Mode Safety: Only reset if we haven't successfully hydrated in this mount cycle.
-    // This prevents double-fetching or clearing valid data on dev hot-reloads/strict mode remounts.
-    if (!isHydratedRef.current) {
+    // Strict Mode Safety: Only reset once per mount cycle.
+    // This prevents double-reset on dev hot-reloads/strict mode remounts.
+    if (!initialResetDoneRef.current) {
+      initialResetDoneRef.current = true;
       useInboxStore.getState().reset();
-      isHydratedRef.current = false;
       console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
     }
   }, []);
@@ -580,7 +581,7 @@ export default function CustomerChatLayout({
         }
       }
     }
-  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+  }, [appendMessagesToChat, incrementUnread, initialUser?.id, initialUser?.activeWorkspaceId, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
@@ -1029,18 +1030,35 @@ export default function CustomerChatLayout({
     }
   }, [initialUser?.activeWorkspaceId]);
 
+  const markSelectedChatAsRead = useCallback(() => {
+    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
+    const hasUnread = currentChatMessages.some((m) => !m.from_me && !m.is_read);
+
+    if (!hasUnread) return;
+
+    markChatAsReadInStore(selectedChatId);
+    fetch('/api/chats/mark-as-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId: selectedChatId })
+    }).catch(() => {
+      console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+    });
+  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         runDeltaSync();
+        markSelectedChatAsRead();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [initialUser?.activeWorkspaceId, runDeltaSync]);
+  }, [initialUser?.activeWorkspaceId, runDeltaSync, markSelectedChatAsRead]);
 
   // Polling mechanism
   useEffect(() => {
@@ -1097,21 +1115,17 @@ export default function CustomerChatLayout({
   }, [initialUser?.activeWorkspaceId, runDeltaSync]);
 
   useEffect(() => {
-    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
-    const hasUnread = currentChatMessages.some(m => !m.from_me && !m.is_read);
+    markSelectedChatAsRead();
+  }, [markSelectedChatAsRead]);
 
-    if (hasUnread) {
-      markChatAsReadInStore(selectedChatId);
+  useEffect(() => {
+    const handleFocus = () => {
+      markSelectedChatAsRead();
+    };
 
-      fetch('/api/chats/mark-as-read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: selectedChatId })
-      }).catch(() => {
-        console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
-      });
-    }
-  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [markSelectedChatAsRead]);
 
   const fetchContactById = useCallback(async (contactId: string) => {
     if (!initialUser?.activeWorkspaceId) return;

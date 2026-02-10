@@ -362,26 +362,29 @@ export default function ChatPanel({
     const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
     const chatRef = useRef(chat?.id);
+    const newMessageRef = useRef(newMessage);
+    newMessageRef.current = newMessage;
 
     // Robust Draft Switching Logic (No Flicker)
+    // Uses refs to avoid stale closures when saving/loading drafts on chat switch
     useLayoutEffect(() => {
         if (chat?.id !== chatRef.current) {
-            // Save draft for previous chat
+            // Save draft for previous chat using ref (always fresh)
             const previousChatId = chatRef.current;
             if (previousChatId) {
-                setDraft(previousChatId, newMessage);
+                setDraft(previousChatId, newMessageRef.current);
             }
 
-            // Load draft for new chat
+            // Load draft for new chat from store state (always fresh)
             if (chat?.id) {
-                // Must read drafts from the current render scope
-                setNewMessage(drafts[chat.id] || '');
+                const savedDraft = useInboxStore.getState().drafts[chat.id];
+                setNewMessage(savedDraft || '');
             } else {
                 setNewMessage('');
             }
             chatRef.current = chat?.id;
         }
-    }, [chat?.id, drafts, setDraft, newMessage]); // Dependencies for closure freshness
+    }, [chat?.id, setDraft]); // Minimal deps — refs handle freshness
 
     // Auto-save while typing (Debounced)
     useEffect(() => {
@@ -526,9 +529,11 @@ export default function ChatPanel({
         console.log('[CHAT_PANEL] Checking copilot subscription. Mode:', chat?.copilot_mode, 'ID:', chat?.id);
         if (!chat?.id || chat.copilot_mode !== 'suggest') return;
 
+        let cancelled = false;
         const supabase = createClient();
         const channel = supabase.channel(`chat:${chat.id}`)
             .on('broadcast', { event: 'ai_suggestion' }, (payload) => {
+                if (cancelled) return; // Guard against updates after unmount
                 console.log('[CHAT_PANEL] Received AI suggestion:', payload);
                 if (payload.payload?.suggestion) {
                     setAiSuggestion({
@@ -540,6 +545,7 @@ export default function ChatPanel({
             .subscribe();
 
         return () => {
+            cancelled = true;
             supabase.removeChannel(channel);
         };
     }, [chat?.id, chat?.copilot_mode]);
@@ -613,12 +619,12 @@ export default function ChatPanel({
     }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages, chat?.id, messagesByChat]);
 
     const pendingStatusIds = useMemo(() => {
-        if (!chat?.messages?.length) return [];
-        return chat.messages
-            .filter((message) => message.chat_id === chat.id)
-            .filter((message) => message.from_me && (message.api_message_status || '').toUpperCase() === 'PENDING')
-            .map((message) => message.id);
-    }, [chat?.id, chat?.messages]);
+        if (!chat?.id) return [];
+        const msgs = messagesByChat[chat.id] || [];
+        return msgs
+            .filter((m) => m.from_me && (m.api_message_status || '').toUpperCase() === 'PENDING')
+            .map((m) => m.id);
+    }, [chat?.id, messagesByChat]);
 
     useEffect(() => {
         if (!chat?.id || isProtocolScoped || !pendingStatusIds.length) {
@@ -698,7 +704,8 @@ export default function ChatPanel({
     const padBottom = 0;
 
     const runAiAgent = useCallback(async () => {
-        const lastMessage = chat?.messages?.length ? chat.messages[chat.messages.length - 1] : null;
+        const storeMessages = chat?.id ? (messagesByChat[chat.id] || []) : [];
+        const lastMessage = storeMessages.length ? storeMessages[storeMessages.length - 1] : null;
 
         if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
             return;
@@ -717,7 +724,7 @@ export default function ChatPanel({
         try {
             setIsAiTyping(true);
             processedMessageIds.current.add(lastMessage.id);
-            const chatHistoryForAI = (chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
+            const chatHistoryForAI = storeMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
             const activeRules = autopilotRules.filter(rule => rule.enabled);
 
             if (!autopilotConfig) {
@@ -776,11 +783,11 @@ export default function ChatPanel({
         } finally {
             setIsAiTyping(false);
         }
-    }, [autopilotConfig, autopilotRules, chat, currentUser.id, isAiAgentActive, isAiTyping, onActionSuccess, toast]);
+    }, [autopilotConfig, autopilotRules, chat, currentUser.id, isAiAgentActive, isAiTyping, onActionSuccess, toast, messagesByChat]);
 
     useEffect(() => {
         runAiAgent();
-    }, [runAiAgent, chat?.messages]);
+    }, [runAiAgent]);
 
     useEffect(() => {
         processedMessageIds.current.clear();
@@ -825,8 +832,15 @@ export default function ChatPanel({
     const handleTrainAgent = async () => {
         if (!chat) return;
 
+        // Use store messages for complete data
+        const msgs = messagesByChat[chat.id] || chat.messages || [];
+        if (!msgs.length) {
+            toast({ title: "Aviso", description: "Nenhuma mensagem carregada para treinar.", variant: 'destructive' });
+            return;
+        }
+
         // Simplify conversation for training
-        const conversationText = chat.messages
+        const conversationText = msgs
             .map(m => {
                 const sender = m.from_me ? 'Atendente' : 'Cliente';
                 const body = m.type === 'text' ? m.content : `[${m.type.toUpperCase()}]`;
@@ -1480,9 +1494,10 @@ export default function ChatPanel({
 
 
 
-    const lastCustomerMessage = useMemo(() =>
-        (chat?.messages || []).slice().reverse().find(m => !m.from_me && m.type !== 'system')
-        , [chat?.messages]);
+    const lastCustomerMessage = useMemo(() => {
+        const msgs = chat?.id ? (messagesByChat[chat.id] || []) : [];
+        return msgs.slice().reverse().find(m => !m.from_me && m.type !== 'system');
+    }, [chat?.id, messagesByChat]);
 
     if (!chat) {
         return (

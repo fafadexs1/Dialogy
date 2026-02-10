@@ -38,6 +38,7 @@ export async function GET(request: Request) {
               w.close_message_template, 
               w.transfer_team_message_template,
               w.marketing_auto_close_seconds,
+              w.queue_auto_close_seconds,
               (w.owner_id = $1) AS is_owner,
               (SELECT plan FROM billing_info WHERE workspace_id = w.id LIMIT 1) as plan
             FROM workspaces w
@@ -74,6 +75,7 @@ export async function GET(request: Request) {
                 closeMessageTemplate: r.close_message_template || '',
                 transferTeamMessageTemplate: r.transfer_team_message_template || '',
                 marketingAutoCloseSeconds: r.marketing_auto_close_seconds ?? undefined,
+                queueAutoCloseSeconds: r.queue_auto_close_seconds ?? undefined,
                 isOwner: !!r.is_owner,
                 plan: planKey,
             };
