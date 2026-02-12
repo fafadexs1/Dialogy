@@ -1071,7 +1071,7 @@ export default function ChatPanel({
                 } else {
                     updateMessage(job.chatId, job.messageId, {
                         api_message_status: 'PENDING',
-                        metadata: { ...job.metadata, send_error: undefined },
+                        metadata: { ...job.metadata, send_error: undefined, send_error_details: undefined },
                     });
                 }
 
@@ -1085,7 +1085,16 @@ export default function ChatPanel({
                 const errorMessage = error instanceof Error ? error.message : 'Falha ao enviar mensagem.';
                 updateMessage(job.chatId, job.messageId, {
                     api_message_status: 'FAILED',
-                    metadata: { ...job.metadata, send_error: errorMessage },
+                    metadata: {
+                        ...job.metadata,
+                        send_error: errorMessage,
+                        send_error_details: {
+                            source: 'client_send_queue',
+                            status: 'FAILED',
+                            reason: errorMessage,
+                            captured_at: new Date().toISOString(),
+                        },
+                    },
                 });
                 toast({ title: 'Falha ao enviar', description: errorMessage, variant: 'destructive' });
             } finally {
@@ -1105,7 +1114,8 @@ export default function ChatPanel({
 
     const handleRetryMessage = useCallback(async (message: Message) => {
         if (!message?.id) return;
-        if ((message.api_message_status || '').toUpperCase() !== 'FAILED') return;
+        const status = (message.api_message_status || '').toUpperCase();
+        if (status !== 'FAILED' && status !== 'ERROR') return;
         if (message.metadata?.isInternalNote) return;
         if (retryingMessagesRef.current.has(message.id)) return;
 
@@ -1114,7 +1124,7 @@ export default function ChatPanel({
 
         updateMessage(message.chat_id, message.id, {
             api_message_status: 'PENDING',
-            metadata: { ...baseMetadata, send_error: undefined },
+            metadata: { ...baseMetadata, send_error: undefined, send_error_details: undefined },
         });
 
         try {
@@ -1148,7 +1158,16 @@ export default function ChatPanel({
             const errorMessage = error instanceof Error ? error.message : 'Falha ao reenviar mensagem.';
             updateMessage(message.chat_id, message.id, {
                 api_message_status: 'FAILED',
-                metadata: { ...baseMetadata, send_error: errorMessage },
+                metadata: {
+                    ...baseMetadata,
+                    send_error: errorMessage,
+                    send_error_details: {
+                        source: 'client_retry',
+                        status: 'FAILED',
+                        reason: errorMessage,
+                        captured_at: new Date().toISOString(),
+                    },
+                },
             });
             toast({ title: 'Falha ao reenviar', description: errorMessage, variant: 'destructive' });
         } finally {
@@ -1355,7 +1374,16 @@ export default function ChatPanel({
                     // Mark specific message as FAILED
                     updateMessage(chatId, optMsg.id, {
                         api_message_status: 'FAILED',
-                        metadata: { ...optMsg.metadata, send_error: fileErr.message || 'Falha no envio.' }
+                        metadata: {
+                            ...optMsg.metadata,
+                            send_error: fileErr.message || 'Falha no envio.',
+                            send_error_details: {
+                                source: 'client_media_send',
+                                status: 'FAILED',
+                                reason: fileErr.message || 'Falha no envio.',
+                                captured_at: new Date().toISOString(),
+                            },
+                        }
                     });
 
                     toast({

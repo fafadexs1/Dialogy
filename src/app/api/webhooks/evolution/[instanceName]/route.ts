@@ -41,6 +41,215 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
     return instanceRes.rows[0];
 }
 
+const FAILED_DELIVERY_STATUSES = new Set(['FAILED', 'ERROR']);
+
+function pickFirstNonEmptyString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed.length > 0) return trimmed;
+        }
+    }
+    return undefined;
+}
+
+function pickFirstCode(...values: unknown[]): string | number | undefined {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed.length > 0) return trimmed;
+        }
+    }
+    return undefined;
+}
+
+function parseWebhookTimestamp(value: unknown): Date | null {
+    if (value === null || value === undefined) return null;
+
+    const parseEpoch = (raw: number): Date | null => {
+        if (!Number.isFinite(raw) || raw <= 0) return null;
+        const milliseconds = raw > 1_000_000_000_000 ? raw : raw * 1000;
+        const parsed = new Date(milliseconds);
+        return Number.isFinite(parsed.getTime()) ? parsed : null;
+    };
+
+    if (typeof value === 'number') {
+        return parseEpoch(value);
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+
+        const numericValue = Number(trimmed);
+        if (Number.isFinite(numericValue)) {
+            return parseEpoch(numericValue);
+        }
+
+        const parsedMs = Date.parse(trimmed);
+        if (Number.isFinite(parsedMs)) {
+            const parsed = new Date(parsedMs);
+            return Number.isFinite(parsed.getTime()) ? parsed : null;
+        }
+    }
+
+    return null;
+}
+
+type FailedMessageInspection = {
+    messageUpdates?: Array<Record<string, unknown>>;
+    findMessagesPayload?: unknown;
+    findStatusPayload?: unknown;
+};
+
+async function inspectFailedMessageFromEvolution(
+    instanceName: string,
+    keyId: string,
+    remoteJid?: string | null
+): Promise<FailedMessageInspection | undefined> {
+    const apiConfig = await getApiConfigForInstance(instanceName);
+    if (!apiConfig) return undefined;
+
+    const inspection: FailedMessageInspection = {};
+
+    try {
+        const where: Record<string, unknown> = {
+            key: {
+                id: keyId,
+                ...(remoteJid ? { remoteJid } : {}),
+            },
+        };
+
+        const response = await fetchEvolutionAPI(
+            `/chat/findMessages/${instanceName}`,
+            apiConfig,
+            {
+                method: 'POST',
+                body: JSON.stringify({ where }),
+            }
+        );
+        inspection.findMessagesPayload = response;
+
+        const record = Array.isArray(response?.messages?.records)
+            ? response.messages.records[0]
+            : null;
+
+        if (Array.isArray(record?.MessageUpdate)) {
+            inspection.messageUpdates = record.MessageUpdate
+                .filter((item: unknown) => item && typeof item === 'object')
+                .slice(-10) as Array<Record<string, unknown>>;
+        }
+    } catch (error) {
+        console.error(`[WEBHOOK_MSG_UPDATE] Falha ao enriquecer detalhes do FAILED para ${keyId}:`, error);
+    }
+
+    try {
+        const statusWhere: Record<string, unknown> = {
+            id: keyId,
+            ...(remoteJid ? { remoteJid } : {}),
+        };
+        const statusPayload = await fetchEvolutionAPI(
+            `/chat/findStatusMessage/${instanceName}`,
+            apiConfig,
+            {
+                method: 'POST',
+                body: JSON.stringify({ where: statusWhere }),
+            }
+        );
+        inspection.findStatusPayload = statusPayload;
+    } catch (error) {
+        console.error(`[WEBHOOK_MSG_UPDATE] Falha ao obter findStatusMessage para ${keyId}:`, error);
+    }
+
+    return inspection;
+}
+
+async function buildFailedDeliveryDetails(
+    payload: any,
+    instanceName: string,
+    keyId: string,
+    normalizedStatus: string
+): Promise<{
+    summary: string;
+    details: NonNullable<MessageMetadata['send_error_details']>;
+}> {
+    const data = payload?.data || {};
+    const keyData = data?.key || {};
+    const remoteJid = pickFirstNonEmptyString(data?.remoteJid, keyData?.remoteJid, data?.jid);
+
+    const reason = pickFirstNonEmptyString(
+        data?.reason,
+        data?.failureReason,
+        data?.details?.reason,
+        data?.details?.message,
+        data?.error?.reason,
+        data?.error?.message,
+        data?.errorMessage,
+        data?.message,
+        data?.statusReason,
+        payload?.error?.message,
+        payload?.message
+    );
+    const providerMessage = pickFirstNonEmptyString(
+        data?.providerMessage,
+        data?.details?.providerMessage,
+        data?.error?.error_user_msg
+    );
+    const code = pickFirstCode(
+        data?.error?.code,
+        data?.details?.code,
+        data?.errorCode,
+        data?.statusCode,
+        data?.code,
+        payload?.error?.code
+    );
+
+    const summaryParts: string[] = [];
+    if (reason) summaryParts.push(reason);
+    if (providerMessage && providerMessage !== reason) summaryParts.push(providerMessage);
+    if (code !== undefined) summaryParts.push(`Cód. ${code}`);
+
+    const summary = summaryParts.length > 0
+        ? summaryParts.join(' | ')
+        : `WhatsApp retornou status ${normalizedStatus} para esta mensagem.`;
+
+    const inspection = await inspectFailedMessageFromEvolution(instanceName, keyId, remoteJid);
+    const messageUpdates = inspection?.messageUpdates;
+    const providerPayload = {
+        findMessages: inspection?.findMessagesPayload,
+        findStatusMessage: inspection?.findStatusPayload,
+    };
+    const hasProviderPayload = Object.values(providerPayload).some((value) => value !== undefined);
+
+    const details: NonNullable<MessageMetadata['send_error_details']> = {
+        source: 'evolution_webhook',
+        status: normalizedStatus,
+        reason,
+        code,
+        provider_message: providerMessage,
+        webhook_event: payload?.event,
+        key_id: keyId,
+        captured_at: new Date().toISOString(),
+        raw_data: {
+            keyId: data?.keyId,
+            id: data?.id,
+            status: data?.status,
+            remoteJid,
+            fromMe: data?.fromMe,
+            reason: data?.reason,
+            message: data?.message,
+            details: data?.details,
+            error: data?.error,
+        },
+        raw_payload: payload,
+        provider_payload: hasProviderPayload ? providerPayload : undefined,
+        message_updates: messageUpdates,
+    };
+
+    return { summary, details };
+}
+
 const DEFAULT_QUEUE_AUTO_CLOSE_MS = 0;
 
 async function getQueueAutoCloseMs(workspaceId: string): Promise<number> {
@@ -266,74 +475,38 @@ export async function POST(
     const jobId = requestId;
     console.log(`[WEBHOOK][${jobId}] Evento '${event}' recebido para ${instanceNameFromUrl}. Fila: ativos=${statsBefore.active}, pendentes=${statsBefore.pending}`);
 
-    try {
-        const queuedAt = Date.now();
-        await evolutionWebhookQueue.add(async () => {
-            const processingStartedAt = Date.now();
-            const queueWaitMs = processingStartedAt - queuedAt;
-            try {
-                await processEvolutionEvent(payload);
-                const completedAt = Date.now();
-                await logAction({
-                    action: 'webhook_processed_success',
-                    workspaceId,
-                    payload: {
-                        request_id: requestId,
-                        source: 'evolution',
-                        event,
-                        instance: instanceNameFromUrl,
-                        status_code: 200,
-                        duration_ms: completedAt - receivedAt,
-                        processing_ms: completedAt - processingStartedAt,
-                        queue_wait_ms: queueWaitMs,
-                    },
-                });
-                recordWebhookMetrics({
+    const queuedAt = Date.now();
+    const runWebhookProcessing = async (executionMode: 'queue' | 'overflow_fallback') => {
+        const processingStartedAt = Date.now();
+        const queueWaitMs = processingStartedAt - queuedAt;
+        try {
+            await processEvolutionEvent(payload);
+            const completedAt = Date.now();
+            await logAction({
+                action: 'webhook_processed_success',
+                workspaceId,
+                payload: {
+                    request_id: requestId,
                     source: 'evolution',
-                    status: 'success',
                     event,
-                    durationMs: completedAt - receivedAt,
-                    queueWaitMs,
-                });
-                outcomeLogged = true;
-            } catch (error) {
-                const completedAt = Date.now();
-                await logAction({
-                    action: 'webhook_processed_fail',
-                    workspaceId,
-                    payload: {
-                        request_id: requestId,
-                        source: 'evolution',
-                        event,
-                        instance: instanceNameFromUrl,
-                        status_code: 500,
-                        duration_ms: completedAt - receivedAt,
-                        processing_ms: completedAt - processingStartedAt,
-                        queue_wait_ms: queueWaitMs,
-                        error: error instanceof Error ? error.message : 'unknown_error',
-                    },
-                });
-                recordWebhookMetrics({
-                    source: 'evolution',
-                    status: 'fail',
-                    event,
-                    durationMs: completedAt - receivedAt,
-                    queueWaitMs,
-                });
-                outcomeLogged = true;
-                throw error;
-            }
-        });
-        console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluído em ${Date.now() - queuedAt}ms.`);
-        return NextResponse.json({
-            message: 'Webhook processado com sucesso',
-            jobId,
-            requestId,
-            queue: evolutionWebhookQueue.stats,
-        });
-    } catch (error) {
-        console.error(`[WEBHOOK][${jobId}] Erro ao processar evento '${event}':`, error);
-        if (!outcomeLogged) {
+                    instance: instanceNameFromUrl,
+                    status_code: 200,
+                    duration_ms: completedAt - receivedAt,
+                    processing_ms: completedAt - processingStartedAt,
+                    queue_wait_ms: queueWaitMs,
+                    execution_mode: executionMode,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'evolution',
+                status: 'success',
+                event,
+                durationMs: completedAt - receivedAt,
+                queueWaitMs,
+            });
+            outcomeLogged = true;
+        } catch (error) {
+            const completedAt = Date.now();
             await logAction({
                 action: 'webhook_processed_fail',
                 workspaceId,
@@ -343,7 +516,10 @@ export async function POST(
                     event,
                     instance: instanceNameFromUrl,
                     status_code: 500,
-                    duration_ms: Date.now() - receivedAt,
+                    duration_ms: completedAt - receivedAt,
+                    processing_ms: completedAt - processingStartedAt,
+                    queue_wait_ms: queueWaitMs,
+                    execution_mode: executionMode,
                     error: error instanceof Error ? error.message : 'unknown_error',
                 },
             });
@@ -351,13 +527,72 @@ export async function POST(
                 source: 'evolution',
                 status: 'fail',
                 event,
-                durationMs: Date.now() - receivedAt,
+                durationMs: completedAt - receivedAt,
+                queueWaitMs,
             });
+            outcomeLogged = true;
+            throw error;
         }
-        return NextResponse.json({ error: 'Internal Server Error', jobId, requestId }, { status: 500 });
-    }
-}
+    };
 
+    void evolutionWebhookQueue
+        .add(() => runWebhookProcessing('queue'))
+        .then(() => {
+            console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluido em ${Date.now() - queuedAt}ms.`);
+        })
+        .catch(async (error) => {
+            try {
+                const isQueueFull = error instanceof Error && error.message.includes('Queue is full');
+
+                if (isQueueFull) {
+                    console.warn(`[WEBHOOK][${jobId}] Fila cheia. Processando '${event}' em fallback para evitar perda.`);
+                    try {
+                        await runWebhookProcessing('overflow_fallback');
+                        console.log(`[WEBHOOK][${jobId}] Evento '${event}' concluido via fallback.`);
+                    } catch (fallbackError) {
+                        console.error(`[WEBHOOK][${jobId}] Falha no fallback do evento '${event}':`, fallbackError);
+                    }
+                    return;
+                }
+
+                console.error(`[WEBHOOK][${jobId}] Erro ao processar evento '${event}':`, error);
+                if (!outcomeLogged) {
+                    await logAction({
+                        action: 'webhook_processed_fail',
+                        workspaceId,
+                        payload: {
+                            request_id: requestId,
+                            source: 'evolution',
+                            event,
+                            instance: instanceNameFromUrl,
+                            status_code: 500,
+                            duration_ms: Date.now() - receivedAt,
+                            error: error instanceof Error ? error.message : 'unknown_error',
+                            execution_mode: 'queue',
+                        },
+                    });
+                    recordWebhookMetrics({
+                        source: 'evolution',
+                        status: 'fail',
+                        event,
+                        durationMs: Date.now() - receivedAt,
+                    });
+                }
+            } catch (catchHandlerError) {
+                console.error(`[WEBHOOK][${jobId}] Falha no handler de erro do webhook:`, catchHandlerError);
+            }
+        });
+
+    return NextResponse.json(
+        {
+            message: 'Webhook aceito para processamento',
+            jobId,
+            requestId,
+            queue: evolutionWebhookQueue.stats,
+        },
+        { status: 202 }
+    );
+}
 async function processEvolutionEvent(payload: any) {
     const { event } = payload;
 
@@ -390,10 +625,16 @@ async function handleMessagesUpdate(payload: any) {
 
     const { keyId, status } = data;
     const normalizedStatus = status.toUpperCase();
+    const isFailureStatus = FAILED_DELIVERY_STATUSES.has(normalizedStatus);
 
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${normalizedStatus} na instância ${instanceName}`);
     if (normalizedStatus === 'READ' || normalizedStatus === 'PLAYED') {
         console.log(`[WEBHOOK_MSG_VIEWED] Mensagem ${keyId} foi visualizada/reproduzida pelo contato.`);
+    }
+
+    let failedDeliveryDetails: Awaited<ReturnType<typeof buildFailedDeliveryDetails>> | null = null;
+    if (isFailureStatus) {
+        failedDeliveryDetails = await buildFailedDeliveryDetails(payload, instanceName, keyId, normalizedStatus);
     }
 
     const client = await db.connect();
@@ -401,10 +642,33 @@ async function handleMessagesUpdate(payload: any) {
         await client.query('BEGIN');
 
         // 1. Update the specific message
-        const updateRes = await client.query(
-            `UPDATE messages SET api_message_status = $1 WHERE message_id_from_api = $2 RETURNING chat_id, created_at, from_me`,
-            [normalizedStatus, keyId]
-        );
+        const updateRes = isFailureStatus && failedDeliveryDetails
+            ? await client.query(
+                `UPDATE messages
+                 SET api_message_status = $1,
+                     metadata = jsonb_set(
+                        jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($3::text), true),
+                        '{send_error_details}',
+                        $4::jsonb,
+                        true
+                     )
+                 WHERE message_id_from_api = $2
+                 RETURNING chat_id, created_at, from_me`,
+                [
+                    normalizedStatus,
+                    keyId,
+                    failedDeliveryDetails.summary,
+                    JSON.stringify(failedDeliveryDetails.details),
+                ]
+            )
+            : await client.query(
+                `UPDATE messages
+                 SET api_message_status = $1,
+                     metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
+                 WHERE message_id_from_api = $2
+                 RETURNING chat_id, created_at, from_me`,
+                [normalizedStatus, keyId]
+            );
 
         if ((updateRes.rowCount ?? 0) > 0 && (normalizedStatus === 'READ' || normalizedStatus === 'PLAYED')) {
             const { chat_id, created_at, from_me } = updateRes.rows[0];
@@ -427,6 +691,11 @@ async function handleMessagesUpdate(payload: any) {
         }
 
         await client.query('COMMIT');
+        if (isFailureStatus && failedDeliveryDetails) {
+            console.log(
+                `[WEBHOOK_MSG_UPDATE] FAILED detalhado para ${keyId}: ${failedDeliveryDetails.summary}`
+            );
+        }
         console.log(`[WEBHOOK_MSG_UPDATE] Status da mensagem ${keyId} atualizado com sucesso.`);
     } catch (error) {
         await client.query('ROLLBACK');
@@ -457,6 +726,14 @@ async function handleMessagesUpsert(payload: any) {
     }
 
     const { key, pushName, message, messageType } = data;
+    const messageCreatedAt = parseWebhookTimestamp(
+        data?.messageTimestamp ??
+        data?.messageTimestampMs ??
+        data?.timestamp ??
+        payload?.date_time ??
+        payload?.dateTime ??
+        payload?.timestamp
+    ) ?? new Date();
 
     if (key.fromMe) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
@@ -659,12 +936,12 @@ async function handleMessagesUpsert(payload: any) {
                 workspace_id, chat_id, type, content, metadata,
                 message_id_from_api, sender_from_api, instance_name,
                 source_from_api, from_me,
-                api_message_status, raw_payload
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+                api_message_status, raw_payload, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
             [
                 workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata ?? {}), key.id, sender,
                 instanceName, data.source, key.fromMe,
-                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload ?? {})
+                data.status?.toUpperCase() || 'SENT', JSON.stringify(payload ?? {}), messageCreatedAt
             ]
         );
 

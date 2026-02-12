@@ -53,6 +53,42 @@ function formatDuration(seconds: number): string {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+type FailureDetailsView = {
+    summary: string;
+    code?: string | number;
+    status?: string;
+    source?: string;
+    capturedAt?: string;
+};
+
+function normalizeFailureDetails(message: Message): FailureDetailsView {
+    const sendError = typeof message.metadata?.send_error === 'string'
+        ? message.metadata.send_error.trim()
+        : '';
+    const details = message.metadata?.send_error_details as Record<string, unknown> | undefined;
+
+    const reason = typeof details?.reason === 'string' ? details.reason.trim() : '';
+    const providerMessage = typeof details?.provider_message === 'string' ? details.provider_message.trim() : '';
+    const code = (typeof details?.code === 'string' || typeof details?.code === 'number') ? details.code : undefined;
+    const status = typeof details?.status === 'string' ? details.status : undefined;
+    const source = typeof details?.source === 'string' ? details.source : undefined;
+    const capturedAt = typeof details?.captured_at === 'string' ? details.captured_at : undefined;
+
+    const parts: string[] = [];
+    if (sendError) parts.push(sendError);
+    if (reason && reason !== sendError) parts.push(reason);
+    if (providerMessage && providerMessage !== reason && providerMessage !== sendError) parts.push(providerMessage);
+    if (code !== undefined) parts.push(`Cód. ${code}`);
+
+    return {
+        summary: parts.length > 0 ? parts.join(' | ') : 'WhatsApp retornou falha de entrega para esta mensagem.',
+        code,
+        status,
+        source,
+        capturedAt,
+    };
+}
+
 function LocationMessage({ message }: { message: Message }) {
     const { latitude, longitude, address, locationName, mapUrl, thumbnail, locationDescription } = message.metadata || {};
     const thumbnailSrc = typeof thumbnail === 'string' && thumbnail.length > 0 ? thumbnail : undefined;
@@ -288,10 +324,18 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
     const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
     const status = (message.api_message_status || '').toUpperCase();
-    const isFailed = status === 'FAILED';
+    const isFailed = status === 'FAILED' || status === 'ERROR';
     const isInternalNote = message.metadata?.isInternalNote;
-    const failureReason = typeof message.metadata?.send_error === 'string' ? message.metadata.send_error : undefined;
-    const statusTitle = isFailed && failureReason ? `Falha ao enviar: ${failureReason}` : (message.api_message_status || 'Sem status');
+    const failureDetails = normalizeFailureDetails(message);
+    const statusTitle = isFailed
+        ? `Falha ao enviar: ${failureDetails.summary}`
+        : (message.api_message_status || 'Sem status');
+    const failedCapturedAtLabel = (() => {
+        if (!failureDetails.capturedAt) return undefined;
+        const parsed = new Date(failureDetails.capturedAt);
+        if (Number.isNaN(parsed.getTime())) return undefined;
+        return formatInTimeZone(parsed, workspaceTimezone, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+    })();
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const isLocationMessage =
@@ -458,8 +502,34 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                                     <div className="flex items-center gap-1">
                                         {isFailed ? (
                                             <>
-                                                <XCircle className="h-3 w-3 text-red-400" />
-                                                <span className="text-red-400">Falha</span>
+                                                <TooltipProvider>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-red-400">
+                                                                <XCircle className="h-3 w-3" />
+                                                                <span>Falha</span>
+                                                            </div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="max-w-[340px] border-red-500/20 bg-red-950/90 text-red-50">
+                                                            <div className="space-y-1">
+                                                                <p className="text-xs font-semibold uppercase tracking-wide text-red-200">Falha de entrega</p>
+                                                                <p className="text-xs leading-relaxed">{failureDetails.summary}</p>
+                                                                {failureDetails.code !== undefined && (
+                                                                    <p className="text-[11px] text-red-200/90">Código: {failureDetails.code}</p>
+                                                                )}
+                                                                {message.message_id_from_api && (
+                                                                    <p className="text-[11px] text-red-200/80 break-all">ID API: {message.message_id_from_api}</p>
+                                                                )}
+                                                                {failedCapturedAtLabel && (
+                                                                    <p className="text-[11px] text-red-200/80">Registrado em {failedCapturedAtLabel}</p>
+                                                                )}
+                                                                {failureDetails.source && (
+                                                                    <p className="text-[10px] text-red-200/60 uppercase tracking-wide">Origem: {failureDetails.source}</p>
+                                                                )}
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </TooltipProvider>
                                                 {onRetry && !isInternalNote && (
                                                     <Button
                                                         type="button"

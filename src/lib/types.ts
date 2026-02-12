@@ -156,6 +156,20 @@ export type MessageMetadata = {
   is_bulk_action?: boolean;
   optimisticId?: string;
   send_error?: string;
+  send_error_details?: {
+    source?: string;
+    status?: string;
+    reason?: string;
+    code?: string | number;
+    provider_message?: string;
+    webhook_event?: string;
+    key_id?: string;
+    captured_at?: string;
+    raw_data?: Record<string, unknown>;
+    raw_payload?: unknown;
+    provider_payload?: Record<string, unknown>;
+    message_updates?: Array<Record<string, unknown>>;
+  };
   isQuestionReply?: boolean;
   packId?: string;
   buyerId?: string;

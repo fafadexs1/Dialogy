@@ -173,6 +173,29 @@ function formatMetaSendError(err: any): string {
     return message || 'Falha ao enviar mensagem para o canal Meta.';
 }
 
+function serializeErrorPayload(error: unknown): unknown {
+    if (error instanceof Error) {
+        const errObj = error as Error & Record<string, unknown>;
+        const extraEntries = Object.entries(errObj).filter(([key]) => !['name', 'message', 'stack'].includes(key));
+        return {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            ...Object.fromEntries(extraEntries),
+        };
+    }
+
+    if (error && typeof error === 'object') {
+        try {
+            return JSON.parse(JSON.stringify(error));
+        } catch (_err) {
+            return String(error);
+        }
+    }
+
+    return error ?? null;
+}
+
 async function resolveMetaSendContext(chatId: string, client: any): Promise<MetaSendContext | null> {
     const res = await client.query(
         `
@@ -544,12 +567,24 @@ async function internalSendMessage(
             console.error('[INTERNAL_SEND_BG] Falha no envio em background:', bgError);
             // Atualiza para FAILED
             const errorMessage = formatMetaSendError(bgError);
+            const errorDetails = {
+                source: 'dialogy_send_background',
+                status: 'FAILED',
+                reason: errorMessage,
+                captured_at: new Date().toISOString(),
+                raw_payload: serializeErrorPayload(bgError),
+            };
             await db.query(`
                 UPDATE messages 
                 SET api_message_status = 'FAILED',
-                    metadata = jsonb_set(COALESCE(metadata, '{}'), '{send_error}', $1)
-                WHERE id = $2
-            `, [JSON.stringify(errorMessage), messageId]);
+                    metadata = jsonb_set(
+                        jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($1::text), true),
+                        '{send_error_details}',
+                        $2::jsonb,
+                        true
+                    )
+                WHERE id = $3
+            `, [errorMessage, JSON.stringify(errorDetails), messageId]);
         }
     })();
 
@@ -757,12 +792,30 @@ async function internalSendMedia(
 
             } catch (bgError: any) {
                 console.error(`[SEND_MEDIA_BG] Falha ao enviar ${file.filename}:`, bgError);
+                const errorMessage = bgError?.message || 'Erro desconhecido';
+                const errorDetails = {
+                    source: 'dialogy_send_media_background',
+                    status: 'FAILED',
+                    reason: errorMessage,
+                    captured_at: new Date().toISOString(),
+                    raw_data: {
+                        filename: file.filename,
+                        mimetype: file.mimetype,
+                        mediatype: file.mediatype,
+                    },
+                    raw_payload: serializeErrorPayload(bgError),
+                };
                 await db.query(`
                     UPDATE messages 
                     SET api_message_status = 'FAILED',
-                        metadata = jsonb_set(COALESCE(metadata, '{}'), '{send_error}', $1)
-                    WHERE id = $2
-                `, [JSON.stringify(bgError.message || 'Erro desconhecido'), dbMessage.id]);
+                        metadata = jsonb_set(
+                            jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($1::text), true),
+                            '{send_error_details}',
+                            $2::jsonb,
+                            true
+                        )
+                    WHERE id = $3
+                `, [errorMessage, JSON.stringify(errorDetails), dbMessage.id]);
             } finally {
                 await cleanupTempMedia(file);
             }
@@ -962,7 +1015,7 @@ export const retryMessageAction = withDebug(
 
         const messageRow = messageRes.rows[0];
         const currentStatus = (messageRow.api_message_status || '').toUpperCase();
-        if (currentStatus && currentStatus !== 'FAILED' && currentStatus !== 'PENDING') {
+        if (currentStatus && currentStatus !== 'FAILED' && currentStatus !== 'ERROR' && currentStatus !== 'PENDING') {
             return { success: false, error: 'Mensagem nao esta em estado de falha.' };
         }
 
