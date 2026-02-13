@@ -15,13 +15,12 @@ import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw, MessageSquare, Users, Settings, CheckCircle2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatMessageDate } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Switch } from '../ui/switch';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { format as formatDate, isToday, isYesterday } from 'date-fns';
-import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
@@ -409,10 +408,7 @@ export default function MobileChatLayout({
   const oldestLoadedMessageId = selectedChatId ? oldestMessageIdByChat[selectedChatId] : null;
 
   const formatMessageDay = useCallback((date: Date) => {
-    const zonedDate = toZonedTime(date, workspaceTimezone);
-    if (isToday(zonedDate)) return 'Hoje';
-    if (isYesterday(zonedDate)) return 'Ontem';
-    return formatDate(zonedDate, 'dd/MM/yyyy', { locale: ptBR });
+    return formatMessageDate(date, workspaceTimezone);
   }, [workspaceTimezone]);
 
   const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {

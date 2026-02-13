@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { format as formatDate, isToday, isYesterday } from 'date-fns';
+import { format as formatDate, isSameDay, subDays } from 'date-fns';
 import { toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 
@@ -9,11 +9,17 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatMessageDate(date: Date, timezone: string): string {
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
   const zonedDate = toZonedTime(date, timezone);
-  if (isToday(zonedDate)) {
+  const zonedNow = toZonedTime(new Date(), timezone);
+
+  if (isSameDay(zonedDate, zonedNow)) {
     return `Hoje`;
   }
-  if (isYesterday(zonedDate)) {
+  if (isSameDay(zonedDate, subDays(zonedNow, 1))) {
     return `Ontem`;
   }
   return formatDate(zonedDate, "dd/MM/yyyy", { locale: ptBR });

@@ -18,8 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { format as formatDate, isToday, isYesterday } from 'date-fns';
-import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
@@ -28,6 +27,7 @@ import ReactDOM from 'react-dom';
 import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
+import { formatMessageDate } from '@/lib/utils';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -331,10 +331,7 @@ export default function CustomerChatLayout({
   }, [chats, initialUser?.id, ownershipFilter, selectedChatId]);
 
   const formatMessageDay = useCallback((date: Date) => {
-    const zonedDate = toZonedTime(date, workspaceTimezone);
-    if (isToday(zonedDate)) return 'Hoje';
-    if (isYesterday(zonedDate)) return 'Ontem';
-    return formatDate(zonedDate, 'dd/MM/yyyy', { locale: ptBR });
+    return formatMessageDate(date, workspaceTimezone);
   }, [workspaceTimezone]);
 
   const mapRealtimePayload = useCallback((payload: RealtimePostgresChangesPayload<any>): Message | null => {

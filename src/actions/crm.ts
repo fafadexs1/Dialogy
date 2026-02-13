@@ -18,6 +18,22 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 import { buildCountQuery, buildSegmentQuery, CriteriaGroup } from '@/lib/crm-query-builder';
 import { Segment } from '@/lib/types';
 
+const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
+
+function normalizeWhatsappJid(value?: string | null): string | null {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const localPart = trimmed
+        .replace(/@s\.whatsapp\.net$/i, '')
+        .split('@')[0]
+        .replace(/\D/g, '');
+
+    if (!localPart) return null;
+    return `${localPart}${WHATSAPP_JID_SUFFIX}`;
+}
+
 export async function getContacts(
     workspaceId: string,
     params: {
@@ -171,7 +187,7 @@ export const saveContactAction = withDebug(
         const data = {
             name: formData.get('name') as string,
             email: formData.get('email') as string || null,
-            phone_number_jid: formData.get('phone_number_jid') as string || null,
+            phone_number_jid: normalizeWhatsappJid(formData.get('phone_number_jid') as string | null),
             address: formData.get('address') as string || null,
             owner_id: ownerId || null,
             avatar_url: formData.get('avatar_url') as string || null,

@@ -40,7 +40,7 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { cn, formatWhatsappText } from '@/lib/utils';
+import { cn, formatMessageDate, formatWhatsappText } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioPlayer } from './audio-player';
 import { MediaViewer } from './media-viewer';
@@ -319,7 +319,19 @@ interface MessageItemProps {
 
 const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward, onRetry }: MessageItemProps) => {
     const { toast } = useToast();
-    const showDateSeparator = !prevMessage || message.formattedDate !== prevMessage.formattedDate;
+
+    const resolveDayLabel = (msg?: Message): string => {
+        if (!msg) return '';
+        const createdAt = new Date(msg.createdAt);
+        if (Number.isNaN(createdAt.getTime())) {
+            return msg.formattedDate || '';
+        }
+        return formatMessageDate(createdAt, workspaceTimezone);
+    };
+
+    const messageDayLabel = resolveDayLabel(message);
+    const prevMessageDayLabel = resolveDayLabel(prevMessage);
+    const showDateSeparator = !prevMessage || messageDayLabel !== prevMessageDayLabel;
 
     const isFromMe = !!message.from_me;
     const isDeleted = message.status === 'deleted';
@@ -378,7 +390,7 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                         <div className="w-full border-t border-border/50"></div>
                     </div>
                     <div className="relative flex justify-center">
-                        <span className="bg-muted/80 backdrop-blur-md px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border shadow-sm dark:bg-white/5 dark:text-white/60 dark:border-white/10">{message.formattedDate}</span>
+                        <span className="bg-muted/80 backdrop-blur-md px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border shadow-sm dark:bg-white/5 dark:text-white/60 dark:border-white/10">{messageDayLabel || message.formattedDate}</span>
                     </div>
                 </div>
             )}

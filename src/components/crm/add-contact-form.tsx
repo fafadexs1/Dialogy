@@ -32,6 +32,16 @@ import { toast } from '@/hooks/use-toast';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
 import { Badge } from '../ui/badge';
 
+const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
+
+function extractWhatsappJidLocalPart(value?: string | null): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const beforeAt = trimmed.replace(/@s\.whatsapp\.net$/i, '').split('@')[0];
+  return beforeAt.replace(/\D/g, '');
+}
+
 interface AddContactFormProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
@@ -120,6 +130,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   const [state, formAction] = useActionState(saveContactAction, { success: false, error: null });
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
+  const [phoneJidLocalPart, setPhoneJidLocalPart] = useState('');
 
   const fetchDropdownData = useCallback(async () => {
     if (isOpen && user?.activeWorkspaceId) {
@@ -135,6 +146,11 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
   useEffect(() => {
     fetchDropdownData();
   }, [fetchDropdownData]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setPhoneJidLocalPart(extractWhatsappJidLocalPart(contact?.phone_number_jid));
+  }, [isOpen, contact?.id, contact?.phone_number_jid]);
 
 
   useEffect(() => {
@@ -196,7 +212,26 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone_number_jid">JID do WhatsApp</Label>
-                <Input id="phone_number_jid" name="phone_number_jid" type="text" placeholder="5511987654321@s.whatsapp.net" defaultValue={contact?.phone_number_jid || ''} />
+                <input
+                  type="hidden"
+                  name="phone_number_jid"
+                  value={phoneJidLocalPart ? `${phoneJidLocalPart}${WHATSAPP_JID_SUFFIX}` : ''}
+                />
+                <div className="flex items-center rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+                  <Input
+                    id="phone_number_jid"
+                    name="phone_number_jid_local"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="5511987654321"
+                    value={phoneJidLocalPart}
+                    onChange={(e) => setPhoneJidLocalPart(e.target.value.replace(/\D/g, ''))}
+                    className="border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  />
+                  <span className="whitespace-nowrap border-l border-input px-3 py-2 text-sm text-muted-foreground">
+                    {WHATSAPP_JID_SUFFIX}
+                  </span>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">E-mail</Label>
