@@ -1015,7 +1015,7 @@ export const retryMessageAction = withDebug(
 
         const messageRow = messageRes.rows[0];
         const currentStatus = (messageRow.api_message_status || '').toUpperCase();
-        if (currentStatus && currentStatus !== 'FAILED' && currentStatus !== 'ERROR' && currentStatus !== 'PENDING') {
+        if (currentStatus && currentStatus !== 'FAILED' && currentStatus !== 'ERROR') {
             return { success: false, error: 'Mensagem nao esta em estado de falha.' };
         }
 

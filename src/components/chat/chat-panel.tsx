@@ -664,6 +664,20 @@ export default function ChatPanel({
 
     // VIRTUALIZATION ENABLED
     const visibleMessages = messagesToRender;
+    const visibleMessagesLookup = useMemo(() => {
+        const byId = new Map<string, Message>();
+        const byApiMessageId = new Map<string, Message>();
+
+        for (const item of visibleMessages) {
+            byId.set(item.id, item);
+
+            if (item.message_id_from_api) {
+                byApiMessageId.set(item.message_id_from_api, item);
+            }
+        }
+
+        return { byId, byApiMessageId };
+    }, [visibleMessages]);
 
     // First Item Index Strategy for Bidirectional Scrolling/Prepend
     // Strategy: Update state DURING render if changes are detected.
@@ -1793,11 +1807,21 @@ export default function ChatPanel({
                     itemContent={(index, message) => {
                         const arrayIndex = index - firstItemIndex;
                         const prevMessage = arrayIndex > 0 ? visibleMessages[arrayIndex - 1] : undefined;
+                        const replyToId = typeof message.metadata?.replyToMessageId === 'string'
+                            ? message.metadata.replyToMessageId
+                            : undefined;
+                        const replyToApiId = typeof message.metadata?.replyToMessageIdFromApi === 'string'
+                            ? message.metadata.replyToMessageIdFromApi
+                            : undefined;
+                        const quotedMessage =
+                            (replyToId ? visibleMessagesLookup.byId.get(replyToId) : undefined) ||
+                            (replyToApiId ? visibleMessagesLookup.byApiMessageId.get(replyToApiId) : undefined);
                         return (
                             <div className="px-2 md:px-6 py-0.5" id={`message-${message.id}`}>
                                 <MessageItem
                                     key={message.id}
                                     message={message}
+                                    quotedMessage={quotedMessage}
                                     prevMessage={prevMessage}
                                     workspaceTimezone={workspaceTimezone}
                                     onDelete={handleDeleteMessage}

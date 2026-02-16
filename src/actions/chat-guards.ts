@@ -53,11 +53,6 @@ export async function guardedCloseChat(chatId: string, reasonTagId: string | nul
     return { success: false, error: `Dados de encerramento inválidos. Verifique: ${fields}` };
   }
 
-  const rate = consumeRateLimit(`close:${currentUser.id}`, 30, 300_000);
-  if (!rate.ok) {
-    return { success: false, error: `Muitos encerramentos. Aguarde ${Math.ceil(rate.retryAfter / 1000)}s.` };
-  }
-
   try {
     const result = await closeChatAction(chatId, reasonTagId, notes, sendCloseMessage, additionalMetadata);
     if (result.success) {

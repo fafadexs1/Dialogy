@@ -126,6 +126,16 @@ export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'syste
 
 
 export type MessageMetadata = {
+  sharedContactName?: string;
+  sharedContactPhones?: string[];
+  sharedContactVcard?: string;
+  sharedContacts?: Array<{
+    displayName?: string;
+    fullName?: string;
+    organization?: string;
+    phones?: string[];
+    vcard?: string;
+  }>;
   mediaUrl?: string;
   mimetype?: string;
   fileName?: string;
@@ -170,6 +180,14 @@ export type MessageMetadata = {
     provider_payload?: Record<string, unknown>;
     message_updates?: Array<Record<string, unknown>>;
   };
+  replyToMessageId?: string;
+  replyToMessageIdFromApi?: string;
+  replyToChatId?: string;
+  replyToContent?: string;
+  replyToType?: 'text' | 'system' | 'audio' | 'image' | 'video' | 'document' | 'location';
+  replyToFromMe?: boolean;
+  replyToCreatedAt?: string;
+  replyToParticipantJid?: string;
   isQuestionReply?: boolean;
   packId?: string;
   buyerId?: string;

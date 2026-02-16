@@ -1092,9 +1092,9 @@ export default function CustomerChatLayout({
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
 
-        // Strategy: 30s if visible, 5m if background
-        // Realtime handles instant updates, polling is just a backup for consistency
-        let interval = isVisible ? 30000 : 300000;
+        // Strategy: 10s always (visible or background)
+        // Aggressive fallback since Realtime may not deliver events reliably
+        let interval = 10000;
 
         // Exponential backoff on errors
         if (errorCount > 0) interval = Math.max(interval, 30000);
@@ -1150,62 +1150,117 @@ export default function CustomerChatLayout({
   const handleRealtimeChatUpdate = useCallback(async (payload: RealtimePostgresChangesPayload<any>) => {
     console.log('[REALTIME] Chat update received:', payload);
     const newChatData = payload.new as any;
+    if (!newChatData?.id) return;
 
-    // 1. Optimistic update (preserving existing fields by merging top-level)
+    const snapshot = useInboxStore.getState();
+    const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
+    const contactId: string | null = newChatData.contact_id ?? existingChat?.contact?.id ?? null;
+
+    const previewRawDate =
+      newChatData.updated_at ||
+      newChatData.created_at ||
+      existingChat?.updatedAt ||
+      new Date().toISOString();
+    const parsedPreviewDate = new Date(previewRawDate);
+    const previewIso = Number.isNaN(parsedPreviewDate.getTime())
+      ? new Date().toISOString()
+      : parsedPreviewDate.toISOString();
+
+    const existingLastMessage = existingChat?.messages?.[existingChat.messages.length - 1];
+    const previewContent =
+      typeof newChatData.last_message_preview === 'string'
+        ? newChatData.last_message_preview.trim()
+        : '';
+
+    const previewMessage: Message | undefined = previewContent
+      ? {
+        id: existingLastMessage?.id || `chat-preview-${newChatData.id}`,
+        chat_id: newChatData.id,
+        workspace_id:
+          newChatData.workspace_id ||
+          existingChat?.workspace_id ||
+          initialUser?.activeWorkspaceId ||
+          '',
+        content: previewContent,
+        type: existingLastMessage?.type || 'text',
+        status: existingLastMessage?.status || 'default',
+        metadata: existingLastMessage?.metadata,
+        transcription: existingLastMessage?.transcription ?? null,
+        timestamp: formatInTimeZone(previewIso, workspaceTimezone, 'HH:mm', { locale: ptBR }),
+        createdAt: previewIso,
+        updatedAt: previewIso,
+        formattedDate: formatMessageDay(new Date(previewIso)),
+        sender: existingLastMessage?.sender,
+        instance_name: newChatData.instance_name || existingLastMessage?.instance_name,
+        source_from_api: newChatData.source || existingLastMessage?.source_from_api,
+        api_message_status: existingLastMessage?.api_message_status,
+        message_id_from_api: existingLastMessage?.message_id_from_api,
+        from_me: existingLastMessage?.from_me,
+        is_read: existingLastMessage?.is_read,
+        sentByTab: existingLastMessage?.sentByTab ?? null,
+        optimistic: false,
+      }
+      : undefined;
+
+    const unreadCountValue = Number(newChatData.unread_count);
+
     const optimisticUpdate: Partial<Chat> = {
       ...newChatData,
-      agentId: newChatData.agent_id,
+      id: newChatData.id,
+      workspace_id:
+        newChatData.workspace_id ||
+        existingChat?.workspace_id ||
+        initialUser?.activeWorkspaceId ||
+        '',
+      status: newChatData.status || existingChat?.status || 'gerais',
+      agentId: newChatData.agent_id ?? undefined,
+      updatedAt: newChatData.updated_at || existingChat?.updatedAt || previewIso,
+      unreadCount:
+        Number.isFinite(unreadCountValue)
+          ? unreadCountValue
+          : existingChat?.unreadCount,
+      teamName: newChatData.team_name || existingChat?.teamName,
+      team_id: newChatData.team_id || existingChat?.team_id,
+      teamColor: newChatData.team_color || existingChat?.teamColor,
+      instance_name: newChatData.instance_name || existingChat?.instance_name,
+      protocol: newChatData.protocol || existingChat?.protocol || `PRT-${String(newChatData.id).toUpperCase()}`,
+      tag: typeof newChatData.tag === 'string' ? newChatData.tag : existingChat?.tag,
+      color: typeof newChatData.color === 'string' ? newChatData.color : existingChat?.color,
+      is_autopilot_active:
+        typeof newChatData.is_autopilot_active === 'boolean'
+          ? newChatData.is_autopilot_active
+          : existingChat?.is_autopilot_active,
+      copilot_mode:
+        (newChatData.copilot_mode || existingChat?.copilot_mode || 'auto') as Chat['copilot_mode'],
+      metaPlatform: (newChatData.meta_platform || existingChat?.metaPlatform || undefined) as Chat['metaPlatform'],
+      metaContactExternalId: newChatData.meta_contact_external_id || existingChat?.metaContactExternalId,
+      metaContactUsername: newChatData.meta_contact_username || existingChat?.metaContactUsername,
+      contact: existingChat?.contact,
+      agent: existingChat?.agent,
+      messages: previewMessage
+        ? [previewMessage]
+        : (existingChat?.messages || []),
     };
-    const contactId: string | null = newChatData.contact_id ?? null;
-    if (contactId) {
-      const existingContact = useInboxStore.getState().chats.find((chat) => chat.contact?.id === contactId)?.contact;
-      if (existingContact) {
-        optimisticUpdate.contact = existingContact;
-      }
-    }
-    // Fix agent object minimally if needed for optimistic update
+
     if (newChatData.agent_id === initialUser?.id) {
       optimisticUpdate.agent = initialUser ?? undefined;
     } else if (newChatData.agent_id === null) {
       optimisticUpdate.agent = undefined;
     }
 
-    // CRITICAL FIX: For INSERT events, we MUST initialize messages array
-    // and ensure updatedAt is set so it sorts correctly to the top
-    if (payload.eventType === 'INSERT') {
-      (optimisticUpdate as any).messages = [];
-      optimisticUpdate.updatedAt = newChatData.updated_at || newChatData.created_at || new Date().toISOString();
-
-      // Ensure contact object exists to prevent UI crashes (accessing property 'name' of undefined)
-      if (!optimisticUpdate.contact && contactId) {
-        // Try to find contact in existing chats if possible, or create a safe placeholder
-        // Since we don't have access to a global contacts list here easily, we use a Safe Placeholder.
-        // It will be replaced by the full fetch in the next step immediately.
-        (optimisticUpdate as any).contact = {
-          id: contactId,
-          name: 'Novo Contato...',
-          workspace_id: initialUser?.activeWorkspaceId || '',
-          avatar_url: null,
-          phone: '',
-        };
-      }
-      if (contactId && !optimisticUpdate.contact) {
-        void fetchContactById(contactId);
-      } else if (contactId && optimisticUpdate.contact?.name === 'Novo Contato...') {
-        void fetchContactById(contactId);
-      }
+    if (!optimisticUpdate.contact && contactId) {
+      optimisticUpdate.contact = {
+        id: contactId,
+        name: 'Novo Contato...',
+        workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
+        avatar_url: undefined,
+        phone: '',
+      } as Contact;
+      void fetchContactById(contactId);
     }
 
-    // CRITICAL: Ensure messages array exists for all events to prevent UI crashes if chat was previously removed
-    if (!(optimisticUpdate as any).messages) {
-      (optimisticUpdate as any).messages = [];
-    }
-
-    useInboxStore.getState().upsertChats([optimisticUpdate as Chat]);
-
-    // 2. Refresh logic removed to enforce Event-Only architecture.
-    // We rely solely on the optimistic update above.
-  }, [fetchContactById, initialUser?.id, initialUser]);
+    snapshot.upsertChats([optimisticUpdate as Chat]);
+  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);

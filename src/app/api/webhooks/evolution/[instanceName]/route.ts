@@ -17,6 +17,27 @@ import { generateEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
+const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
+const STALE_REPLAY_TOLERANCE_MS = 2_000;
+
+const parsedLiveEventMaxAgeSeconds = Number(process.env.EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS ?? 1800);
+const LIVE_EVENT_MAX_AGE_MS =
+    Number.isFinite(parsedLiveEventMaxAgeSeconds) && parsedLiveEventMaxAgeSeconds >= 0
+        ? parsedLiveEventMaxAgeSeconds * 1000
+        : 1_800_000;
+
+function isDisallowedInboundJid(jid: string): boolean {
+    const normalized = jid.trim().toLowerCase();
+    if (!normalized) return true;
+    return DISALLOWED_CONTACT_JID_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function isRecentInboundEvent(createdAt: Date): boolean {
+    if (!Number.isFinite(createdAt.getTime())) return true;
+    const ageMs = Date.now() - createdAt.getTime();
+    if (ageMs < -60_000) return false;
+    return ageMs <= LIVE_EVENT_MAX_AGE_MS;
+}
 
 function resolveWhatsappJid(...candidates: Array<string | null | undefined>): string | null {
     const sanitized = candidates
@@ -97,6 +118,200 @@ function parseWebhookTimestamp(value: unknown): Date | null {
     return null;
 }
 
+type SharedContactData = {
+    displayName?: string;
+    fullName?: string;
+    organization?: string;
+    phones: string[];
+    vcard?: string;
+};
+
+function normalizePhoneForDisplay(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('+')) return trimmed;
+    const digits = trimmed.replace(/\D/g, '');
+    return digits || undefined;
+}
+
+function extractPhonesFromVcard(vcard: string): string[] {
+    const phones = new Set<string>();
+    const lines = vcard.split(/\r?\n/);
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const telMatch = line.match(/^TEL[^:]*:(.+)$/i) || line.match(/^item\d+\.TEL[^:]*:(.+)$/i);
+        if (!telMatch?.[1]) continue;
+        const normalized = normalizePhoneForDisplay(telMatch[1]);
+        if (normalized) phones.add(normalized);
+    }
+
+    return [...phones];
+}
+
+function parseSharedContactPayload(rawContact: any): SharedContactData | null {
+    if (!rawContact || typeof rawContact !== 'object') return null;
+
+    const vcard = pickFirstNonEmptyString(rawContact.vcard);
+    const displayName = pickFirstNonEmptyString(rawContact.displayName);
+    let fullName = pickFirstNonEmptyString(rawContact.fullName);
+    let organization = pickFirstNonEmptyString(rawContact.organization);
+    const phones = new Set<string>();
+
+    const directPhone = pickFirstNonEmptyString(rawContact.phoneNumber, rawContact.waid);
+    if (directPhone) {
+        const normalized = normalizePhoneForDisplay(directPhone);
+        if (normalized) phones.add(normalized);
+    }
+
+    if (vcard) {
+        for (const phone of extractPhonesFromVcard(vcard)) {
+            phones.add(phone);
+        }
+        for (const rawLine of vcard.split(/\r?\n/)) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            if (!fullName) {
+                const fnMatch = line.match(/^FN:(.+)$/i);
+                if (fnMatch?.[1]) fullName = fnMatch[1].trim();
+            }
+            if (!organization) {
+                const orgMatch = line.match(/^ORG:(.+)$/i);
+                if (orgMatch?.[1]) organization = orgMatch[1].trim();
+            }
+        }
+    }
+
+    if (!displayName && !fullName && phones.size === 0 && !organization) {
+        return null;
+    }
+
+    return {
+        displayName,
+        fullName,
+        organization,
+        phones: [...phones],
+        vcard,
+    };
+}
+
+function extractSharedContactsFromMessage(rawMessage: any): SharedContactData[] {
+    const contacts: SharedContactData[] = [];
+    const single = parseSharedContactPayload(rawMessage?.contactMessage);
+    if (single) contacts.push(single);
+
+    const contactsArray = rawMessage?.contactsArrayMessage?.contacts;
+    if (Array.isArray(contactsArray)) {
+        for (const rawContact of contactsArray) {
+            const parsed = parseSharedContactPayload(rawContact);
+            if (parsed) contacts.push(parsed);
+        }
+    }
+
+    return contacts;
+}
+
+type ReplyContextData = {
+    messageIdFromApi?: string;
+    participantJid?: string;
+    previewContent?: string;
+};
+
+function extractMessagePreviewFromEnvelope(rawMessage: any): string | undefined {
+    if (!rawMessage || typeof rawMessage !== 'object') return undefined;
+
+    const locationDetails = rawMessage.locationMessage;
+    const mediaDetails =
+        rawMessage.imageMessage ||
+        rawMessage.videoMessage ||
+        rawMessage.documentMessage ||
+        rawMessage.audioMessage ||
+        rawMessage.extendedTextMessage;
+
+    const latitude = locationDetails?.degreesLatitude !== undefined ? Number(locationDetails.degreesLatitude) : undefined;
+    const longitude = locationDetails?.degreesLongitude !== undefined ? Number(locationDetails.degreesLongitude) : undefined;
+    const hasNumericCoords = Number.isFinite(latitude) && Number.isFinite(longitude);
+    const locationLabel = locationDetails
+        ? locationDetails.name ||
+        locationDetails.address ||
+        (hasNumericCoords
+            ? `Localizacao: ${latitude!.toFixed(5)}, ${longitude!.toFixed(5)}`
+            : 'Localizacao enviada')
+        : undefined;
+
+    const sharedContacts = extractSharedContactsFromMessage(rawMessage);
+    const primarySharedContact = sharedContacts.length > 0 ? sharedContacts[0] : null;
+    const sharedContactLabel = primarySharedContact
+        ? primarySharedContact.displayName ||
+        primarySharedContact.fullName ||
+        (primarySharedContact.phones[0]
+            ? `Contato: ${primarySharedContact.phones[0]}`
+            : 'Contato compartilhado')
+        : undefined;
+
+    return pickFirstNonEmptyString(
+        rawMessage.conversation,
+        mediaDetails?.text,
+        mediaDetails?.caption,
+        mediaDetails?.fileName,
+        mediaDetails?.filename,
+        locationLabel,
+        sharedContactLabel
+    );
+}
+
+function extractReplyContextFromPayload(data: any, message: any): ReplyContextData {
+    const contexts: any[] = [];
+    const pushContext = (value: any) => {
+        if (value && typeof value === 'object') contexts.push(value);
+    };
+
+    pushContext(data?.contextInfo);
+    pushContext(message?.contextInfo);
+
+    const messageContextCandidates = [
+        message?.extendedTextMessage,
+        message?.imageMessage,
+        message?.videoMessage,
+        message?.documentMessage,
+        message?.audioMessage,
+        message?.locationMessage,
+        message?.contactMessage,
+        message?.contactsArrayMessage,
+        message?.buttonsResponseMessage,
+        message?.listResponseMessage,
+        message?.templateButtonReplyMessage,
+        message?.reactionMessage,
+        message?.stickerMessage,
+    ];
+
+    for (const candidate of messageContextCandidates) {
+        pushContext(candidate?.contextInfo);
+    }
+
+    const messageIdFromApi = pickFirstNonEmptyString(
+        ...contexts.map((context) => context?.stanzaId),
+        ...contexts.map((context) => context?.quotedMessageId),
+        ...contexts.map((context) => context?.key?.id)
+    );
+
+    const participantJid = resolveWhatsappJid(
+        ...contexts.map((context) => context?.participant),
+        ...contexts.map((context) => context?.remoteJid)
+    );
+
+    const previewContent = pickFirstNonEmptyString(
+        ...contexts.map((context) => extractMessagePreviewFromEnvelope(context?.quotedMessage))
+    );
+
+    return {
+        messageIdFromApi,
+        participantJid: participantJid ?? undefined,
+        previewContent,
+    };
+}
+
 type FailedMessageInspection = {
     messageUpdates?: Array<Record<string, unknown>>;
     findMessagesPayload?: unknown;
@@ -140,7 +355,7 @@ async function inspectFailedMessageFromEvolution(
                 .filter((item: unknown) => item && typeof item === 'object')
                 .slice(-10) as Array<Record<string, unknown>>;
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error(`[WEBHOOK_MSG_UPDATE] Falha ao enriquecer detalhes do FAILED para ${keyId}:`, error);
     }
 
@@ -208,7 +423,7 @@ async function buildFailedDeliveryDetails(
     const summaryParts: string[] = [];
     if (reason) summaryParts.push(reason);
     if (providerMessage && providerMessage !== reason) summaryParts.push(providerMessage);
-    if (code !== undefined) summaryParts.push(`Cód. ${code}`);
+    if (code !== undefined) summaryParts.push(`Cod. ${code}`);
 
     const summary = summaryParts.length > 0
         ? summaryParts.join(' | ')
@@ -265,7 +480,7 @@ async function getQueueAutoCloseMs(workspaceId: string): Promise<number> {
         if (!Number.isFinite(seconds) || seconds <= 0) return 0;
         return Math.round(seconds) * 1000;
     } catch (error) {
-        console.error('[QUEUE_AUTO_CLOSE] Falha ao buscar configuração:', error);
+        console.error('[QUEUE_AUTO_CLOSE] Falha ao buscar configuracao:', error);
         return DEFAULT_QUEUE_AUTO_CLOSE_MS;
     }
 }
@@ -336,7 +551,7 @@ async function scheduleQueueAutoClose(
                 [
                     workspaceId,
                     chatId,
-                    `Atendimento encerrado automaticamente após ${seconds} segundos na fila sem atendimento.`,
+                    `Atendimento encerrado automaticamente apos ${seconds} segundos na fila sem atendimento.`,
                     {
                         event: 'queue_auto_close',
                         autoClosedAfterMs: autoCloseMs,
@@ -398,7 +613,7 @@ export async function POST(
     const payloadBytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
 
     if (instanceNameFromUrl !== instanceNameFromPayload) {
-        console.error(`[WEBHOOK] Conflito de nome de instância. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+        console.error(`[WEBHOOK] Conflito de nome de instancia. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
         await logAction({
             action: 'webhook_processed_fail',
             payload: {
@@ -421,7 +636,7 @@ export async function POST(
     }
 
     if (!event) {
-        console.error('[WEBHOOK] Erro: Evento não encontrado no payload.');
+        console.error('[WEBHOOK] Erro: Evento nao encontrado no payload.');
         await logAction({
             action: 'webhook_processed_fail',
             payload: {
@@ -610,7 +825,7 @@ async function processEvolutionEvent(payload: any) {
             await handleChatsUpsert(payload);
             break;
         default:
-            console.log(`[WEBHOOK] Evento '${event}' recebido, mas não há handler implementado.`);
+            console.log(`[WEBHOOK] Evento '${event}' recebido, mas nao ha handler implementado.`);
     }
 }
 
@@ -619,7 +834,7 @@ async function handleMessagesUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
 
     if (!data || !data.keyId || !data.status) {
-        console.log('[WEBHOOK_MSG_UPDATE] Payload inválido, keyId ou status ausente.');
+        console.log('[WEBHOOK_MSG_UPDATE] Payload invalido, keyId ou status ausente.');
         return;
     }
 
@@ -627,7 +842,7 @@ async function handleMessagesUpdate(payload: any) {
     const normalizedStatus = status.toUpperCase();
     const isFailureStatus = FAILED_DELIVERY_STATUSES.has(normalizedStatus);
 
-    console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${normalizedStatus} na instância ${instanceName}`);
+    console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${normalizedStatus} na instancia ${instanceName}`);
     if (normalizedStatus === 'READ' || normalizedStatus === 'PLAYED') {
         console.log(`[WEBHOOK_MSG_VIEWED] Mensagem ${keyId} foi visualizada/reproduzida pelo contato.`);
     }
@@ -713,6 +928,8 @@ async function handleMessagesUpsert(payload: any) {
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
+    let shouldRunRealtimeSideEffects = true;
+    let sideEffectSkipReason: string | null = null;
     const contactJid = resolveWhatsappJid(
         data?.key?.remoteJid,
         data?.key?.remoteJidAlt,
@@ -721,11 +938,32 @@ async function handleMessagesUpsert(payload: any) {
     );
 
     if (!data || !data.key || !data.message) {
-        console.log('[WEBHOOK_MSG_UPSERT] Payload inválido, data, key ou message ausente.');
+        console.log('[WEBHOOK_MSG_UPSERT] Payload invalido, data, key ou message ausente.');
         return;
     }
 
     const { key, pushName, message, messageType } = data;
+    if (key.fromMe) {
+        console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
+        return;
+    }
+
+    const externalMessageId = pickFirstNonEmptyString(key?.id, data?.id, data?.keyId);
+    if (!externalMessageId) {
+        console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada por falta de identificador externo (key.id).');
+        return;
+    }
+
+    const duplicateMessageRes = await db.query(
+        'SELECT id FROM messages WHERE message_id_from_api = $1 LIMIT 1',
+        [externalMessageId]
+    );
+    if ((duplicateMessageRes.rowCount ?? 0) > 0) {
+        console.log(
+            `[WEBHOOK_MSG_UPSERT] Mensagem ${externalMessageId} ja processada (${duplicateMessageRes.rows[0].id}). Ignorando duplicata.`
+        );
+        return;
+    }
     const messageCreatedAt = parseWebhookTimestamp(
         data?.messageTimestamp ??
         data?.messageTimestampMs ??
@@ -734,11 +972,6 @@ async function handleMessagesUpsert(payload: any) {
         payload?.dateTime ??
         payload?.timestamp
     ) ?? new Date();
-
-    if (key.fromMe) {
-        console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada (fromMe=true).');
-        return;
-    }
 
     // Log payload for incoming messages as requested
     console.log('[WEBHOOK_MSG_UPSERT] Incoming Message Payload:', JSON.stringify(payload, null, 2));
@@ -757,13 +990,31 @@ async function handleMessagesUpsert(payload: any) {
         ? locationDetails.name ||
         (locationDetails as any)?.address ||
         (hasNumericCoords
-            ? `Localização: ${latitude!.toFixed(5)}, ${longitude!.toFixed(5)}`
-            : 'Localização enviada')
+            ? `Localizacao: ${latitude!.toFixed(5)}, ${longitude!.toFixed(5)}`
+            : 'Localizacao enviada')
         : '';
 
-    content = message.conversation || mediaDetails?.text || mediaDetails?.caption || locationLabel;
+    const sharedContacts = extractSharedContactsFromMessage(message);
+    const hasSharedContacts = sharedContacts.length > 0;
+    const primarySharedContact = hasSharedContacts ? sharedContacts[0] : null;
+    const sharedContactLabel = primarySharedContact
+        ? primarySharedContact.displayName ||
+        primarySharedContact.fullName ||
+        (primarySharedContact.phones[0]
+            ? `Contato: ${primarySharedContact.phones[0]}`
+            : 'Contato compartilhado')
+        : '';
 
-    // A URL da mídia está no nível superior do objeto `message`
+    content =
+        message.conversation ||
+        mediaDetails?.text ||
+        mediaDetails?.caption ||
+        locationLabel ||
+        sharedContactLabel;
+
+    const replyContext = extractReplyContextFromPayload(data, message);
+
+    // A URL da midia esta no nivel superior do objeto `message`
     const mediaUrl = sanitizeUrl(message.mediaUrl) || null;
     console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
     console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
@@ -775,7 +1026,7 @@ async function handleMessagesUpsert(payload: any) {
         console.log('[WEBHOOK_MSG_UPSERT] Raw Mime_type:', messageDetails.mime_type);
     }
 
-    const effectiveMessageType = messageType || (locationDetails ? 'locationMessage' : undefined);
+    const effectiveMessageType = messageType || (locationDetails ? 'locationMessage' : hasSharedContacts ? 'contactMessage' : undefined);
 
     if (effectiveMessageType) {
         switch (effectiveMessageType) {
@@ -794,20 +1045,29 @@ async function handleMessagesUpsert(payload: any) {
             case 'locationMessage':
                 dbMessageType = 'location';
                 break;
+            case 'contactMessage':
+            case 'contactsArrayMessage':
+                dbMessageType = 'text';
+                break;
             case 'conversation': case 'extendedTextMessage': break;
             default:
-                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem não suportado: ${effectiveMessageType}. Ignorando.`);
+                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem nao suportado: ${effectiveMessageType}. Ignorando.`);
                 return;
         }
     }
 
-    if (!content.trim() && !mediaUrl && !locationDetails) {
-        console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteúdo textual ou de mídia. Ignorando.');
+    if (!content.trim() && !mediaUrl && !locationDetails && !hasSharedContacts) {
+        console.log('[WEBHOOK_MSG_UPSERT] Mensagem sem conteudo textual ou de midia. Ignorando.');
         return;
     }
 
     if (!contactJid) {
         console.log('[WEBHOOK_MSG_UPSERT] Nao foi possivel determinar o JID do contato. Payload ignorado.');
+        return;
+    }
+
+    if (isDisallowedInboundJid(contactJid)) {
+        console.log(`[WEBHOOK_MSG_UPSERT] JID ${contactJid} nao elegivel para processamento inbound. Ignorando.`);
         return;
     }
 
@@ -844,7 +1104,7 @@ async function handleMessagesUpsert(payload: any) {
                 locationThumbnail = `data:image/jpeg;base64,${Buffer.from(Object.values(rawLocationThumb) as any[]).toString('base64')}`;
             }
         } catch (thumbErr) {
-            console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail de localização:', thumbErr);
+            console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail de localizacao:', thumbErr);
         }
     }
 
@@ -875,6 +1135,22 @@ async function handleMessagesUpsert(payload: any) {
         };
     }
 
+    if (hasSharedContacts) {
+        metadata = {
+            ...metadata,
+            sharedContactName: primarySharedContact?.displayName || primarySharedContact?.fullName,
+            sharedContactPhones: primarySharedContact?.phones || [],
+            sharedContactVcard: primarySharedContact?.vcard,
+            sharedContacts: sharedContacts.map((item) => ({
+                displayName: item.displayName,
+                fullName: item.fullName,
+                organization: item.organization,
+                phones: item.phones,
+                vcard: item.vcard,
+            })),
+        };
+    }
+
     const contactPhone = contactJid.split('@')[0];
 
     const client = await db.connect();
@@ -886,7 +1162,7 @@ async function handleMessagesUpsert(payload: any) {
              FROM evolution_api_instances
              WHERE instance_name = $1`, [instanceName]
         );
-        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instância '${instanceName}' não encontrado.`);
+        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
 
         workspaceId = instanceRes.rows[0].workspace_id;
         apiConfig = await getApiConfigForInstance(instanceName);
@@ -896,7 +1172,7 @@ async function handleMessagesUpsert(payload: any) {
         );
 
         if ((contactRes.rowCount ?? 0) === 0) {
-            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} não encontrado no workspace ${workspaceId}. Criando novo contato...`);
+            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} nao encontrado no workspace ${workspaceId}. Criando novo contato...`);
             contactRes = await client.query(
                 `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
                  RETURNING *`,
@@ -931,15 +1207,89 @@ async function handleMessagesUpsert(payload: any) {
         chat.contact = contactData;
         console.log(`[WEBHOOK_MSG_UPSERT] Chat loaded - is_autopilot_active: ${chat.is_autopilot_active}, copilot_mode: ${(chat as any).copilot_mode}`);
 
+        let replyReferenceRow: {
+            id: string;
+            chat_id: string;
+            content: string | null;
+            type: Message['type'];
+            from_me: boolean;
+            created_at: string | Date;
+        } | null = null;
+
+        if (replyContext.messageIdFromApi) {
+            const replyReferenceRes = await client.query(
+                `SELECT m.id, m.chat_id, m.content, m.type, m.from_me, m.created_at
+                 FROM messages m
+                 JOIN chats c ON c.id = m.chat_id
+                 WHERE m.workspace_id = $1
+                   AND m.message_id_from_api = $2
+                   AND c.contact_id = $3
+                 ORDER BY m.created_at DESC
+                 LIMIT 1`,
+                [workspaceId, replyContext.messageIdFromApi, contactData.id]
+            );
+            if ((replyReferenceRes.rowCount ?? 0) > 0) {
+                replyReferenceRow = replyReferenceRes.rows[0];
+            }
+
+            const replyCreatedAtRaw = replyReferenceRow?.created_at;
+            const replyCreatedAt = replyCreatedAtRaw ? new Date(replyCreatedAtRaw) : null;
+            const resolvedReplyContent = pickFirstNonEmptyString(
+                replyReferenceRow?.content,
+                replyContext.previewContent
+            );
+
+            metadata = {
+                ...metadata,
+                replyToMessageIdFromApi: replyContext.messageIdFromApi,
+                ...(replyContext.participantJid ? { replyToParticipantJid: replyContext.participantJid } : {}),
+                ...(replyReferenceRow?.id ? { replyToMessageId: replyReferenceRow.id } : {}),
+                ...(replyReferenceRow?.chat_id ? { replyToChatId: replyReferenceRow.chat_id } : {}),
+                ...(replyReferenceRow?.type ? { replyToType: replyReferenceRow.type } : {}),
+                ...(typeof replyReferenceRow?.from_me === 'boolean' ? { replyToFromMe: replyReferenceRow.from_me } : {}),
+                ...(replyCreatedAt && Number.isFinite(replyCreatedAt.getTime())
+                    ? { replyToCreatedAt: replyCreatedAt.toISOString() }
+                    : {}),
+                ...(resolvedReplyContent ? { replyToContent: resolvedReplyContent } : {}),
+            };
+        }
+
+        const latestInboundRes = await client.query(
+            `SELECT created_at
+             FROM messages
+             WHERE chat_id = $1
+               AND from_me = FALSE
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [chat.id]
+        );
+        const latestInboundAtRaw = latestInboundRes.rows[0]?.created_at;
+        const latestInboundAt = latestInboundAtRaw ? new Date(latestInboundAtRaw) : null;
+
+        if (
+            latestInboundAt &&
+            Number.isFinite(latestInboundAt.getTime()) &&
+            messageCreatedAt.getTime() + STALE_REPLAY_TOLERANCE_MS < latestInboundAt.getTime()
+        ) {
+            shouldRunRealtimeSideEffects = false;
+            sideEffectSkipReason = `historical_replay_before_${latestInboundAt.toISOString()}`;
+        }
+
+        if (shouldRunRealtimeSideEffects && !isRecentInboundEvent(messageCreatedAt)) {
+            shouldRunRealtimeSideEffects = false;
+            const ageMs = Date.now() - messageCreatedAt.getTime();
+            sideEffectSkipReason = `stale_inbound_event_age_ms_${Math.round(ageMs)}`;
+        }
+
         const messageResult = await client.query(
             `INSERT INTO messages (
                 workspace_id, chat_id, type, content, metadata,
                 message_id_from_api, sender_from_api, instance_name,
                 source_from_api, from_me,
                 api_message_status, raw_payload, created_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
             [
-                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata ?? {}), key.id, sender,
+                workspaceId, chat.id, dbMessageType, content, JSON.stringify(metadata ?? {}), externalMessageId, sender,
                 instanceName, data.source, key.fromMe,
                 data.status?.toUpperCase() || 'SENT', JSON.stringify(payload ?? {}), messageCreatedAt
             ]
@@ -950,26 +1300,41 @@ async function handleMessagesUpsert(payload: any) {
         savedChat = chat;
         savedMessage = messageResult.rows[0];
 
-    } catch (error) {
+    } catch (error: any) {
         await client.query('ROLLBACK');
-        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem na transação:', error);
+        const isDuplicateExternalMessage =
+            error?.code === '23505' &&
+            typeof error?.constraint === 'string' &&
+            error.constraint.includes('message_id_from_api');
+        if (isDuplicateExternalMessage) {
+            console.log(
+                '[WEBHOOK_MSG_UPSERT] Mensagem duplicada ignorada por duplicidade concorrente.'
+            );
+            return;
+        }
+        console.error('[WEBHOOK_MSG_UPSERT] Erro ao processar a mensagem na transacao:', error);
         return;
     } finally {
         client.release();
     }
 
     if (savedChat && savedMessage) {
-        const webhookTask = shouldEnqueueJob('webhook_outbound')
-            ? enqueueWebhookOutbound({
-                chatId: savedChat.id,
-                messageId: savedMessage.id,
-                instanceName,
-            })
-            : dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
+        const postTransactionTasks: Promise<any>[] = [];
 
-        const postTransactionTasks: Promise<any>[] = [
-            webhookTask,
-        ];
+        if (!shouldRunRealtimeSideEffects) {
+            console.log(
+                `[WEBHOOK_MSG_UPSERT] Side-effects em tempo real desativados para ${savedMessage.id}. Motivo: ${sideEffectSkipReason || 'unknown'}`
+            );
+        } else {
+            const webhookTask = shouldEnqueueJob('webhook_outbound')
+                ? enqueueWebhookOutbound({
+                    chatId: savedChat.id,
+                    messageId: savedMessage.id,
+                    instanceName,
+                })
+                : dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
+            postTransactionTasks.push(webhookTask);
+        }
 
         if (contactData?.id && apiConfig && !contactData.avatar_url) {
             postTransactionTasks.push(
@@ -982,7 +1347,7 @@ async function handleMessagesUpsert(payload: any) {
         // ... existing code ...
 
         // Trigger Autopilot for incoming messages
-        if (!key.fromMe) {
+        if (!key.fromMe && shouldRunRealtimeSideEffects) {
             const queueStatus = (savedChat as any).status;
             const queueAgent = (savedChat as any).agent_id || (savedChat as any).agentId || null;
             if (workspaceId && queueStatus === 'gerais' && !queueAgent) {
@@ -1099,9 +1464,7 @@ async function handleChatsUpsert(payload: any) {
         if (!remoteJid) continue;
 
         if (archive) {
-            console.log(`[WEBHOOK_CHAT_UPSERT] Recebido evento de arquivamento para ${remoteJid}. Esta funcionalidade ainda não está implementada.`);
+            console.log(`[WEBHOOK_CHAT_UPSERT] Recebido evento de arquivamento para ${remoteJid}. Esta funcionalidade ainda nao esta implementada.`);
         }
     }
 }
-
-

@@ -17,6 +17,8 @@ import {
     Download,
     StickyNote,
     MapPin,
+    User,
+    Phone,
     Copy,
     Clock,
     ArrowRightLeft,
@@ -89,6 +91,56 @@ function normalizeFailureDetails(message: Message): FailureDetailsView {
     };
 }
 
+function formatReplyTypeLabel(type?: Message['type']): string {
+    switch (type) {
+        case 'image':
+            return 'Imagem';
+        case 'video':
+            return 'Video';
+        case 'audio':
+            return 'Audio';
+        case 'document':
+            return 'Documento';
+        case 'location':
+            return 'Localizacao';
+        default:
+            return 'Mensagem';
+    }
+}
+
+function resolveReplyPreview(message: Message, quotedMessage?: Message): {
+    author: string;
+    content: string;
+} | null {
+    const hasReplyReference = Boolean(
+        quotedMessage ||
+        (typeof message.metadata?.replyToMessageId === 'string' && message.metadata.replyToMessageId.trim().length > 0) ||
+        (typeof message.metadata?.replyToMessageIdFromApi === 'string' && message.metadata.replyToMessageIdFromApi.trim().length > 0) ||
+        (typeof message.metadata?.replyToContent === 'string' && message.metadata.replyToContent.trim().length > 0)
+    );
+    if (!hasReplyReference) return null;
+
+    const replyToContent =
+        typeof quotedMessage?.content === 'string' && quotedMessage.content.trim().length > 0
+            ? quotedMessage.content.trim()
+            : (typeof message.metadata?.replyToContent === 'string' && message.metadata.replyToContent.trim().length > 0
+                ? message.metadata.replyToContent.trim()
+                : undefined);
+
+    const replyToType = quotedMessage?.type || message.metadata?.replyToType;
+    const content = replyToContent || formatReplyTypeLabel(replyToType);
+    if (!content) return null;
+
+    const resolvedFromMe = typeof quotedMessage?.from_me === 'boolean'
+        ? quotedMessage.from_me
+        : (typeof message.metadata?.replyToFromMe === 'boolean' ? message.metadata.replyToFromMe : undefined);
+
+    return {
+        author: resolvedFromMe === true ? 'Voce' : resolvedFromMe === false ? 'Contato' : 'Mensagem original',
+        content,
+    };
+}
+
 function LocationMessage({ message }: { message: Message }) {
     const { latitude, longitude, address, locationName, mapUrl, thumbnail, locationDescription } = message.metadata || {};
     const thumbnailSrc = typeof thumbnail === 'string' && thumbnail.length > 0 ? thumbnail : undefined;
@@ -140,6 +192,106 @@ function LocationMessage({ message }: { message: Message }) {
                 </div>
             </div>
         </a>
+    );
+}
+
+type SharedContactView = {
+    displayName?: string;
+    fullName?: string;
+    organization?: string;
+    phones: string[];
+    vcard?: string;
+};
+
+function normalizeSharedContacts(message: Message): SharedContactView[] {
+    const metadata = message.metadata || {};
+    if (Array.isArray(metadata.sharedContacts) && metadata.sharedContacts.length > 0) {
+        return metadata.sharedContacts.map((contact: any) => ({
+            displayName: typeof contact?.displayName === 'string' ? contact.displayName : undefined,
+            fullName: typeof contact?.fullName === 'string' ? contact.fullName : undefined,
+            organization: typeof contact?.organization === 'string' ? contact.organization : undefined,
+            phones: Array.isArray(contact?.phones)
+                ? contact.phones.filter((phone: unknown): phone is string => typeof phone === 'string' && phone.trim().length > 0)
+                : [],
+            vcard: typeof contact?.vcard === 'string' ? contact.vcard : undefined,
+        }));
+    }
+
+    const singleName = typeof metadata.sharedContactName === 'string' ? metadata.sharedContactName : undefined;
+    const singlePhones = Array.isArray(metadata.sharedContactPhones)
+        ? metadata.sharedContactPhones.filter((phone): phone is string => typeof phone === 'string' && phone.trim().length > 0)
+        : [];
+    const singleVcard = typeof metadata.sharedContactVcard === 'string' ? metadata.sharedContactVcard : undefined;
+
+    if (!singleName && singlePhones.length === 0 && !singleVcard) return [];
+
+    return [{
+        displayName: singleName,
+        phones: singlePhones,
+        vcard: singleVcard,
+    }];
+}
+
+function normalizePhoneHref(phone: string): string {
+    const trimmed = phone.trim();
+    if (!trimmed) return '#';
+    const digits = trimmed.replace(/\D/g, '');
+    if (!digits) return '#';
+    return trimmed.startsWith('+') ? `tel:+${digits}` : `tel:${digits}`;
+}
+
+function SharedContactMessage({ message }: { message: Message }) {
+    const contacts = normalizeSharedContacts(message);
+    if (contacts.length === 0) {
+        return (
+            <p className="text-sm whitespace-pre-wrap">
+                {message.content || 'Contato compartilhado'}
+            </p>
+        );
+    }
+
+    return (
+        <div className="space-y-2 max-w-[85vw] md:max-w-[340px]">
+            <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground dark:border-white/10 dark:bg-white/10 dark:text-white/70">
+                <User className="h-3 w-3" />
+                <span>Contato compartilhado</span>
+            </div>
+            {contacts.slice(0, 3).map((contact, index) => {
+                const title = contact.displayName || contact.fullName || `Contato ${index + 1}`;
+                return (
+                    <div
+                        key={`${title}-${index}`}
+                        className="rounded-xl border border-border/60 bg-background/70 p-3 shadow-sm dark:border-white/10 dark:bg-black/20"
+                    >
+                        <p className="text-sm font-semibold text-foreground dark:text-white">{title}</p>
+                        {contact.organization && (
+                            <p className="text-xs text-muted-foreground dark:text-white/70">{contact.organization}</p>
+                        )}
+                        {contact.phones.length > 0 ? (
+                            <div className="mt-2 space-y-1">
+                                {contact.phones.map((phone) => (
+                                    <a
+                                        key={`${title}-${phone}`}
+                                        href={normalizePhoneHref(phone)}
+                                        className="inline-flex items-center gap-1 text-xs text-blue-500 hover:underline dark:text-blue-300"
+                                    >
+                                        <Phone className="h-3 w-3" />
+                                        <span>{phone}</span>
+                                    </a>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="mt-2 text-xs text-muted-foreground dark:text-white/60">Sem telefone no contato.</p>
+                        )}
+                    </div>
+                );
+            })}
+            {contacts.length > 3 && (
+                <p className="text-[11px] text-muted-foreground dark:text-white/60">
+                    +{contacts.length - 3} contatos adicionais
+                </p>
+            )}
+        </div>
     );
 }
 
@@ -308,6 +460,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
 interface MessageItemProps {
     message: Message;
+    quotedMessage?: Message;
     prevMessage?: Message;
     workspaceTimezone: string;
     onDelete: (messageId: string, instanceName?: string) => void;
@@ -317,7 +470,7 @@ interface MessageItemProps {
     onRetry?: (message: Message) => void;
 }
 
-const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward, onRetry }: MessageItemProps) => {
+const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezone, onDelete, currentUserId, instanceName, onForward, onRetry }: MessageItemProps) => {
     const { toast } = useToast();
 
     const resolveDayLabel = (msg?: Message): string => {
@@ -339,6 +492,7 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
     const isFailed = status === 'FAILED' || status === 'ERROR';
     const isInternalNote = message.metadata?.isInternalNote;
     const failureDetails = normalizeFailureDetails(message);
+    const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
         ? `Falha ao enviar: ${failureDetails.summary}`
         : (message.api_message_status || 'Sem status');
@@ -350,6 +504,15 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
     })();
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
+        const hasSharedContacts =
+            (Array.isArray(message.metadata?.sharedContacts) && message.metadata.sharedContacts.length > 0) ||
+            !!message.metadata?.sharedContactName ||
+            (Array.isArray(message.metadata?.sharedContactPhones) && message.metadata.sharedContactPhones.length > 0);
+
+        if (hasSharedContacts) {
+            return <SharedContactMessage message={message} />;
+        }
+
         const isLocationMessage =
             message.type === 'location' ||
             (typeof message.metadata?.latitude === 'number' && typeof message.metadata?.longitude === 'number');
@@ -431,6 +594,28 @@ const MessageItem = memo(({ message, prevMessage, workspaceTimezone, onDelete, c
                                     {isInternalNote && (
                                         <div className="flex items-center gap-1 text-xs text-yellow-500/70 mb-1 font-medium uppercase tracking-wider">
                                             <StickyNote className="h-3 w-3" /> Nota Interna
+                                        </div>
+                                    )}
+                                    {!isDeleted && replyPreview && (
+                                        <div
+                                            className={cn(
+                                                "mb-2 rounded-xl border-l-2 px-2 py-1",
+                                                isFromMe
+                                                    ? 'border-white/80 bg-white/20 text-white'
+                                                    : 'border-blue-500/40 bg-muted/50 text-foreground dark:bg-white/10 dark:text-white'
+                                            )}
+                                        >
+                                            <p
+                                                className={cn(
+                                                    "text-[10px] uppercase tracking-wide font-semibold",
+                                                    isFromMe ? 'text-white/85' : 'text-blue-600 dark:text-blue-300'
+                                                )}
+                                            >
+                                                {replyPreview.author}
+                                            </p>
+                                            <p className={cn("text-xs line-clamp-2", isFromMe ? 'text-white' : 'text-foreground/80 dark:text-white/80')}>
+                                                {replyPreview.content}
+                                            </p>
                                         </div>
                                     )}
                                     {isDeleted ? (

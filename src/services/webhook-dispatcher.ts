@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import type { Message, Chat, Contact } from '@/lib/types';
 
 const WEBHOOK_TIMEOUT_MS = Number(process.env.WEBHOOK_TIMEOUT_MS ?? 8000);
+const FAILED_MESSAGE_STATUSES = new Set(['FAILED', 'ERROR']);
 
 interface WebhookPayload {
     event: 'message.created';
@@ -132,7 +133,7 @@ export async function dispatchMessageToWebhooksById(
     const chatRow = chatRes.rows[0];
 
     const messageRes = await db.query(
-        `SELECT id, content, type, from_me, created_at, metadata, direction, instance_name
+        `SELECT id, content, type, from_me, created_at, metadata, direction, instance_name, api_message_status
          FROM messages
          WHERE id = $1`,
         [messageId]
@@ -144,6 +145,24 @@ export async function dispatchMessageToWebhooksById(
     }
 
     const messageRow = messageRes.rows[0];
+    const normalizedStatus = (messageRow.api_message_status || '').toUpperCase();
+    if (FAILED_MESSAGE_STATUSES.has(normalizedStatus)) {
+        console.log(
+            `[WEBHOOK_DISPATCHER] Ignorando despacho para mensagem ${messageId} com status ${normalizedStatus}.`
+        );
+        return;
+    }
+
+    const isIncomingMessage =
+        !messageRow.from_me &&
+        (!messageRow.direction || messageRow.direction === 'incoming');
+    if (!isIncomingMessage) {
+        console.log(
+            `[WEBHOOK_DISPATCHER] Ignorando despacho para mensagem ${messageId} pois nao e inbound.`
+        );
+        return;
+    }
+
     const resolvedInstance = instanceName || messageRow.instance_name || 'N/A';
 
     const chat: Chat = {
@@ -191,6 +210,24 @@ export async function dispatchMessageToWebhooks(
 ) {
     try {
         console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
+
+        const normalizedStatus = (message.api_message_status || '').toUpperCase();
+        if (FAILED_MESSAGE_STATUSES.has(normalizedStatus)) {
+            console.log(
+                `[WEBHOOK_DISPATCHER] Despacho bloqueado para mensagem ${message.id} com status ${normalizedStatus}.`
+            );
+            return;
+        }
+
+        const isIncomingMessage =
+            !message.from_me &&
+            (!message.direction || message.direction === 'incoming');
+        if (!isIncomingMessage) {
+            console.log(
+                `[WEBHOOK_DISPATCHER] Despacho bloqueado para mensagem ${message.id} pois nao e inbound.`
+            );
+            return;
+        }
 
         if (!chat.workspace_id) {
             console.error(`[WEBHOOK_DISPATCHER] Erro crítico: O objeto 'chat' não contém 'workspace_id'. Abortando.`);

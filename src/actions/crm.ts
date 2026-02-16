@@ -209,8 +209,23 @@ export const saveContactAction = withDebug(
             await client.query('BEGIN');
 
             let contactId = id;
+            const duplicatePhoneError = 'Ja existe um contato com este WhatsApp neste workspace.';
 
             if (id) { // Update
+                const duplicateRes = await client.query(
+                    `SELECT 1
+                     FROM contacts
+                     WHERE workspace_id = $1
+                       AND phone_number_jid = $2
+                       AND id <> $3
+                     LIMIT 1`,
+                    [workspaceId, data.phone_number_jid, id]
+                );
+                if ((duplicateRes.rowCount || 0) > 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: duplicatePhoneError };
+                }
+
                 await client.query(
                     `UPDATE contacts 
                  SET name = $1, email = $2, phone_number_jid = $3, address = $4, owner_id = $5, avatar_url = $6
@@ -220,9 +235,15 @@ export const saveContactAction = withDebug(
             } else { // Create
                 const res = await client.query(
                     `INSERT INTO contacts (workspace_id, name, email, phone_number_jid, address, owner_id, avatar_url) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (workspace_id, phone_number_jid) DO NOTHING
+                 RETURNING id`,
                     [workspaceId, data.name, data.email, data.phone_number_jid, data.address, data.owner_id, data.avatar_url]
                 );
+                if ((res.rowCount || 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: duplicatePhoneError };
+                }
                 contactId = res.rows[0].id;
             }
 
@@ -278,6 +299,10 @@ export const saveContactAction = withDebug(
             return { success: true, error: null, contact: updatedContact };
         } catch (error) {
             await client.query('ROLLBACK');
+            const maybePgError = error as { code?: string; constraint?: string };
+            if (maybePgError.code === '23505' && maybePgError.constraint === 'uq_contacts_workspace_phone_jid') {
+                return { success: false, error: 'Ja existe um contato com este WhatsApp neste workspace.' };
+            }
             console.error("[SAVE_CONTACT] Error:", error);
             return { success: false, error: "Falha ao salvar contato no banco de dados." };
         } finally {
