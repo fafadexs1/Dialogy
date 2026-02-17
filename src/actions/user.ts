@@ -8,6 +8,7 @@ import type { OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { cache } from 'react';
 import { getPresenceTtlSeconds } from '@/lib/presence';
+import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
 
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
@@ -255,21 +256,24 @@ export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[
             [workspaceId, ttlSeconds]
         );
 
-        return res.rows.map((row): OnlineAgent => ({
-            user: {
-                id: row.id,
-                name: row.full_name,
-                email: row.email,
-                avatar_url: row.avatar_url,
-                avatar: row.avatar_url,
-                is_superadmin: row.is_superadmin,
-                firstName: row.full_name?.split(' ')[0] ?? row.full_name,
-                lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
-                team: row.team_name || undefined,
-                role: row.role_name ? { name: row.role_name } as any : undefined,
-            },
-            joined_at: row.online_since ?? new Date().toISOString(),
-        }));
+        return res.rows.map((row): OnlineAgent => {
+            const normalizedAvatar = normalizeSupabaseStorageUrl(row.avatar_url);
+            return {
+                user: {
+                    id: row.id,
+                    name: row.full_name,
+                    email: row.email,
+                    avatar_url: normalizedAvatar || undefined,
+                    avatar: normalizedAvatar || undefined,
+                    is_superadmin: row.is_superadmin,
+                    firstName: row.full_name?.split(' ')[0] ?? row.full_name,
+                    lastName: row.full_name?.split(' ').slice(1).join(' ') ?? '',
+                    team: row.team_name || undefined,
+                    role: row.role_name ? { name: row.role_name } as any : undefined,
+                },
+                joined_at: row.online_since ?? new Date().toISOString(),
+            };
+        });
     } catch (error) {
         console.error('[GET_ONLINE_AGENTS] Error fetching presence data:', error);
         return [];
@@ -359,6 +363,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         `, [authUser.id]);
 
         const workspaces = workspacesRes.rows.map((r: any) => {
+            const normalizedWorkspaceAvatar = normalizeSupabaseStorageUrl(r.avatar_url);
             // Normalize plan key (same logic as /api/user/route.ts)
             const rawPlan = r.plan;
             let planKey = 'starter';
@@ -375,7 +380,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             return {
                 id: r.id,
                 name: r.name,
-                avatar: r.avatar_url || '',
+                avatar: normalizedWorkspaceAvatar || '',
                 isOwner: r.owner_id === authUser.id,
                 roleName: r.role_name,
                 nexus_settings: r.nexus_settings || {},
@@ -400,7 +405,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             name: dbUser.full_name,
             firstName: dbUser.full_name.split(' ')[0] || '',
             lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
-            avatar: dbUser.avatar_url || '',
+            avatar: normalizeSupabaseStorageUrl(dbUser.avatar_url) || '',
             email: dbUser.email,
             workspaces,
             activeWorkspaceId,

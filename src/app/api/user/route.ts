@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { PLANS } from '@/lib/plans';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
 
 export async function GET(request: Request) {
     const supabase = await createClient();
@@ -70,7 +71,7 @@ export async function GET(request: Request) {
             return {
                 id: r.id,
                 name: r.name,
-                avatar: r.avatar_url || '',
+                avatar: normalizeSupabaseStorageUrl(r.avatar_url) || '',
                 timezone: r.timezone || undefined,
                 closeMessageTemplate: r.close_message_template || '',
                 transferTeamMessageTemplate: r.transfer_team_message_template || '',
@@ -87,7 +88,7 @@ export async function GET(request: Request) {
             name: dbUser.full_name,
             firstName: dbUser.full_name.split(' ')[0] || '',
             lastName: dbUser.full_name.split(' ').slice(1).join(' ') || '',
-            avatar: dbUser.avatar_url || '',
+            avatar: normalizeSupabaseStorageUrl(dbUser.avatar_url) || '',
             email: dbUser.email,
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,

@@ -1336,11 +1336,8 @@ async function handleMessagesUpsert(payload: any) {
             postTransactionTasks.push(webhookTask);
         }
 
-        if (contactData?.id && apiConfig && !contactData.avatar_url) {
-            postTransactionTasks.push(
-                updateProfilePicture(contactData.id, contactJid, instanceName, apiConfig)
-            );
-        }
+        // WhatsApp profile pic fetching disabled — Meta does not allow fetching profile pictures
+        // for WhatsApp contacts (only Instagram/Messenger), and these requests overload the system.
 
 
 
@@ -1398,56 +1395,16 @@ async function handleMessagesUpsert(payload: any) {
     }
 }
 
-async function updateProfilePicture(contactId: string, contactJid: string, instanceName: string, apiConfig: { api_url: string; api_key: string; }) {
-    try {
-        console.log(`[WEBHOOK_PROFILE_PIC] Buscando foto para JID: ${contactJid}`);
-        const profilePicRes = await fetchEvolutionAPI(
-            `/chat/fetchProfilePictureUrl/${instanceName}`,
-            apiConfig,
-            { method: 'POST', body: JSON.stringify({ number: contactJid }) }
-        );
-        const profileUrl = sanitizeUrl(profilePicRes?.profilePictureUrl);
-
-        if (profileUrl) {
-            await db.query('UPDATE contacts SET avatar_url = $1 WHERE id = $2', [profileUrl, contactId]);
-            console.log(`[WEBHOOK_PROFILE_PIC] Foto de perfil atualizada para o contato ${contactId}`);
-        }
-    } catch (picError) {
-        console.error(`[WEBHOOK_PROFILE_PIC] Erro ao buscar foto de perfil para ${contactJid}:`, picError);
-    }
-}
+// updateProfilePicture disabled — Meta does not allow fetching WhatsApp profile pictures.
+// Only Instagram and Messenger support profile picture access.
 
 
-async function handleContactsUpdate(payload: any) {
-    const { instance: instanceName, data } = payload;
-    if (!Array.isArray(data) || data.length === 0) return;
-
-    const contactUpdate = data[0];
-    const profilePicUrl = sanitizeUrl(contactUpdate?.profilePicUrl);
-    const remoteJid = resolveWhatsappJid(
-        contactUpdate?.id,
-        contactUpdate?.remoteJid,
-        contactUpdate?.remoteJidAlt
-    );
-
-    if (!remoteJid || !profilePicUrl) return;
-
-    try {
-        const instanceRes = await db.query('SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1', [instanceName]);
-        if ((instanceRes.rowCount ?? 0) === 0) return;
-        const workspaceId = instanceRes.rows[0].workspace_id;
-
-        const result = await db.query(
-            `UPDATE contacts SET avatar_url = $1 WHERE phone_number_jid = $2 AND workspace_id = $3`,
-            [profilePicUrl, remoteJid, workspaceId]
-        );
-
-        if ((result.rowCount ?? 0) > 0) {
-            console.log(`[WEBHOOK_CONTACT_UPDATE] Foto de perfil atualizada para o contato ${remoteJid}.`);
-        }
-    } catch (error) {
-        console.error('[WEBHOOK_CONTACT_UPDATE] Erro ao atualizar foto de perfil:', error);
-    }
+async function handleContactsUpdate(_payload: any) {
+    // WhatsApp contact profile picture updates disabled.
+    // Meta does not allow fetching profile pictures for WhatsApp contacts.
+    // Only Instagram and Messenger support profile picture access.
+    // This handler now intentionally does nothing to avoid unnecessary API calls.
+    return;
 }
 
 async function handleChatsUpsert(payload: any) {

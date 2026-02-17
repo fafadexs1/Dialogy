@@ -13,7 +13,7 @@ const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
     <div
       ref={ref}
       className={cn(
-        "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full [&_img:not(.hidden)~*]:hidden",
+        "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full [&_img.avatar-loaded~*]:hidden",
         className
       )}
       {...props}
@@ -24,9 +24,13 @@ Avatar.displayName = "Avatar"
 
 const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
   ({ className, src, alt, onError, onLoad, fallbackSrc, ...props }, ref) => {
-    const [isLoaded, setIsLoaded] = React.useState<boolean>(false)
-    const [hasError, setHasError] = React.useState<boolean>(false)
-    const safeSrc = React.useMemo(() => (typeof src === 'string' && src.trim() !== '') ? src : undefined, [src]);
+    const [status, setStatus] = React.useState<'loading' | 'loaded' | 'error'>('loading')
+    const safeSrc = React.useMemo(() => {
+      if (typeof src !== 'string') return undefined;
+      const trimmedSrc = src.trim();
+      if (!trimmedSrc) return undefined;
+      return trimmedSrc;
+    }, [src]);
     const internalRef = React.useRef<HTMLImageElement | null>(null);
 
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
@@ -44,45 +48,53 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
 
     React.useEffect(() => {
       setCurrentSrc(safeSrc || fallbackSrc)
-      setIsLoaded(false)
-      setHasError(false)
+      setStatus('loading')
     }, [safeSrc, fallbackSrc])
 
+    // Catch images that loaded before React hydrated (race condition fix)
     React.useEffect(() => {
       if (!currentSrc) return;
       const img = internalRef.current;
-      if (img && img.complete && img.naturalWidth > 0) {
-        setIsLoaded(true);
+      if (img && img.complete) {
+        if (img.naturalWidth > 0) {
+          setStatus('loaded');
+        } else {
+          // Image completed but with 0 width = broken
+          setStatus('error');
+        }
       }
     }, [currentSrc]);
 
-    return currentSrc ? (
+    if (!currentSrc) return null;
+
+    const isLoaded = status === 'loaded';
+
+    return (
       <img
         ref={setRefs}
         src={currentSrc}
         alt={alt ?? ""}
         className={cn(
           "aspect-square h-full w-full object-cover",
-          (hasError || !isLoaded) && "hidden",
+          isLoaded ? "avatar-loaded" : "hidden",
           className
         )}
         onLoad={(e) => {
-          setIsLoaded(true)
+          setStatus('loaded')
           onLoad?.(e)
         }}
         onError={(e) => {
-          setIsLoaded(false)
-          setHasError(true)
           if (fallbackSrc && currentSrc !== fallbackSrc) {
             setCurrentSrc(fallbackSrc)
-            setHasError(false)
+            setStatus('loading')
             return
           }
+          setStatus('error')
           onError?.(e)
         }}
         {...props}
       />
-    ) : null
+    )
   }
 )
 AvatarImage.displayName = "AvatarImage"

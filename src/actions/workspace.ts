@@ -172,16 +172,15 @@ export async function updateWorkspaceAction(
         return { success: false, error: `Erro ao enviar avatar: ${uploadError.message}` };
       }
 
-      const { data: signedData, error: signedUrlError } = await getSupabaseAdmin().storage
+      const { data: publicData } = getSupabaseAdmin().storage
         .from('workspace-avatars')
-        .createSignedUrl(filePath, 31536000);
+        .getPublicUrl(filePath);
 
-      if (signedUrlError) {
-        console.error('[UPDATE_WORKSPACE] Signed URL erro:', signedUrlError);
-        return { success: false, error: `Erro ao gerar URL do avatar: ${signedUrlError.message}` };
+      if (!publicData?.publicUrl) {
+        return { success: false, error: 'Erro ao gerar URL pública do avatar.' };
       }
 
-      fieldsToUpdate.avatar_url = signedData?.signedUrl;
+      fieldsToUpdate.avatar_url = publicData.publicUrl;
     } catch (error: any) {
       console.error('[UPDATE_WORKSPACE] Avatar upload exception:', error);
       return { success: false, error: 'Erro inesperado ao enviar o avatar do workspace.' };

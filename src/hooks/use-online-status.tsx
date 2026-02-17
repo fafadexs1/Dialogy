@@ -34,6 +34,8 @@ function buildUserSnapshot(user: User | null | undefined): string {
   if (!user) return 'null';
   const workspaces = (user.workspaces || []).map((workspace) => ({
     id: workspace.id,
+    name: workspace.name || '',
+    avatar: workspace.avatar || '',
     timezone: workspace.timezone || '',
     closeMessageTemplate: workspace.closeMessageTemplate || '',
     transferTeamMessageTemplate: workspace.transferTeamMessageTemplate || '',
@@ -43,6 +45,7 @@ function buildUserSnapshot(user: User | null | undefined): string {
 
   return JSON.stringify({
     id: user.id,
+    avatar: user.avatar || user.avatar_url || '',
     activeWorkspaceId: user.activeWorkspaceId || null,
     workspaces,
   });
