@@ -4,7 +4,8 @@ import type { User, Contact, Tag } from '@/lib/types';
 import CustomerList from '@/components/crm/customer-list';
 import CrmKanban from '@/components/crm/crm-kanban';
 import CrmDashboard from '@/components/crm/crm-dashboard';
-import { Loader2, LayoutDashboard, Kanban, List } from 'lucide-react';
+import CrmAutomations from '@/components/crm/crm-automations';
+import { Loader2, LayoutDashboard, Kanban, List, Zap } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getContacts, getTags } from '@/actions/crm';
@@ -60,16 +61,17 @@ export default function CrmPage() {
         <Tabs defaultValue="dashboard" className="flex flex-col h-full">
           <div className="border-b border-white/10 px-6 py-3 bg-black/20 backdrop-blur-xl flex items-center justify-between shrink-0">
             <h1 className="text-xl font-semibold text-white mr-4">CRM</h1>
-            <TabsList className="grid w-[300px] grid-cols-3 bg-white/5 border border-white/10">
+            <TabsList className="grid w-[400px] grid-cols-4 bg-white/5 border border-white/10">
               <TabsTrigger value="dashboard" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-zinc-400"><LayoutDashboard className="w-4 h-4 mr-2" />Visão</TabsTrigger>
               <TabsTrigger value="kanban" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-zinc-400"><Kanban className="w-4 h-4 mr-2" />Kanban</TabsTrigger>
               <TabsTrigger value="list" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-zinc-400"><List className="w-4 h-4 mr-2" />Lista</TabsTrigger>
+              <TabsTrigger value="automations" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-zinc-400"><Zap className="w-4 h-4 mr-2" />Auto</TabsTrigger>
             </TabsList>
           </div>
 
           <div className="flex-1 overflow-hidden">
             <TabsContent value="dashboard" className="h-full m-0 border-0 p-0 data-[state=active]:flex flex-col">
-              <CrmDashboard contacts={contacts} tags={tags} />
+              <CrmDashboard contacts={contacts} tags={tags} workspaceId={user.activeWorkspaceId} />
             </TabsContent>
 
             <TabsContent value="kanban" className="h-full m-0 border-0 p-0 data-[state=active]:flex flex-col">
@@ -78,6 +80,10 @@ export default function CrmPage() {
 
             <TabsContent value="list" className="h-full m-0 border-0 p-0 data-[state=active]:flex flex-col">
               <CustomerList user={user} />
+            </TabsContent>
+
+            <TabsContent value="automations" className="h-full m-0 border-0 p-0 data-[state=active]:flex flex-col">
+              {user.activeWorkspaceId && <CrmAutomations workspaceId={user.activeWorkspaceId} />}
             </TabsContent>
           </div>
         </Tabs>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { type Chat, type User, type Team, type Contact, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
+import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -29,7 +29,8 @@ import {
     LayoutGrid,
     Cpu,
     Target,
-    Check
+    Check,
+    DollarSign
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -42,6 +43,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
 import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
+import { getDealsByContact } from '@/actions/deals';
 import { transferChatAction } from '@/actions/chats';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { startNewConversation } from '@/actions/messages';
@@ -57,6 +59,9 @@ import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import ContactTimeline from '../crm/contact-timeline';
+import DealForm from '../crm/deal-form';
+import LeadScoreBadge from '../crm/lead-score-badge';
 import { CopyProtocolButton } from './copy-protocol-button';
 
 interface ContactPanelProps {
@@ -492,6 +497,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [isStatsOpen, setIsStatsOpen] = useState(false);
     const [agents, setAgents] = useState<User[]>([]);
     const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
+    const [deals, setDeals] = useState<Deal[]>([]);
+    const [dealsLoading, setDealsLoading] = useState(false);
+    const [dealFormOpen, setDealFormOpen] = useState(false);
+    const [showTimeline, setShowTimeline] = useState(false);
 
     const handleContactSave = useCallback((updatedContact?: Contact | null) => {
         // If we received an updated contact, update it directly in the store
@@ -501,6 +510,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         // Still call the original callback for any other sync operations
         onContactUpdate();
     }, [onContactUpdate]);
+
+    const contactId = chat?.contact?.id;
 
     useEffect(() => {
         if (currentUser?.activeWorkspaceId) {
@@ -512,6 +523,20 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             });
         }
     }, [currentUser?.activeWorkspaceId]);
+
+    // Fetch deals for the contact
+    useEffect(() => {
+        if (!contactId) { setDeals([]); return; }
+        setDealsLoading(true);
+        getDealsByContact(contactId)
+            .then(res => setDeals(res.deals || []))
+            .finally(() => setDealsLoading(false));
+    }, [contactId]);
+
+    const openDeals = useMemo(() => deals.filter(d => d.won === null || d.won === undefined), [deals]);
+    const totalOpenValue = useMemo(() => openDeals.reduce((s, d) => s + d.value, 0), [openDeals]);
+
+    const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 
     if (!chat) {
@@ -636,10 +661,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             </div>
 
             <ScrollArea className="flex-1 custom-scrollbar">
-                <div className="p-4 space-y-6 pb-24">
-                    {/* Profile Section */}
+                <div className="p-4 space-y-4 pb-24">
+                    {/* Profile Section — always visible above tabs */}
                     <div className="relative">
-                        {/* Dynamic Platform Glow */}
                         <div className={cn(
                             "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700",
                             platform === 'instagram' ? "bg-pink-500" :
@@ -656,58 +680,47 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
                                 <div className="absolute -inset-2 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
                                 <div className="p-1 rounded-full bg-gradient-to-b from-white/20 to-transparent border border-white/10 backdrop-blur-md">
-                                    <Avatar className="h-32 w-32 shrink-0 rounded-full border-2 border-black/50 shadow-2xl relative">
+                                    <Avatar className="h-20 w-20 shrink-0 rounded-full border-2 border-black/50 shadow-2xl relative">
                                         <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
-                                        <AvatarFallback className="text-4xl font-bold bg-gradient-to-br from-neutral-800 to-black text-white">
+                                        <AvatarFallback className="text-2xl font-bold bg-gradient-to-br from-neutral-800 to-black text-white">
                                             {contact.name.charAt(0)}
                                         </AvatarFallback>
                                     </Avatar>
                                 </div>
 
-                                {/* Platform Icon Badge */}
-                                <div className="absolute -bottom-2 -right-2 h-10 w-10 rounded-2xl bg-black border border-white/10 flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
+                                <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-xl bg-black border border-white/10 flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
                                     {platform === 'instagram' ? (
-                                        <Globe className="h-5 w-5 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
+                                        <Globe className="h-4 w-4 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
                                     ) : platform === 'messenger' ? (
-                                        <Globe className="h-5 w-5 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                                        <Globe className="h-4 w-4 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
                                     ) : (
-                                        <Smartphone className="h-5 w-5 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                                        <Smartphone className="h-4 w-4 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
                                     )}
                                 </div>
                             </div>
 
-                            <div className="mt-8 space-y-3">
-                                <motion.h2
-                                    initial={{ y: 10, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    transition={{ delay: 0.2 }}
-                                    className="font-black text-3xl tracking-tight text-white/90"
-                                >
-                                    {contact.name}
-                                </motion.h2>
-
-                                <motion.div
-                                    initial={{ y: 10, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    transition={{ delay: 0.3 }}
-                                    className="flex flex-wrap items-center justify-center gap-2"
-                                >
+                            <div className="mt-4 space-y-2">
+                                <div className="flex items-center justify-center gap-2">
+                                    <h2 className="font-black text-xl tracking-tight text-white/90">{contact.name}</h2>
+                                    <LeadScoreBadge score={contact.lead_score} size="sm" />
+                                </div>
+                                <div className="flex flex-wrap items-center justify-center gap-1.5">
                                     {chat.tag && chat.color && (
                                         <div
                                             style={{ backgroundColor: `${chat.color}20`, color: chat.color, borderColor: `${chat.color}40` }}
-                                            className="px-3 py-1 rounded-full border text-[9px] font-black uppercase tracking-tighter shadow-[0_0_20px_rgba(0,0,0,0.3)] flex items-center gap-1.5"
+                                            className="px-2 py-0.5 rounded-full border text-[8px] font-black uppercase tracking-tighter flex items-center gap-1"
                                         >
-                                            <div className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: chat.color }} />
+                                            <div className="h-1 w-1 rounded-full animate-pulse" style={{ backgroundColor: chat.color }} />
                                             {chat.tag}
                                         </div>
                                     )}
-                                    <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-white/40 text-[9px] font-bold uppercase tracking-wider">
+                                    <div className="px-2 py-0.5 rounded-full bg-white/5 border border-white/5 text-white/40 text-[8px] font-bold uppercase tracking-wider">
                                         {instanceTypeDisplay}
                                     </div>
                                     <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
                                         <DialogTrigger asChild>
-                                            <button className="h-6 w-6 rounded-full bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 flex items-center justify-center transition-all">
-                                                <Edit className="h-3 w-3" />
+                                            <button className="h-5 w-5 rounded-full bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 flex items-center justify-center transition-all">
+                                                <Edit className="h-2.5 w-2.5" />
                                             </button>
                                         </DialogTrigger>
                                         <AddContactForm
@@ -720,273 +733,223 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             user={currentUser}
                                         />
                                     </Dialog>
-                                </motion.div>
+                                </div>
                             </div>
                         </motion.div>
                     </div>
 
-                    {/* Information Grid (Tiles) */}
-                    <motion.div
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.4 }}
-                        className="space-y-4"
-                    >
-                        <div className="flex items-center justify-between px-1">
-                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
-                                Inteligência de Contato
-                            </h4>
-                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
-                        </div>
+                    {/* ==== TABBED CONTENT ==== */}
+                    <Tabs defaultValue="info" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 bg-white/[0.03] border border-white/5 rounded-xl h-8">
+                            <TabsTrigger value="info" className="text-[10px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-6">Info</TabsTrigger>
+                            <TabsTrigger value="crm" className="text-[10px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-6">
+                                CRM
+                                {openDeals.length > 0 && (
+                                    <span className="ml-1.5 h-4 px-1 bg-emerald-500/20 text-emerald-400 text-[8px] font-black rounded flex items-center">{openDeals.length}</span>
+                                )}
+                            </TabsTrigger>
+                        </TabsList>
 
-                        <div className="grid grid-cols-2 gap-3">
-                            {/* Phone Tile */}
-                            <div className="group relative col-span-2 sm:col-span-1">
-                                <div className="absolute -inset-[1px] bg-gradient-to-b from-white/10 to-transparent rounded-2xl opacity-50 transition-opacity group-hover:opacity-100" />
-                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
-                                    <div className="flex items-center justify-between">
-                                        <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20">
-                                            <Smartphone className="h-4 w-4 text-green-400" />
-                                        </div>
-                                        <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
+                        {/* ── INFO TAB ── */}
+                        <TabsContent value="info" className="mt-4 space-y-5">
+                            {/* Contact Details — compact rows */}
+                            <div className="space-y-2">
+                                {/* Phone */}
+                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all group">
+                                    <div className="h-7 w-7 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 shrink-0">
+                                        <Smartphone className="h-3.5 w-3.5 text-green-400" />
                                     </div>
-                                    <div>
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">WhatsApp</span>
-                                        <span className="text-xs font-bold text-white/80 tabular-nums">
+                                    <div className="flex-1 min-w-0">
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">WhatsApp</span>
+                                        <span className="text-[11px] font-bold text-white/80 tabular-nums truncate block">
                                             {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
                                         </span>
                                     </div>
+                                    <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
                                 </div>
-                            </div>
 
-                            {/* Email Tile */}
-                            <div className="group relative col-span-2 sm:col-span-1">
-                                <div className="absolute -inset-[1px] bg-gradient-to-b from-white/10 to-transparent rounded-2xl opacity-50 transition-opacity group-hover:opacity-100" />
-                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
-                                    <div className="flex items-center justify-between">
-                                        <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
-                                            <Mail className="h-4 w-4 text-blue-400" />
-                                        </div>
-                                        {contact.email && <CopyButton value={contact.email} label="Email" />}
+                                {/* Email */}
+                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all group">
+                                    <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
+                                        <Mail className="h-3.5 w-3.5 text-blue-400" />
                                     </div>
-                                    <div className="min-w-0">
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Email</span>
-                                        <span className="text-xs font-bold text-white/80 truncate block">
-                                            {contact.email || 'Não informado'}
-                                        </span>
+                                    <div className="flex-1 min-w-0">
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">Email</span>
+                                        <span className="text-[11px] font-bold text-white/80 truncate block">{contact.email || 'Não informado'}</span>
                                     </div>
+                                    {contact.email && <CopyButton value={contact.email} label="Email" />}
                                 </div>
-                            </div>
 
-                            {/* Protocol Tile */}
-                            <div className="group relative col-span-2 sm:col-span-1">
-                                <div className="absolute -inset-[1px] bg-gradient-to-r from-purple-500/20 to-blue-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all overflow-hidden border-dashed">
-                                    <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity pointer-events-none">
-                                        <Hash className="h-12 w-12 -mr-4 -mt-4 rotate-12" />
+                                {/* Protocol */}
+                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 border-dashed hover:bg-white/[0.06] transition-all group">
+                                    <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shrink-0">
+                                        <Hash className="h-3.5 w-3.5 text-purple-400" />
                                     </div>
-                                    <div className="flex items-center justify-between">
-                                        <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
-                                            <Hash className="h-4 w-4 text-purple-400" />
-                                        </div>
-                                        <CopyProtocolButton protocol={chat.protocol || buildChatProtocol(chat.id)} />
-                                    </div>
-                                    <div className="min-w-0 overflow-hidden">
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Protocolo</span>
-                                        <span className="text-[10px] font-mono font-bold text-purple-300 tracking-tighter truncate block max-w-full" title={chat.protocol || buildChatProtocol(chat.id)}>
+                                    <div className="flex-1 min-w-0">
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">Protocolo</span>
+                                        <span className="text-[10px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
                                             {chat.protocol || buildChatProtocol(chat.id)}
                                         </span>
                                     </div>
+                                    <CopyProtocolButton protocol={chat.protocol || buildChatProtocol(chat.id)} />
                                 </div>
                             </div>
 
-                            {/* Device Tile */}
-                            <div className="group relative col-span-2 sm:col-span-1">
-                                <div className="absolute -inset-[1px] bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                                <div className="relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 hover:bg-white/[0.06] transition-all">
-                                    <div className="flex items-center justify-between">
-                                        <div className="h-8 w-8 rounded-lg bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
-                                            <Cpu className="h-4 w-4 text-cyan-400" />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-white/20 block mb-1">Dispositivo</span>
-                                        <span className="text-xs font-bold text-white/80 capitalize">
-                                            {(() => {
-                                                const lastMsg = [...(chat.messages || [])].reverse().find(m => !m.from_me && m.source_from_api);
-                                                return lastMsg?.source_from_api || 'Desconhecido';
-                                            })()}
-                                        </span>
+                            {/* Custom Fields */}
+                            {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id]) && (
+                                <div className="space-y-2">
+                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Campos Adicionais</h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {customFields.map(field => {
+                                            const value = contact.custom_fields?.[field.id];
+                                            if (!value) return null;
+                                            let displayValue = value;
+                                            if (field.type === 'select') {
+                                                const option = field.options?.find(opt => opt.value === value);
+                                                displayValue = option ? option.label : value;
+                                            }
+                                            return (
+                                                <div key={field.id} className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col gap-0.5">
+                                                    <span className="text-[8px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
+                                                    <span className="text-[10px] font-bold text-white/70 truncate">{displayValue}</span>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                    </motion.div>
+                            )}
 
-                    {/* Custom Fields Section */}
-                    {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id]) && (
-                        <motion.div
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="space-y-4"
-                        >
-                            <h4 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-white/40 mb-2 px-1">
-                                Campos Adicionais
-                            </h4>
-                            <div className="grid grid-cols-2 gap-3">
-                                {customFields.map(field => {
-                                    const value = contact.custom_fields?.[field.id];
-                                    if (!value) return null;
-
-                                    let displayValue = value;
-                                    if (field.type === 'select') {
-                                        const option = field.options?.find(opt => opt.value === value);
-                                        displayValue = option ? option.label : value;
-                                    }
-
-                                    return (
-                                        <div key={field.id} className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col gap-1 hover:bg-white/5 transition-colors">
-                                            <span className="text-[9px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
-                                            <div className="flex items-center gap-2">
-                                                <Target className="h-3 w-3 text-white/40" />
-                                                <span className="text-xs font-bold text-white/70 truncate">{displayValue}</span>
+                            {/* Agent */}
+                            <div className="space-y-2">
+                                <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Agente Responsável</h4>
+                                <div className="relative bg-white/[0.03] border border-white/5 rounded-xl p-3">
+                                    {agent && agent.id !== 'unknown' ? (
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="relative shrink-0">
+                                                <Avatar className="h-8 w-8 rounded-lg border border-white/10 shadow-lg">
+                                                    <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
+                                                    <AvatarFallback className="bg-neutral-800 text-white/60 font-black text-xs">{agent.name.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                                <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <p className="font-bold text-white/90 truncate text-xs">{agent.name}</p>
+                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[7px] font-bold uppercase px-1 h-3 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                                </div>
+                                                {chat.assigned_at && (
+                                                    <p className="text-[9px] text-white/40 mt-0.5">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
+                                                )}
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        </motion.div>
-                    )}
-
-                    {/* Assigned Agent Card */}
-                    <motion.div
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.6 }}
-                        className="space-y-4"
-                    >
-                        <div className="flex items-center justify-between px-1">
-                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
-                                Agente Responsável
-                            </h4>
-                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
-                        </div>
-
-                        <div className="group relative">
-                            <div className="absolute -inset-[1px] bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur-sm opacity-50 group-hover:opacity-100 transition-opacity"></div>
-                            <div className="relative bg-[#0A0A0A] border border-white/10 rounded-2xl p-5 overflow-hidden shadow-2xl">
-                                {/* Decorative elements */}
-                                <div className="absolute top-0 right-0 p-1 opacity-5">
-                                    <Cpu className="h-16 w-16 -mr-4 -mt-4" />
-                                </div>
-
-                                {agent && agent.id !== 'unknown' ? (
-                                    <div className="flex items-start gap-3 min-w-0">
-                                        <div className="relative shrink-0">
-                                            <div className="absolute -inset-1 bg-blue-500/20 rounded-lg blur-sm" />
-                                            <Avatar className="h-10 w-10 rounded-lg border border-white/10 shadow-lg relative">
-                                                <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
-                                                <AvatarFallback className="bg-neutral-800 text-white/60 font-black text-sm">{agent.name.charAt(0)}</AvatarFallback>
-                                            </Avatar>
-                                            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-black shadow-[0_0_6px_#22c55e]" />
-                                        </div>
-                                        <div className="flex-1 min-w-0 overflow-hidden">
-                                            <div className="flex items-center gap-1.5 mb-1">
-                                                <p className="font-bold text-white/90 truncate text-sm">{agent.name}</p>
-                                                <Badge className="bg-blue-500/10 text-blue-400 text-[7px] font-bold uppercase px-1.5 h-3 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                    ) : (
+                                        <div className="flex items-center gap-3">
+                                            <div className="h-8 w-8 rounded-lg bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
+                                                <UserCheck className="h-4 w-4 text-white/10" />
                                             </div>
-                                            {chat.assigned_at ? (
-                                                <div className="flex items-center gap-1 text-white/40">
-                                                    <Calendar className="h-2.5 w-2.5 shrink-0" />
-                                                    <p className="text-[9px] font-medium truncate">
-                                                        Desde {new Date(chat.assigned_at).toLocaleDateString()}
-                                                    </p>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center gap-1 text-blue-400/60">
-                                                    <Zap className="h-2.5 w-2.5 animate-pulse shrink-0" />
-                                                    <span className="text-[9px] font-bold uppercase">Ativo</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center text-center py-4 space-y-4">
-                                        <div className="h-14 w-14 rounded-2xl bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
-                                            <UserCheck className="h-8 w-8 text-white/10" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-black text-white/40 uppercase tracking-widest">Sem agente responsável</p>
-                                            <p className="text-[10px] text-white/20 font-bold">Fila de espera</p>
-                                        </div>
-                                        <div className="w-full pt-2">
+                                            <div className="flex-1">
+                                                <p className="text-xs font-bold text-white/40">Sem agente</p>
+                                                <p className="text-[9px] text-white/20">Fila de espera</p>
+                                            </div>
                                             <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
                                         </div>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    </motion.div>
 
-                    {/* CRM & Stats Section */}
-                    <motion.div
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.7 }}
-                        className="space-y-4"
-                    >
-                        <div className="flex items-center justify-between px-1">
-                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">
-                                Insights e Central Nexus
-                            </h4>
-                            <div className="h-[1px] flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
-                        </div>
+                            {/* Quick Actions */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <Card
+                                    className="bg-white/[0.02] border-white/5 shadow-none hover:bg-blue-500/5 hover:border-blue-500/30 transition-all cursor-pointer group rounded-xl overflow-hidden"
+                                    onClick={() => setIsStatsOpen(true)}
+                                >
+                                    <CardContent className="p-3 flex items-center gap-2">
+                                        <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shrink-0">
+                                            <BarChart3 className="h-3.5 w-3.5" />
+                                        </div>
+                                        <span className="text-[9px] font-black uppercase tracking-wider text-white/50">Stats</span>
+                                    </CardContent>
+                                </Card>
 
-                        <div className="grid grid-cols-2 gap-3">
-                            <Card
-                                className="bg-[#0A0A0A] border-white/5 shadow-none hover:bg-blue-500/5 hover:border-blue-500/30 transition-all duration-300 cursor-pointer group rounded-2xl overflow-hidden relative"
-                                onClick={() => setIsStatsOpen(true)}
-                            >
-                                <div className="absolute top-0 right-0 p-3 opacity-5 pointer-events-none">
-                                    <BarChart3 className="h-12 w-12" />
+                                <Link href="/crm" className="block">
+                                    <Card className="bg-white/[0.02] border-white/5 shadow-none hover:bg-purple-500/5 hover:border-purple-500/30 transition-all cursor-pointer group rounded-xl overflow-hidden h-full">
+                                        <CardContent className="p-3 flex items-center gap-2">
+                                            <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
+                                                <LayoutGrid className="h-3.5 w-3.5" />
+                                            </div>
+                                            <span className="text-[9px] font-black uppercase tracking-wider text-white/50">CRM</span>
+                                        </CardContent>
+                                    </Card>
+                                </Link>
+                            </div>
+                        </TabsContent>
+
+                        {/* ── CRM TAB ── */}
+                        <TabsContent value="crm" className="mt-4 space-y-5">
+                            {/* Deals */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between px-1">
+                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25">Negócios</h4>
+                                    {totalOpenValue > 0 && (
+                                        <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{formatBRL(totalOpenValue)}</span>
+                                    )}
                                 </div>
-                                <CardContent className="p-5 flex flex-col items-start gap-4">
-                                    <div className="h-10 w-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 group-hover:scale-110 transition-transform">
-                                        <BarChart3 className="h-5 w-5" />
-                                    </div>
-                                    <div className="flex items-center justify-between w-full">
-                                        <span className="text-xs font-black uppercase tracking-widest text-white/60">Estatísticas</span>
-                                        <ArrowRightLeft className="h-3 w-3 text-white/20 rotate-180 group-hover:translate-x-1 transition-transform" />
-                                    </div>
-                                </CardContent>
-                            </Card>
 
-                            <Card className="bg-[#0A0A0A] border-white/5 shadow-none hover:bg-green-500/5 hover:border-green-500/30 transition-all duration-300 cursor-pointer group rounded-2xl overflow-hidden relative">
-                                <div className="absolute top-0 right-0 p-3 opacity-5 pointer-events-none">
-                                    <CheckSquare className="h-12 w-12" />
-                                </div>
-                                <CardContent className="p-5 flex flex-col items-start gap-4">
-                                    <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 border border-green-500/20 group-hover:scale-110 transition-transform">
-                                        <CheckSquare className="h-5 w-5" />
+                                {dealsLoading ? (
+                                    <div className="flex justify-center py-4">
+                                        <Loader2 className="h-4 w-4 animate-spin text-white/30" />
                                     </div>
-                                    <div className="flex items-center justify-between w-full">
-                                        <span className="text-xs font-black uppercase tracking-widest text-white/60">Tarefas</span>
-                                        <div className="h-5 px-2 bg-green-500/20 text-green-400 text-[10px] font-black flex items-center justify-center rounded-lg border border-green-500/20 group-hover:shadow-[0_0_10px_rgba(34,197,94,0.3)] transition-all">0</div>
+                                ) : openDeals.length > 0 ? (
+                                    <div className="space-y-1.5">
+                                        {openDeals.map(deal => (
+                                            <div key={deal.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all">
+                                                <div className="h-7 w-7 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                                                    <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="text-[11px] font-bold text-white/80 truncate block">{deal.title}</span>
+                                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                                        <Badge className="h-3.5 px-1 bg-white/5 border-white/10 text-[8px] font-bold text-white/35">{deal.stage}</Badge>
+                                                        <span className="text-[8px] text-white/25">{deal.probability}%</span>
+                                                    </div>
+                                                </div>
+                                                <span className="text-[11px] font-black text-emerald-400 tabular-nums shrink-0">{formatBRL(deal.value)}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                </CardContent>
-                            </Card>
-                        </div>
+                                ) : (
+                                    <p className="text-[10px] text-white/20 text-center py-3">Nenhum negócio em aberto.</p>
+                                )}
 
-                        <Link href="/crm" className="block">
-                            <Button variant="outline" className="w-full h-14 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.2em] gap-3 group relative overflow-hidden">
-                                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-white/5 to-blue-500/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-                                <LayoutGrid className="h-4 w-4" />
-                                Interface Avançada CRM
-                                <ArrowRightLeft className="h-3.5 w-3.5 rotate-180 group-hover:translate-x-1 transition-transform" />
-                            </Button>
-                        </Link>
-                    </motion.div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full h-7 bg-white/[0.02] border-white/5 text-white/40 hover:text-emerald-400 hover:bg-emerald-500/5 hover:border-emerald-500/20 rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest gap-1.5"
+                                    onClick={() => setDealFormOpen(true)}
+                                >
+                                    <DollarSign className="h-3 w-3" />
+                                    Novo Negócio
+                                </Button>
+                            </div>
+
+                            {/* Timeline */}
+                            <div className="space-y-2">
+                                <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Timeline</h4>
+                                {!showTimeline ? (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full h-7 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest"
+                                        onClick={() => setShowTimeline(true)}
+                                    >
+                                        Carregar Timeline
+                                    </Button>
+                                ) : contactId ? (
+                                    <ContactTimeline contactId={contactId} compact maxItems={8} />
+                                ) : null}
+                            </div>
+                        </TabsContent>
+                    </Tabs>
                 </div>
             </ScrollArea>
             <ContactStatisticsDialog
@@ -995,6 +958,19 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 contactId={contact.id}
                 contactName={contact.name}
             />
+            {/* Deal Form Dialog */}
+            {currentUser?.activeWorkspaceId && contactId && (
+                <DealForm
+                    isOpen={dealFormOpen}
+                    setIsOpen={setDealFormOpen}
+                    workspaceId={currentUser.activeWorkspaceId}
+                    contactId={contactId}
+                    contactName={contact.name}
+                    onSaved={() => {
+                        getDealsByContact(contactId).then(res => setDeals(res.deals || []));
+                    }}
+                />
+            )}
         </motion.div>
     );
 }

@@ -2,14 +2,17 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Save, X } from 'lucide-react';
+import { Plus, Trash2, Save, X, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Tag, CustomFieldDefinition } from '@/lib/types';
 import { CriteriaGroup, Condition, Field, Operator } from '@/lib/crm-query-builder';
+import { parseNaturalLanguageSegment } from '@/actions/nlp-segment';
+import { toast } from '@/hooks/use-toast';
 
 interface SegmentBuilderProps {
     onSave: (criteria: CriteriaGroup, name: string, description: string) => void;
@@ -43,13 +46,16 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
         conditions: [{ field: 'name', operator: 'contains', value: '' }]
     });
 
+    // NLP state
+    const [nlpInput, setNlpInput] = useState('');
+    const [nlpLoading, setNlpLoading] = useState(false);
+
     const allFields = useMemo(() => {
         const custom = customFields.map(cf => {
             let type: 'text' | 'date' | 'select' | 'boolean' | 'number' = 'text';
             if (cf.type === 'number') type = 'number';
             else if (cf.type === 'date') type = 'date';
             else if (cf.type === 'select') type = 'select';
-            // email and tel fall back to 'text'
 
             return {
                 value: `custom_field_${cf.id}` as Field,
@@ -76,7 +82,6 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
 
     const updateCondition = (index: number, updates: Partial<Condition>) => {
         const newConditions = [...criteria.conditions];
-        // Ensure we are updating a Condition, not a Group (simple version supports only 1 level depth for now)
         if ('field' in newConditions[index]) {
             newConditions[index] = { ...newConditions[index], ...updates } as Condition;
             setCriteria({ ...criteria, conditions: newConditions });
@@ -88,11 +93,61 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
         onSave(criteria, name, description);
     };
 
+    const handleNlpGenerate = async () => {
+        if (!nlpInput.trim()) return;
+        setNlpLoading(true);
+        try {
+            const result = await parseNaturalLanguageSegment(nlpInput);
+            if (result.error || !result.criteria) {
+                toast({ title: 'Erro ao gerar filtros', description: result.error, variant: 'destructive' });
+                return;
+            }
+            setCriteria(result.criteria);
+            if (!name.trim()) {
+                setName(nlpInput.length > 40 ? nlpInput.substring(0, 40) + '...' : nlpInput);
+            }
+            if (!description.trim()) {
+                setDescription(nlpInput);
+            }
+            toast({ title: '✨ Filtros gerados com IA!', description: `${result.criteria.conditions.length} condição(ões) criada(s).` });
+        } catch {
+            toast({ title: 'Erro', description: 'Falha ao conectar com a IA.', variant: 'destructive' });
+        } finally {
+            setNlpLoading(false);
+        }
+    };
+
     return (
         <Card className="p-6 bg-zinc-950 border-white/10 text-white space-y-6">
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-semibold">Novo Segmento Inteligente</h3>
                 <Button variant="ghost" size="icon" onClick={onCancel}><X className="w-4 h-4" /></Button>
+            </div>
+
+            {/* NLP Input */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/20 space-y-3">
+                <Label className="text-white/80 text-xs flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-400" /> Descreva o segmento em linguagem natural
+                </Label>
+                <Textarea
+                    value={nlpInput}
+                    onChange={e => setNlpInput(e.target.value)}
+                    placeholder="Ex: contatos com score acima de 70 que não tiveram atividade nos últimos 5 dias"
+                    className="bg-white/5 border-white/10 text-white text-sm resize-none min-h-[60px]"
+                    rows={2}
+                />
+                <Button
+                    size="sm"
+                    className="gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                    onClick={handleNlpGenerate}
+                    disabled={nlpLoading || !nlpInput.trim()}
+                >
+                    {nlpLoading ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                    ) : (
+                        <><Sparkles className="w-3.5 h-3.5" /> Gerar com IA</>
+                    )}
+                </Button>
             </div>
 
             <div className="space-y-4">
@@ -120,7 +175,7 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                 <Label>Regras</Label>
                 <div className="space-y-2">
                     {criteria.conditions.map((condition, index) => {
-                        if (!('field' in condition)) return null; // Skip nested groups for simple UI
+                        if (!('field' in condition)) return null;
 
                         const fieldDef = allFields.find(f => f.value === condition.field);
                         const fieldType = fieldDef?.type || 'text';

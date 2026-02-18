@@ -1,21 +1,35 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { Contact, Tag } from '@/lib/types';
+import React, { useMemo, useEffect, useState } from 'react';
+import { Contact, Tag, DealMetrics } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, AreaChart, Area, CartesianGrid } from 'recharts';
-import { Users, UserPlus, TrendingUp, Activity, ArrowUpRight, ArrowDownRight, MoreHorizontal, Calendar, Phone, Mail, MessageCircle, FileText } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
+import { Users, UserPlus, TrendingUp, Activity, ArrowUpRight, ArrowDownRight, Calendar, Phone, Mail, MessageCircle, FileText, DollarSign, Target, Clock, MoreHorizontal } from 'lucide-react';
 import { format, subDays, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { getDealMetrics } from '@/actions/deals';
 
 interface CrmDashboardProps {
     contacts: Contact[];
     tags: Tag[];
+    workspaceId?: string;
 }
 
-export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
+function formatBRL(value: number): string {
+    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+export default function CrmDashboard({ contacts, tags, workspaceId }: CrmDashboardProps) {
+    const [dealMetrics, setDealMetrics] = useState<DealMetrics | null>(null);
+
+    useEffect(() => {
+        if (workspaceId) {
+            getDealMetrics(workspaceId).then(res => {
+                if (res.metrics) setDealMetrics(res.metrics);
+            });
+        }
+    }, [workspaceId]);
 
     const metrics = useMemo(() => {
         const totalContacts = contacts.length;
@@ -23,7 +37,6 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
             c.created_at && isAfter(new Date(c.created_at), subDays(new Date(), 7))
         ).length;
 
-        // Calculate contacts per stage
         const stages = ['novo', 'qualificado', 'proposta', 'negociacao', 'ganho', 'perdido'];
         const stageCounts = stages.map(stage => {
             const count = contacts.filter(c => c.tags?.some(t => t.value === stage)).length;
@@ -34,7 +47,6 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
             return { name: stage, count };
         });
 
-        // Recent activities
         const allActivities = contacts.flatMap(c =>
             (c.activities || []).map(a => ({ ...a, contactName: c.name, contactAvatar: c.avatar_url, contactEmail: c.email }))
         ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 6);
@@ -48,12 +60,12 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
     }, [contacts]);
 
     const stageColors: Record<string, string> = {
-        novo: '#60A5FA',       // Blue 400
-        qualificado: '#FACC15', // Yellow 400
-        proposta: '#C084FC',    // Purple 400
-        negociacao: '#FB923C',  // Orange 400
-        ganho: '#4ADE80',       // Green 400
-        perdido: '#F87171'      // Red 400
+        novo: '#60A5FA',
+        qualificado: '#FACC15',
+        proposta: '#C084FC',
+        negociacao: '#FB923C',
+        ganho: '#4ADE80',
+        perdido: '#F87171'
     };
 
     const stageLabels: Record<string, string> = {
@@ -79,6 +91,48 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
         return null;
     };
 
+    // Build the metrics cards data with real trend info from deals
+    const trendData = dealMetrics?.trends;
+
+    const metricCards = [
+        {
+            title: "Pipeline Total",
+            value: dealMetrics ? formatBRL(dealMetrics.totalPipelineValue) : '—',
+            subtext: dealMetrics ? `Ponderado: ${formatBRL(dealMetrics.weightedPipelineValue)}` : 'Carregando...',
+            icon: DollarSign,
+            trend: trendData ? `${trendData.revenue.change >= 0 ? '+' : ''}${trendData.revenue.change}%` : '',
+            trendUp: trendData ? trendData.revenue.change >= 0 : true,
+            gradient: "from-emerald-500 to-teal-400"
+        },
+        {
+            title: "Total de Contatos",
+            value: metrics.totalContacts,
+            subtext: `${metrics.newContactsThisWeek} novos essa semana`,
+            icon: Users,
+            trend: trendData ? `${trendData.newDeals.change >= 0 ? '+' : ''}${trendData.newDeals.change}%` : '',
+            trendUp: trendData ? trendData.newDeals.change >= 0 : true,
+            gradient: "from-blue-500 to-cyan-400"
+        },
+        {
+            title: "Ticket Médio",
+            value: dealMetrics ? formatBRL(dealMetrics.averageTicket) : '—',
+            subtext: `Win rate: ${dealMetrics?.winRate ?? 0}%`,
+            icon: Target,
+            trend: trendData ? `${trendData.closedWon.change >= 0 ? '+' : ''}${trendData.closedWon.change}%` : '',
+            trendUp: trendData ? trendData.closedWon.change >= 0 : true,
+            gradient: "from-purple-500 to-pink-500"
+        },
+        {
+            title: "Ciclo Médio",
+            value: dealMetrics ? `${dealMetrics.averageCycleTimeDays}d` : '—',
+            subtext: "Média de dias até fechar",
+            icon: Clock,
+            trend: '',
+            trendUp: true,
+            gradient: "from-orange-500 to-amber-400"
+        },
+    ];
+
     return (
         <div className="p-8 space-y-8 h-full overflow-y-auto bg-transparent custom-scrollbar">
 
@@ -91,58 +145,16 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
                 <div className="flex items-center gap-3">
                     <div className="bg-white/5 border border-white/10 rounded-full px-4 py-1.5 text-xs text-white/70 flex items-center gap-2">
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>Últimos 30 dias</span>
+                        <span>Últimos 7 dias</span>
                     </div>
                 </div>
             </div>
 
-            {/* Metrics Options */}
+            {/* Metrics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[
-                    {
-                        title: "Total de Contatos",
-                        value: metrics.totalContacts,
-                        subtext: "Base total de clientes",
-                        icon: Users,
-                        trend: "+2.5%",
-                        trendUp: true,
-                        gradient: "from-blue-500 to-cyan-400"
-                    },
-                    {
-                        title: "Novos na Semana",
-                        value: metrics.newContactsThisWeek,
-                        subtext: `${((metrics.newContactsThisWeek / (metrics.totalContacts || 1)) * 100).toFixed(1)}% da base`,
-                        icon: UserPlus,
-                        trend: "+12%",
-                        trendUp: true,
-                        gradient: "from-emerald-500 to-teal-400"
-                    },
-                    {
-                        title: "Em Negociação",
-                        value: metrics.stageCounts.find(s => s.name === 'negociacao')?.count || 0,
-                        subtext: "Oportunidades ativas",
-                        icon: TrendingUp,
-                        trend: "+4.3%",
-                        trendUp: true,
-                        gradient: "from-orange-500 to-amber-400"
-                    },
-                    {
-                        title: "Taxa de Conversão",
-                        value: (() => {
-                            const won = metrics.stageCounts.find(s => s.name === 'ganho')?.count || 0;
-                            const lost = metrics.stageCounts.find(s => s.name === 'perdido')?.count || 0;
-                            const totalClosed = won + lost;
-                            return totalClosed > 0 ? `${((won / totalClosed) * 100).toFixed(1)}%` : '0%';
-                        })(),
-                        subtext: "Ganho vs Perdido",
-                        icon: Activity,
-                        trend: "-1.2%",
-                        trendUp: false,
-                        gradient: "from-purple-500 to-pink-500"
-                    },
-                ].map((metric, i) => (
+                {metricCards.map((metric, i) => (
                     <Card key={i} className="border-white/10 bg-black/40 backdrop-blur-xl shadow-lg relative overflow-hidden group">
-                        <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500`}>
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
                             <metric.icon className="w-24 h-24 text-white" />
                         </div>
                         <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
@@ -150,20 +162,38 @@ export default function CrmDashboard({ contacts, tags }: CrmDashboardProps) {
                             <metric.icon className="h-4 w-4 text-white/50" />
                         </CardHeader>
                         <CardContent className="relative z-10">
-                            <div className={`text-4xl font-bold bg-gradient-to-r ${metric.gradient} bg-clip-text text-transparent`}>
+                            <div className={`text-3xl font-bold bg-gradient-to-r ${metric.gradient} bg-clip-text text-transparent`}>
                                 {metric.value}
                             </div>
                             <div className="flex items-center mt-2 gap-2">
-                                <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${metric.trendUp ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {metric.trendUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                                    {metric.trend}
-                                </span>
+                                {metric.trend && (
+                                    <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${metric.trendUp ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                        {metric.trendUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                                        {metric.trend}
+                                    </span>
+                                )}
                                 <p className="text-xs text-white/40">{metric.subtext}</p>
                             </div>
                         </CardContent>
                     </Card>
                 ))}
             </div>
+
+            {/* Deal Pipeline per Stage */}
+            {dealMetrics && dealMetrics.dealsByStage.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {dealMetrics.dealsByStage.map(ds => (
+                        <div key={ds.stage} className="bg-black/20 border border-white/5 rounded-lg p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5 mb-1">
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stageColors[ds.stage] || '#888' }} />
+                                <span className="text-xs text-white/60">{stageLabels[ds.stage] || ds.stage}</span>
+                            </div>
+                            <p className="text-sm font-bold text-white">{formatBRL(ds.totalValue)}</p>
+                            <p className="text-[10px] text-white/40">{ds.count} deals</p>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Charts Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

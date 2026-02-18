@@ -928,6 +928,7 @@ async function handleMessagesUpsert(payload: any) {
     let workspaceId: string | null = null;
     let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
+    let isNewContact = false;
     let shouldRunRealtimeSideEffects = true;
     let sideEffectSkipReason: string | null = null;
     const contactJid = resolveWhatsappJid(
@@ -1178,6 +1179,7 @@ async function handleMessagesUpsert(payload: any) {
                  RETURNING *`,
                 [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
             );
+            isNewContact = true;
         }
 
         if ((contactRes.rowCount ?? 0) === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
@@ -1334,6 +1336,24 @@ async function handleMessagesUpsert(payload: any) {
                 })
                 : dispatchMessageToWebhooks(savedChat, savedMessage, instanceName);
             postTransactionTasks.push(webhookTask);
+        }
+
+        // Auto-capture: fire contact_created automations for new contacts
+        if (isNewContact && workspaceId && contactData) {
+            postTransactionTasks.push((async () => {
+                try {
+                    const { evaluateAutomations } = await import('@/lib/automation-engine');
+                    await evaluateAutomations({
+                        type: 'contact_created',
+                        contactId: contactData!.id,
+                        workspaceId: workspaceId!,
+                        data: { name: contactData!.name, phone: (contactData as any)?.phone },
+                    });
+                    console.log(`[AUTO_CAPTURE] Automacoes contact_created disparadas para ${contactData!.id}`);
+                } catch (err) {
+                    console.error('[AUTO_CAPTURE] Erro ao disparar automacoes:', err);
+                }
+            })());
         }
 
         // WhatsApp profile pic fetching disabled — Meta does not allow fetching profile pictures

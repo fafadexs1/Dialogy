@@ -81,7 +81,10 @@ export async function GET(
         let reason = 'closed_by_default';
 
         // 1. Verificar exceções para o dia atual
-        const todayException = team.scheduleExceptions.find((ex: any) => ex.date.toISOString().split('T')[0] === currentDate);
+        const todayException = team.scheduleExceptions.find((ex: any) => {
+            const exDate = ex.date instanceof Date ? ex.date.toISOString().split('T')[0] : String(ex.date).split('T')[0];
+            return exDate === currentDate;
+        });
 
         if (todayException) {
             if (todayException.is_closed) {

@@ -90,6 +90,7 @@ export type Contact = {
   meta_contact_id?: string; // Reference to meta_contacts for Instagram/Messenger
   created_at?: string;
   custom_fields?: Record<string, any>;
+  lead_score?: number;
 }
 
 export type OnlineAgent = {
@@ -99,10 +100,36 @@ export type OnlineAgent = {
 
 export type Deal = {
   id: string;
-  name: string;
-  value: string;
-  stage: 'Qualificação' | 'Proposta Apresentada' | 'Negociação' | 'Fechado';
-  closeDate: string;
+  workspace_id: string;
+  contact_id: string;
+  title: string;
+  value: number;
+  currency: string;
+  stage: string;
+  probability: number;
+  expected_close_date?: string | null;
+  closed_at?: string | null;
+  won?: boolean | null;
+  owner_id?: string | null;
+  owner?: Partial<User>;
+  contact?: Partial<Contact>;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DealMetrics = {
+  totalPipelineValue: number;
+  weightedPipelineValue: number;
+  averageTicket: number;
+  winRate: number;
+  averageCycleTimeDays: number;
+  dealsByStage: { stage: string; count: number; totalValue: number }[];
+  trends: {
+    newDeals: { current: number; previous: number; change: number };
+    closedWon: { current: number; previous: number; change: number };
+    revenue: { current: number; previous: number; change: number };
+  };
 };
 
 export type Task = {
