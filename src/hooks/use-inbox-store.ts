@@ -425,9 +425,17 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     }));
   },
   setDraft: (chatId, text) => {
-    set((state) => ({
-      drafts: { ...state.drafts, [chatId]: text },
-    }));
+    const normalizedText = normalizeDraftForStorage(text);
+    set((state) => {
+      if (!normalizedText) {
+        const { [chatId]: _removed, ...remainingDrafts } = state.drafts;
+        return { drafts: remainingDrafts };
+      }
+
+      return {
+        drafts: { ...state.drafts, [chatId]: normalizedText },
+      };
+    });
   },
   reset: () =>
     set({
@@ -443,4 +451,18 @@ function dedupeMessages(messages: Message[]): Message[] {
   return Array.from(seen.values()).sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
+}
+
+function normalizeDraftForStorage(text: string): string {
+  if (!text) return '';
+
+  const plainText = text
+    .replace(/<\/(div|p)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\u200B/g, '')
+    .trim();
+
+  return plainText.length > 0 ? text : '';
 }

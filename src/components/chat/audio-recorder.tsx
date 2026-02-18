@@ -239,14 +239,13 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
   }
 
   return (
-    <Button
-      variant="default"
-      size="icon"
+    <button
+      type="button"
       onClick={startRecording}
       disabled={isInitializing}
-      className="bg-blue-500 hover:bg-blue-600 text-white rounded-xl h-10 w-10 transition-all shadow-lg shadow-blue-500/20"
+      className="h-9 w-9 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-full transition-colors duration-150 shrink-0 disabled:opacity-50"
     >
-      {isInitializing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
-    </Button>
+      {isInitializing ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <Mic className="h-[18px] w-[18px]" />}
+    </button>
   );
 }

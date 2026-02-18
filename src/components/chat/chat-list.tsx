@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { Virtuoso } from 'react-virtuoso';
@@ -12,7 +12,7 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type Team } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -54,6 +54,7 @@ import { buildChatProtocol } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
+import { getTeams } from '@/actions/teams';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -465,6 +466,18 @@ const isMarketingMessage = (message: Message) => {
   return Boolean(meta?.isMarketing || meta?.event === 'marketing_auto_close');
 };
 
+const getDraftPreviewText = (draft: string): string => {
+  if (!draft) return '';
+
+  return draft
+    .replace(/<\/(div|p)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign, onPrefetch }) => {
   const isMarketingChat = useMemo(() => {
     const hasMarketingMessage = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
@@ -480,6 +493,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const removeChat = useInboxStore(state => state.removeChat);
   const drafts = useInboxStore(state => state.drafts);
   const draft = drafts[chat.id];
+  const draftPreview = useMemo(() => getDraftPreviewText(draft || ''), [draft]);
+  const hasDraft = draftPreview.length > 0;
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages?.[chat.messages.length - 1];
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -578,12 +593,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex items-start gap-2.5 md:gap-3 px-3 py-2.5 md:p-3 cursor-pointer group transition-all border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
-        "mx-0 my-0 rounded-none border-b border-border/40 hover:bg-muted/30", // Mobile: Native list feel
-        "md:mx-3 md:my-1 md:rounded-xl md:border-transparent md:hover:bg-muted/50", // Desktop: Card feel
-        "min-h-[76px] md:h-[112px]", // Height adjustment
+        "relative flex items-start gap-2.5 md:gap-3 px-4 py-3 md:px-5 md:py-3 cursor-pointer group transition-all mx-2 my-1 rounded-xl border border-transparent hover:bg-muted/30 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        "min-h-[76px]", // Height adjustment
         isSelected && !isForwarding && !isBulkMode
-          ? "bg-sidebar-accent dark:bg-white/10 dark:border-white/10 shadow-sm"
+          ? "bg-sidebar-accent border-border/50 shadow-sm dark:bg-white/5 dark:border-white/10"
           : "dark:hover:bg-white/5",
         (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
         isSnoozed ? "opacity-60 grayscale" : ""
@@ -864,10 +877,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex-1 min-w-0">
-            {draft ? (
+            {hasDraft ? (
               <p className="text-xs text-red-500 font-medium truncate flex items-center gap-1">
                 <PencilLine className="h-3 w-3" />
-                <span className="font-bold">[Rascunho]:</span> {draft}
+                <span className="font-bold">[Rascunho]:</span> {draftPreview}
               </p>
             ) : (
               lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />
@@ -923,6 +936,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [showMarketing, setShowMarketing] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
   const [snoozedUntilMap, setSnoozedUntilMap] = useState<Record<string, number>>({});
+
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [isLoadingTeams, setIsLoadingTeams] = useState(false);
+  const [teamFilter, setTeamFilter] = useState<string[]>([]);
+  const [isTeamFilterOpen, setIsTeamFilterOpen] = useState(false);
+  const [teamSearchTerm, setTeamSearchTerm] = useState('');
 
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const appendChats = useInboxStore((state) => state.appendChats);
@@ -982,6 +1001,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   };
 
+  const toggleTeamSelection = useCallback((teamId: string) => {
+    setTeamFilter((prev) =>
+      prev.includes(teamId)
+        ? prev.filter((id) => id !== teamId)
+        : [...prev, teamId]
+    );
+  }, []);
+
   const handleBulkSubmit = async () => {
     if (selectedBulkChats.size === 0) return;
     setIsBulkSubmitting(true);
@@ -1039,6 +1066,19 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   useEffect(() => {
     selectedChatIdRef.current = selectedChat?.id;
   }, [selectedChat?.id]);
+
+  useEffect(() => {
+    if (currentUser.activeWorkspaceId) {
+      setIsLoadingTeams(true);
+      getTeams(currentUser.activeWorkspaceId)
+        .then((res) => {
+          if (res.teams) {
+            setTeams(res.teams);
+          }
+        })
+        .finally(() => setIsLoadingTeams(false));
+    }
+  }, [currentUser.activeWorkspaceId]);
 
   useEffect(() => {
     if (isFirstRun.current) {
@@ -1128,6 +1168,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
 
       const chatAgentId = chat.agent?.id || chat.agentId;
+      const matchesTeam =
+        ownershipFilter === 'mine'
+          ? true
+          : (teamFilter.length === 0 || (chat.team_id && teamFilter.includes(chat.team_id)));
+
       const matchesOwner =
         ownershipFilter === 'everyone' ||
         chatAgentId === currentUser.id ||
@@ -1148,14 +1193,20 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (chat.id || '').toLowerCase().includes(query) ||
         visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
 
-      return matchesStatus && matchesOwner && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
+      return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
     },
-    [statusFilter, ownershipFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap]
+    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap]
   );
 
   const filteredChats = useMemo(() => {
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
+
+  const filteredTeamsBySearch = useMemo(() => {
+    const query = teamSearchTerm.trim().toLowerCase();
+    if (!query) return teams;
+    return teams.filter((team) => team.name.toLowerCase().includes(query));
+  }, [teams, teamSearchTerm]);
 
   const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
   const handleEndReached = useCallback(() => {
@@ -1183,24 +1234,125 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   <Filter className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 p-4 space-y-4 bg-popover border-border text-popover-foreground">
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Responsável</p>
-                  <RadioGroup
-                    value={ownershipFilter}
-                    onValueChange={(value) => setOwnershipFilter(value as 'mine' | 'everyone')}
-                    className="mt-2 space-y-2"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="mine" id="owner-mine" className="border-border text-blue-500" />
-                      <Label htmlFor="owner-mine" className="cursor-pointer text-foreground">Somente minhas conversas</Label>
+              <PopoverContent
+                align="start"
+                className="w-[340px] p-4 space-y-5 bg-popover border-border text-popover-foreground"
+                onInteractOutside={(event) => {
+                  const target = event.target as HTMLElement | null;
+                  if (target?.closest('[data-team-filter-popover="true"]')) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                {/* Ownership Section */}
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Visualização</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div
+                      onClick={() => setOwnershipFilter('mine')}
+                      className={cn(
+                        "cursor-pointer border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-all duration-200",
+                        ownershipFilter === 'mine'
+                          ? "bg-primary/10 border-primary text-primary shadow-sm"
+                          : "bg-card hover:bg-muted/50 border-border text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <UserIcon className="h-5 w-5" />
+                      <span className="text-sm font-medium">Minhas</span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="everyone" id="owner-all" className="border-border text-blue-500" />
-                      <Label htmlFor="owner-all" className="cursor-pointer text-foreground">Todos os atendentes</Label>
+                    <div
+                      onClick={() => setOwnershipFilter('everyone')}
+                      className={cn(
+                        "cursor-pointer border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-all duration-200",
+                        ownershipFilter === 'everyone'
+                          ? "bg-primary/10 border-primary text-primary shadow-sm"
+                          : "bg-card hover:bg-muted/50 border-border text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Users className="h-5 w-5" />
+                      <span className="text-sm font-medium">Todos</span>
                     </div>
-                  </RadioGroup>
+                  </div>
                 </div>
+
+                {/* Team Filter Section (Visible only for 'everyone') */}
+                {ownershipFilter === 'everyone' && (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
+                      {teamFilter.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto p-0 text-xs text-muted-foreground hover:text-primary"
+                          onClick={() => setTeamFilter([])}
+                        >
+                          Limpar
+                        </Button>
+                      )}
+                    </div>
+                    <Popover
+                      open={isTeamFilterOpen}
+                      onOpenChange={(open) => {
+                        setIsTeamFilterOpen(open);
+                        if (!open) setTeamSearchTerm('');
+                      }}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isTeamFilterOpen}
+                          className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
+                        >
+                          {teamFilter.length > 0
+                            ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
+                            : "Todas as equipes"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
+                        <div className="border-b border-border p-2">
+                          <Input
+                            value={teamSearchTerm}
+                            onChange={(event) => setTeamSearchTerm(event.target.value)}
+                            placeholder="Buscar equipe..."
+                            className="h-9"
+                          />
+                        </div>
+                        <ScrollArea className="max-h-[220px]">
+                          <div className="p-1">
+                            {isLoadingTeams ? (
+                              <div className="px-2 py-3 text-sm text-muted-foreground">Carregando equipes...</div>
+                            ) : filteredTeamsBySearch.length === 0 ? (
+                              <div className="px-2 py-3 text-sm text-muted-foreground">Nenhuma equipe encontrada.</div>
+                            ) : (
+                              filteredTeamsBySearch.map((team) => (
+                                <button
+                                  key={team.id}
+                                  type="button"
+                                  onClick={() => toggleTeamSelection(team.id)}
+                                  className={cn(
+                                    "w-full flex items-center rounded-sm px-2 py-1.5 text-sm transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                                    teamFilter.includes(team.id) && "bg-accent/70 text-accent-foreground"
+                                  )}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      teamFilter.includes(team.id) ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <span className="truncate text-left">{team.name}</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
@@ -1336,11 +1488,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       className="relative cursor-pointer hover:scale-110 transition-transform duration-200"
                       onClick={() => setSelectedAgent(agent.user)}
                     >
-                      <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.3)]">
+                      <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-[#0D4A23] shadow-[0_0_10px_rgba(13,74,35,0.3)]">
                         <AvatarImage src={agent.user.avatar} className="object-cover" />
-                        <AvatarFallback className="bg-gradient-to-br from-green-600 to-emerald-800 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
+                        <AvatarFallback className="bg-[#0D4A23] text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
-                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></span>
+                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-[#22C05C] border-2 border-background animate-pulse shadow-[0_0_8px_rgba(34,192,92,0.8)]"></span>
                     </div>
                   </HoverCardTrigger>
                   <HoverCardContent className="w-80 p-0 border-border bg-popover text-popover-foreground shadow-2xl rounded-xl overflow-hidden">
@@ -1499,7 +1651,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               }}
               endReached={handleEndReached}
               itemContent={(index, chat) => (
-                <div className="pb-1 px-3">
+                <div className="">
                   <ChatListItem
                     key={chat.id}
                     chat={chat}

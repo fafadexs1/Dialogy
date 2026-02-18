@@ -708,13 +708,13 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     {chat.tag && chat.color && (
                                         <div
                                             style={{ backgroundColor: `${chat.color}20`, color: chat.color, borderColor: `${chat.color}40` }}
-                                            className="px-2 py-0.5 rounded-full border text-[8px] font-black uppercase tracking-tighter flex items-center gap-1"
+                                            className="px-2.5 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-tighter flex items-center gap-1"
                                         >
                                             <div className="h-1 w-1 rounded-full animate-pulse" style={{ backgroundColor: chat.color }} />
                                             {chat.tag}
                                         </div>
                                     )}
-                                    <div className="px-2 py-0.5 rounded-full bg-white/5 border border-white/5 text-white/40 text-[8px] font-bold uppercase tracking-wider">
+                                    <div className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/5 text-white/40 text-[10px] font-bold uppercase tracking-wider">
                                         {instanceTypeDisplay}
                                     </div>
                                     <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
@@ -741,11 +741,11 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     {/* ==== TABBED CONTENT ==== */}
                     <Tabs defaultValue="info" className="w-full">
                         <TabsList className="grid w-full grid-cols-2 bg-white/[0.03] border border-white/5 rounded-xl h-8">
-                            <TabsTrigger value="info" className="text-[10px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-6">Info</TabsTrigger>
-                            <TabsTrigger value="crm" className="text-[10px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-6">
+                            <TabsTrigger value="info" className="text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-7">Info</TabsTrigger>
+                            <TabsTrigger value="crm" className="text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-7">
                                 CRM
                                 {openDeals.length > 0 && (
-                                    <span className="ml-1.5 h-4 px-1 bg-emerald-500/20 text-emerald-400 text-[8px] font-black rounded flex items-center">{openDeals.length}</span>
+                                    <span className="ml-1.5 h-4 px-1.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded flex items-center">{openDeals.length}</span>
                                 )}
                             </TabsTrigger>
                         </TabsList>
@@ -760,8 +760,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <Smartphone className="h-3.5 w-3.5 text-green-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">WhatsApp</span>
-                                        <span className="text-[11px] font-bold text-white/80 tabular-nums truncate block">
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">WhatsApp</span>
+                                        <span className="text-[13px] font-bold text-white/80 tabular-nums truncate block">
                                             {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
                                         </span>
                                     </div>
@@ -774,8 +774,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <Mail className="h-3.5 w-3.5 text-blue-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">Email</span>
-                                        <span className="text-[11px] font-bold text-white/80 truncate block">{contact.email || 'Não informado'}</span>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">Email</span>
+                                        <span className="text-[13px] font-bold text-white/80 truncate block">{contact.email || 'Não informado'}</span>
                                     </div>
                                     {contact.email && <CopyButton value={contact.email} label="Email" />}
                                 </div>
@@ -786,8 +786,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <Hash className="h-3.5 w-3.5 text-purple-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[8px] font-black uppercase tracking-widest text-white/20 block">Protocolo</span>
-                                        <span className="text-[10px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">Protocolo</span>
+                                        <span className="text-[12px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
                                             {chat.protocol || buildChatProtocol(chat.id)}
                                         </span>
                                     </div>
@@ -798,7 +798,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             {/* Custom Fields */}
                             {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id]) && (
                                 <div className="space-y-2">
-                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Campos Adicionais</h4>
+                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Campos Adicionais</h4>
                                     <div className="grid grid-cols-2 gap-2">
                                         {customFields.map(field => {
                                             const value = contact.custom_fields?.[field.id];
@@ -810,8 +810,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             }
                                             return (
                                                 <div key={field.id} className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col gap-0.5">
-                                                    <span className="text-[8px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
-                                                    <span className="text-[10px] font-bold text-white/70 truncate">{displayValue}</span>
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
+                                                    <span className="text-[13px] font-bold text-white/70 truncate">{displayValue}</span>
                                                 </div>
                                             );
                                         })}
@@ -821,7 +821,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                             {/* Agent */}
                             <div className="space-y-2">
-                                <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Agente Responsável</h4>
+                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Agente Responsável</h4>
                                 <div className="relative bg-white/[0.03] border border-white/5 rounded-xl p-3">
                                     {agent && agent.id !== 'unknown' ? (
                                         <div className="flex items-center gap-3 min-w-0">
@@ -834,11 +834,11 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-1.5">
-                                                    <p className="font-bold text-white/90 truncate text-xs">{agent.name}</p>
-                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[7px] font-bold uppercase px-1 h-3 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                                    <p className="font-bold text-white/90 truncate text-sm">{agent.name}</p>
+                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
                                                 </div>
                                                 {chat.assigned_at && (
-                                                    <p className="text-[9px] text-white/40 mt-0.5">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
+                                                    <p className="text-[11px] text-white/40 mt-0.5">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
                                                 )}
                                             </div>
                                         </div>
@@ -848,8 +848,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                 <UserCheck className="h-4 w-4 text-white/10" />
                                             </div>
                                             <div className="flex-1">
-                                                <p className="text-xs font-bold text-white/40">Sem agente</p>
-                                                <p className="text-[9px] text-white/20">Fila de espera</p>
+                                                <p className="text-sm font-bold text-white/40">Sem agente</p>
+                                                <p className="text-[11px] text-white/20">Fila de espera</p>
                                             </div>
                                             <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
                                         </div>
@@ -867,7 +867,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shrink-0">
                                             <BarChart3 className="h-3.5 w-3.5" />
                                         </div>
-                                        <span className="text-[9px] font-black uppercase tracking-wider text-white/50">Stats</span>
+                                        <span className="text-[11px] font-black uppercase tracking-wider text-white/50">Stats</span>
                                     </CardContent>
                                 </Card>
 
@@ -877,7 +877,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
                                                 <LayoutGrid className="h-3.5 w-3.5" />
                                             </div>
-                                            <span className="text-[9px] font-black uppercase tracking-wider text-white/50">CRM</span>
+                                            <span className="text-[11px] font-black uppercase tracking-wider text-white/50">CRM</span>
                                         </CardContent>
                                     </Card>
                                 </Link>
@@ -889,9 +889,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             {/* Deals */}
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between px-1">
-                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25">Negócios</h4>
+                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25">Negócios</h4>
                                     {totalOpenValue > 0 && (
-                                        <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{formatBRL(totalOpenValue)}</span>
+                                        <span className="text-[12px] font-bold text-emerald-400 tabular-nums">{formatBRL(totalOpenValue)}</span>
                                     )}
                                 </div>
 
@@ -907,24 +907,24 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                     <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <span className="text-[11px] font-bold text-white/80 truncate block">{deal.title}</span>
+                                                    <span className="text-[13px] font-bold text-white/80 truncate block">{deal.title}</span>
                                                     <div className="flex items-center gap-1.5 mt-0.5">
-                                                        <Badge className="h-3.5 px-1 bg-white/5 border-white/10 text-[8px] font-bold text-white/35">{deal.stage}</Badge>
-                                                        <span className="text-[8px] text-white/25">{deal.probability}%</span>
+                                                        <Badge className="h-4 px-1.5 bg-white/5 border-white/10 text-[10px] font-bold text-white/35">{deal.stage}</Badge>
+                                                        <span className="text-[10px] text-white/25">{deal.probability}%</span>
                                                     </div>
                                                 </div>
-                                                <span className="text-[11px] font-black text-emerald-400 tabular-nums shrink-0">{formatBRL(deal.value)}</span>
+                                                <span className="text-[13px] font-black text-emerald-400 tabular-nums shrink-0">{formatBRL(deal.value)}</span>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-[10px] text-white/20 text-center py-3">Nenhum negócio em aberto.</p>
+                                    <p className="text-[12px] text-white/20 text-center py-3">Nenhum negócio em aberto.</p>
                                 )}
 
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="w-full h-7 bg-white/[0.02] border-white/5 text-white/40 hover:text-emerald-400 hover:bg-emerald-500/5 hover:border-emerald-500/20 rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest gap-1.5"
+                                    className="w-full h-8 bg-white/[0.02] border-white/5 text-white/40 hover:text-emerald-400 hover:bg-emerald-500/5 hover:border-emerald-500/20 rounded-lg transition-all text-[11px] font-bold uppercase tracking-widest gap-1.5"
                                     onClick={() => setDealFormOpen(true)}
                                 >
                                     <DollarSign className="h-3 w-3" />
@@ -934,12 +934,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                             {/* Timeline */}
                             <div className="space-y-2">
-                                <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Timeline</h4>
+                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Timeline</h4>
                                 {!showTimeline ? (
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        className="w-full h-7 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest"
+                                        className="w-full h-8 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-lg transition-all text-[11px] font-bold uppercase tracking-widest"
                                         onClick={() => setShowTimeline(true)}
                                     >
                                         Carregar Timeline
