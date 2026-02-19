@@ -1,19 +1,18 @@
-
 'use client';
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { Integration } from '@/lib/types';
 import { IntegrationCard } from '@/components/integrations/integration-card';
-import { Loader2, Search, SlidersHorizontal } from 'lucide-react';
+import { Loader2, Search, SlidersHorizontal, Zap, ArrowLeft } from 'lucide-react';
 import { getIntegrations } from '@/actions/integrations';
 import { toast } from '@/hooks/use-toast';
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 
 const CATEGORIES = [
     { id: 'all', label: 'Todos' },
@@ -40,6 +39,7 @@ export default function IntegrationsPage() {
                     category: i.name.toLowerCase().includes('messenger') || i.name.toLowerCase().includes('instagram') || i.name.toLowerCase().includes('whatsapp') ? 'messaging' :
                         i.name.toLowerCase().includes('crm') ? 'crm' : 'utilities'
                 }));
+                // @ts-ignore
                 setIntegrations(enriched);
             } else {
                 toast({ title: 'Erro de Rede', description: 'Não foi possível carregar as configurações.', variant: 'destructive' });
@@ -64,88 +64,163 @@ export default function IntegrationsPage() {
         });
     }, [integrations, searchQuery, selectedCategory]);
 
+    const containerVariants = {
+        hidden: { opacity: 0 },
+        visible: {
+            opacity: 1,
+            transition: {
+                staggerChildren: 0.05,
+            },
+        },
+    };
+
+    const itemVariants = {
+        hidden: { y: 20, opacity: 0 },
+        visible: {
+            y: 0,
+            opacity: 1,
+            transition: { type: 'spring', stiffness: 100, damping: 20 }
+        },
+    };
+
     if (loading || !user) {
         return (
-            <div className="flex items-center justify-center h-full bg-muted/40">
-                <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                    <p className="text-sm text-muted-foreground animate-pulse">Carregando ecossistema...</p>
+            <div className="flex items-center justify-center h-full bg-zinc-950">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="relative">
+                        <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-xl animate-pulse" />
+                        <Loader2 className="relative h-12 w-12 animate-spin text-emerald-500" />
+                    </div>
+                    <p className="text-sm font-medium text-emerald-500/80 animate-pulse">Carregando ecossistema...</p>
                 </div>
             </div>
         )
     }
 
     return (
-        <div className="flex flex-col flex-1 h-full bg-muted/10">
-            <header className="px-8 py-8 border-b bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto space-y-6">
-                    <div className="flex items-center justify-between">
+        <div className="relative flex min-h-screen flex-col overflow-hidden bg-background selection:bg-emerald-500/30">
+            {/* Background Effects */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/5 blur-[120px]" />
+                <div className="absolute top-[10%] left-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />
+                <div className="absolute bottom-[10%] right-[10%] h-[600px] w-[600px] rounded-full bg-violet-500/5 blur-[120px]" />
+            </div>
+
+            <div className="relative z-10 w-full max-w-[1600px] mx-auto p-4 md:p-8 space-y-8">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                            <Zap className="h-6 w-6 text-emerald-400" />
+                        </div>
                         <div>
-                            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Extensões & Integrações</h1>
-                            <p className="text-muted-foreground mt-1 text-lg">
+                            <h1 className="text-3xl font-bold tracking-tight text-white">
+                                Extensões & Integrações
+                            </h1>
+                            <p className="text-zinc-400 mt-1">
                                 Conecte o Dialogy às suas ferramentas favoritas e potencialize seu atendimento.
                             </p>
                         </div>
-                        <div className="hidden md:flex items-center gap-2">
-                            <Badge variant="outline" className="px-3 py-1 h-7">
-                                {integrations.length} Disponíveis
-                            </Badge>
-                        </div>
                     </div>
-
-                    <div className="flex flex-col md:flex-row items-center gap-4">
-                        <div className="relative flex-1 w-full">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Buscar integração (ex: Instagram, Messenger)..."
-                                className="pl-9 h-10 bg-background/50 border-muted-foreground/20 focus-visible:ring-primary/20"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
+                    <div className="hidden md:flex items-center gap-2">
+                        <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/5 backdrop-blur-md">
+                            <span className="text-zinc-400 text-sm mr-2">Disponíveis:</span>
+                            <span className="text-white font-semibold">{integrations.length}</span>
                         </div>
-                        <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="w-full md:w-auto">
-                            <TabsList className="grid grid-cols-4 w-full md:w-auto h-10 bg-muted/50 p-1">
-                                {CATEGORIES.map(cat => (
-                                    <TabsTrigger key={cat.id} value={cat.id} className="text-xs px-4 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                                        {cat.label}
-                                    </TabsTrigger>
-                                ))}
-                            </TabsList>
-                        </Tabs>
                     </div>
                 </div>
-            </header>
 
-            <main className="flex-1 overflow-y-auto p-4 sm:p-8">
-                <div className="max-w-7xl mx-auto">
-                    {filteredIntegrations.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in-95 duration-500">
-                            <div className="h-16 w-16 bg-muted rounded-full flex items-center justify-center mb-4">
-                                <Search className="h-8 w-8 text-muted-foreground" />
-                            </div>
-                            <h3 className="text-xl font-semibold">Nenhuma integração encontrada</h3>
-                            <p className="text-muted-foreground mt-2 max-w-sm">
-                                Não encontramos resultados para sua busca ou filtro. Tente buscar por outros termos.
-                            </p>
-                            <Button variant="outline" className="mt-6" onClick={() => { setSearchQuery(''); setSelectedCategory('all'); }}>
-                                Limpar Filtros
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-                            {filteredIntegrations.map((integration, idx) => (
-                                <div key={integration.id} className="animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ animationDelay: `${idx * 50}ms` }}>
-                                    <IntegrationCard
-                                        integration={integration}
-                                        isSuperAdmin={user.is_superadmin}
-                                        onEditSuccess={fetchData}
+                {/* Filters & Search Toolbar */}
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="flex flex-col md:flex-row gap-4 items-center justify-between bg-zinc-950/40 backdrop-blur-md p-2 rounded-2xl border border-white/5"
+                >
+                    <div className="flex gap-1 p-1 bg-white/5 rounded-xl w-full md:w-auto overflow-x-auto no-scrollbar">
+                        {CATEGORIES.map((cat) => (
+                            <button
+                                key={cat.id}
+                                onClick={() => setSelectedCategory(cat.id)}
+                                className={`
+                                    relative px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap
+                                    ${selectedCategory === cat.id
+                                        ? 'text-white'
+                                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                                    }
+                                `}
+                            >
+                                {selectedCategory === cat.id && (
+                                    <motion.div
+                                        layoutId="activeCategory"
+                                        className="absolute inset-0 bg-white/10 rounded-lg"
+                                        initial={false}
+                                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                     />
-                                </div>
-                            ))}
+                                )}
+                                <span className="relative z-10">{cat.label}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="relative flex-1 max-w-md w-full">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-4 w-4 text-zinc-500" />
                         </div>
-                    )}
-                </div>
-            </main>
+                        <Input
+                            placeholder="Buscar integração (ex: Instagram, Messenger)..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-10 h-11 bg-white/5 border-white/5 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/20 text-zinc-200 placeholder:text-zinc-600 rounded-xl"
+                        />
+                    </div>
+                </motion.div>
+
+                {/* Grid */}
+                <AnimatePresence mode="popLayout">
+                    <div className="min-h-[400px]">
+                        {filteredIntegrations.length === 0 ? (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="flex flex-col items-center justify-center py-24 text-center"
+                            >
+                                <div className="h-24 w-24 rounded-full bg-white/5 flex items-center justify-center mb-6 border border-white/5">
+                                    <Search className="h-10 w-10 text-zinc-600" />
+                                </div>
+                                <h3 className="text-xl font-semibold text-white mb-2">Nenhuma integração encontrada</h3>
+                                <p className="text-zinc-500 max-w-sm mb-6">
+                                    Não encontramos resultados para sua busca ou filtro. Tente buscar por outros termos.
+                                </p>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => { setSearchQuery(''); setSelectedCategory('all'); }}
+                                    className="border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white"
+                                >
+                                    Limpar Filtros
+                                </Button>
+                            </motion.div>
+                        ) : (
+                            <motion.div
+                                variants={containerVariants}
+                                initial="hidden"
+                                animate="visible"
+                                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20"
+                            >
+                                {filteredIntegrations.map((integration) => (
+                                    <motion.div key={integration.id} variants={itemVariants} layout>
+                                        <IntegrationCard
+                                            integration={integration}
+                                            isSuperAdmin={user.is_superadmin}
+                                            onEditSuccess={fetchData}
+                                        />
+                                    </motion.div>
+                                ))}
+                            </motion.div>
+                        )}
+                    </div>
+                </AnimatePresence>
+            </div>
         </div>
     );
 }

@@ -1,21 +1,80 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Ticket, BookOpen, MessageCircle, Search, ArrowRight, LifeBuoy, ShieldCheck, Mail, Sparkles } from 'lucide-react';
+import {
+    Ticket,
+    BookOpen,
+    MessageCircle,
+    Search,
+    ArrowRight,
+    LifeBuoy,
+    ShieldCheck,
+    Mail,
+    Zap,
+    ExternalLink
+} from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from "@/components/ui/accordion"
+
+const actionCards = [
+    {
+        href: '/support/tickets/new',
+        title: 'Abrir chamado',
+        description: 'Relate incidentes, solicite novos recursos e fale com o time técnico.',
+        cta: 'Iniciar atendimento',
+        icon: Ticket,
+        gradient: 'from-blue-500/20 via-blue-500/5 to-transparent',
+        border: 'group-hover:border-blue-500/30',
+        iconColor: 'text-blue-400',
+        iconBg: 'bg-blue-500/10'
+    },
+    {
+        href: '/support/tickets',
+        title: 'Meus tickets',
+        description: 'Acompanhe respostas, SLA e histórico completo das solicitações.',
+        cta: 'Ver histórico',
+        icon: MessageCircle,
+        gradient: 'from-violet-500/20 via-violet-500/5 to-transparent',
+        border: 'group-hover:border-violet-500/30',
+        iconColor: 'text-violet-400',
+        iconBg: 'bg-violet-500/10'
+    },
+    {
+        href: 'https://docs.dialogy.app',
+        title: 'Documentação',
+        description: 'Acesse guias objetivos, referências de API e materiais de integração.',
+        cta: 'Ler tutoriais',
+        icon: BookOpen,
+        gradient: 'from-emerald-500/20 via-emerald-500/5 to-transparent',
+        border: 'group-hover:border-emerald-500/30',
+        iconColor: 'text-emerald-400',
+        iconBg: 'bg-emerald-500/10',
+        external: true
+    }
+];
+
+const faqItems = [
+    { value: 'item-1', q: 'Como conectar meu WhatsApp?', a: 'Para conectar seu WhatsApp, navegue até a seção de "Integrações" no menu lateral, selecione "WhatsApp" e siga o passo a passo para escanear o QR Code gerado. Certifique-se de que o número não esteja vinculado a outra conta Business API.' },
+    { value: 'item-2', q: 'Onde vejo consumo e faturas?', a: 'Você pode acessar todas as informações financeiras em "Configurações" > "Cobrança". Lá você encontrará seu histórico de faturas, consumo atual e previsão para o próximo ciclo.' },
+    { value: 'item-3', q: 'Como criar um agente de IA?', a: 'Vá até o menu "Automações" > "Agentes Inteligentes" e clique em "Novo Agente". Recomendamos começar utilizando um dos nossos templates pré-configurados para agilizar o processo.' },
+    { value: 'item-4', q: 'Webhook e API têm exemplos?', a: 'Sim, nossa documentação é completa e inclui exemplos de payloads para todas as requisições, métodos de autenticação e fluxos de integração passo a passo.' },
+    { value: 'item-5', q: 'Posso adicionar membros à minha equipe?', a: 'Sim! Dependendo do seu plano, você pode convidar membros para sua equipe em "Configurações" > "Equipe", definindo níveis de permissão específicos para cada usuário.' }
+];
 
 export default function SupportPage() {
     const containerVariants = {
         hidden: { opacity: 0 },
         visible: {
             opacity: 1,
-            transition: {
-                staggerChildren: 0.1
-            }
+            transition: { staggerChildren: 0.1 }
         }
     };
 
@@ -24,157 +83,168 @@ export default function SupportPage() {
         visible: {
             y: 0,
             opacity: 1,
-            transition: { type: 'spring', stiffness: 100 }
+            transition: { type: 'spring', stiffness: 100, damping: 20 }
         }
     };
 
     return (
-        <div className="flex-1 overflow-y-auto bg-muted/30">
+        <div className="relative flex min-h-screen flex-col overflow-hidden bg-background selection:bg-emerald-500/30">
+            {/* Background Effects */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/5 blur-[120px]" />
+                <div className="absolute top-[10%] left-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />
+                <div className="absolute bottom-[10%] right-[10%] h-[600px] w-[600px] rounded-full bg-violet-500/5 blur-[120px]" />
+            </div>
+
             <motion.div
-                className="max-w-6xl mx-auto p-8 space-y-12"
+                className="relative z-10 mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 lg:px-8"
                 variants={containerVariants}
                 initial="hidden"
                 animate="visible"
             >
-                {/* Header Section */}
-                <motion.div variants={itemVariants} className="text-center space-y-6 py-10">
-                    <Badge variant="secondary" className="px-4 py-1.5 rounded-full text-foreground text-sm font-medium mb-4 shadow-sm border">
-                        <Sparkles className="w-3 h-3 mr-2" /> Central de Suporte Premium
-                    </Badge>
-                    <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-foreground">
-                        Como podemos <span className="text-primary">ajudar você?</span>
+                {/* Hero Section */}
+                <motion.div variants={itemVariants} className="mb-16 text-center">
+                    <div className="mb-4 inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-400">
+                        <Zap className="mr-2 h-4 w-4" />
+                        Centro de Suporte
+                    </div>
+                    <h1 className="mb-6 text-4xl font-bold tracking-tight text-white sm:text-5xl md:text-6xl">
+                        Como podemos <span className="bg-gradient-to-r from-emerald-400 to-blue-500 bg-clip-text text-transparent">ajudar você?</span>
                     </h1>
-                    <p className="text-muted-foreground text-xl max-w-2xl mx-auto leading-relaxed">
-                        Encontre respostas rápidas, explore nossa documentação detalhada ou fale diretamente com nossos especialistas.
+                    <p className="mx-auto mb-10 max-w-2xl text-lg text-zinc-400">
+                        Encontre respostas, acesse documentações ou entre em contato com nosso time de especialistas para resolver seus problemas rapidamente.
                     </p>
 
-                    {/* Search Bar */}
-                    <div className="max-w-2xl mx-auto relative group">
-                        <div className="relative">
-                            <Search className="absolute left-6 top-1/2 transform -translate-y-1/2 h-6 w-6 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                            <Input
-                                placeholder="Busque por dúvidas, tutoriais ou tópicos..."
-                                className="pl-16 h-16 text-lg rounded-2xl border-input bg-background shadow-lg shadow-black/5 focus-visible:ring-primary/20 transition-all"
-                            />
+                    <div className="mx-auto max-w-2xl">
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-blue-500 opacity-30 blur transition group-hover:opacity-50" />
+                            <div className="relative flex items-center rounded-2xl bg-zinc-950 shadow-2xl">
+                                <Search className="absolute left-4 h-5 w-5 text-zinc-500" />
+                                <Input
+                                    placeholder="Busque por artigos, tutoriais ou tópicos de ajuda..."
+                                    className="h-14 truncate rounded-2xl border-0 bg-transparent pl-12 pr-4 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-0 focus-visible:ring-offset-0"
+                                />
+                                <div className="absolute right-2 hidden sm:block">
+                                    <kbd className="inline-flex h-8 items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 text-xs font-medium text-zinc-400">
+                                        <span className="text-xs">⌘</span>K
+                                    </kbd>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </motion.div>
 
-                {/* Main Action Cards */}
-                <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <Link href="/support/tickets/new" className="group">
-                        <Card className="h-full border-border bg-card hover:bg-accent/50 hover:border-primary/50 transition-all duration-300 shadow-sm hover:shadow-lg rounded-3xl overflow-hidden relative group-hover:-translate-y-1">
-                            <CardHeader>
-                                <div className="h-14 w-14 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-4 text-blue-600 transition-transform duration-300 group-hover:scale-110">
-                                    <Ticket className="h-7 w-7" />
-                                </div>
-                                <CardTitle className="text-2xl font-bold group-hover:text-primary transition-colors">Abrir Chamado</CardTitle>
-                                <CardDescription className="text-muted-foreground text-base leading-relaxed">
-                                    Relate problemas técnicos, solicite recursos ou tire dúvidas complexas com nossa equipe.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center text-sm font-semibold text-primary bg-primary/10 w-fit px-4 py-2 rounded-full group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                                    Iniciar Atendimento <ArrowRight className="ml-2 h-4 w-4" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
+                {/* Main Actions Grid */}
+                <motion.section variants={itemVariants} className="mb-20 grid grid-cols-1 gap-6 md:grid-cols-3">
+                    {actionCards.map((card) => {
+                        const Icon = card.icon;
+                        return (
+                            <Link
+                                key={card.title}
+                                href={card.href}
+                                target={card.external ? '_blank' : undefined}
+                                rel={card.external ? 'noopener noreferrer' : undefined}
+                                className="group relative block h-full"
+                            >
+                                <div className={`absolute inset-0 rounded-3xl bg-gradient-to-br ${card.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-100`} />
+                                <Card className={`relative h-full overflow-hidden rounded-3xl border border-white/5 bg-zinc-950/50 backdrop-blur-md transition-all duration-300 ${card.border} hover:translate-y-[-4px] hover:shadow-2xl hover:shadow-black/50`}>
+                                    <CardHeader>
+                                        <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl ${card.iconBg} ${card.iconColor} ring-1 ring-inset ring-white/10`}>
+                                            <Icon className="h-6 w-6" />
+                                        </div>
+                                        <CardTitle className="text-xl font-bold text-white">{card.title}</CardTitle>
+                                        <CardDescription className="line-clamp-2 text-zinc-400">
+                                            {card.description}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className={`inline-flex items-center text-sm font-semibold ${card.iconColor} transition-all group-hover:translate-x-1`}>
+                                            {card.cta}
+                                            {card.external ? <ExternalLink className="ml-2 h-4 w-4" /> : <ArrowRight className="ml-2 h-4 w-4" />}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </Link>
+                        );
+                    })}
+                </motion.section>
 
-                    <Link href="/support/tickets" className="group">
-                        <Card className="h-full border-border bg-card hover:bg-accent/50 hover:border-primary/50 transition-all duration-300 shadow-sm hover:shadow-lg rounded-3xl overflow-hidden relative group-hover:-translate-y-1">
-                            <CardHeader>
-                                <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-4 text-violet-600 transition-transform duration-300 group-hover:scale-110">
-                                    <MessageCircle className="h-7 w-7" />
-                                </div>
-                                <CardTitle className="text-2xl font-bold group-hover:text-primary transition-colors">Meus Tickets</CardTitle>
-                                <CardDescription className="text-muted-foreground text-base leading-relaxed">
-                                    Acompanhe o status e histórico de todas as suas solicitações em tempo real.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center text-sm font-semibold text-primary bg-primary/10 w-fit px-4 py-2 rounded-full group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                                    Ver Histórico <ArrowRight className="ml-2 h-4 w-4" />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </Link>
+                {/* Secondary Content Grid */}
+                <motion.div variants={itemVariants} className="grid grid-cols-1 gap-8 lg:grid-cols-3">
 
-                    <Link href="https://docs.dialogy.app" target="_blank" className="group">
-                        <Card className="h-full border-border bg-card hover:bg-accent/50 hover:border-primary/50 transition-all duration-300 shadow-sm hover:shadow-lg rounded-3xl overflow-hidden relative group-hover:-translate-y-1">
-                            <CardHeader>
-                                <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4 text-emerald-600 transition-transform duration-300 group-hover:scale-110">
-                                    <BookOpen className="h-7 w-7" />
-                                </div>
-                                <CardTitle className="text-2xl font-bold group-hover:text-primary transition-colors">Documentação</CardTitle>
-                                <CardDescription className="text-muted-foreground text-base leading-relaxed">
-                                    Acesse guias passo-a-passo, tutoriais em vídeo e referências da API.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center text-sm font-semibold text-primary bg-primary/10 w-fit px-4 py-2 rounded-full group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                                    Ler Tutoriais <ArrowRight className="ml-2 h-4 w-4" />
-                                </div>
+                    {/* FAQ Section */}
+                    <section className="lg:col-span-2">
+                        <div className="mb-6 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900/50 border border-white/5">
+                                <LifeBuoy className="h-5 w-5 text-emerald-400" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-white">Perguntas Frequentes</h2>
+                        </div>
+
+                        <Card className="border-white/5 bg-zinc-950/30 backdrop-blur-sm">
+                            <CardContent className="p-6">
+                                <Accordion type="single" collapsible className="w-full space-y-2">
+                                    {faqItems.map((item) => (
+                                        <AccordionItem key={item.value} value={item.value} className="border-white/5 px-2 data-[state=open]:bg-white/5 rounded-lg transition-colors">
+                                            <AccordionTrigger className="text-zinc-200 hover:text-white hover:no-underline py-4 px-2">
+                                                {item.q}
+                                            </AccordionTrigger>
+                                            <AccordionContent className="text-zinc-400 px-2 pb-4">
+                                                {item.a}
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    ))}
+                                </Accordion>
                             </CardContent>
                         </Card>
-                    </Link>
+                    </section>
+
+                    {/* Enterprise Support Column */}
+                    <section className="flex flex-col gap-6">
+                        <div className="relative overflow-hidden rounded-3xl border border-indigo-500/20 bg-gradient-to-b from-[#0f111a] to-[#05060a] p-1">
+                            <div className="absolute inset-0 bg-[url('/noise.png')] opacity-20 mixed-blend-overlay" />
+                            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-indigo-500/20 blur-[60px]" />
+
+                            <div className="relative rounded-[20px] bg-zinc-950/80 p-6 backdrop-blur-xl">
+                                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/20">
+                                    <ShieldCheck className="h-6 w-6" />
+                                </div>
+                                <h3 className="mb-2 text-xl font-bold text-white">Suporte Enterprise</h3>
+                                <p className="mb-6 text-sm text-zinc-400">
+                                    Clientes do plano Enterprise possuem atendimento prioritário e gerente de contas dedicado.
+                                </p>
+
+                                <div className="space-y-3">
+                                    <Button className="w-full gap-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" size="lg">
+                                        <Mail className="h-4 w-4" />
+                                        Contatar Gerente
+                                    </Button>
+                                    <div className="text-center">
+                                        <span className="text-xs text-zinc-500">Tempo médio de resposta: &lt; 2 horas</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-3xl border border-white/5 bg-zinc-950/30 p-6 backdrop-blur-md">
+                            <h3 className="mb-2 text-lg font-semibold text-white">Precisa de mais ajuda?</h3>
+                            <p className="mb-4 text-sm text-zinc-400">
+                                Nossa comunidade no Discord é ativa e pode ajudar com dúvidas rápidas.
+                            </p>
+                            <Button variant="outline" className="w-full gap-2 rounded-xl border-white/10 bg-transparent text-zinc-300 hover:bg-white/5 hover:text-white">
+                                <ExternalLink className="h-4 w-4" />
+                                Acessar Comunidade
+                            </Button>
+                        </div>
+                    </section>
                 </motion.div>
 
-                {/* FAQ & Contact Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* FAQ */}
-                    <motion.div variants={itemVariants} className="lg:col-span-2 space-y-6">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-bold flex items-center gap-2 text-foreground">
-                                <LifeBuoy className="h-6 w-6 text-primary" />
-                                Perguntas Frequentes
-                            </h2>
-                            <Button variant="ghost" className="text-muted-foreground hover:text-primary">Ver todas</Button>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {[
-                                { q: "Como configurar o WhatsApp?", a: "Guia completo de conexão QR Code" },
-                                { q: "Onde vejo minhas faturas?", a: "Configurações > Cobrança" },
-                                { q: "Como criar um Agente de IA?", a: "Automações > Agentes Inteligentes" },
-                                { q: "Integração via Webhooks", a: "Documentação de API para devs" },
-                            ].map((item, index) => (
-                                <div key={index} className="p-5 rounded-2xl border border-border bg-card hover:bg-accent hover:border-primary/30 transition-all cursor-pointer group shadow-sm">
-                                    <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors mb-2 text-lg">{item.q}</h4>
-                                    <p className="text-sm text-muted-foreground">{item.a}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </motion.div>
-
-                    {/* Contact Info */}
-                    <motion.div variants={itemVariants} className="lg:col-span-1">
-                        <div className="h-full p-8 rounded-3xl bg-zinc-950 text-white relative overflow-hidden flex flex-col justify-between border border-zinc-800 shadow-xl">
-                            {/* Subtle glow effect */}
-                            <div className="absolute top-0 right-0 w-48 h-48 bg-blue-600/20 blur-[60px] rounded-full -mr-12 -mt-12 pointer-events-none" />
-
-                            <div className="space-y-6 relative z-10">
-                                <h3 className="text-2xl font-bold flex items-center gap-2">
-                                    <ShieldCheck className="h-6 w-6 text-emerald-400" />
-                                    Suporte Enterprise
-                                </h3>
-                                <p className="text-zinc-400 text-base leading-relaxed">
-                                    Clientes do plano Enterprise possuem atendimento prioritário exclusivo via WhatsApp e Telefone com tempo de resposta garantido.
-                                </p>
-                            </div>
-
-                            <div className="mt-8 space-y-4 relative z-10">
-                                <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                                    <Mail className="h-5 w-5 text-zinc-300" />
-                                    <span className="text-base font-medium">enterprise@dialogy.app</span>
-                                </div>
-                                <Button className="w-full bg-white text-black hover:bg-zinc-200 font-bold h-12 text-base rounded-xl" variant="default">
-                                    Falar com Gerente de Contas
-                                </Button>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
+                {/* Footer Note */}
+                <motion.div variants={itemVariants} className="mt-20 text-center">
+                    <p className="text-sm text-zinc-500">
+                        &copy; {new Date().getFullYear()} Dialogy. Todos os direitos reservados.
+                    </p>
+                </motion.div>
             </motion.div>
         </div>
     );
