@@ -903,7 +903,16 @@ export default function MobileChatLayout({
 
       // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
       React.startTransition(() => {
-        upsertChats(result.deltaChats, result.lastSyncChats);
+        // If the chat is currently selected and visible, it should remain read
+        // even if delta sync sends a stale unread_count from the chats table.
+        const deltaChatsToUpsert = result.deltaChats.map(chat => {
+          if (chat.id === snapshot.selectedChatId && document.hasFocus()) {
+            return { ...chat, unreadCount: 0 };
+          }
+          return chat;
+        });
+
+        upsertChats(deltaChatsToUpsert, result.lastSyncChats);
 
         // SHARED POLLING: If the chat list received an update for the currently selected chat,
         // we immediately push that message to the chat panel as well.
@@ -1186,7 +1195,13 @@ export default function MobileChatLayout({
       }
       : undefined;
 
-    const unreadCountValue = Number(newChatData.unread_count);
+    let unreadCountValue = Number(newChatData.unread_count);
+
+    // If the chat is currently selected and visible, it should remain read
+    // even if Realtime sends a stale unread_count from the chats table.
+    if (snapshot.selectedChatId === newChatData.id && document.hasFocus()) {
+      unreadCountValue = 0;
+    }
 
     const optimisticUpdate: Partial<Chat> = {
       ...newChatData,

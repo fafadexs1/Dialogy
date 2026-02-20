@@ -325,7 +325,7 @@ async function internalSendMessage(
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
         const isCloseNotice = metadata?.event === 'close_notice';
 
-        if ((!currentAgentId || chatStatus === 'encerrados') && isFromHumanAgent && !isCloseNotice) {
+        if (!currentAgentId && chatStatus !== 'encerrados' && isFromHumanAgent && !isCloseNotice) {
             await client.query(
                 "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
                 [senderId, chatId]
@@ -1260,7 +1260,7 @@ export const sendMediaAction = withDebug(
                         );
                         if ((chatInfoRes.rowCount ?? 0) > 0) {
                             const { workspace_id: workspaceId, status, agent_id: currentAgentId } = chatInfoRes.rows[0];
-                            if (!currentAgentId || status === 'encerrados') {
+                            if (!currentAgentId && status !== 'encerrados') {
                                 await client.query(
                                     "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
                                     [user.id, chatId]

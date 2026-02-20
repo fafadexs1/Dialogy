@@ -19,6 +19,8 @@ import { VectorStore } from '@/lib/vector-store';
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const STALE_REPLAY_TOLERANCE_MS = 2_000;
+const NON_INBOUND_UPSERT_STATUSES = new Set(['READ', 'PLAYED']);
+const REOPEN_ALLOWED_UPSERT_STATUSES = new Set(['SENT', 'RECEIVED']);
 
 const parsedLiveEventMaxAgeSeconds = Number(process.env.EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS ?? 1800);
 const LIVE_EVENT_MAX_AGE_MS =
@@ -949,6 +951,17 @@ async function handleMessagesUpsert(payload: any) {
         return;
     }
 
+    const normalizedUpsertStatus =
+        typeof data?.status === 'string' ? data.status.trim().toUpperCase() : '';
+    const canReopenClosedFromStatus =
+        !normalizedUpsertStatus || REOPEN_ALLOWED_UPSERT_STATUSES.has(normalizedUpsertStatus);
+    if (normalizedUpsertStatus && NON_INBOUND_UPSERT_STATUSES.has(normalizedUpsertStatus)) {
+        console.log(
+            `[WEBHOOK_MSG_UPSERT] Evento ignorado por status nao-inbound (${normalizedUpsertStatus}).`
+        );
+        return;
+    }
+
     const externalMessageId = pickFirstNonEmptyString(key?.id, data?.id, data?.keyId);
     if (!externalMessageId) {
         console.log('[WEBHOOK_MSG_UPSERT] Mensagem ignorada por falta de identificador externo (key.id).');
@@ -965,7 +978,7 @@ async function handleMessagesUpsert(payload: any) {
         );
         return;
     }
-    const messageCreatedAt = parseWebhookTimestamp(
+    const rawMessageCreatedAt = parseWebhookTimestamp(
         data?.messageTimestamp ??
         data?.messageTimestampMs ??
         data?.timestamp ??
@@ -973,6 +986,9 @@ async function handleMessagesUpsert(payload: any) {
         payload?.dateTime ??
         payload?.timestamp
     ) ?? new Date();
+
+    const messageCreatedAt = new Date(Math.min(rawMessageCreatedAt.getTime(), Date.now()));
+    const isLiveInbound = isRecentInboundEvent(messageCreatedAt);
 
     // Log payload for incoming messages as requested
     console.log('[WEBHOOK_MSG_UPSERT] Incoming Message Payload:', JSON.stringify(payload, null, 2));
@@ -1189,13 +1205,85 @@ async function handleMessagesUpsert(payload: any) {
         if (!contactData) throw new Error("Contact data is null despite rowCount > 0");
 
         let chatRes = await client.query(
-            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactData.id]
+            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactData.id]
         );
 
-        let chat: Chat;
+        let chat: Chat = {} as Chat;
+        let latestChatStatus: Chat['status'] | null = null;
+        let requiresNewChat = false;
+
         if ((chatRes.rowCount ?? 0) > 0) {
-            chat = chatRes.rows[0];
+            const recentChat = chatRes.rows[0];
+            latestChatStatus = recentChat.status as Chat['status'];
+            if (recentChat.status === 'gerais' || recentChat.status === 'atendimentos') {
+                chat = recentChat;
+            } else if (recentChat.status === 'encerrados') {
+                const closedAt = recentChat.closed_at ? new Date(recentChat.closed_at).getTime() : 0;
+                const msgTime = messageCreatedAt.getTime();
+
+                // If message was sent before chat was closed, or within 15s (race condition / quick "thank you"), 
+                // append to the closed chat rather than spamming a new chat in the queue.
+                if (msgTime <= closedAt + 15000) {
+                    chat = recentChat;
+                    console.log(`[WEBHOOK_MSG_UPSERT] Mensagem dentro da tolerancia de encerramento (${msgTime <= closedAt ? 'atrasada' : 'grace period'}). Reutilizando chat encerrado ${chat.id}.`);
+                } else if (!isLiveInbound) {
+                    // Historical/replayed events must not reopen queue chats.
+                    chat = recentChat;
+                    shouldRunRealtimeSideEffects = false;
+                    sideEffectSkipReason = `stale_inbound_after_close_${recentChat.id}`;
+                    console.log(`[WEBHOOK_MSG_UPSERT] Evento stale apos encerramento. Mantendo no chat encerrado ${chat.id}.`);
+                } else if (!canReopenClosedFromStatus) {
+                    // Delivery/read acks that leak into upsert should never reopen queue.
+                    chat = recentChat;
+                    shouldRunRealtimeSideEffects = false;
+                    sideEffectSkipReason = `non_reopen_status_${normalizedUpsertStatus}`;
+                    console.log(`[WEBHOOK_MSG_UPSERT] Status ${normalizedUpsertStatus} nao reabre chat encerrado ${chat.id}.`);
+                } else {
+                    requiresNewChat = true;
+                }
+            } else {
+                requiresNewChat = true;
+            }
         } else {
+            requiresNewChat = true;
+        }
+
+        if (requiresNewChat) {
+            if (latestChatStatus === 'encerrados') {
+                const trimmedContent = content.trim();
+                const likelyOutboundEchoRes = await client.query(
+                    `SELECT m.id
+                     FROM messages m
+                     JOIN chats c ON c.id = m.chat_id
+                     WHERE c.workspace_id = $1
+                       AND c.contact_id = $2
+                       AND m.from_me = TRUE
+                       AND m.created_at BETWEEN ($3::timestamptz - interval '2 minutes')
+                                             AND ($3::timestamptz + interval '30 seconds')
+                       AND (
+                            m.message_id_from_api = $4
+                            OR ($5 <> '' AND lower(trim(COALESCE(m.content, ''))) = lower($5))
+                       )
+                     ORDER BY m.created_at DESC
+                     LIMIT 1`,
+                    [
+                        workspaceId,
+                        contactData.id,
+                        messageCreatedAt.toISOString(),
+                        externalMessageId,
+                        trimmedContent,
+                    ]
+                );
+
+                if ((likelyOutboundEchoRes.rowCount ?? 0) > 0) {
+                    console.log(
+                        `[WEBHOOK_MSG_UPSERT] Evento potencialmente echo/outbound apos encerramento (${externalMessageId}). Ignorando para nao reabrir fila.`
+                    );
+                    await client.query('ROLLBACK');
+                    return;
+                }
+            }
+
             console.log(`[WEBHOOK_MSG_UPSERT] Nenhum chat ativo encontrado para ${contactJid}. Criando um novo.`);
             const chatId = randomUUID();
             const protocol = buildChatProtocol(chatId);

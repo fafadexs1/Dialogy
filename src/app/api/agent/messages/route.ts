@@ -61,7 +61,24 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
       return chatRes.rows[0].id;
     }
 
-    // 3. If no active chat, create a new one
+    // 3. If there is no active chat, prefer reusing the latest closed chat.
+    // This avoids resurrecting contacts into the queue due outbound system sends.
+    const closedChatRes = await client.query(
+      `SELECT id
+       FROM chats
+       WHERE contact_id = $1
+         AND workspace_id = $2
+         AND status = 'encerrados'
+       ORDER BY closed_at DESC NULLS LAST, created_at DESC
+       LIMIT 1`,
+      [contactId, workspaceId]
+    );
+
+    if ((closedChatRes.rowCount ?? 0) > 0) {
+      return closedChatRes.rows[0].id;
+    }
+
+    // 4. If there is no active or closed chat, create a new one.
     console.log(`[AGENT_API] No active chat found for ${phoneNumber}. Creating a new one.`);
     const chatId = randomUUID();
     const protocol = buildChatProtocol(chatId);

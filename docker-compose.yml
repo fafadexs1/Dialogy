@@ -8,6 +8,6 @@ services:
       dockerfile: Dockerfile
     restart: always
     ports:
-      - 3000:3000
+      - 9045:9045
     env_file:
       - .env

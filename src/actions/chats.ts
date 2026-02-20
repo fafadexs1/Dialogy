@@ -56,7 +56,7 @@ export const assignChatToSelfAction = withDebug(
             // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
             // regardless of whether agent_id was previously filled.
             const result = await db.query(
-                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2 AND status = 'gerais' RETURNING workspace_id",
+                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = clock_timestamp() WHERE id = $2 AND status = 'gerais' RETURNING workspace_id",
                 [currentAgentId, chatId]
             );
 
@@ -73,7 +73,7 @@ export const assignChatToSelfAction = withDebug(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me, 
                     sender_user_id, created_at, is_read
-                ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
+                ) VALUES ($1, $2, 'system', $3, true, $4, clock_timestamp(), true)`,
                 [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, currentAgentId]
             );
 
@@ -246,7 +246,7 @@ export const transferChatAction = withDebug(
             SET 
                 agent_id = $1,
                 status = 'atendimentos',
-                assigned_at = NOW()
+                assigned_at = clock_timestamp()
             WHERE id = $2
         `, [finalAgentId, chatId]);
 
@@ -256,8 +256,8 @@ export const transferChatAction = withDebug(
                 : `Atendimento atribuído a ${transferTargetName} por ${currentAgentName}.`;
 
             await client.query(`
-            INSERT INTO messages (workspace_id, chat_id, type, content, metadata)
-            VALUES ($1, $2, 'system', $3, $4)
+            INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
+            VALUES ($1, $2, 'system', $3, $4, clock_timestamp())
         `, [
                 workspaceId,
                 chatId,
@@ -387,7 +387,7 @@ export const closeChatAction = withDebug(
                 `UPDATE chats
              SET 
                 status = 'encerrados',
-                closed_at = NOW(),
+                closed_at = clock_timestamp(),
                 close_reason_tag_id = $1,
                 tag = $2,
                 color = $3
@@ -411,8 +411,8 @@ export const closeChatAction = withDebug(
             const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
 
             await client.query(`
-            INSERT INTO messages (workspace_id, chat_id, type, content, metadata)
-            VALUES ($1, $2, 'system', $3, $4)
+            INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
+            VALUES ($1, $2, 'system', $3, $4, clock_timestamp())
         `, [
                 workspace_id,
                 chatId,

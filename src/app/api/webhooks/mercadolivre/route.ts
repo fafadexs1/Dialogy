@@ -109,21 +109,19 @@ export async function POST(request: Request) {
 
                 let chatId: string;
                 const chatRes = await db.query(
-                    `SELECT id FROM chats WHERE contact_id = $1 AND source = 'mercadolivre' AND workspace_id = $2`,
+                    `SELECT id
+                     FROM chats
+                     WHERE contact_id = $1
+                       AND source = 'mercadolivre'
+                       AND workspace_id = $2
+                       AND status IN ('gerais', 'atendimentos')
+                     ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                     LIMIT 1`,
                     [contactId, account.workspace_id]
                 );
 
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
-                    // Re-open if needed (only keep "atendimentos" when an agent is already assigned)
-                    await db.query(
-                        `UPDATE chats
-                         SET status = CASE WHEN agent_id IS NULL THEN 'gerais' ELSE 'atendimentos' END,
-                             assigned_at = CASE WHEN agent_id IS NULL THEN NULL ELSE assigned_at END,
-                             updated_at = NOW()
-                         WHERE id = $1 AND status = 'encerrados'`,
-                        [chatId]
-                    );
                 } else {
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)
@@ -230,19 +228,18 @@ export async function POST(request: Request) {
                 // 2. Find/Create Chat
                 let chatId: string;
                 const chatRes = await db.query(
-                    `SELECT id FROM chats WHERE contact_id = $1 AND source = 'mercadolivre' AND workspace_id = $2`,
+                    `SELECT id
+                     FROM chats
+                     WHERE contact_id = $1
+                       AND source = 'mercadolivre'
+                       AND workspace_id = $2
+                       AND status IN ('gerais', 'atendimentos')
+                     ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                     LIMIT 1`,
                     [contactId, account.workspace_id]
                 );
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
-                    await db.query(
-                        `UPDATE chats
-                         SET status = CASE WHEN agent_id IS NULL THEN 'gerais' ELSE 'atendimentos' END,
-                             assigned_at = CASE WHEN agent_id IS NULL THEN NULL ELSE assigned_at END,
-                             updated_at = NOW()
-                         WHERE id = $1 AND status = 'encerrados'`,
-                        [chatId]
-                    );
                 } else {
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)

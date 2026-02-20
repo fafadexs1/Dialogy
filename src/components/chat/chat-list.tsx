@@ -399,18 +399,19 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
         : null;
       text = address || locationName || (coords ? `Localização: ${coords}` : 'Localização');
     }
-    else if (!isMedia) text = message.content;
-    else if (message.content) text = message.content;
+    else if (!isMedia && message.content) text = message.content;
+    else if (isMedia && message.content && message.content.length > 0) text = message.content;
     else {
       const mimetype = message.metadata?.mimetype || '';
-      if (mimetype.startsWith('image/')) text = 'Imagem';
+      if (mimetype.startsWith('image/')) text = 'Foto';
       else if (mimetype.startsWith('video/')) text = 'Vídeo';
-      else if (mimetype.startsWith('audio/')) text = 'Áudio';
+      else if (mimetype.startsWith('audio/')) text = 'Mensagem de voz';
+      else if (mimetype.includes('pdf')) text = 'Documento PDF';
       else if (message.metadata?.fileName) text = message.metadata.fileName;
       else text = 'Arquivo';
     }
 
-    const charLimit = 30;
+    const charLimit = 35;
     if (text && text.length > charLimit) return text.substring(0, charLimit) + '...';
     return text;
   };
@@ -512,6 +513,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
 
+  // SLA Calculation
+  const isWaiting = chat.status === 'atendimentos' && !isSnoozed && lastMessage && !lastMessage.from_me;
+  const waitingMinutes = isWaiting && lastMessage ? (Date.now() - new Date(lastMessage.createdAt).getTime()) / 60000 : 0;
+
+  const slaClasses = isWaiting && waitingMinutes > 30
+    ? 'border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.15)] dark:border-red-500/40' // Over SLA (High Priority)
+    : isWaiting && waitingMinutes > 15
+      ? 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.15)] dark:border-yellow-400/40' // Warning SLA
+      : '';
+
   const handleSelect = (e?: React.MouseEvent) => {
     if (isBulkMode && onToggleBulkSelection) {
       e?.preventDefault();
@@ -591,13 +602,20 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   };
 
   return (
-    <div
+    <motion.div
+      layout="position"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       className={cn(
-        "relative flex items-start gap-2.5 md:gap-3 px-4 py-3 md:px-5 md:py-3 cursor-pointer group transition-all mx-2 my-1 rounded-xl border border-transparent hover:bg-muted/30 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        "relative flex items-start gap-2.5 md:gap-3 px-4 py-3 md:px-5 md:py-3 cursor-pointer group transition-all mx-2 my-1 rounded-xl border",
+        slaClasses || "border-transparent",
+        "hover:bg-muted/30 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
         "min-h-[76px]", // Height adjustment
         isSelected && !isForwarding && !isBulkMode
-          ? "bg-sidebar-accent border-border/50 shadow-sm dark:bg-white/5 dark:border-white/10"
-          : "dark:hover:bg-white/5",
+          ? "bg-sidebar-accent shadow-sm dark:bg-white/5 dark:border-white/10"
+          : (!slaClasses && "dark:hover:bg-white/5"),
         (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
         isSnoozed ? "opacity-60 grayscale" : ""
       )}
@@ -897,7 +915,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           })()}
         </div>
       </div>
-    </div >
+    </motion.div>
   );
 };
 
@@ -1245,35 +1263,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 }}
               >
                 {/* Ownership Section */}
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Visualização</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div
-                      onClick={() => setOwnershipFilter('mine')}
-                      className={cn(
-                        "cursor-pointer border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-all duration-200",
-                        ownershipFilter === 'mine'
-                          ? "bg-primary/10 border-primary text-primary shadow-sm"
-                          : "bg-card hover:bg-muted/50 border-border text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      <UserIcon className="h-5 w-5" />
-                      <span className="text-sm font-medium">Minhas</span>
-                    </div>
-                    <div
-                      onClick={() => setOwnershipFilter('everyone')}
-                      className={cn(
-                        "cursor-pointer border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-all duration-200",
-                        ownershipFilter === 'everyone'
-                          ? "bg-primary/10 border-primary text-primary shadow-sm"
-                          : "bg-card hover:bg-muted/50 border-border text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      <Users className="h-5 w-5" />
-                      <span className="text-sm font-medium">Todos</span>
-                    </div>
-                  </div>
-                </div>
+                {/* Ownership section removed; now handled by Quick Filter Chips */}
 
                 {/* Team Filter Section (Visible only for 'everyone') */}
                 {ownershipFilter === 'everyone' && (
@@ -1376,20 +1366,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                   </RadioGroup>
                 </div>
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Somente não lidas</p>
-                      <p className="text-xs text-muted-foreground">Priorize contatos aguardando resposta</p>
-                    </div>
-                    <Switch checked={onlyUnread} onCheckedChange={setOnlyUnread} className="data-[state=checked]:bg-blue-600" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
-                      <p className="text-xs text-muted-foreground">Ótimo para dividir a fila com o time</p>
-                    </div>
-                    <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
-                  </div>
+                  {/* Unread & Unassigned removed; now handled by Quick Filter Chips */}
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
@@ -1451,6 +1428,38 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               }
             }}
           />
+          {/* Quick Filter Chips */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none pt-2">
+            <Badge
+              variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
+              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'mine' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              onClick={() => setOwnershipFilter('mine')}
+            >
+              Minhas
+            </Badge>
+            <Badge
+              variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
+              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'everyone' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              onClick={() => setOwnershipFilter('everyone')}
+            >
+              Todos
+            </Badge>
+            <div className="w-[1px] h-4 bg-border mx-1" />
+            <Badge
+              variant={onlyUnread ? 'default' : 'outline'}
+              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", onlyUnread ? "bg-amber-500 hover:bg-amber-600 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              onClick={() => setOnlyUnread(!onlyUnread)}
+            >
+              Não lidas
+            </Badge>
+            <Badge
+              variant={showUnassignedOnly ? 'default' : 'outline'}
+              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", showUnassignedOnly ? "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
+            >
+              Sem responsável
+            </Badge>
+          </div>
         </div>
       </div>
 
@@ -1592,53 +1601,55 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         </div>
       </div>
 
-      {isBulkMode && (
-        <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
-          <div className="flex items-center gap-2 px-2">
-            <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
-            <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
-              {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
-            </Button>
-          </div>
-          <div className="flex items-center gap-1">
-            <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
-                  Encerrar
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
-                <DialogHeader>
-                  <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
-                  <DialogDescription className="text-muted-foreground">
-                    Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                  <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
-                  <Textarea
-                    id="bulk-message"
-                    placeholder="Ex: Agradecemos o contato!"
-                    className="bg-muted/50 border-border text-foreground min-h-[100px]"
-                    value={bulkMessage}
-                    onChange={(e) => setBulkMessage(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
-                  <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
-                    {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Confirmar Encerramento
+      {
+        isBulkMode && (
+          <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 px-2">
+              <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
+              <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
+                {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
+              </Button>
+            </div>
+            <div className="flex items-center gap-1">
+              <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
+                    Encerrar
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </DialogTrigger>
+                <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
+                    <DialogDescription className="text-muted-foreground">
+                      Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
+                    <Textarea
+                      id="bulk-message"
+                      placeholder="Ex: Agradecemos o contato!"
+                      className="bg-muted/50 border-border text-foreground min-h-[100px]"
+                      value={bulkMessage}
+                      onChange={(e) => setBulkMessage(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
+                    <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                      {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Confirmar Encerramento
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
         {filteredChats.length > 0 ? (
@@ -1678,25 +1689,45 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             />
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center space-y-3 opacity-50">
+          <div className="flex flex-col items-center justify-center py-20 px-6 text-center space-y-4">
             {activeTab === 'atendimentos' ? (
-              <>
-                <div className="p-4 bg-blue-500/10 rounded-full mb-2 ring-1 ring-blue-500/20">
-                  <div className="h-8 w-8 text-blue-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
-                  </div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.4 }}
+                className="flex flex-col items-center"
+              >
+                <div className="relative mb-6">
+                  {/* Subtle pulsing background glow */}
+                  <div className="absolute inset-0 bg-emerald-500/20 blur-[25px] rounded-full animate-pulse z-0" />
+
+                  {/* Floating Container */}
+                  <motion.div
+                    animate={{ y: [0, -8, 0] }}
+                    transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
+                    className="relative z-10 bg-gradient-to-tr from-emerald-100 to-emerald-50 dark:from-emerald-900/40 dark:to-emerald-800/20 p-5 rounded-full border border-emerald-200 dark:border-emerald-700/50 shadow-lg"
+                  >
+                    <svg className="h-10 w-10 text-emerald-600 dark:text-emerald-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+                      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                    </svg>
+                  </motion.div>
                 </div>
-                <h3 className="font-semibold text-foreground">Nenhuma conversa</h3>
-                <p className="text-sm text-muted-foreground max-w-[200px]">
-                  Você não é responsável por nenhuma conversa no momento
+
+                <h3 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent mb-1">
+                  Tudo limpo por aqui!
+                </h3>
+                <p className="text-sm text-muted-foreground/80 max-w-[240px] mb-6">
+                  Bom trabalho. Você não tem atendimentos pendentes no momento.
                 </p>
+
                 {currentUser.activeWorkspaceId && (
                   <div className="pt-2 opacity-100 pointer-events-auto">
                     <NewConversationDialog
                       workspaceId={currentUser.activeWorkspaceId}
                       onActionSuccess={onUpdate}
                       trigger={
-                        <Button variant="outline" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 text-blue-600 hover:text-blue-700">
+                        <Button variant="outline" className="gap-2 border-emerald-500/20 hover:bg-emerald-500/10 text-emerald-600 hover:text-emerald-700 rounded-xl shadow-sm transition-all duration-300">
                           <PlusCircle className="h-4 w-4" />
                           Nova Conversa
                         </Button>
@@ -1704,7 +1735,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     />
                   </div>
                 )}
-              </>
+              </motion.div>
             ) : (
               <>
                 <MessageSquare className="h-12 w-12 text-muted-foreground/30" />
@@ -1715,31 +1746,33 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         )}
       </div>
 
-      {isForwarding && (
-        <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-foreground font-medium">
-              {selectedForwardingChatIds?.size || 0} selecionados
-            </span>
+      {
+        isForwarding && (
+          <div className="p-4 border-t border-border bg-background border-t-2 shadow-inner">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-foreground font-medium">
+                {selectedForwardingChatIds?.size || 0} selecionados
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
+                onClick={onCancelForward}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
+                onClick={onConfirmForward}
+                disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
+              >
+                Encaminhar
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1 border-input hover:bg-accent hover:text-accent-foreground"
-              onClick={onCancelForward}
-            >
-              Cancelar
-            </Button>
-            <Button
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white"
-              onClick={onConfirmForward}
-              disabled={!selectedForwardingChatIds || selectedForwardingChatIds.size === 0}
-            >
-              Encaminhar
-            </Button>
-          </div>
-        </div>
-      )}
+        )
+      }
 
       <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
         <AlertDialogContent className="bg-background border-border text-foreground">
