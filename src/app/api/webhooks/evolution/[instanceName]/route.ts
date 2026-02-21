@@ -20,7 +20,6 @@ const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const STALE_REPLAY_TOLERANCE_MS = 2_000;
 const NON_INBOUND_UPSERT_STATUSES = new Set(['READ', 'PLAYED']);
-const REOPEN_ALLOWED_UPSERT_STATUSES = new Set(['SENT', 'RECEIVED']);
 
 const parsedLiveEventMaxAgeSeconds = Number(process.env.EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS ?? 1800);
 const LIVE_EVENT_MAX_AGE_MS =
@@ -953,8 +952,6 @@ async function handleMessagesUpsert(payload: any) {
 
     const normalizedUpsertStatus =
         typeof data?.status === 'string' ? data.status.trim().toUpperCase() : '';
-    const canReopenClosedFromStatus =
-        !normalizedUpsertStatus || REOPEN_ALLOWED_UPSERT_STATUSES.has(normalizedUpsertStatus);
     if (normalizedUpsertStatus && NON_INBOUND_UPSERT_STATUSES.has(normalizedUpsertStatus)) {
         console.log(
             `[WEBHOOK_MSG_UPSERT] Evento ignorado por status nao-inbound (${normalizedUpsertStatus}).`
@@ -1232,12 +1229,6 @@ async function handleMessagesUpsert(payload: any) {
                     shouldRunRealtimeSideEffects = false;
                     sideEffectSkipReason = `stale_inbound_after_close_${recentChat.id}`;
                     console.log(`[WEBHOOK_MSG_UPSERT] Evento stale apos encerramento. Mantendo no chat encerrado ${chat.id}.`);
-                } else if (!canReopenClosedFromStatus) {
-                    // Delivery/read acks that leak into upsert should never reopen queue.
-                    chat = recentChat;
-                    shouldRunRealtimeSideEffects = false;
-                    sideEffectSkipReason = `non_reopen_status_${normalizedUpsertStatus}`;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Status ${normalizedUpsertStatus} nao reabre chat encerrado ${chat.id}.`);
                 } else {
                     requiresNewChat = true;
                 }
