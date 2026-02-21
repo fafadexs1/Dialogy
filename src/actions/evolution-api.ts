@@ -8,6 +8,18 @@ import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
 
+function parseEnvInt(value: string | undefined, fallback: number): number {
+    if (!value) return fallback;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const EVOLUTION_LIMITS = {
+    // If unset, do not enforce local token length and defer validation to Evolution API/database.
+    instanceTokenMax: parseEnvInt(process.env.EVOLUTION_INSTANCE_TOKEN_MAX_LENGTH, 0),
+    businessFieldMax: parseEnvInt(process.env.EVOLUTION_BUSINESS_FIELD_MAX_LENGTH, 100),
+} as const;
+
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
@@ -17,7 +29,19 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
     }
 
     try {
-        const res = await db.query('SELECT id, instance_name, display_name, type, cluster_id, webhook_url FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId]);
+        const res = await db.query(
+            `SELECT 
+                id, instance_name, display_name, type, cluster_id, webhook_url,
+                to_jsonb(evolution_api_instances)->>'business_name' as business_name,
+                to_jsonb(evolution_api_instances)->>'waba_name' as waba_name,
+                to_jsonb(evolution_api_instances)->>'display_phone_number' as display_phone_number,
+                to_jsonb(evolution_api_instances)->>'verified_name' as verified_name,
+                to_jsonb(evolution_api_instances)->>'waba_id' as waba_id,
+                to_jsonb(evolution_api_instances)->>'phone_number_id' as phone_number_id
+             FROM evolution_api_instances
+             WHERE workspace_id = $1`,
+            [workspaceId]
+        );
 
         // --- BILLING Check ---
         const { checkLimit } = await import('@/lib/billing-logic');
@@ -112,6 +136,24 @@ export async function createEvolutionApiInstance(
     const isBaileys = payload.integration === 'WHATSAPP-BAILEYS';
     if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
+    }
+    if (EVOLUTION_LIMITS.instanceTokenMax > 0 && payload.token && payload.token.length > EVOLUTION_LIMITS.instanceTokenMax) {
+        return {
+            success: false,
+            error: `Token muito longo para a Evolution v2.3.7 (${payload.token.length} caracteres). O limite do campo token é ${EVOLUTION_LIMITS.instanceTokenMax}. Gere/use um token menor ou ajuste o schema da Evolution.`,
+        };
+    }
+    if (payload.number && payload.number.length > EVOLUTION_LIMITS.businessFieldMax) {
+        return {
+            success: false,
+            error: `Phone Number ID muito longo (${payload.number.length} caracteres). O limite aceito pela Evolution v2.3.7 é ${EVOLUTION_LIMITS.businessFieldMax}.`,
+        };
+    }
+    if (payload.businessId && payload.businessId.length > EVOLUTION_LIMITS.businessFieldMax) {
+        return {
+            success: false,
+            error: `WABA ID muito longo (${payload.businessId.length} caracteres). O limite aceito pela Evolution v2.3.7 é ${EVOLUTION_LIMITS.businessFieldMax}.`,
+        };
     }
 
     const client = await db.connect();

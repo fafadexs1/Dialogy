@@ -189,9 +189,10 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
 
                         setStatusMessage('Criando Instância Evolution...');
 
-                        const instanceName = `WhatsApp Business ${phoneId.slice(-4)}`;
+                        // This is only the friendly label in Dialogy.
+                        const displayName = `wb${phoneId.slice(-4)}`;
                         const payload: EvolutionInstanceCreationPayload = {
-                            displayName: instanceName,
+                            displayName,
                             integration: 'WHATSAPP-BUSINESS',
                             businessId: wabaId,
                             number: phoneId,
@@ -707,6 +708,10 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
         }
     }
 
+    const cloudPrimaryLabel = instance.verified_name || instance.business_name || null;
+    const cloudPhoneLabel = instance.display_phone_number || instance.phone_number_id || null;
+    const cloudWabaLabel = instance.waba_name || instance.waba_id || null;
+
     return (
         <Card>
             <CardHeader>
@@ -717,6 +722,16 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                             {instance.display_name}
                         </CardTitle>
                         <CardDescription>{instance.type === 'wa_cloud' ? 'Cloud API' : 'Baileys'} • {instance.instance_name}</CardDescription>
+                        {instance.type === 'wa_cloud' && (
+                            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                                {cloudPrimaryLabel && <p className="text-foreground/90 font-medium">{cloudPrimaryLabel}</p>}
+                                {cloudPhoneLabel && <p>Número: {cloudPhoneLabel}</p>}
+                                {cloudWabaLabel && <p>WABA: {cloudWabaLabel}</p>}
+                                {!cloudPrimaryLabel && !cloudPhoneLabel && !cloudWabaLabel && (
+                                    <p>Dados da Meta indisponíveis nesta instância.</p>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <AlertDialog>
                         <DropdownMenu>

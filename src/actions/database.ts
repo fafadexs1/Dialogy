@@ -404,12 +404,24 @@ create table if not exists public.evolution_api_instances (
   display_name text,
   type text,
   webhook_url text,
+  business_name text,
+  waba_name text,
+  display_phone_number text,
+  verified_name text,
+  waba_id text,
+  phone_number_id text,
   created_at timestamptz not null default timezone('utc', now()),
   constraint evolution_api_instances_workspace_id_fkey
     foreign key (workspace_id) references public.workspaces(id) on delete cascade,
   constraint evolution_api_instances_cluster_id_fkey
     foreign key (cluster_id) references public.whatsapp_clusters(id) on delete set null
 );
+alter table if exists public.evolution_api_instances add column if not exists business_name text;
+alter table if exists public.evolution_api_instances add column if not exists waba_name text;
+alter table if exists public.evolution_api_instances add column if not exists display_phone_number text;
+alter table if exists public.evolution_api_instances add column if not exists verified_name text;
+alter table if exists public.evolution_api_instances add column if not exists waba_id text;
+alter table if exists public.evolution_api_instances add column if not exists phone_number_id text;
 create unique index if not exists uq_evo_instances_workspace_name on public.evolution_api_instances(workspace_id, instance_name);
 create index if not exists idx_evo_instances_cluster on public.evolution_api_instances(cluster_id);
 

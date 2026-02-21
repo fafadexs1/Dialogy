@@ -497,6 +497,12 @@ export interface EvolutionInstance {
   cluster_id: string;
   qrCode?: string;
   webhook_url?: string;
+  business_name?: string | null;
+  waba_name?: string | null;
+  display_phone_number?: string | null;
+  verified_name?: string | null;
+  waba_id?: string | null;
+  phone_number_id?: string | null;
 }
 
 export type EvolutionInstanceSettings = {
