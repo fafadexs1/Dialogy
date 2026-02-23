@@ -846,7 +846,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             )}
             {lastMessage && (
               <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
-                {formatMessageTime(lastMessage.timestamp || lastMessage.createdAt, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
+                {formatMessageTime(lastMessage.createdAt || lastMessage.timestamp, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
               </p>
             )}
           </div>
@@ -1412,22 +1412,24 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           </div>
         </div>
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
-          <Input
-            placeholder="Pesquisar por nome, telefone ou mensagem..."
-            className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            aria-label="Pesquisar conversas"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && searchTerm.trim()) {
-                e.preventDefault();
-                e.stopPropagation();
-                setIsSearchDialogOpen(true);
-              }
-            }}
-          />
+        <div>
+          <div className="relative group">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
+            <Input
+              placeholder="Pesquisar por nome, telefone ou mensagem..."
+              className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Pesquisar conversas"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchTerm.trim()) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsSearchDialogOpen(true);
+                }
+              }}
+            />
+          </div>
           {/* Quick Filter Chips */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none pt-2">
             <Badge

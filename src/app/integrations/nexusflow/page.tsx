@@ -1,112 +1,219 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
-import { useFormStatus } from 'react-dom';
-import { updateWorkspaceAction } from '@/actions/workspace'; // Reuse the workspace action which handles nexus_settings
-import { Button } from "@/components/ui/button";
+import { useActionState, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Save, Mail, Unplug } from 'lucide-react';
+import { Loader2, Lock, Save } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/use-online-status';
-import { useToast } from '@/hooks/use-toast';
-import { getNexusConfig } from '@/actions/nexus';
+import { getNexusConfig, updateNexusConfigAction } from '@/actions/nexus';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useFormStatus } from 'react-dom';
+
+type NexusConfig = {
+    mode?: 'workspace_managed' | 'existing_account';
+    email?: string;
+    username?: string;
+    autoProvisioned?: boolean;
+    nexusUserId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+} | null;
+
+type ActionState = {
+    success: boolean;
+    error: string | null;
+    config: NexusConfig;
+};
+
+const initialActionState: ActionState = {
+    success: false,
+    error: null,
+    config: null,
+};
 
 function SubmitButton() {
     const { pending } = useFormStatus();
     return (
-        <Button type="submit" disabled={pending} className="min-w-[140px]">
+        <Button type="submit" disabled={pending} className="min-w-[170px]">
             {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {pending ? 'Salvando...' : 'Salvar Configuração'}
+            {pending ? 'Salvando...' : 'Salvar Integracao'}
         </Button>
-    )
+    );
 }
 
 export default function NexusFlowIntegrationPage() {
     const user = useCurrentUser();
-    const [config, setConfig] = useState<{ email?: string } | null>(null);
+    const [config, setConfig] = useState<NexusConfig>(null);
     const [isFetching, setIsFetching] = useState(true);
-
-    // We reuse updateWorkspaceAction, but check if we need a specific wrapper or if it accepts just part of the form.
-    // updateWorkspaceAction handles nexusEmail if present in FormData.
-    const [state, formAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
-    const { toast } = useToast();
+    const [mode, setMode] = useState<'workspace_managed' | 'existing_account'>('workspace_managed');
+    const [existingEmail, setExistingEmail] = useState('');
+    const [existingPassword, setExistingPassword] = useState('');
+    const [state, formAction] = useActionState(updateNexusConfigAction, initialActionState);
 
     useEffect(() => {
-        if (!user || !user.activeWorkspaceId) return;
-
-        getNexusConfig(user.activeWorkspaceId).then(cfg => {
-            setConfig(cfg);
+        if (!user?.activeWorkspaceId) {
             setIsFetching(false);
-        });
-    }, [user]);
+            return;
+        }
+
+        setIsFetching(true);
+        getNexusConfig(user.activeWorkspaceId)
+            .then((cfg) => {
+                setConfig(cfg);
+                setMode(cfg?.mode === 'existing_account' ? 'existing_account' : 'workspace_managed');
+                setExistingEmail(cfg?.mode === 'existing_account' ? (cfg.email || '') : '');
+                setExistingPassword('');
+            })
+            .finally(() => {
+                setIsFetching(false);
+            });
+    }, [user?.activeWorkspaceId]);
 
     useEffect(() => {
-        if (state.success) {
-            toast({ title: "Integração Atualizada", description: "Configurações do NexusFlow salvas com sucesso." });
-        } else if (state.error) {
-            toast({ title: "Erro", description: state.error, variant: "destructive" });
-        }
-    }, [state, toast]);
+        if (!state.success || !state.config) return;
+        setConfig(state.config);
+        setMode(state.config.mode === 'existing_account' ? 'existing_account' : 'workspace_managed');
+        setExistingEmail(state.config.mode === 'existing_account' ? (state.config.email || '') : '');
+        setExistingPassword('');
+    }, [state]);
 
-
-    // Checking if fetching config is done. 
-    // If user is null (loading or not logged in), we just show loader.
     if (!user || isFetching) {
-        return <div className="flex h-64 w-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+        return (
+            <div className="flex h-64 w-full items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
     }
 
-    if (!user?.activeWorkspaceId) {
-        return <div className="p-8 text-center text-muted-foreground">Selecione um workspace para configurar a integração.</div>
+    if (!user.activeWorkspaceId) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Selecione um workspace para visualizar a integracao.
+            </div>
+        );
     }
 
     return (
         <div className="max-w-4xl mx-auto space-y-8 py-8">
             <header>
-                <h1 className="text-3xl font-bold tracking-tight">Integração NexusFlow</h1>
+                <h1 className="text-3xl font-bold tracking-tight">Integracao NexusFlow</h1>
                 <p className="text-muted-foreground mt-2 text-lg">
-                    Conecte seu fluxo de automação avançada com o Dialogy.
+                    Padrão automatico por workspace, com opcao segura de vincular conta existente.
                 </p>
             </header>
 
-            <form action={formAction}>
-                <input type="hidden" name="workspaceId" value={user.activeWorkspaceId} />
+            <Card className="border-none shadow-sm bg-card/50 ring-1 ring-purple-500/10">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
+                        <Lock className="h-5 w-5" />
+                        Conta Compartilhada do Workspace
+                    </CardTitle>
+                    <CardDescription>
+                        A escolha fica salva no workspace. No modo de conta existente, o Dialogy valida email + senha no ato do vinculo e nao armazena a senha.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    <form action={formAction} className="space-y-6">
+                        <input type="hidden" name="workspaceId" value={user.activeWorkspaceId} />
+                        <input type="hidden" name="mode" value={mode} />
 
-                <Card className="border-none shadow-sm bg-card/50 ring-1 ring-purple-500/10">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M12 2a10 10 0 1 0 10 10 10.01 10.01 0 0 0-10-10zm0 14a4 4 0 1 1 4-4 4 4 0 0 1-4 4zm0-6a2 2 0 1 0 2 2 2 2 0 0 0-2-2z" /></svg>
-                            Conta Mestre Unificada
-                        </CardTitle>
-                        <CardDescription>
-                            Defina uma conta única do NexusFlow para ser usada por todos os membros deste workspace.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        <div className="space-y-2">
-                            <Label htmlFor="nexusEmail">E-mail da Conta Mestre</Label>
-                            <div className="relative max-w-md">
-                                <Input
-                                    id="nexusEmail"
-                                    name="nexusEmail"
-                                    type="email"
-                                    placeholder="ex: admin@empresa.com"
-                                    defaultValue={config?.email || ''}
-                                    className="pl-10 h-11"
+                        <div className="space-y-3">
+                            <Label>Modo de conexao</Label>
+                            <label className="flex items-start gap-3 rounded-md border p-3 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    checked={mode === 'workspace_managed'}
+                                    onChange={() => setMode('workspace_managed')}
                                 />
-                                <Mail className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-2 max-w-2xl text-balance">
-                                <strong>Como funciona:</strong> Quando configurado, qualquer membro da sia equipe que abrir o NexusFlow será autenticado automaticamente com este e-mail, compartilhando os mesmos fluxos e configurações.
+                                <span className="text-sm">
+                                    <strong>Conta automatica do workspace</strong><br />
+                                    O Dialogy cria e reutiliza sempre a mesma conta tecnica para este workspace.
+                                </span>
+                            </label>
+                            <label className="flex items-start gap-3 rounded-md border p-3 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    checked={mode === 'existing_account'}
+                                    onChange={() => setMode('existing_account')}
+                                />
+                                <span className="text-sm">
+                                    <strong>Vincular conta existente</strong><br />
+                                    Usa um usuario NexusFlow ja existente, validado por senha, e nao cria novo automaticamente.
+                                </span>
+                            </label>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="existingEmail">E-mail da conta existente</Label>
+                            <Input
+                                id="existingEmail"
+                                name="existingEmail"
+                                type="email"
+                                value={existingEmail}
+                                onChange={(e) => setExistingEmail(e.target.value)}
+                                placeholder="exemplo@empresa.com"
+                                disabled={mode !== 'existing_account'}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Obrigatorio somente no modo "Vincular conta existente".
                             </p>
                         </div>
 
-                        <div className="pt-4 border-t">
+                        <div className="space-y-2">
+                            <Label htmlFor="existingPassword">Senha da conta existente</Label>
+                            <Input
+                                id="existingPassword"
+                                name="existingPassword"
+                                type="password"
+                                value={existingPassword}
+                                onChange={(e) => setExistingPassword(e.target.value)}
+                                placeholder="Digite a senha para validar o vinculo"
+                                disabled={mode !== 'existing_account'}
+                                autoComplete="new-password"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Usada apenas para validacao do vinculo. A senha nao e salva no Dialogy.
+                            </p>
+                        </div>
+
+                        {state.error && (
+                            <p className="text-sm text-red-500">{state.error}</p>
+                        )}
+
+                        {state.success && !state.error && (
+                            <p className="text-sm text-emerald-600">Configuracao NexusFlow atualizada com sucesso.</p>
+                        )}
+
+                        <div className="pt-2">
                             <SubmitButton />
                         </div>
-                    </CardContent>
-                </Card>
-            </form>
+                    </form>
+
+                    <div className="space-y-2">
+                        <Label>Identidade ativa no workspace</Label>
+                        <div className="max-w-2xl rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm break-all">
+                            {config?.email || 'Ainda nao provisionada.'}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Usuario</Label>
+                        <div className="max-w-2xl rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm break-all">
+                            {config?.username || '-'}
+                        </div>
+                    </div>
+
+                    <p className="text-sm text-muted-foreground">
+                        Modo atual: {config?.mode === 'existing_account' ? 'Conta existente vinculada' : 'Conta automatica do workspace'}.
+                    </p>
+                    {config?.mode === 'existing_account' && config?.nexusUserId && (
+                        <p className="text-xs text-muted-foreground">
+                            ID da conta vinculada no NexusFlow: <span className="font-mono">{config.nexusUserId}</span>
+                        </p>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

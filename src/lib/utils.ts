@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { format as formatDate, isSameDay, subDays } from 'date-fns';
+import { format as formatDate, formatDistanceToNow, isSameDay, subDays } from 'date-fns';
 import { toZonedTime } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
 
@@ -28,8 +28,18 @@ export function formatMessageDate(date: Date, timezone: string): string {
 export function formatMessageTime(date: Date | string, timezone: string = 'America/Sao_Paulo'): string {
   try {
     const d = typeof date === 'string' ? new Date(date) : date;
+    if (Number.isNaN(d.getTime())) {
+      return typeof date === 'string' ? date : '';
+    }
+
     const zonedDate = toZonedTime(d, timezone);
-    return formatDate(zonedDate, "HH:mm");
+    const zonedNow = toZonedTime(new Date(), timezone);
+
+    if (isSameDay(zonedDate, zonedNow)) {
+      return formatDate(zonedDate, "HH:mm");
+    }
+
+    return formatDistanceToNow(zonedDate, { addSuffix: true, locale: ptBR });
   } catch (e) {
     return typeof date === 'string' ? date : '';
   }

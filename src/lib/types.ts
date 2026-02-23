@@ -14,7 +14,15 @@ export type Workspace = {
   roleName?: string;
   isOwner?: boolean;
   plan?: string;
-  nexus_settings?: { email?: string; }; // Shared NexusFlow credentials
+  nexus_settings?: {
+    mode?: 'workspace_managed' | 'existing_account';
+    email?: string;
+    username?: string;
+    autoProvisioned?: boolean;
+    nexusUserId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }; // Shared NexusFlow credentials per workspace
 }
 
 export type Permission = {

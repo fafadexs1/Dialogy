@@ -355,14 +355,7 @@ export function Sidebar({ user }: SidebarProps) {
   const automationRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
-  // Filter Nav Items based on configuration
-  const activeWorkspace = user.workspaces?.find(w => w.id === user.activeWorkspaceId);
-  const hasNexusConfig = !!activeWorkspace?.nexus_settings?.email;
-
-  const filteredNavItems = mainNavItems.filter(item => {
-    if (item.href === '/nexus' && !hasNexusConfig) return false;
-    return true;
-  });
+  const filteredNavItems = mainNavItems;
 
   const teamItems = useMemo(
     () =>

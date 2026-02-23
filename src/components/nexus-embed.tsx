@@ -1,16 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useAuth } from '@/providers/auth-provider';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Loader2 } from 'lucide-react';
-import { getNexusConfig, getNexusUrl } from '@/actions/nexus';
+import { createNexusAuthPayload, getNexusUrl } from '@/actions/nexus';
 
 export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    const { session } = useAuth();
     const user = useCurrentUser();
     const [loading, setLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [authPayload, setAuthPayload] = useState<string | null>(null);
     const [nexusUrl, setNexusUrl] = useState<string>(propNexusUrl || '');
 
@@ -20,53 +19,34 @@ export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
             if (!user) return;
 
             try {
+                setErrorMessage(null);
+                setLoading(true);
+
                 // If URL passed via props, preserve it. Else fetch or fallback
                 if (!nexusUrl) {
                     const url = await getNexusUrl();
                     setNexusUrl(url);
                 }
 
-                let targetUser = user;
-
-                // If user belongs to a workspace, check for shared credentials.
-                // We prioritize activeWorkspaceId from the rich user object.
                 const wsId = user.activeWorkspaceId || user.last_active_workspace_id;
-
-                if (wsId) {
-                    const config = await getNexusConfig(wsId);
-
-                    if (config && config.email) {
-                        console.log('[NexusEmbed] Using Shared Credentials:', config.email);
-                        // Create a proxy user identity for the shared account
-                        targetUser = {
-                            ...user,
-                            email: config.email,
-                            // We don't overwrite ID to avoid session conflicts, but the email is what triggers the specific user login in Tester
-                            // name: config.email.split('@')[0], 
-                        };
-                    }
+                if (!wsId) {
+                    throw new Error('Workspace ativo nao encontrado para iniciar SSO do NexusFlow.');
                 }
 
-                // Unicode-safe Base64 Encoding
-                // 1. JSON stringify
-                const jsonStr = JSON.stringify({
-                    user: targetUser,
-                    session: { ...session, access_token: 'iframe-token' }
-                });
-                // 2. URI Encode to handle Unicode (accents)
-                const uriEncoded = encodeURIComponent(jsonStr);
-                // 3. btoa (safe now as it's all ASCII)
-                const base64 = btoa(uriEncoded);
-                // 4. URL component encode for the query param
-                const payload = encodeURIComponent(base64);
+                const sso = await createNexusAuthPayload(wsId);
+                if (!sso.success || !sso.authPayload) {
+                    throw new Error(sso.error || 'Falha ao preparar autenticacao segura do NexusFlow.');
+                }
 
-                setAuthPayload(payload);
+                setAuthPayload(sso.authPayload);
             } catch (err) {
                 console.error('[NexusEmbed] Error preparing auth:', err);
+                setErrorMessage('Nao foi possivel autenticar com seguranca no NexusFlow para este workspace.');
+                setAuthPayload(null);
             }
         }
         init();
-    }, [user, session, nexusUrl]); // Added nexusUrl dependency to satisfy linter, logic handles stability
+    }, [user, nexusUrl]);
 
 
     // 2. Handle Handshake & PostMessage (Legacy + Backup)
@@ -106,7 +86,9 @@ export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
         return (
             <div className="w-full h-[calc(100vh-20px)] relative rounded-2xl overflow-hidden border border-border shadow-2xl bg-black flex items-center justify-center">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
-                <span className="ml-3 text-lg font-medium text-muted-foreground">Preparing Neural Link...</span>
+                <span className="ml-3 text-lg font-medium text-muted-foreground">
+                    {errorMessage || 'Preparing Neural Link...'}
+                </span>
             </div>
         );
     }
