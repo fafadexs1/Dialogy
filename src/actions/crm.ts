@@ -249,6 +249,13 @@ export const saveContactAction = withDebug(
 
             if (!contactId) throw new Error('Falha ao obter o ID do contato.');
 
+            // Fetch current custom fields to track changes before updating
+            const currentFieldsRes = await client.query(
+                'SELECT field_id, value FROM contact_custom_field_values WHERE contact_id = $1',
+                [contactId]
+            );
+            const currentFields = currentFieldsRes.rows.reduce((acc, row) => ({ ...acc, [row.field_id]: row.value }), {});
+
             // Update tags
             await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
             if (tagIds.length > 0 && tagIds[0]) {
@@ -296,6 +303,35 @@ export const saveContactAction = withDebug(
             }
 
             await client.query('COMMIT');
+
+            // Dispatch Automations for custom field changes
+            try {
+                const { evaluateAutomations } = await import('@/lib/automation-engine');
+                const changedFields = Object.entries(customFields).filter(([fieldId, newValue]) => newValue !== currentFields[fieldId]);
+
+                for (const [fieldId, newValue] of changedFields) {
+                    console.log(
+                        `[AUTOMATION] Dispatching custom_field_changed for contact ${contactId} field ${fieldId}: "${currentFields[fieldId] ?? ''}" -> "${newValue}"`
+                    );
+                    await evaluateAutomations({
+                        type: 'custom_field_changed',
+                        workspaceId,
+                        contactId,
+                        data: {
+                            custom_field_id: fieldId,
+                            new_value: newValue as string,
+                            actor_user_id: user.id,
+                        }
+                    });
+                }
+
+                if (changedFields.length === 0) {
+                    console.log(`[AUTOMATION] No custom field changes detected for contact ${contactId}`);
+                }
+            } catch (e) {
+                console.error("[SAVE_CONTACT] Error dispatching custom field automations:", e);
+            }
+
             return { success: true, error: null, contact: updatedContact };
         } catch (error) {
             await client.query('ROLLBACK');

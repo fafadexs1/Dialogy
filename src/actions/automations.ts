@@ -9,10 +9,12 @@ export interface AutomationTriggerConfig {
     from_stage?: string;
     to_stage?: string;
     threshold?: number;
+    field_id?: string;
+    field_value?: string;
 }
 
 export interface AutomationAction {
-    type: 'move_to_stage' | 'assign_owner' | 'create_deal' | 'send_notification';
+    type: 'move_to_stage' | 'assign_owner' | 'create_deal' | 'send_notification' | 'update_custom_field' | 'api_call';
     config: Record<string, any>;
 }
 
@@ -20,7 +22,7 @@ export interface CrmAutomation {
     id: string;
     workspace_id: string;
     name: string;
-    trigger_type: 'stage_changed' | 'deal_created' | 'lead_score_above' | 'contact_created';
+    trigger_type: 'stage_changed' | 'deal_created' | 'lead_score_above' | 'contact_created' | 'custom_field_changed';
     trigger_config: AutomationTriggerConfig;
     actions: AutomationAction[];
     is_active: boolean;

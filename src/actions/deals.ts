@@ -376,7 +376,11 @@ export async function logStageChange(
                 type: 'stage_changed',
                 contactId,
                 workspaceId,
-                data: { from_stage: fromStage || undefined, to_stage: toStage },
+                data: {
+                    from_stage: fromStage || undefined,
+                    to_stage: toStage,
+                    actor_user_id: changedBy,
+                },
             }).catch(err => console.error('[AUTOMATION] Error in stage_changed trigger:', err));
         }
     } catch (error) {

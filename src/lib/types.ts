@@ -308,7 +308,7 @@ export type CustomFieldDefinition = {
   id: string;
   workspace_id: string;
   label: string;
-  type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select';
+  type: 'text' | 'number' | 'date' | 'email' | 'tel' | 'select' | 'file';
   placeholder?: string;
   options?: SelectableOption[];
 };

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import type { CustomFieldDefinition, SelectableOption, Tag, Team, User } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,7 +16,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Trash2, Palette, Loader2, Edit2 } from 'lucide-react';
+import { PlusCircle, Trash2, Palette, Loader2, Edit2, Tag as TagIcon, LayoutList } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
@@ -123,33 +124,36 @@ function OptionsManager({
     };
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle className="text-base">{title}</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <form onSubmit={handleAddItem} className="flex flex-col gap-4 mb-4">
-                    <div className="flex items-end gap-2">
-                        <div className='flex-1'>
-                            <Label htmlFor={`new-option-${title}`} className='text-xs'>Nome da Opção</Label>
+        <div className="flex flex-col gap-6 w-full">
+            {/* Form Section */}
+            <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 shadow-sm transition-all hover:bg-card/50">
+                <div className="mb-5">
+                    <h3 className="font-semibold text-[15px] tracking-tight">{title}</h3>
+                    <p className="text-sm text-muted-foreground mt-1">Adicione ou edite as {title.toLowerCase()} disponíveis no sistema.</p>
+                </div>
+
+                <form onSubmit={handleAddItem} className="space-y-6">
+                    <div className="flex flex-col sm:flex-row gap-5">
+                        <div className="flex-1 group space-y-2">
+                            <Label htmlFor={`new-option-${title}`} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Nome da Opção</Label>
                             <Input
                                 id={`new-option-${title}`}
-                                placeholder={`Nova opção...`}
+                                placeholder="Ex: Lead Quente"
                                 value={newItemLabel}
                                 onChange={(e) => setNewItemLabel(e.target.value)}
-                                className='h-9'
+                                className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4"
                             />
                         </div>
-                        <div>
-                            <Label htmlFor={`new-color-${title}`} className='text-xs'>Cor</Label>
-                            <div className="flex items-center gap-2 border rounded-md h-9 px-2 bg-background">
-                                <Palette className="h-4 w-4 text-muted-foreground" />
+                        <div className="w-full sm:w-28 group space-y-2">
+                            <Label htmlFor={`new-color-${title}`} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Cor</Label>
+                            <div className="flex items-center gap-2 border border-border/40 hover:border-border/80 bg-background/50 rounded-xl h-11 px-3 shadow-sm transition-all focus-within:ring-1 focus-within:ring-ring focus-within:bg-background">
+                                <Palette className="h-4 w-4 text-muted-foreground shrink-0" />
                                 <input
                                     id={`new-color-${title}`}
                                     type="color"
                                     value={newItemColor}
                                     onChange={(e) => setNewItemColor(e.target.value)}
-                                    className="w-5 h-5 p-0 border-none bg-transparent"
+                                    className="w-full h-7 p-0 border-none bg-transparent cursor-pointer rounded-sm"
                                 />
                             </div>
                         </div>
@@ -157,86 +161,136 @@ function OptionsManager({
 
                     {/* Team Selection UI */}
                     {title === "Etiquetas (Tags)" && teams && teams.length > 0 && (
-                        <div className="space-y-2">
-                            <Label className="text-xs">Restringir a Equipes (Opcional - Vazio = Todas)</Label>
-                            <div className="flex flex-wrap gap-2">
+                        <div className="space-y-3">
+                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                                Restringir a Equipes
+                                <span className="text-muted-foreground/50 normal-case lowercase text-[10px] tracking-normal font-medium px-1.5 py-0.5 rounded-md bg-foreground/5">(Opcional - Vazio = Todas)</span>
+                            </Label>
+                            <div className="flex flex-wrap gap-2 pt-1">
                                 {teams.map(team => (
-                                    <div key={team.id} className="flex items-center space-x-1">
+                                    <label
+                                        key={team.id}
+                                        className={cn(
+                                            "flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-all active:scale-95",
+                                            selectedTeamIds.includes(team.id)
+                                                ? "bg-primary/10 border-primary/30 text-primary shadow-sm"
+                                                : "bg-background/50 border-border/40 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+                                        )}
+                                    >
                                         <Checkbox
                                             id={`team-${team.id}`}
                                             checked={selectedTeamIds.includes(team.id)}
                                             onCheckedChange={() => toggleTeam(team.id)}
+                                            className="sr-only" // hidden logic
                                         />
-                                        <label htmlFor={`team-${team.id}`} className="text-xs cursor-pointer select-none">
-                                            {team.name}
-                                        </label>
-                                    </div>
+                                        {team.name}
+                                    </label>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    <div className="flex justify-between items-center">
-                        {title === "Etiquetas (Tags)" && (
-                            <div className="flex items-center space-x-2">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2 border-t border-border/20">
+                        {title === "Etiquetas (Tags)" ? (
+                            <label className="flex items-center gap-3 cursor-pointer group py-2">
                                 <Checkbox
                                     id={`is-close-reason-${title}`}
                                     checked={isCloseReason}
                                     onCheckedChange={(checked) => setIsCloseReason(!!checked)}
+                                    className="rounded-md border-border/50 data-[state=checked]:bg-primary h-5 w-5"
                                 />
-                                <label
-                                    htmlFor={`is-close-reason-${title}`}
-                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                >
+                                <span className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors select-none">
                                     Usar como motivo de encerramento
-                                </label>
-                            </div>
-                        )}
-                        {editingItem && (
-                            <Button type="button" variant="outline" size="sm" className='h-9 mr-2' onClick={handleCancelEdit}>
-                                Cancelar
-                            </Button>
-                        )}
-                        <Button type="submit" size="sm" className='h-9' disabled={isSubmitting}>
-                            {isSubmitting && <Loader2 className='h-4 w-4 animate-spin mr-2' />}
-                            {editingItem ? 'Salvar' : 'Adicionar'}
-                        </Button>
-                    </div>
+                                </span>
+                            </label>
+                        ) : <div />}
 
-                </form>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {options.map(option => (
-                        <div key={option.id} className="flex items-center justify-between p-2 border rounded-md bg-background text-sm">
-                            <div className='flex items-center gap-2'>
-                                <span className='h-3 w-3 rounded-full' style={{ backgroundColor: option.color }}></span>
-                                <div className='flex flex-col'>
-                                    <span className='font-medium'>{option.label}</span>
-                                    <span className="text-xs font-mono text-muted-foreground">ID: {option.id}</span>
-                                    {option.is_close_reason && (
-                                        <span className='text-xs text-blue-500 font-semibold'>Motivo de Encerramento</span>
-                                    )}
-                                    {option.team_ids && option.team_ids.length > 0 && teams && (
-                                        <span className='text-[10px] text-muted-foreground'>
-                                            Equipes: {option.team_ids.map(tid => teams.find(t => t.id === tid)?.name).filter(Boolean).join(', ')}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => setEditingItem(option)}>
-                                    <Edit2 className="h-3 w-3 text-muted-foreground" />
-                                    <span className="sr-only">Editar</span>
+                        <div className="flex items-center gap-2 ml-auto w-full sm:w-auto">
+                            {editingItem && (
+                                <Button type="button" variant="ghost" className="h-10 rounded-xl px-4 w-full sm:w-auto hover:bg-muted/50" onClick={handleCancelEdit}>
+                                    Cancelar
                                 </Button>
-                                <Button variant="ghost" size="icon" className='h-7 w-7' onClick={() => handleRemoveItem(option)}>
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                    <span className="sr-only">Remover</span>
-                                </Button>
-                            </div>
+                            )}
+                            <Button type="submit" className="h-10 rounded-xl px-6 w-full sm:w-auto bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground shadow-md shadow-primary/20 transition-all font-medium">
+                                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                                {editingItem ? 'Salvar Alterações' : 'Adicionar Opção'}
+                            </Button>
                         </div>
-                    ))}
+                    </div>
+                </form>
+            </div>
+
+            {/* List Section */}
+            <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-0 shadow-sm flex flex-col min-h-[350px] overflow-hidden">
+                <div className="px-6 py-5 border-b border-border/20 bg-muted/10 flex items-center justify-between">
+                    <div>
+                        <h3 className="font-semibold text-[15px] tracking-tight">Opções Cadastradas</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">Gerencie as opções existentes abaixo.</p>
+                    </div>
+                    <Badge variant="secondary" className="rounded-full font-mono text-xs px-2.5 bg-background shadow-sm border border-border/40">{options.length}</Badge>
                 </div>
-            </CardContent>
-        </Card>
+
+                <ScrollArea className="flex-1 h-[350px]">
+                    <div className="space-y-3 p-6">
+                        {options.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center text-center py-12 px-4 border border-dashed border-border/40 rounded-xl bg-background/20">
+                                <div className="h-10 w-10 flex items-center justify-center rounded-full bg-muted/50 mb-3">
+                                    <TagIcon className="h-5 w-5 text-muted-foreground/50" />
+                                </div>
+                                <p className="text-sm font-medium">Nenhuma opção cadastrada</p>
+                                <p className="text-xs text-muted-foreground mt-1">Use o formulário acima para adicionar a primeira opção.</p>
+                            </div>
+                        ) : (
+                            options.map(option => (
+                                <div key={option.id} className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-border/30 rounded-xl bg-background/40 hover:bg-background/80 hover:border-border/60 transition-all shadow-sm gap-3">
+                                    <div className="flex items-start gap-4">
+                                        <div className="mt-1 h-5 w-5 rounded-full shadow-sm ring-2 ring-background shrink-0" style={{ backgroundColor: option.color }} />
+                                        <div className="flex flex-col gap-1.5">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-semibold text-[14px] text-foreground">{option.label}</span>
+                                                {option.is_close_reason && (
+                                                    <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 border-blue-200/20 font-medium h-5 px-2 text-[10px] uppercase tracking-wider">
+                                                        Encerramento
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <span className="text-[11px] font-mono text-muted-foreground/60 select-all">ID: {option.id}</span>
+
+                                            {option.team_ids && option.team_ids.length > 0 && teams && (
+                                                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Equipes:</span>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {option.team_ids.map(tid => {
+                                                            const team = teams.find(t => t.id === tid);
+                                                            if (!team) return null;
+                                                            return (
+                                                                <Badge key={tid} variant="outline" className="h-5 px-1.5 text-[10px] font-medium bg-background border-border/50 text-muted-foreground">
+                                                                    {team.name}
+                                                                </Badge>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 self-end sm:self-center opacity-100 sm:opacity-40 sm:group-hover:opacity-100 transition-opacity">
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-background border border-transparent hover:border-border/50 transition-all shadow-sm hover:shadow" onClick={() => setEditingItem(option)}>
+                                            <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                            <span className="sr-only">Editar</span>
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-destructive/10 hover:text-destructive border border-transparent hover:border-destructive/20 transition-all shadow-sm hover:shadow" onClick={() => handleRemoveItem(option)}>
+                                            <Trash2 className="h-3.5 w-3.5 text-destructive/70" />
+                                            <span className="sr-only">Remover</span>
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </ScrollArea>
+            </div>
+        </div>
     )
 }
 
@@ -366,126 +420,152 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                             <TabsTrigger value="fields">Campos Personalizados</TabsTrigger>
                             <TabsTrigger value="options">Etiquetas e Opções</TabsTrigger>
                         </TabsList>
-                        <TabsContent value="fields">
-                            <Card className='border-0 shadow-none'>
-                                <CardHeader>
-                                    <CardTitle>Gerenciador de Campos</CardTitle>
-                                    <CardDescription>Crie campos únicos para capturar informações essenciais para o seu negócio.</CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <form onSubmit={handleAddField} className="flex flex-col gap-4 mb-6 p-4 border rounded-lg bg-secondary/30">
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                                            <div className="flex-1 space-y-2">
-                                                <Label htmlFor="field-label">Nome do Campo</Label>
+                        <TabsContent value="fields" className="pt-2 focus-visible:outline-none focus-visible:ring-0">
+                            <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 space-y-6 shadow-sm">
+                                <div>
+                                    <h3 className="font-semibold text-[15px] tracking-tight">Gerenciador de Campos</h3>
+                                    <p className="text-sm text-muted-foreground mt-1">Crie campos únicos para capturar informações essenciais para o seu negócio.</p>
+                                </div>
+
+                                <div>
+                                    <form onSubmit={handleAddField} className="flex flex-col gap-5 p-5 border border-border/30 rounded-xl bg-background/30 mb-8 shadow-sm">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
+                                            <div className="group space-y-2">
+                                                <Label htmlFor="field-label" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Nome do Campo</Label>
                                                 <Input
                                                     id="field-label"
                                                     placeholder="Ex: Orçamento Anual"
                                                     value={newFieldLabel}
                                                     onChange={(e) => setNewFieldLabel(e.target.value)}
-                                                    className="h-9"
+                                                    className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4"
                                                 />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="field-type">Tipo do Campo</Label>
+                                            <div className="group space-y-2">
+                                                <Label htmlFor="field-type" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Tipo do Campo</Label>
                                                 <Select value={newFieldType} onValueChange={(val) => setNewFieldType(val as CustomFieldDefinition['type'])}>
-                                                    <SelectTrigger id="field-type" className="h-9">
+                                                    <SelectTrigger id="field-type" className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4">
                                                         <SelectValue placeholder="Selecione o tipo" />
                                                     </SelectTrigger>
-                                                    <SelectContent>
+                                                    <SelectContent className="rounded-xl border-border/40 shadow-xl">
                                                         <SelectItem value="text">Texto</SelectItem>
                                                         <SelectItem value="number">Número</SelectItem>
                                                         <SelectItem value="date">Data</SelectItem>
                                                         <SelectItem value="email">Email</SelectItem>
                                                         <SelectItem value="tel">Telefone</SelectItem>
                                                         <SelectItem value="select">Dropdown</SelectItem>
+                                                        <SelectItem value="file">Arquivo (Anexo)</SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <Button type="submit" className="h-9">
-                                                <PlusCircle className="mr-2 h-4 w-4" />
-                                                Adicionar
-                                            </Button>
+                                            <div className="md:pt-[24px]">
+                                                <Button type="submit" className="h-11 w-full rounded-xl bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground shadow-md shadow-primary/20 transition-all font-medium">
+                                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                                    Adicionar Campo
+                                                </Button>
+                                            </div>
                                         </div>
+
                                         {newFieldType === 'select' ? (
-                                            <div className="space-y-2 animate-in fade-in-50">
-                                                <Label htmlFor="field-options">Opções do Dropdown</Label>
+                                            <div className="group space-y-2 animate-in fade-in-50 slide-in-from-top-2 duration-300 border-t border-border/20 pt-4 mt-2">
+                                                <Label htmlFor="field-options" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors flex items-center gap-1.5">
+                                                    Opções do Dropdown
+                                                    <span className="text-[9px] normal-case bg-foreground/5 px-1.5 py-0.5 rounded-md font-medium tracking-normal text-muted-foreground/70">(Separadas por vírgula)</span>
+                                                </Label>
                                                 <Textarea
                                                     id="field-options"
                                                     placeholder="Opção 1, Opção 2, Opção 3"
                                                     value={newFieldOptions}
                                                     onChange={(e) => setNewFieldOptions(e.target.value)}
+                                                    className="resize-none bg-background/50 border-border/40 hover:border-border/80 rounded-xl shadow-sm focus:bg-background transition-all min-h-[80px]"
                                                 />
-                                                <p className="text-xs text-muted-foreground">Separe cada opção com uma vírgula.</p>
                                             </div>
                                         ) : (
-                                            <div className="space-y-2 animate-in fade-in-50">
-                                                <Label htmlFor="field-placeholder">Texto de Exemplo (Placeholder)</Label>
+                                            <div className="group space-y-2 animate-in fade-in-50 slide-in-from-top-2 duration-300 border-t border-border/20 pt-4 mt-2">
+                                                <Label htmlFor="field-placeholder" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Texto de Exemplo (Placeholder)</Label>
                                                 <Input
                                                     id="field-placeholder"
                                                     placeholder="Ex: R$ 50.000"
                                                     value={newFieldPlaceholder}
                                                     onChange={(e) => setNewFieldPlaceholder(e.target.value)}
+                                                    className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4"
                                                 />
                                             </div>
                                         )}
                                     </form>
 
                                     <div className="space-y-4">
-                                        <h3 className="font-semibold text-muted-foreground">Campos Atuais</h3>
-                                        {fields.length > 0 ? (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {fields.map(field => (
-                                                    <div key={field.id} className="flex items-center justify-between p-3 border rounded-md bg-background">
-                                                        <div>
-                                                            <p className="font-medium">{field.label}</p>
-                                                            <div className="flex items-center gap-2">
-                                                                <Badge variant="outline" className="capitalize">{field.type}</Badge>
+                                        <div className="flex items-center justify-between pb-2 border-b border-border/20">
+                                            <h3 className="font-semibold text-sm">Campos Atuais</h3>
+                                            <Badge variant="secondary" className="rounded-full font-mono text-xs">{fields.length}</Badge>
+                                        </div>
+
+                                        <ScrollArea className="h-[250px] pr-4">
+                                            {fields.length > 0 ? (
+                                                <div className="grid grid-cols-1 gap-3 pb-4">
+                                                    {fields.map(field => (
+                                                        <div key={field.id} className="group flex items-center justify-between p-4 border border-border/30 rounded-xl bg-background/40 hover:bg-background/80 transition-all shadow-sm">
+                                                            <div className="flex flex-col gap-1.5 min-w-0">
+                                                                <div className="flex items-center gap-2">
+                                                                    <p className="font-semibold text-[14px] truncate">{field.label}</p>
+                                                                    <Badge variant="outline" className="capitalize text-[10px] h-5 px-1.5 bg-background border-border/50 text-muted-foreground">{field.type}</Badge>
+                                                                </div>
+
                                                                 {field.type === 'select' && field.options && (
-                                                                    <p className="text-xs text-muted-foreground truncate">
-                                                                        Opções: {field.options.map(o => o.label).join(', ')}
-                                                                    </p>
+                                                                    <div className="flex items-center gap-1.5 mt-1 overflow-x-auto pb-1 scrollbar-hide">
+                                                                        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest shrink-0">Opções:</span>
+                                                                        {field.options.map(o => (
+                                                                            <Badge key={o.id} variant="secondary" className="h-5 px-1.5 text-[10px] font-medium shrink-0 bg-secondary/50 border border-border/20">
+                                                                                {o.label}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
                                                                 )}
                                                             </div>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg hover:bg-destructive/10 hover:text-destructive border border-transparent hover:border-destructive/20 transition-all opacity-100 sm:opacity-40 sm:group-hover:opacity-100" onClick={() => handleRemoveField(field.id)}>
+                                                                <Trash2 className="h-3.5 w-3.5 text-destructive/70" />
+                                                                <span className="sr-only">Remover</span>
+                                                            </Button>
                                                         </div>
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveField(field.id)}>
-                                                            <Trash2 className="h-4 w-4 text-destructive" />
-                                                            <span className="sr-only">Remover</span>
-                                                        </Button>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center text-center py-10 px-4 border border-dashed border-border/40 rounded-xl bg-background/20 mt-2">
+                                                    <div className="h-10 w-10 flex items-center justify-center rounded-full bg-muted/50 mb-3">
+                                                        <LayoutList className="h-5 w-5 text-muted-foreground/50" />
                                                     </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-muted-foreground p-4 text-center border-dashed border rounded-md">
-                                                Nenhum campo personalizado criado.
-                                            </p>
-                                        )}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </TabsContent>
-                        <TabsContent value="options">
-                            <Card className='border-0 shadow-none'>
-                                <CardHeader>
-                                    <CardTitle>Gerenciador de Etiquetas e Opções</CardTitle>
-                                    <CardDescription>Personalize as etiquetas e as opções disponíveis nos campos de seleção do CRM.</CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <ScrollArea className="h-[55vh]">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-1">
-                                            {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-                                                <OptionsManager
-                                                    title="Etiquetas (Tags)"
-                                                    options={tags}
-                                                    teams={teams} // Pass teams to OptionsManager
-                                                    onAdd={handleAddTag}
-                                                    onUpdate={handleUpdateTag}
-                                                    onRemove={handleRemoveTag}
-                                                />
+                                                    <p className="text-sm text-muted-foreground">Nenhum campo personalizado criado.</p>
+                                                </div>
                                             )}
+                                        </ScrollArea>
+                                    </div>
+                                </div>
+                            </div>
+                        </TabsContent>
+                        <TabsContent value="options" className="pt-2 focus-visible:outline-none focus-visible:ring-0">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-1">
+                                {loading ? (
+                                    <div className="col-span-1 md:col-span-2 flex flex-col items-center justify-center py-20">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                                        <p className="text-sm font-medium text-muted-foreground animate-pulse">Carregando etiquetas...</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* The OptionsManager maps to full width by default but inside grid-cols-2 it takes half. 
+                                            Since CRM settings only has one OptionsManager right now, we can make it full width 
+                                            or keep it half width. The user wants it more spacious, let's remove the grid cols and let it be full width. */}
+                                        <div className="col-span-1 md:col-span-2">
+                                            <OptionsManager
+                                                title="Etiquetas (Tags)"
+                                                options={tags}
+                                                teams={teams}
+                                                onAdd={handleAddTag}
+                                                onUpdate={handleUpdateTag}
+                                                onRemove={handleRemoveTag}
+                                            />
                                         </div>
-                                    </ScrollArea>
-                                </CardContent>
-                            </Card>
+                                    </>
+                                )}
+                            </div>
                         </TabsContent>
                     </Tabs>
                 </div>

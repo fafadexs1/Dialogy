@@ -802,12 +802,28 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <div className="grid grid-cols-2 gap-2">
                                         {customFields.map(field => {
                                             const value = contact.custom_fields?.[field.id];
-                                            if (!value) return null;
-                                            let displayValue = value;
+                                            if (!value || value === '[]') return null;
+
+                                            let displayValue: React.ReactNode = value;
+
                                             if (field.type === 'select') {
                                                 const option = field.options?.find(opt => opt.value === value);
                                                 displayValue = option ? option.label : value;
+                                            } else if (field.type === 'file') {
+                                                try {
+                                                    const parsed = JSON.parse(value);
+                                                    if (Array.isArray(parsed)) {
+                                                        if (parsed.length === 0) return null;
+                                                        displayValue = `${parsed.length} anexo${parsed.length > 1 ? 's' : ''}`;
+                                                    }
+                                                } catch (e) {
+                                                    // Handle legacy single URL string
+                                                    if (typeof value === 'string' && value.startsWith('http')) {
+                                                        displayValue = '1 anexo';
+                                                    }
+                                                }
                                             }
+
                                             return (
                                                 <div key={field.id} className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col gap-0.5">
                                                     <span className="text-[10px] font-black uppercase tracking-widest text-white/20">{field.label}</span>

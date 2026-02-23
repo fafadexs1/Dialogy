@@ -1,0 +1,38 @@
+[
+  {
+    "column_name": "id",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "workspace_id",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "name",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "trigger_type",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "trigger_config",
+    "data_type": "jsonb"
+  },
+  {
+    "column_name": "actions",
+    "data_type": "jsonb"
+  },
+  {
+    "column_name": "is_active",
+    "data_type": "boolean"
+  },
+  {
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone"
+  },
+  {
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone"
+  }
+]

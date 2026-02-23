@@ -1,19 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
     Zap, Plus, Trash2, Loader2, Play, Pause,
-    ArrowRight, UserCheck, Target, Bell, GitBranch
+    ArrowRight, UserCheck, Target, Bell, GitBranch,
+    List, Globe, Braces
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -21,8 +24,8 @@ import {
     deleteAutomation, toggleAutomation,
     type CrmAutomation, type AutomationAction, type AutomationTriggerConfig
 } from '@/actions/automations';
-import { getWorkspaceUsers } from '@/actions/crm';
-import type { User } from '@/lib/types';
+import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
+import type { User, CustomFieldDefinition } from '@/lib/types';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -31,6 +34,7 @@ const TRIGGER_TYPES = [
     { value: 'deal_created', label: 'Deal Criado', icon: Target, description: 'Quando um novo deal é criado' },
     { value: 'lead_score_above', label: 'Lead Score Acima de', icon: Zap, description: 'Quando o score do lead ultrapassa um valor' },
     { value: 'contact_created', label: 'Contato Criado', icon: UserCheck, description: 'Quando um novo contato é cadastrado' },
+    { value: 'custom_field_changed', label: 'Campo Personalizado', icon: List, description: 'Quando um campo personalizado é alterado' },
 ];
 
 const ACTION_TYPES = [
@@ -38,6 +42,8 @@ const ACTION_TYPES = [
     { value: 'assign_owner', label: 'Atribuir Responsável', icon: UserCheck },
     { value: 'create_deal', label: 'Criar Deal', icon: Target },
     { value: 'send_notification', label: 'Enviar Notificação', icon: Bell },
+    { value: 'update_custom_field', label: 'Atualizar Campo', icon: List },
+    { value: 'api_call', label: 'Chamada API', icon: Globe },
 ];
 
 const STAGES = [
@@ -48,6 +54,34 @@ const STAGES = [
     { value: 'fechamento', label: 'Fechamento' },
 ];
 
+const ANY_VALUE_SENTINEL = '__any__';
+const CLEAR_VALUE_SENTINEL = '__clear__';
+type VariableFieldElement = HTMLInputElement | HTMLTextAreaElement;
+
+const VariableSelector = ({ customFields, onSelect }: { customFields: CustomFieldDefinition[], onSelect: (val: string) => void }) => {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0 bg-transparent border-white/10 text-white/50 hover:text-white hover:bg-white/5">
+                    <Braces className="h-3.5 w-3.5" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[200px] max-h-[300px] overflow-y-auto bg-zinc-950 border-white/10">
+                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.name}}')}>Nome do Contato</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.email}}')}>Email</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.phone}}')}>Telefone</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{event.actor_full_name}}')}>Usuário que executou</DropdownMenuItem>
+                {customFields.length > 0 && <Separator className="my-1 bg-white/10" />}
+                {customFields.map(cf => (
+                    <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" key={cf.id} onClick={() => onSelect(`{{contact.custom_fields.${cf.id}}}`)}>
+                        {cf.label}
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+};
+
 interface CrmAutomationsProps {
     workspaceId: string;
 }
@@ -55,6 +89,7 @@ interface CrmAutomationsProps {
 export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
     const [automations, setAutomations] = useState<CrmAutomation[]>([]);
     const [users, setUsers] = useState<User[]>([]);
+    const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -64,15 +99,19 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
     const [triggerType, setTriggerType] = useState('stage_changed');
     const [triggerConfig, setTriggerConfig] = useState<AutomationTriggerConfig>({});
     const [actions, setActions] = useState<AutomationAction[]>([]);
+    const variableFieldRefs = useRef<Record<string, VariableFieldElement | null>>({});
+    const variableFieldSelections = useRef<Record<string, { start: number; end: number }>>({});
 
     const fetchData = useCallback(async () => {
         setLoading(true);
-        const [autoRes, usersRes] = await Promise.all([
+        const [autoRes, usersRes, fieldsRes] = await Promise.all([
             getAutomations(workspaceId),
             getWorkspaceUsers(workspaceId),
+            getCustomFieldDefinitions(workspaceId),
         ]);
         setAutomations(autoRes.automations);
         if (usersRes.users) setUsers(usersRes.users);
+        if (fieldsRes.fields) setCustomFields(fieldsRes.fields);
         setLoading(false);
     }, [workspaceId]);
 
@@ -154,11 +193,98 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         setActions(updated);
     };
 
+    const addActionHeader = (actionIndex: number) => {
+        const updated = [...actions];
+        const headers = updated[actionIndex].config.headers || [];
+        updated[actionIndex].config.headers = [...headers, { key: '', value: '' }];
+        setActions(updated);
+    };
+
+    const updateActionHeader = (actionIndex: number, headerIndex: number, field: 'key' | 'value', value: string) => {
+        const updated = [...actions];
+        updated[actionIndex].config.headers[headerIndex][field] = value;
+        setActions(updated);
+    };
+
+    const removeActionHeader = (actionIndex: number, headerIndex: number) => {
+        const updated = [...actions];
+        updated[actionIndex].config.headers = updated[actionIndex].config.headers.filter((_: any, i: number) => i !== headerIndex);
+        setActions(updated);
+    };
+
+    const addActionFormData = (actionIndex: number) => {
+        const updated = [...actions];
+        const formData = updated[actionIndex].config.formData || [];
+        updated[actionIndex].config.formData = [...formData, { key: '', value: '' }];
+        setActions(updated);
+    };
+
+    const updateActionFormData = (actionIndex: number, formDataIndex: number, field: 'key' | 'value', value: string) => {
+        const updated = [...actions];
+        updated[actionIndex].config.formData[formDataIndex][field] = value;
+        setActions(updated);
+    };
+
+    const removeActionFormData = (actionIndex: number, formDataIndex: number) => {
+        const updated = [...actions];
+        updated[actionIndex].config.formData = updated[actionIndex].config.formData.filter((_: any, i: number) => i !== formDataIndex);
+        setActions(updated);
+    };
+
+    const rememberVariableFieldSelection = (fieldKey: string, element: VariableFieldElement) => {
+        const fallbackPos = element.value.length;
+        variableFieldSelections.current[fieldKey] = {
+            start: element.selectionStart ?? fallbackPos,
+            end: element.selectionEnd ?? fallbackPos,
+        };
+    };
+
+    const insertVariableAtCursor = (
+        fieldKey: string,
+        currentValue: string,
+        token: string,
+        applyValue: (nextValue: string) => void
+    ) => {
+        const savedSelection = variableFieldSelections.current[fieldKey];
+        let start = savedSelection?.start ?? currentValue.length;
+        let end = savedSelection?.end ?? currentValue.length;
+
+        const liveElement = variableFieldRefs.current[fieldKey];
+        if (
+            liveElement &&
+            typeof liveElement.selectionStart === 'number' &&
+            typeof liveElement.selectionEnd === 'number' &&
+            document.activeElement === liveElement
+        ) {
+            start = liveElement.selectionStart;
+            end = liveElement.selectionEnd;
+        }
+
+        const nextValue = `${currentValue.slice(0, start)}${token}${currentValue.slice(end)}`;
+        const nextCursor = start + token.length;
+
+        applyValue(nextValue);
+        variableFieldSelections.current[fieldKey] = { start: nextCursor, end: nextCursor };
+
+        window.setTimeout(() => {
+            const element = variableFieldRefs.current[fieldKey];
+            if (!element) return;
+            element.focus();
+            element.setSelectionRange(nextCursor, nextCursor);
+        }, 0);
+    };
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     const getTriggerLabel = (type: string) => TRIGGER_TYPES.find(t => t.value === type)?.label || type;
     const getTriggerIcon = (type: string) => TRIGGER_TYPES.find(t => t.value === type)?.icon || Zap;
     const getActionLabel = (type: string) => ACTION_TYPES.find(a => a.value === type)?.label || type;
+    const getCustomFieldById = (fieldId?: string) => customFields.find(f => f.id === fieldId);
+    const getCustomFieldOptionLabel = (field: CustomFieldDefinition | undefined, optionValue?: string) => {
+        if (!field || !optionValue) return optionValue || '';
+        const option = field.options?.find(o => o.value === optionValue);
+        return option?.label || optionValue;
+    };
 
     const describeTrigger = (auto: CrmAutomation) => {
         const config = auto.trigger_config || {};
@@ -169,6 +295,13 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                 return 'Qualquer mudança';
             case 'lead_score_above':
                 return `Score ≥ ${config.threshold || 0}`;
+            case 'custom_field_changed': {
+                const field = getCustomFieldById(config.field_id);
+                const displayValue = config.field_value
+                    ? getCustomFieldOptionLabel(field, String(config.field_value))
+                    : 'Qualquer valor';
+                return `${field?.label || config.field_id || 'Campo'} → ${displayValue}`;
+            }
             default:
                 return '';
         }
@@ -183,6 +316,14 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
             }
             case 'create_deal': return action.config.title || 'Deal Automático';
             case 'send_notification': return action.config.message || 'Notificação';
+            case 'update_custom_field': {
+                const field = getCustomFieldById(action.config.field_id);
+                const displayValue = getCustomFieldOptionLabel(field, action.config.field_value);
+                return `${field?.label || 'Campo'} = ${displayValue || ''}`;
+            }
+            case 'api_call': {
+                return `${action.config.method || 'GET'} ${action.config.url || '?'}`;
+            }
             default: return '';
         }
     };
@@ -364,6 +505,65 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     />
                                 </div>
                             )}
+
+                            {triggerType === 'custom_field_changed' && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                        <Label className="text-white/50 text-[10px]">Campo *</Label>
+                                        <Select
+                                            value={triggerConfig.field_id || ''}
+                                            onValueChange={v => setTriggerConfig({ ...triggerConfig, field_id: v, field_value: '' })}
+                                        >
+                                            <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                <SelectValue placeholder="Selecione o campo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {customFields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-white/50 text-[10px]">Igual a (opcional)</Label>
+                                        {(() => {
+                                            const selectedField = getCustomFieldById(triggerConfig.field_id);
+                                            const fieldOptions = selectedField?.type === 'select' ? (selectedField.options || []) : [];
+
+                                            if (fieldOptions.length > 0) {
+                                                return (
+                                                    <Select
+                                                        value={triggerConfig.field_value || ANY_VALUE_SENTINEL}
+                                                        onValueChange={v => setTriggerConfig({
+                                                            ...triggerConfig,
+                                                            field_value: v === ANY_VALUE_SENTINEL ? '' : v,
+                                                        })}
+                                                    >
+                                                        <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                            <SelectValue placeholder="Qualquer valor" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value={ANY_VALUE_SENTINEL}>Qualquer valor</SelectItem>
+                                                            {fieldOptions.map(option => (
+                                                                <SelectItem key={option.id} value={option.value}>
+                                                                    {option.label}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                );
+                                            }
+
+                                            return (
+                                                <Input
+                                                    value={triggerConfig.field_value || ''}
+                                                    onChange={e => setTriggerConfig({ ...triggerConfig, field_value: e.target.value })}
+                                                    className="bg-white/5 border-white/10 text-white h-8 text-xs"
+                                                    placeholder="Ex: VIP"
+                                                />
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <Separator className="bg-white/10" />
@@ -449,6 +649,261 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                             placeholder="Mensagem da notificação"
                                             className="bg-white/5 border-white/10 text-white text-xs h-8"
                                         />
+                                    )}
+
+                                    {action.type === 'update_custom_field' && (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <Select
+                                                value={action.config.field_id || ''}
+                                                onValueChange={v => {
+                                                    const updated = [...actions];
+                                                    updated[i] = {
+                                                        ...updated[i],
+                                                        config: { ...updated[i].config, field_id: v, field_value: '' }
+                                                    };
+                                                    setActions(updated);
+                                                }}
+                                            >
+                                                <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                    <SelectValue placeholder="Selecione o campo" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {customFields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            {(() => {
+                                                const selectedField = getCustomFieldById(action.config.field_id);
+                                                const fieldOptions = selectedField?.type === 'select' ? (selectedField.options || []) : [];
+
+                                                if (fieldOptions.length > 0) {
+                                                    return (
+                                                        <Select
+                                                            value={action.config.field_value || CLEAR_VALUE_SENTINEL}
+                                                            onValueChange={v => updateAction(i, 'field_value', v === CLEAR_VALUE_SENTINEL ? '' : v)}
+                                                        >
+                                                            <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                                <SelectValue placeholder="Novo valor" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value={CLEAR_VALUE_SENTINEL}>Limpar valor</SelectItem>
+                                                                {fieldOptions.map(option => (
+                                                                    <SelectItem key={option.id} value={option.value}>
+                                                                        {option.label}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <Input
+                                                        value={action.config.field_value || ''}
+                                                        onChange={e => updateAction(i, 'field_value', e.target.value)}
+                                                        placeholder="Novo valor"
+                                                        className="bg-white/5 border-white/10 text-white text-xs h-8"
+                                                    />
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+
+                                    {action.type === 'api_call' && (
+                                        <div className="space-y-4 pt-2">
+                                            <div className="flex gap-2">
+                                                <div className="w-[100px]">
+                                                    <Select value={action.config.method || 'GET'} onValueChange={v => updateAction(i, 'method', v)}>
+                                                        <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="GET">GET</SelectItem>
+                                                            <SelectItem value="POST">POST</SelectItem>
+                                                            <SelectItem value="PUT">PUT</SelectItem>
+                                                            <SelectItem value="DELETE">DELETE</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="flex flex-1 gap-1">
+                                                    <Input
+                                                        value={action.config.url || ''}
+                                                        ref={element => { variableFieldRefs.current[`action-${i}-url`] = element; }}
+                                                        onSelect={e => rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget)}
+                                                        onClick={e => rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget)}
+                                                        onKeyUp={e => rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget)}
+                                                        onBlur={e => rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget)}
+                                                        onChange={e => {
+                                                            updateAction(i, 'url', e.target.value);
+                                                            rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget);
+                                                        }}
+                                                        placeholder="URL do Webhook (ex: https://api.exemplo.com/webhook)"
+                                                        className="bg-white/5 border-white/10 text-white text-xs h-8 flex-1"
+                                                    />
+                                                    <VariableSelector
+                                                        customFields={customFields}
+                                                        onSelect={(val) => insertVariableAtCursor(
+                                                            `action-${i}-url`,
+                                                            action.config.url || '',
+                                                            val,
+                                                            (nextValue) => updateAction(i, 'url', nextValue)
+                                                        )}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Headers */}
+                                            <div className="space-y-2 border border-white/5 p-3 rounded-md bg-white/5 text-xs">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-white/70 font-medium">Headers</Label>
+                                                    <Button variant="ghost" size="sm" className="h-6 text-[10px] text-white/50 hover:text-white" onClick={() => addActionHeader(i)}>
+                                                        <Plus className="h-3 w-3 mr-1" /> Adicionar Header
+                                                    </Button>
+                                                </div>
+                                                {(action.config.headers || []).map((header: any, hIndex: number) => (
+                                                    <div key={hIndex} className="flex gap-2">
+                                                        <Input
+                                                            value={header.key}
+                                                            onChange={e => updateActionHeader(i, hIndex, 'key', e.target.value)}
+                                                            placeholder="Key (ex: Authorization)"
+                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                        />
+                                                        <div className="flex flex-1 gap-1">
+                                                            <Input
+                                                                value={header.value}
+                                                                ref={element => { variableFieldRefs.current[`action-${i}-header-${hIndex}-value`] = element; }}
+                                                                onSelect={e => rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget)}
+                                                                onClick={e => rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget)}
+                                                                onKeyUp={e => rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget)}
+                                                                onBlur={e => rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget)}
+                                                                onChange={e => {
+                                                                    updateActionHeader(i, hIndex, 'value', e.target.value);
+                                                                    rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget);
+                                                                }}
+                                                                placeholder="Value (ex: Bearer token...)"
+                                                                className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                            />
+                                                            <div className="scale-[0.875] origin-right">
+                                                                <VariableSelector
+                                                                    customFields={customFields}
+                                                                    onSelect={(val) => insertVariableAtCursor(
+                                                                        `action-${i}-header-${hIndex}-value`,
+                                                                        header.value || '',
+                                                                        val,
+                                                                        (nextValue) => updateActionHeader(i, hIndex, 'value', nextValue)
+                                                                    )}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-white/30 hover:text-red-400 shrink-0" onClick={() => removeActionHeader(i, hIndex)}>
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                                {!(action.config.headers?.length > 0) && <p className="text-[10px] text-white/30">Nenhum header configurado.</p>}
+                                            </div>
+
+                                            {/* Body Configuration */}
+                                            {action.config.method !== 'GET' && (
+                                                <div className="space-y-2 border border-white/5 p-3 rounded-md bg-white/5 text-xs">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <Label className="text-white/70 font-medium">Body (Payload)</Label>
+                                                        <Select value={action.config.bodyType || 'json'} onValueChange={v => updateAction(i, 'bodyType', v)}>
+                                                            <SelectTrigger className="w-[180px] bg-black/20 border-white/10 text-white text-[10px] h-6 px-2">
+                                                                <SelectValue placeholder="Tipo de Envío" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">Nenhum</SelectItem>
+                                                                <SelectItem value="json">JSON (raw)</SelectItem>
+                                                                <SelectItem value="form-data">x-www-form-urlencoded</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+
+                                                    {/* JSON Textarea payload */}
+                                                    {(action.config.bodyType === 'json' || !action.config.bodyType) && (
+                                                        <div className="relative">
+                                                            <Textarea
+                                                                value={action.config.payload || ''}
+                                                                ref={element => { variableFieldRefs.current[`action-${i}-payload`] = element; }}
+                                                                onSelect={e => rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget)}
+                                                                onClick={e => rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget)}
+                                                                onKeyUp={e => rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget)}
+                                                                onBlur={e => rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget)}
+                                                                onChange={e => {
+                                                                    updateAction(i, 'payload', e.target.value);
+                                                                    rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget);
+                                                                }}
+                                                                placeholder='Payload JSON (Opcional). Ex: { "id": "{{contact.id}}" }'
+                                                                className="bg-black/20 border-white/10 text-white text-xs min-h-[60px] resize-y pr-10"
+                                                            />
+                                                            <div className="absolute top-1 right-1">
+                                                                <VariableSelector
+                                                                    customFields={customFields}
+                                                                    onSelect={(val) => insertVariableAtCursor(
+                                                                        `action-${i}-payload`,
+                                                                        action.config.payload || '',
+                                                                        val,
+                                                                        (nextValue) => updateAction(i, 'payload', nextValue)
+                                                                    )}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* URL Encoded Form Data */}
+                                                    {action.config.bodyType === 'form-data' && (
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-end">
+                                                                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-white/50 hover:text-white" onClick={() => addActionFormData(i)}>
+                                                                    <Plus className="h-3 w-3 mr-1" /> Adicionar Parâmetro
+                                                                </Button>
+                                                            </div>
+                                                            {(action.config.formData || []).map((data: any, dIndex: number) => (
+                                                                <div key={dIndex} className="flex gap-2">
+                                                                    <Input
+                                                                        value={data.key}
+                                                                        onChange={e => updateActionFormData(i, dIndex, 'key', e.target.value)}
+                                                                        placeholder="Key (ex: email)"
+                                                                        className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                                    />
+                                                                    <div className="flex flex-1 gap-1">
+                                                                        <Input
+                                                                            value={data.value}
+                                                                            ref={element => { variableFieldRefs.current[`action-${i}-formdata-${dIndex}-value`] = element; }}
+                                                                            onSelect={e => rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget)}
+                                                                            onClick={e => rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget)}
+                                                                            onKeyUp={e => rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget)}
+                                                                            onBlur={e => rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget)}
+                                                                            onChange={e => {
+                                                                                updateActionFormData(i, dIndex, 'value', e.target.value);
+                                                                                rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget);
+                                                                            }}
+                                                                            placeholder="Value (ex: {{contact.email}})"
+                                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                                        />
+                                                                        <div className="scale-[0.875] origin-right">
+                                                                            <VariableSelector
+                                                                                customFields={customFields}
+                                                                                onSelect={(val) => insertVariableAtCursor(
+                                                                                    `action-${i}-formdata-${dIndex}-value`,
+                                                                                    data.value || '',
+                                                                                    val,
+                                                                                    (nextValue) => updateActionFormData(i, dIndex, 'value', nextValue)
+                                                                                )}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-white/30 hover:text-red-400 shrink-0" onClick={() => removeActionFormData(i, dIndex)}>
+                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                            {!(action.config.formData?.length > 0) && <p className="text-[10px] text-white/30 mt-1">Nenhum parâmetro configurado.</p>}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             ))}

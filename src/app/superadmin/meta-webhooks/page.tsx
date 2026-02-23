@@ -21,7 +21,7 @@ type WebhookLogRow = {
 };
 
 type SearchParams = Record<string, string | string[] | undefined>;
-type SearchParamsInput = SearchParams | URLSearchParams | Promise<SearchParams | URLSearchParams>;
+type SearchParamsInput = Promise<any>;
 
 const allowedSources = new Set(['meta-instagram', 'meta-messenger']);
 const allowedDirections = new Set(['incoming', 'outgoing']);

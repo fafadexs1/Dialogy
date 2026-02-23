@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.995.0",
     "@ducanh2912/next-pwa": "^10.2.9",
     "@genkit-ai/firebase": "1.16.0",
     "@genkit-ai/googleai": "1.16.0",
