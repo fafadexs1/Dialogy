@@ -12,13 +12,6 @@ import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
 
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
-async function ensurePresenceMetadataColumn() {
-    await db.query(`
-        ALTER TABLE user_workspace_presence
-        ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
-    `);
-}
-
 export async function sweepStalePresence(workspaceId?: string): Promise<number> {
     const ttlSeconds = getPresenceTtlSeconds();
     const params: Array<string | number> = [];
@@ -27,8 +20,6 @@ export async function sweepStalePresence(workspaceId?: string): Promise<number> 
         params.push(workspaceId);
         workspaceClause = `AND workspace_id = $1`;
     }
-
-    await ensurePresenceMetadataColumn();
 
     const result = await db.query(
         `
@@ -67,7 +58,6 @@ export async function updateUserOnlineStatus(
         const ttlSeconds = getPresenceTtlSeconds();
         const nowIso = new Date().toISOString();
 
-        await ensurePresenceMetadataColumn();
         await sweepStalePresence(workspaceId);
 
         // 2. Perform Atomic Update with Session Logic

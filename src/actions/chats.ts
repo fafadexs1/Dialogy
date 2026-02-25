@@ -749,7 +749,7 @@ async function fetchChats({
     let beforeClause = '';
     if (before) {
         params.push(before);
-        beforeClause = `AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) < $${queryIndex}`;
+        beforeClause = `AND GREATEST(lmd.created_at, fc.closed_at, fc.assigned_at, fc.created_at) < $${queryIndex}`;
         queryIndex++;
     }
 
@@ -782,43 +782,48 @@ async function fetchChats({
 
     const { rows } = await db.query(
         `
-        WITH last_message_details AS (
-            SELECT DISTINCT ON (chat_id)
-                id,
-                chat_id,
-                content,
-                type,
-                metadata,
-                transcription,
-                created_at,
-                from_me,
-                sender_user_id,
-                sender_system_agent_id,
-                instance_name,
-                source_from_api,
-                platform,
-                message_id_from_api,
-                api_message_status,
-                is_read,
-                sent_by_tab
-            FROM messages
-            WHERE workspace_id = $1
-            ORDER BY chat_id, created_at DESC
-        ),
-        filtered_chats AS (
+        WITH filtered_chats AS (
             SELECT c.*
             FROM chats c
-            LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
             WHERE c.workspace_id = $1
               ${statusClause}
               ${ownershipClause}
+        ),
+        last_message_details AS (
+            SELECT DISTINCT ON (m.chat_id)
+                m.id,
+                m.chat_id,
+                m.content,
+                m.type,
+                m.metadata,
+                m.transcription,
+                m.created_at,
+                m.from_me,
+                m.sender_user_id,
+                m.sender_system_agent_id,
+                m.instance_name,
+                m.source_from_api,
+                m.platform,
+                m.message_id_from_api,
+                m.api_message_status,
+                m.is_read,
+                m.sent_by_tab
+            FROM messages m
+            WHERE m.chat_id IN (SELECT id FROM filtered_chats)
+            ORDER BY m.chat_id, m.created_at DESC
+        ),
+        sorted_chats AS (
+            SELECT fc.*
+            FROM filtered_chats fc
+            LEFT JOIN last_message_details lmd ON lmd.chat_id = fc.id
+            WHERE 1=1
               ${beforeClause}
-            ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+            ORDER BY GREATEST(lmd.created_at, fc.closed_at, fc.assigned_at, fc.created_at) DESC
             LIMIT $2
         )
         ${includeChatClause}
         , merged_chats AS (
-            SELECT * FROM filtered_chats
+            SELECT * FROM sorted_chats
             ${includeChatId ? 'UNION SELECT * FROM target_chat' : ''}
         )
         SELECT 
@@ -834,30 +839,10 @@ async function fetchChats({
             c.contact_id,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
-            (
-                SELECT m.instance_name 
-                FROM messages m 
-                WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL 
-                ORDER BY m.created_at DESC 
-                LIMIT 1
-            ) AS instance_name,
+            lmd.instance_name AS instance_name,
             COALESCE(
                 lmd.source_from_api,
                 lmd.platform::text,
-                (
-                    SELECT m.source_from_api
-                    FROM messages m
-                    WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL
-                    ORDER BY m.created_at DESC
-                    LIMIT 1
-                ),
-                (
-                    SELECT m.platform::text
-                    FROM messages m
-                    WHERE m.chat_id = c.id AND m.platform IS NOT NULL
-                    ORDER BY m.created_at DESC
-                    LIMIT 1
-                ),
                 mc.platform::text
             ) AS source,
             COALESCE((
@@ -913,18 +898,14 @@ async function fetchChats({
         ) mct_stable ON true
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
-        LEFT JOIN evolution_api_instances eai ON eai.instance_name = COALESCE(
-            lmd.instance_name,
-            (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1)
-        ) AND eai.workspace_id = c.workspace_id
+        LEFT JOIN evolution_api_instances eai ON eai.instance_name = lmd.instance_name
+            AND eai.workspace_id = c.workspace_id
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         params
     );
     const endTime = performance.now();
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`[PERF] fetchChats took ${(endTime - startTime).toFixed(2)}ms for limit ${limit}`);
-    }
+    console.log(`[PERF] fetchChats took ${(endTime - startTime).toFixed(2)}ms for limit ${limit}`);
     return rows as ChatRow[];
 }
 
@@ -970,7 +951,8 @@ export const getInitialChatsData = withDebug(
 
         try {
             // Repair chats that were marked as attending without an assigned agent.
-            await db.query(
+            // Fire-and-forget: don't block the main loading path.
+            db.query(
                 `UPDATE chats
                  SET status = 'gerais',
                      assigned_at = NULL
@@ -978,11 +960,11 @@ export const getInitialChatsData = withDebug(
                    AND status = 'atendimentos'
                    AND agent_id IS NULL`,
                 [workspaceId]
-            );
+            ).catch(err => console.error('[REPAIR_CHATS] Failed:', err));
 
             const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
 
-            const activeChatsLimit = 100000; // Effectively unlimited for active queues
+            const activeChatsLimit = 200; // Paginated; more loaded on scroll
             const activeChatsPromise = fetchChats({
                 workspaceId,
                 userId,
@@ -1003,7 +985,7 @@ export const getInitialChatsData = withDebug(
             });
 
             const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout ao buscar chats')), 15000)
+                setTimeout(() => reject(new Error('Timeout ao buscar chats')), 10000)
             );
 
             const [activeChatRows, closedChatRows] = await Promise.race([
@@ -1642,30 +1624,41 @@ async function fetchChatsDelta({
     workspaceId: string;
     since: string;
 }): Promise<ChatRow[]> {
+    const startTime = performance.now();
     const { rows } = await db.query(
         `
-        WITH last_message_details AS (
-            SELECT DISTINCT ON (chat_id)
-                id,
-                chat_id,
-                content,
-                type,
-                metadata,
-                transcription,
-                created_at,
-                from_me,
-                sender_user_id,
-                sender_system_agent_id,
-                instance_name,
-                source_from_api,
-                platform,
-                message_id_from_api,
-                api_message_status,
-                is_read,
-                sent_by_tab
-            FROM messages
-            WHERE workspace_id = $1
-            ORDER BY chat_id, created_at DESC
+        WITH changed_chats AS (
+            SELECT c.*
+            FROM chats c
+            WHERE c.workspace_id = $1
+              AND (c.updated_at >= $2 OR c.closed_at >= $2 OR c.assigned_at >= $2
+                   OR EXISTS (
+                       SELECT 1 FROM messages m
+                       WHERE m.chat_id = c.id AND m.created_at >= $2
+                   ))
+        ),
+        last_message_details AS (
+            SELECT DISTINCT ON (m.chat_id)
+                m.id,
+                m.chat_id,
+                m.content,
+                m.type,
+                m.metadata,
+                m.transcription,
+                m.created_at,
+                m.from_me,
+                m.sender_user_id,
+                m.sender_system_agent_id,
+                m.instance_name,
+                m.source_from_api,
+                m.platform,
+                m.message_id_from_api,
+                m.api_message_status,
+                m.is_read,
+                m.sent_by_tab
+            FROM messages m
+            WHERE m.chat_id IN (SELECT id FROM changed_chats)
+            ORDER BY m.chat_id, m.created_at DESC
         )
         SELECT 
             c.id,
@@ -1683,20 +1676,6 @@ async function fetchChatsDelta({
             COALESCE(
                 lmd.source_from_api,
                 lmd.platform::text,
-                (
-                    SELECT m.source_from_api
-                    FROM messages m
-                    WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL
-                    ORDER BY m.created_at DESC
-                    LIMIT 1
-                ),
-                (
-                    SELECT m.platform::text
-                    FROM messages m
-                    WHERE m.chat_id = c.id AND m.platform IS NOT NULL
-                    ORDER BY m.created_at DESC
-                    LIMIT 1
-                ),
                 mc.platform::text
             ) AS source,
             COALESCE((
@@ -1726,7 +1705,6 @@ async function fetchChatsDelta({
             lmd.message_id_from_api AS last_message_message_id_from_api,
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
-            lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
             (
                 SELECT json_object_agg(cfd.id, cfv.value)
@@ -1734,19 +1712,20 @@ async function fetchChatsDelta({
                 JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
                 WHERE cfv.contact_id = c.contact_id
             ) AS contact_custom_fields
-        FROM chats c
+        FROM changed_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
         LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
-        WHERE c.workspace_id = $1
-          AND GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
+        WHERE GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         [workspaceId, since]
     );
+    const endTime = performance.now();
+    console.log(`[PERF] fetchChatsDelta took ${(endTime - startTime).toFixed(2)}ms, ${rows.length} changed chats since ${since}`);
     return rows as ChatRow[];
 }
 

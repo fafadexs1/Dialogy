@@ -1105,9 +1105,9 @@ export default function CustomerChatLayout({
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
 
-        // Strategy: 10s always (visible or background)
-        // Aggressive fallback since Realtime may not deliver events reliably
-        let interval = 10000;
+        // Adaptive polling: 15s when visible, 45s when backgrounded.
+        // Realtime handles most live updates; polling is a safety-net fallback.
+        let interval = isVisible ? 15000 : 45000;
 
         // Exponential backoff on errors
         if (errorCount > 0) interval = Math.max(interval, 30000);

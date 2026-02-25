@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
             // 2. Primary Action: Update our database
             await client.query(
-                'UPDATE messages SET is_read = TRUE WHERE id::text = ANY($1::text[])',
+                'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
                 [messageIdsToUpdate]
             );
             console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
