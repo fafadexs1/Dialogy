@@ -11,6 +11,14 @@ export interface AutomationTriggerConfig {
     threshold?: number;
     field_id?: string;
     field_value?: string;
+    changed_conditions?: Array<{
+        field_id: string;
+        field_value?: string;
+    }>;
+    state_conditions?: Array<{
+        field_id: string;
+        field_value?: string;
+    }>;
 }
 
 export interface AutomationAction {

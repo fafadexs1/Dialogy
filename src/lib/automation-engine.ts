@@ -16,11 +16,18 @@ export interface AutomationEvent {
         phone?: string;
         custom_field_id?: string;
         new_value?: string;
+        changed_fields?: Record<string, string>;
+        contact_custom_fields?: Record<string, string>;
         actor_user_id?: string;
         actor_full_name?: string;
         [key: string]: any;
     };
 }
+
+type TriggerCustomFieldCondition = {
+    field_id?: string;
+    field_value?: string;
+};
 
 function normalizeComparableValue(value: unknown): string {
     if (value === null || value === undefined) return '';
@@ -30,6 +37,53 @@ function normalizeComparableValue(value: unknown): string {
         .trim()
         .toLowerCase()
         .replace(/\s+/g, '_');
+}
+
+function valuesMatch(expected: unknown, actual: unknown): boolean {
+    const expectedValue = String(expected ?? '');
+    const actualValue = String(actual ?? '');
+    if (expectedValue === actualValue) return true;
+    return normalizeComparableValue(expectedValue) === normalizeComparableValue(actualValue);
+}
+
+function hasValue(value: unknown): boolean {
+    return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function extractCustomFieldConditions(config: Record<string, any>): {
+    changedConditions: TriggerCustomFieldCondition[];
+    stateConditions: TriggerCustomFieldCondition[];
+} {
+    const changedConditions = Array.isArray(config.changed_conditions)
+        ? config.changed_conditions
+        : config.field_id
+            ? [{ field_id: config.field_id, field_value: config.field_value }]
+            : [];
+
+    const stateConditions = Array.isArray(config.state_conditions)
+        ? config.state_conditions
+        : [];
+
+    return {
+        changedConditions: changedConditions.filter((condition: TriggerCustomFieldCondition) => condition?.field_id),
+        stateConditions: stateConditions.filter((condition: TriggerCustomFieldCondition) => condition?.field_id),
+    };
+}
+
+async function loadContactCustomFields(event: AutomationEvent): Promise<Record<string, string>> {
+    const fieldsFromEvent = event.data?.contact_custom_fields;
+    if (fieldsFromEvent && typeof fieldsFromEvent === 'object') {
+        return fieldsFromEvent;
+    }
+
+    const res = await db.query(
+        'SELECT field_id, value FROM contact_custom_field_values WHERE contact_id = $1',
+        [event.contactId]
+    );
+    return res.rows.reduce((acc: Record<string, string>, row: { field_id: string; value: string }) => {
+        acc[row.field_id] = row.value;
+        return acc;
+    }, {});
 }
 
 function getValueByPath(source: any, path: string): unknown {
@@ -88,7 +142,7 @@ export async function evaluateAutomations(event: AutomationEvent): Promise<void>
         const automations: CrmAutomation[] = result.rows;
 
         for (const automation of automations) {
-            if (matchesTrigger(automation, eventWithActor)) {
+            if (await matchesTrigger(automation, eventWithActor)) {
                 console.log(`[AUTOMATION] Firing "${automation.name}" for contact ${eventWithActor.contactId}`);
                 await executeActions(automation.actions, eventWithActor);
             }
@@ -100,7 +154,7 @@ export async function evaluateAutomations(event: AutomationEvent): Promise<void>
 
 // ─── Trigger Matching ───────────────────────────────────────────────────────
 
-function matchesTrigger(automation: CrmAutomation, event: AutomationEvent): boolean {
+async function matchesTrigger(automation: CrmAutomation, event: AutomationEvent): Promise<boolean> {
     const config = automation.trigger_config || {};
 
     switch (event.type) {
@@ -114,15 +168,59 @@ function matchesTrigger(automation: CrmAutomation, event: AutomationEvent): bool
             return (event.data?.lead_score || 0) >= threshold;
         }
         case 'custom_field_changed': {
-            if (config.field_id && config.field_id !== event.data?.custom_field_id) return false;
-            // Optionally check configured value, tolerating case/spacing differences (e.g. "NOVO" vs "novo")
-            if (config.field_value) {
-                const expectedValue = String(config.field_value);
-                const actualValue = String(event.data?.new_value ?? '');
-                const exactMatch = expectedValue === actualValue;
-                const normalizedMatch = normalizeComparableValue(expectedValue) === normalizeComparableValue(actualValue);
-                if (!exactMatch && !normalizedMatch) return false;
+            const { changedConditions, stateConditions } = extractCustomFieldConditions(config);
+            const changedFields = event.data?.changed_fields || {};
+
+            // "Quando fizer X e Y": all configured changed fields must be present in this change batch.
+            for (const condition of changedConditions) {
+                const fieldId = condition.field_id!;
+                const hasDirectChangedField = Object.prototype.hasOwnProperty.call(changedFields, fieldId);
+                const rawChangedValue = hasDirectChangedField
+                    ? changedFields[fieldId]
+                    : event.data?.custom_field_id === fieldId
+                        ? event.data?.new_value
+                        : undefined;
+
+                if (rawChangedValue === undefined) return false;
+                if (hasValue(condition.field_value) && !valuesMatch(condition.field_value, rawChangedValue)) {
+                    return false;
+                }
             }
+
+            // Legacy fallback (single field/value) when no new changed_conditions were configured.
+            if (changedConditions.length === 0) {
+                if (config.field_id) {
+                    const hasDirectChangedField = Object.prototype.hasOwnProperty.call(changedFields, config.field_id);
+                    const rawChangedValue = hasDirectChangedField
+                        ? changedFields[config.field_id]
+                        : event.data?.custom_field_id === config.field_id
+                            ? event.data?.new_value
+                            : undefined;
+                    if (rawChangedValue === undefined) return false;
+
+                    if (hasValue(config.field_value) && !valuesMatch(config.field_value, rawChangedValue)) {
+                        return false;
+                    }
+                } else if (hasValue(config.field_value) && !valuesMatch(config.field_value, event.data?.new_value)) {
+                    return false;
+                }
+            }
+
+            // "E estiver X e Y": all configured state conditions must match current contact custom fields.
+            if (stateConditions.length > 0) {
+                const contactCustomFields = await loadContactCustomFields(event);
+                for (const condition of stateConditions) {
+                    const fieldId = condition.field_id!;
+                    const currentValue = contactCustomFields[fieldId];
+
+                    if (hasValue(condition.field_value)) {
+                        if (!valuesMatch(condition.field_value, currentValue)) return false;
+                    } else if (!hasValue(currentValue)) {
+                        return false;
+                    }
+                }
+            }
+
             return true;
         }
         case 'deal_created':

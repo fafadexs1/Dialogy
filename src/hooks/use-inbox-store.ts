@@ -33,7 +33,7 @@ type InboxState = {
   appendChats: (chats: Chat[]) => void;
   setHasMoreChats: (hasMore: boolean) => void;
   updateChatContact: (contact: Contact) => void;
-  setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean) => void;
+  setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean, replace?: boolean) => void;
   appendMessagesToChat: (chatId: string, messages: Message[], lastSync?: string | null) => void;
   prependMessagesToChat: (chatId: string, messages: Message[], oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean) => void;
   markChatAsRead: (chatId: string) => void;
@@ -205,10 +205,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       ),
     }));
   },
-  setMessagesForChat: (chatId, messages, lastSync, oldestDate, oldestId, hasMoreHistory) => {
+  setMessagesForChat: (chatId, messages, lastSync, oldestDate, oldestId, hasMoreHistory, replace = false) => {
     set((state) => {
       const current = state.messagesByChat[chatId] || [];
-      const merged = dedupeMessages([...current, ...messages]);
+      const merged = replace ? dedupeMessages(messages) : dedupeMessages([...current, ...messages]);
       return {
         messagesByChat: { ...state.messagesByChat, [chatId]: merged },
         lastSyncMessages:

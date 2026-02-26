@@ -825,6 +825,29 @@ async function fetchChats({
         , merged_chats AS (
             SELECT * FROM sorted_chats
             ${includeChatId ? 'UNION SELECT * FROM target_chat' : ''}
+        ),
+        unread_counts AS (
+            SELECT
+                m.chat_id,
+                COUNT(*) AS unread_count
+            FROM messages m
+            JOIN merged_chats c ON c.id = m.chat_id
+            WHERE m.from_me = false
+              AND COALESCE(m.is_read, false) = false
+            GROUP BY m.chat_id
+        ),
+        contact_custom_fields AS (
+            SELECT
+                cfv.contact_id,
+                json_object_agg(cfd.id, cfv.value) AS contact_custom_fields
+            FROM contact_custom_field_values cfv
+            JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+            JOIN (
+                SELECT DISTINCT contact_id
+                FROM merged_chats
+                WHERE contact_id IS NOT NULL
+            ) mc ON mc.contact_id = cfv.contact_id
+            GROUP BY cfv.contact_id
         )
         SELECT 
             c.id,
@@ -845,10 +868,7 @@ async function fetchChats({
                 lmd.platform::text,
                 mc.platform::text
             ) AS source,
-            COALESCE((
-                SELECT COUNT(*) FROM messages m
-                WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
-            ), 0) AS unread_count,
+            COALESCE(uc.unread_count, 0) AS unread_count,
             t.id AS team_id,
             t.name AS team_name,
             t.color AS team_color,
@@ -874,17 +894,14 @@ async function fetchChats({
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
-            (
-                SELECT json_object_agg(cfd.id, cfv.value)
-                FROM contact_custom_field_values cfv
-                JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
-                WHERE cfv.contact_id = c.contact_id
-            ) AS contact_custom_fields,
+            ccf.contact_custom_fields AS contact_custom_fields,
             COALESCE(mct.external_id, mct_stable.external_id) AS meta_contact_external_id,
             COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
             COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
         FROM merged_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN unread_counts uc ON uc.chat_id = c.id
+        LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
@@ -1260,11 +1277,12 @@ export const searchChatsAndContacts = withDebug(
                     FROM messages m
                     JOIN chats ch ON ch.id = m.chat_id
                     JOIN contacts c ON c.id = ch.contact_id
-                    WHERE ch.protocol ILIKE $1
+                    WHERE ch.workspace_id = $1
+                      AND ch.protocol ILIKE $2
                     ORDER BY m.created_at DESC
                     LIMIT 200
                 `,
-                    [protocolTerm]
+                    [workspaceId, protocolTerm]
                 );
 
                 const messages: Message[] = messagesRes.rows.map((m: any) => ({
@@ -1480,6 +1498,94 @@ export const searchChatsAndContacts = withDebug(
     }
 );
 
+export const getContactProtocolsAction = withDebug(
+    'get_contact_protocols',
+    async function getContactProtocolsAction(
+        workspaceId: string,
+        contactId: string
+    ): Promise<{
+        protocols: Array<{
+            chatId: string;
+            protocol: string;
+            status: Chat['status'];
+            createdAt: string;
+            lastActivityAt: string;
+            lastMessageContent: string | null;
+        }>;
+        error?: string;
+    }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { protocols: [], error: "Usuario nao autenticado." };
+        }
+
+        if (!workspaceId || !contactId) {
+            return { protocols: [], error: "Workspace e contato sao obrigatorios." };
+        }
+
+        try {
+            const accessRes = await db.query(
+                `
+                SELECT 1
+                FROM user_workspace_roles
+                WHERE user_id = $1
+                  AND workspace_id = $2
+                LIMIT 1
+                `,
+                [user.id, workspaceId]
+            );
+
+            if ((accessRes.rowCount ?? 0) === 0) {
+                return { protocols: [], error: "Sem permissao para este workspace." };
+            }
+
+            const { rows } = await db.query(
+                `
+                SELECT
+                    c.id AS chat_id,
+                    COALESCE(c.protocol, 'PRT-' || upper(replace(c.id::text, '-', ''))) AS protocol,
+                    c.status,
+                    c.created_at,
+                    COALESCE(last_msg.created_at, c.created_at) AS last_activity_at,
+                    last_msg.content AS last_message_content
+                FROM chats c
+                LEFT JOIN LATERAL (
+                    SELECT m.created_at, m.content
+                    FROM messages m
+                    WHERE m.chat_id = c.id
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ) last_msg ON TRUE
+                WHERE c.workspace_id = $1
+                  AND c.contact_id = $2
+                ORDER BY c.created_at DESC
+                LIMIT 200
+                `,
+                [workspaceId, contactId]
+            );
+
+            const protocols = rows.map((row: any) => ({
+                chatId: row.chat_id as string,
+                protocol: row.protocol as string,
+                status: row.status as Chat['status'],
+                createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+                lastActivityAt: row.last_activity_at instanceof Date ? row.last_activity_at.toISOString() : String(row.last_activity_at),
+                lastMessageContent: row.last_message_content ? String(row.last_message_content) : null,
+            }));
+
+            return { protocols };
+        } catch (error: any) {
+            console.error('[GET_CONTACT_PROTOCOLS] Error:', error);
+            return { protocols: [], error: `Falha ao buscar protocolos: ${error.message}` };
+        }
+    },
+    {
+        contextResolver: (workspaceId, contactId) => ({ payload: { workspaceId, contactId } }),
+    }
+);
+
 export const refreshChatAction = withDebug(
     'refresh_chat',
     async function refreshChatAction(chatId: string): Promise<{ chat?: Chat; error?: string }> {
@@ -1659,6 +1765,29 @@ async function fetchChatsDelta({
             FROM messages m
             WHERE m.chat_id IN (SELECT id FROM changed_chats)
             ORDER BY m.chat_id, m.created_at DESC
+        ),
+        unread_counts AS (
+            SELECT
+                m.chat_id,
+                COUNT(*) AS unread_count
+            FROM messages m
+            JOIN changed_chats c ON c.id = m.chat_id
+            WHERE m.from_me = false
+              AND COALESCE(m.is_read, false) = false
+            GROUP BY m.chat_id
+        ),
+        contact_custom_fields AS (
+            SELECT
+                cfv.contact_id,
+                json_object_agg(cfd.id, cfv.value) AS contact_custom_fields
+            FROM contact_custom_field_values cfv
+            JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+            JOIN (
+                SELECT DISTINCT contact_id
+                FROM changed_chats
+                WHERE contact_id IS NOT NULL
+            ) cc ON cc.contact_id = cfv.contact_id
+            GROUP BY cfv.contact_id
         )
         SELECT 
             c.id,
@@ -1678,10 +1807,7 @@ async function fetchChatsDelta({
                 lmd.platform::text,
                 mc.platform::text
             ) AS source,
-            COALESCE((
-                SELECT COUNT(*) FROM messages m
-                WHERE m.chat_id = c.id AND m.from_me = false AND COALESCE(m.is_read, false) = false
-            ), 0) AS unread_count,
+            COALESCE(uc.unread_count, 0) AS unread_count,
             t.name AS team_name,
             t.id AS team_id,
             eai.type AS instance_type,
@@ -1706,14 +1832,11 @@ async function fetchChatsDelta({
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
-            (
-                SELECT json_object_agg(cfd.id, cfv.value)
-                FROM contact_custom_field_values cfv
-                JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
-                WHERE cfv.contact_id = c.contact_id
-            ) AS contact_custom_fields
+            ccf.contact_custom_fields AS contact_custom_fields
         FROM changed_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN unread_counts uc ON uc.chat_id = c.id
+        LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
@@ -1868,12 +1991,14 @@ export async function getChatMessagesWindow({
     before,
     beforeId,
     timezone,
+    chatOnly = false,
 }: {
     chatId: string;
     limit: number;
     before?: string | null;
     beforeId?: string | null;
     timezone: string;
+    chatOnly?: boolean;
 }): Promise<{
     messages: Message[];
     lastSyncMessage: string | null;
@@ -1931,11 +2056,19 @@ export async function getChatMessagesWindow({
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
-    // Fetch paginated history for the whole contact thread within the same workspace.
-    // This preserves the inbox UX where scrolling up keeps loading older messages,
-    // including previous chat sessions for the same contact.
+    const chatScopeJoinCondition = chatOnly
+        ? 'c.id = tc.id'
+        : 'c.workspace_id = tc.workspace_id AND (c.contact_id = tc.contact_id OR c.id = tc.id)';
+
+    // Default behavior keeps contact-thread history across sessions.
+    // For protocol-scoped searches, we can force chat-only history.
     const { rows } = await db.query(
         `
+        WITH target_chat AS (
+            SELECT id, workspace_id, contact_id
+            FROM chats
+            WHERE id = $1
+        )
         SELECT 
             m.*,
             c.workspace_id AS workspace_id,
@@ -1945,22 +2078,12 @@ export async function getChatMessagesWindow({
             cont.email AS contact_email,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
-        FROM messages m
-        JOIN chats c ON c.id = m.chat_id
+        FROM target_chat tc
+        JOIN chats c
+          ON ${chatScopeJoinCondition}
+        JOIN messages m ON m.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE c.workspace_id = (
-            SELECT workspace_id
-            FROM chats
-            WHERE id = $1
-        )
-          AND (
-              c.contact_id = (
-                  SELECT contact_id
-                  FROM chats
-                  WHERE id = $1
-              )
-              OR c.id = $1
-          )
+        WHERE 1=1
         ${beforeClause}
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2

@@ -303,7 +303,9 @@ export default function CustomerChatLayout({
 
   const enrichedSelectedChat = useMemo(() => selectedChat ? {
     ...selectedChat,
-    messages: currentChatMessages,
+    messages: (selectedChat as any)?.protocolScoped
+      ? (selectedChat.messages || [])
+      : currentChatMessages,
     unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
   } : null, [selectedChat, currentChatMessages]);
 
@@ -584,12 +586,16 @@ export default function CustomerChatLayout({
     const startedAt = performance.now();
     try {
       console.log('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
+      const state = useInboxStore.getState();
+      const activeChat = state.chats.find((candidate) => candidate.id === chatId);
+      const chatOnly = !!(activeChat as any)?.protocolScoped;
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
         beforeId: beforeId ?? undefined,
         limit: 50,
-        timezone: workspaceTimezone
+        timezone: workspaceTimezone,
+        chatOnly,
       });
       console.log('[LOAD_MESSAGES] Result:', {
         messagesCount: result.messages.length,
@@ -600,7 +606,15 @@ export default function CustomerChatLayout({
       if (beforeDate) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
       } else {
-        setMessagesForChat(chatId, result.messages, result.lastSyncMessage, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
+        setMessagesForChat(
+          chatId,
+          result.messages,
+          result.lastSyncMessage,
+          result.oldestMessageDate,
+          result.oldestMessageId,
+          result.hasMoreHistory,
+          chatOnly
+        );
       }
       if (result.contact) {
         updateChatContact(result.contact);

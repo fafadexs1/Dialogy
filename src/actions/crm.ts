@@ -307,19 +307,31 @@ export const saveContactAction = withDebug(
             // Dispatch Automations for custom field changes
             try {
                 const { evaluateAutomations } = await import('@/lib/automation-engine');
-                const changedFields = Object.entries(customFields).filter(([fieldId, newValue]) => newValue !== currentFields[fieldId]);
+                const candidateFieldIds = Array.from(
+                    new Set([...Object.keys(currentFields), ...Object.keys(customFields)])
+                );
+                const changedFields = candidateFieldIds
+                    .filter((fieldId) => (customFields[fieldId] ?? '') !== (currentFields[fieldId] ?? ''))
+                    .map((fieldId) => [fieldId, customFields[fieldId] ?? ''] as const);
 
-                for (const [fieldId, newValue] of changedFields) {
+                if (changedFields.length > 0) {
+                    const changedFieldsMap = Object.fromEntries(changedFields);
+                    const [firstFieldId, firstNewValue] = changedFields[0];
+
                     console.log(
-                        `[AUTOMATION] Dispatching custom_field_changed for contact ${contactId} field ${fieldId}: "${currentFields[fieldId] ?? ''}" -> "${newValue}"`
+                        `[AUTOMATION] Dispatching custom_field_changed for contact ${contactId} with ${changedFields.length} changed fields`
                     );
                     await evaluateAutomations({
                         type: 'custom_field_changed',
                         workspaceId,
                         contactId,
                         data: {
-                            custom_field_id: fieldId,
-                            new_value: newValue as string,
+                            // Keep legacy single-field payload for compatibility.
+                            custom_field_id: firstFieldId,
+                            new_value: firstNewValue,
+                            // New payload for AND conditions.
+                            changed_fields: changedFieldsMap,
+                            contact_custom_fields: (updatedContact?.custom_fields || {}) as Record<string, string>,
                             actor_user_id: user.id,
                         }
                     });
@@ -533,7 +545,12 @@ export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ 
     if (!user) return { fields: null, error: "Usuário não autenticado." };
 
     try {
-        const res = await db.query('SELECT id, label, type, placeholder, options FROM custom_field_definitions WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
+        const res = await db.query(
+            // custom_field_definitions does not expose created_at in this project schema;
+            // xmin keeps insertion transaction order, which matches "created first".
+            'SELECT id, label, type, placeholder, options FROM custom_field_definitions WHERE workspace_id = $1 ORDER BY xmin::text::bigint ASC, label ASC',
+            [workspaceId]
+        );
         const fields: CustomFieldDefinition[] = res.rows.map(row => ({
             ...row,
             options: typeof row.options === 'string' ? JSON.parse(row.options) : row.options
@@ -699,7 +716,10 @@ export const addActivityAction = withDebug(
     }
 );
 
-export async function getContactStatistics(contactId: string): Promise<{
+export async function getContactStatistics(
+    contactId: string,
+    period: 'this_month' | 'last_7_days' | 'last_month' | 'all_time' = 'this_month'
+): Promise<{
     stats: {
         totalChats: number;
         totalNotes: number;
@@ -723,19 +743,38 @@ export async function getContactStatistics(contactId: string): Promise<{
             return { stats: null, error: "Acesso não autorizado." };
         }
 
-        // 1. Total Chats & Last Contact
+        const buildPeriodClause = (column: string) => {
+            switch (period) {
+                case 'all_time':
+                    return `1=1`;
+                case 'last_month':
+                    return `${column} >= date_trunc('month', NOW()) - interval '1 month' AND ${column} < date_trunc('month', NOW())`;
+                case 'last_7_days':
+                    return `${column} >= NOW() - interval '7 days'`;
+                case 'this_month':
+                default:
+                    return `${column} >= date_trunc('month', NOW()) AND ${column} < date_trunc('month', NOW()) + interval '1 month'`;
+            }
+        };
+
+        const chatPeriodClause = buildPeriodClause('c.created_at');
+        const closeReasonPeriodClause = buildPeriodClause('COALESCE(c.closed_at, c.created_at)');
+        const activitiesPeriodClause = buildPeriodClause('a.date');
+
+        // 1. Total Chats & Last Contact (filtered period)
         const chatsRes = await client.query(`
             SELECT 
                 COUNT(*) as total,
                 MAX(created_at) as last_contact
-            FROM chats 
-            WHERE contact_id = $1
+            FROM chats c
+            WHERE c.contact_id = $1
+              AND ${chatPeriodClause}
         `, [contactId]);
 
         const totalChats = parseInt(chatsRes.rows[0].total || '0');
         const lastContactDate = chatsRes.rows[0].last_contact;
 
-        // 2. Close Reasons Distribution
+        // 2. Close Reasons Distribution (filtered period)
         const reasonsRes = await client.query(`
             SELECT 
                 t.label as tag,
@@ -743,7 +782,9 @@ export async function getContactStatistics(contactId: string): Promise<{
                 COUNT(*) as count
             FROM chats c
             JOIN tags t ON c.close_reason_tag_id = t.id
-            WHERE c.contact_id = $1 AND c.status = 'encerrados'
+            WHERE c.contact_id = $1
+              AND c.status = 'encerrados'
+              AND ${closeReasonPeriodClause}
             GROUP BY t.label, t.color
             ORDER BY count DESC
         `, [contactId]);
@@ -754,7 +795,7 @@ export async function getContactStatistics(contactId: string): Promise<{
             count: parseInt(r.count)
         }));
 
-        // 3. Activities (Notes)
+        // 3. Activities (Notes, filtered period)
         const activitiesRes = await client.query(`
             SELECT 
                 a.*,
@@ -763,6 +804,7 @@ export async function getContactStatistics(contactId: string): Promise<{
             FROM activities a
             JOIN users u ON a.user_id = u.id
             WHERE a.contact_id = $1
+              AND ${activitiesPeriodClause}
             ORDER BY a.date DESC
         `, [contactId]);
 

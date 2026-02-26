@@ -30,7 +30,8 @@ import {
     Cpu,
     Target,
     Check,
-    DollarSign
+    DollarSign,
+    History
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -44,7 +45,7 @@ import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
 import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { getDealsByContact } from '@/actions/deals';
-import { transferChatAction } from '@/actions/chats';
+import { transferChatAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
@@ -63,6 +64,7 @@ import ContactTimeline from '../crm/contact-timeline';
 import DealForm from '../crm/deal-form';
 import LeadScoreBadge from '../crm/lead-score-badge';
 import { CopyProtocolButton } from './copy-protocol-button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -501,6 +503,17 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [dealsLoading, setDealsLoading] = useState(false);
     const [dealFormOpen, setDealFormOpen] = useState(false);
     const [showTimeline, setShowTimeline] = useState(false);
+    const [protocolHistory, setProtocolHistory] = useState<Array<{
+        chatId: string;
+        protocol: string;
+        status: Chat['status'];
+        createdAt: string;
+        lastActivityAt: string;
+        lastMessageContent: string | null;
+    }>>([]);
+    const [protocolHistoryLoading, setProtocolHistoryLoading] = useState(false);
+    const [protocolSelectorOpen, setProtocolSelectorOpen] = useState(false);
+    const [switchingProtocol, setSwitchingProtocol] = useState<string | null>(null);
 
     const handleContactSave = useCallback((updatedContact?: Contact | null) => {
         // If we received an updated contact, update it directly in the store
@@ -533,10 +546,65 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             .finally(() => setDealsLoading(false));
     }, [contactId]);
 
+    useEffect(() => {
+        if (!chat?.workspace_id || !contactId) {
+            setProtocolHistory([]);
+            return;
+        }
+
+        setProtocolHistoryLoading(true);
+        getContactProtocolsAction(chat.workspace_id, contactId)
+            .then((res) => {
+                if (res.error) {
+                    setProtocolHistory([]);
+                    return;
+                }
+                setProtocolHistory(res.protocols || []);
+            })
+            .finally(() => setProtocolHistoryLoading(false));
+    }, [chat?.workspace_id, contactId]);
+
     const openDeals = useMemo(() => deals.filter(d => d.won === null || d.won === undefined), [deals]);
     const totalOpenValue = useMemo(() => openDeals.reduce((s, d) => s + d.value, 0), [openDeals]);
 
     const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    const handleSelectProtocol = useCallback(async (protocol: string) => {
+        if (!chat?.workspace_id) return;
+
+        setSwitchingProtocol(protocol);
+        try {
+            const searchResult = await searchChatsAndContacts(chat.workspace_id, protocol);
+            if (searchResult.error || !searchResult.chats?.length) {
+                toast({ title: "Nao foi possivel abrir o protocolo.", variant: 'destructive' });
+                return;
+            }
+
+            const selectedProtocolChat = {
+                ...searchResult.chats[0],
+                protocolScoped: true,
+                messages: searchResult.chats[0].messages || [],
+            } as Chat;
+
+            const store = useInboxStore.getState();
+            store.upsertChats([selectedProtocolChat]);
+            store.setMessagesForChat(
+                selectedProtocolChat.id,
+                selectedProtocolChat.messages || [],
+                null,
+                null,
+                null,
+                false,
+                true
+            );
+            store.setSelectedChatId(selectedProtocolChat.id);
+            setProtocolSelectorOpen(false);
+        } catch (error) {
+            toast({ title: "Falha ao carregar protocolo.", variant: 'destructive' });
+        } finally {
+            setSwitchingProtocol(null);
+        }
+    }, [chat?.workspace_id]);
 
 
     if (!chat) {
@@ -559,7 +627,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     }
 
     const { contact, agent } = chat;
-    const isProtocolScoped = (chat as any).protocolScoped;
+    const currentProtocol = chat.protocol || buildChatProtocol(chat.id);
 
     const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
 
@@ -787,11 +855,69 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">Protocolo</span>
-                                        <span className="text-[12px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={chat.protocol || buildChatProtocol(chat.id)}>
-                                            {chat.protocol || buildChatProtocol(chat.id)}
+                                        <span className="text-[12px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={currentProtocol}>
+                                            {currentProtocol}
                                         </span>
                                     </div>
-                                    <CopyProtocolButton protocol={chat.protocol || buildChatProtocol(chat.id)} />
+                                    <Popover open={protocolSelectorOpen} onOpenChange={setProtocolSelectorOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                type="button"
+                                                className="relative z-10 h-6 w-6 rounded-md bg-white/5 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                                                title="Ver todos os protocolos"
+                                            >
+                                                <History className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent align="end" className="w-[340px] p-2 border-white/10 bg-zinc-950">
+                                            <div className="px-2 py-1.5">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Protocolos do contato</p>
+                                            </div>
+                                            <div className="max-h-[260px] overflow-y-auto pr-1 space-y-1">
+                                                {protocolHistoryLoading ? (
+                                                    <div className="flex items-center justify-center py-6 text-white/40">
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                    </div>
+                                                ) : protocolHistory.length === 0 ? (
+                                                    <p className="px-2 py-4 text-xs text-white/40">Nenhum protocolo encontrado.</p>
+                                                ) : (
+                                                    protocolHistory.map((entry) => (
+                                                        <button
+                                                            key={entry.chatId}
+                                                            type="button"
+                                                            onClick={() => handleSelectProtocol(entry.protocol)}
+                                                            disabled={switchingProtocol === entry.protocol}
+                                                            className={cn(
+                                                                "w-full rounded-lg border px-2 py-2 text-left transition-colors",
+                                                                entry.protocol === currentProtocol
+                                                                    ? "border-purple-500/40 bg-purple-500/10"
+                                                                    : "border-white/10 bg-white/[0.02] hover:bg-white/[0.06]"
+                                                            )}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="truncate text-[11px] font-mono font-semibold text-purple-200">{entry.protocol}</span>
+                                                                {switchingProtocol === entry.protocol ? (
+                                                                    <Loader2 className="h-3 w-3 animate-spin text-white/40 shrink-0" />
+                                                                ) : (
+                                                                    <span className="text-[10px] text-white/40 shrink-0">
+                                                                        {new Date(entry.createdAt).toLocaleDateString('pt-BR')}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {entry.lastMessageContent && (
+                                                                <p className="mt-1 line-clamp-1 text-[10px] text-white/45">
+                                                                    {entry.lastMessageContent}
+                                                                </p>
+                                                            )}
+                                                        </button>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+                                    <CopyProtocolButton protocol={currentProtocol} />
                                 </div>
                             </div>
 

@@ -27,21 +27,21 @@ import {
 import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import type { User, CustomFieldDefinition } from '@/lib/types';
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// Constants
 
 const TRIGGER_TYPES = [
-    { value: 'stage_changed', label: 'Mudança de Estágio', icon: GitBranch, description: 'Quando um contato muda de estágio no funil' },
-    { value: 'deal_created', label: 'Deal Criado', icon: Target, description: 'Quando um novo deal é criado' },
+    { value: 'stage_changed', label: 'Mudanca de Estagio', icon: GitBranch, description: 'Quando um contato muda de estagio no funil' },
+    { value: 'deal_created', label: 'Deal Criado', icon: Target, description: 'Quando um novo deal e criado' },
     { value: 'lead_score_above', label: 'Lead Score Acima de', icon: Zap, description: 'Quando o score do lead ultrapassa um valor' },
-    { value: 'contact_created', label: 'Contato Criado', icon: UserCheck, description: 'Quando um novo contato é cadastrado' },
-    { value: 'custom_field_changed', label: 'Campo Personalizado', icon: List, description: 'Quando um campo personalizado é alterado' },
+    { value: 'contact_created', label: 'Contato Criado', icon: UserCheck, description: 'Quando um novo contato e cadastrado' },
+    { value: 'custom_field_changed', label: 'Campo Personalizado', icon: List, description: 'Quando um campo personalizado e alterado' },
 ];
 
 const ACTION_TYPES = [
-    { value: 'move_to_stage', label: 'Mover para Estágio', icon: ArrowRight },
-    { value: 'assign_owner', label: 'Atribuir Responsável', icon: UserCheck },
+    { value: 'move_to_stage', label: 'Mover para Estagio', icon: ArrowRight },
+    { value: 'assign_owner', label: 'Atribuir Responsavel', icon: UserCheck },
     { value: 'create_deal', label: 'Criar Deal', icon: Target },
-    { value: 'send_notification', label: 'Enviar Notificação', icon: Bell },
+    { value: 'send_notification', label: 'Enviar Notificacao', icon: Bell },
     { value: 'update_custom_field', label: 'Atualizar Campo', icon: List },
     { value: 'api_call', label: 'Chamada API', icon: Globe },
 ];
@@ -50,13 +50,46 @@ const STAGES = [
     { value: 'novo', label: 'Novo' },
     { value: 'qualificado', label: 'Qualificado' },
     { value: 'proposta', label: 'Proposta' },
-    { value: 'negociacao', label: 'Negociação' },
+    { value: 'negociacao', label: 'Negociacao' },
     { value: 'fechamento', label: 'Fechamento' },
 ];
 
 const ANY_VALUE_SENTINEL = '__any__';
 const CLEAR_VALUE_SENTINEL = '__clear__';
 type VariableFieldElement = HTMLInputElement | HTMLTextAreaElement;
+type TriggerFieldCondition = { field_id: string; field_value?: string };
+
+function sanitizeTriggerConfigForSave(type: string, config: AutomationTriggerConfig): AutomationTriggerConfig {
+    if (type !== 'custom_field_changed') return config;
+
+    const changedRaw = Array.isArray(config.changed_conditions)
+        ? config.changed_conditions
+        : config.field_id
+            ? [{ field_id: config.field_id, field_value: config.field_value }]
+            : [];
+    const stateRaw = Array.isArray(config.state_conditions) ? config.state_conditions : [];
+
+    const normalizeList = (list: Array<{ field_id?: string; field_value?: string }>) =>
+        list
+            .filter(condition => condition?.field_id)
+            .map(condition => ({
+                field_id: String(condition.field_id),
+                field_value: condition.field_value || '',
+            }));
+
+    const changed_conditions = normalizeList(changedRaw);
+    const state_conditions = normalizeList(stateRaw);
+    const firstChanged = changed_conditions[0];
+
+    return {
+        ...config,
+        // Keep legacy keys for backward compatibility.
+        field_id: firstChanged?.field_id || '',
+        field_value: firstChanged?.field_value || '',
+        changed_conditions,
+        state_conditions,
+    };
+}
 
 const VariableSelector = ({ customFields, onSelect }: { customFields: CustomFieldDefinition[], onSelect: (val: string) => void }) => {
     return (
@@ -70,7 +103,7 @@ const VariableSelector = ({ customFields, onSelect }: { customFields: CustomFiel
                 <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.name}}')}>Nome do Contato</DropdownMenuItem>
                 <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.email}}')}>Email</DropdownMenuItem>
                 <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{contact.phone}}')}>Telefone</DropdownMenuItem>
-                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{event.actor_full_name}}')}>Usuário que executou</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{event.actor_full_name}}')}>Usuario que executou</DropdownMenuItem>
                 {customFields.length > 0 && <Separator className="my-1 bg-white/10" />}
                 {customFields.map(cf => (
                     <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" key={cf.id} onClick={() => onSelect(`{{contact.custom_fields.${cf.id}}}`)}>
@@ -141,22 +174,31 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
     const handleSave = async () => {
         if (!name.trim()) {
-            toast({ title: 'Nome obrigatório', variant: 'destructive' });
+            toast({ title: 'Nome obrigatorio', variant: 'destructive' });
             return;
         }
         if (actions.length === 0) {
-            toast({ title: 'Adicione pelo menos uma ação', variant: 'destructive' });
+            toast({ title: 'Adicione pelo menos uma acao', variant: 'destructive' });
+            return;
+        }
+
+        const normalizedTriggerConfig = sanitizeTriggerConfigForSave(triggerType, triggerConfig);
+        if (
+            triggerType === 'custom_field_changed' &&
+            (!normalizedTriggerConfig.changed_conditions || normalizedTriggerConfig.changed_conditions.length === 0)
+        ) {
+            toast({ title: 'Adicione pelo menos uma condicao em "Quando..."', variant: 'destructive' });
             return;
         }
 
         if (editingId) {
-            const res = await updateAutomation(editingId, { name, trigger_type: triggerType, trigger_config: triggerConfig, actions });
+            const res = await updateAutomation(editingId, { name, trigger_type: triggerType, trigger_config: normalizedTriggerConfig, actions });
             if (res.error) { toast({ title: 'Erro', description: res.error, variant: 'destructive' }); return; }
-            toast({ title: 'Automação atualizada!' });
+            toast({ title: 'Automacao atualizada!' });
         } else {
-            const res = await createAutomation({ workspace_id: workspaceId, name, trigger_type: triggerType, trigger_config: triggerConfig, actions });
+            const res = await createAutomation({ workspace_id: workspaceId, name, trigger_type: triggerType, trigger_config: normalizedTriggerConfig, actions });
             if (res.error) { toast({ title: 'Erro', description: res.error, variant: 'destructive' }); return; }
-            toast({ title: 'Automação criada!' });
+            toast({ title: 'Automacao criada!' });
         }
 
         setDialogOpen(false);
@@ -171,7 +213,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
     const handleDelete = async (id: string) => {
         await deleteAutomation(id);
-        toast({ title: 'Automação excluída' });
+        toast({ title: 'Automacao excluida' });
         fetchData();
     };
 
@@ -274,7 +316,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         }, 0);
     };
 
-    // ─── Helpers ────────────────────────────────────────────────────────────
+    // Helpers
 
     const getTriggerLabel = (type: string) => TRIGGER_TYPES.find(t => t.value === type)?.label || type;
     const getTriggerIcon = (type: string) => TRIGGER_TYPES.find(t => t.value === type)?.icon || Zap;
@@ -286,21 +328,122 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         return option?.label || optionValue;
     };
 
+    const getConditionList = (config: AutomationTriggerConfig, key: 'changed_conditions' | 'state_conditions'): TriggerFieldCondition[] => {
+        const rawList = config[key];
+        if (Array.isArray(rawList)) {
+            return rawList.map(condition => ({
+                field_id: condition?.field_id || '',
+                field_value: condition?.field_value || '',
+            }));
+        }
+        if (key === 'changed_conditions' && config.field_id) {
+            return [{ field_id: config.field_id, field_value: config.field_value || '' }];
+        }
+        return [];
+    };
+
+    const getChangedConditions = (config: AutomationTriggerConfig): TriggerFieldCondition[] => {
+        const list = getConditionList(config, 'changed_conditions');
+        return list.length > 0 ? list : [{ field_id: '', field_value: '' }];
+    };
+
+    const getStateConditions = (config: AutomationTriggerConfig): TriggerFieldCondition[] => {
+        return getConditionList(config, 'state_conditions');
+    };
+
+    const setTriggerConditionList = (
+        key: 'changed_conditions' | 'state_conditions',
+        nextList: TriggerFieldCondition[]
+    ) => {
+        const baseChanged = key === 'changed_conditions'
+            ? nextList
+            : getConditionList(triggerConfig, 'changed_conditions');
+
+        const normalizedChanged = baseChanged
+            .filter(condition => condition.field_id)
+            .map(condition => ({ field_id: condition.field_id, field_value: condition.field_value || '' }));
+
+        const firstChanged = normalizedChanged[0];
+
+        setTriggerConfig({
+            ...triggerConfig,
+            field_id: firstChanged?.field_id || '',
+            field_value: firstChanged?.field_value || '',
+            changed_conditions: key === 'changed_conditions'
+                ? nextList
+                : getConditionList(triggerConfig, 'changed_conditions'),
+            state_conditions: key === 'state_conditions'
+                ? nextList
+                : getConditionList(triggerConfig, 'state_conditions'),
+        });
+    };
+
+    const addTriggerCondition = (key: 'changed_conditions' | 'state_conditions') => {
+        const currentList = key === 'changed_conditions'
+            ? getChangedConditions(triggerConfig)
+            : getStateConditions(triggerConfig);
+        setTriggerConditionList(key, [...currentList, { field_id: '', field_value: '' }]);
+    };
+
+    const updateTriggerCondition = (
+        key: 'changed_conditions' | 'state_conditions',
+        index: number,
+        patch: Partial<TriggerFieldCondition>
+    ) => {
+        const currentList = key === 'changed_conditions'
+            ? getChangedConditions(triggerConfig)
+            : getStateConditions(triggerConfig);
+        const nextList = [...currentList];
+        nextList[index] = { ...nextList[index], ...patch };
+        setTriggerConditionList(key, nextList);
+    };
+
+    const removeTriggerCondition = (key: 'changed_conditions' | 'state_conditions', index: number) => {
+        const currentList = key === 'changed_conditions'
+            ? getChangedConditions(triggerConfig)
+            : getStateConditions(triggerConfig);
+        const nextList = currentList.filter((_, conditionIndex) => conditionIndex !== index);
+        if (key === 'changed_conditions' && nextList.length === 0) {
+            setTriggerConditionList(key, [{ field_id: '', field_value: '' }]);
+            return;
+        }
+        setTriggerConditionList(key, nextList);
+    };
+
+    const describeTriggerCondition = (condition: TriggerFieldCondition): string => {
+        const field = getCustomFieldById(condition.field_id);
+        const label = field?.label || condition.field_id || 'Campo';
+        const value = condition.field_value
+            ? getCustomFieldOptionLabel(field, condition.field_value)
+            : 'qualquer valor';
+        return `${label} = ${value}`;
+    };
+
     const describeTrigger = (auto: CrmAutomation) => {
         const config = auto.trigger_config || {};
         switch (auto.trigger_type) {
             case 'stage_changed':
-                if (config.from_stage && config.to_stage) return `${STAGES.find(s => s.value === config.from_stage)?.label || config.from_stage} → ${STAGES.find(s => s.value === config.to_stage)?.label || config.to_stage}`;
-                if (config.to_stage) return `→ ${STAGES.find(s => s.value === config.to_stage)?.label || config.to_stage}`;
-                return 'Qualquer mudança';
+                if (config.from_stage && config.to_stage) return `${STAGES.find(s => s.value === config.from_stage)?.label || config.from_stage} -> ${STAGES.find(s => s.value === config.to_stage)?.label || config.to_stage}`;
+                if (config.to_stage) return `-> ${STAGES.find(s => s.value === config.to_stage)?.label || config.to_stage}`;
+                return 'Qualquer mudanca';
             case 'lead_score_above':
-                return `Score ≥ ${config.threshold || 0}`;
+                return `Score >= ${config.threshold || 0}`;
             case 'custom_field_changed': {
-                const field = getCustomFieldById(config.field_id);
-                const displayValue = config.field_value
-                    ? getCustomFieldOptionLabel(field, String(config.field_value))
-                    : 'Qualquer valor';
-                return `${field?.label || config.field_id || 'Campo'} → ${displayValue}`;
+                const changedConditions = getConditionList(config, 'changed_conditions');
+                const fallbackChanged = changedConditions.length > 0
+                    ? changedConditions
+                    : config.field_id
+                        ? [{ field_id: config.field_id, field_value: config.field_value || '' }]
+                        : [];
+                const stateConditions = getConditionList(config, 'state_conditions');
+
+                const changedText = fallbackChanged.length > 0
+                    ? fallbackChanged.map(describeTriggerCondition).join(' E ')
+                    : 'qualquer campo';
+                const stateText = stateConditions.length > 0
+                    ? ` | estando ${stateConditions.map(describeTriggerCondition).join(' E ')}`
+                    : '';
+                return `${changedText}${stateText}`;
             }
             default:
                 return '';
@@ -309,13 +452,13 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
     const describeAction = (action: AutomationAction) => {
         switch (action.type) {
-            case 'move_to_stage': return `→ ${STAGES.find(s => s.value === action.config.stage)?.label || action.config.stage || '?'}`;
+            case 'move_to_stage': return `-> ${STAGES.find(s => s.value === action.config.stage)?.label || action.config.stage || '?'}`;
             case 'assign_owner': {
                 const user = users.find(u => u.id === action.config.owner_id);
                 return user?.name || user?.email || action.config.owner_id || '?';
             }
-            case 'create_deal': return action.config.title || 'Deal Automático';
-            case 'send_notification': return action.config.message || 'Notificação';
+            case 'create_deal': return action.config.title || 'Deal Automatico';
+            case 'send_notification': return action.config.message || 'Notificacao';
             case 'update_custom_field': {
                 const field = getCustomFieldById(action.config.field_id);
                 const displayValue = getCustomFieldOptionLabel(field, action.config.field_value);
@@ -328,7 +471,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         }
     };
 
-    // ─── Render ─────────────────────────────────────────────────────────────
+    // Render
 
     if (loading) {
         return (
@@ -342,11 +485,11 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         <div className="h-full flex flex-col">
             <div className="p-6 pb-4 flex items-center justify-between shrink-0">
                 <div>
-                    <h2 className="text-lg font-semibold text-white">Automações do Funil</h2>
-                    <p className="text-sm text-white/50">Regras automáticas: quando algo acontecer, execute ações.</p>
+                    <h2 className="text-lg font-semibold text-white">Automacoes do Funil</h2>
+                    <p className="text-sm text-white/50">Regras automaticas: quando algo acontecer, execute acoes.</p>
                 </div>
                 <Button size="sm" className="gap-1.5" onClick={openCreate}>
-                    <Plus className="h-4 w-4" /> Nova Automação
+                    <Plus className="h-4 w-4" /> Nova Automacao
                 </Button>
             </div>
 
@@ -356,8 +499,8 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                         <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                             <Zap className="h-8 w-8 text-white/30" />
                         </div>
-                        <h3 className="text-base font-medium text-white/70 mb-1">Nenhuma automação criada</h3>
-                        <p className="text-sm text-white/40 max-w-xs">Crie regras para automatizar ações quando contatos mudarem de estágio, deals forem criados, e mais.</p>
+                        <h3 className="text-base font-medium text-white/70 mb-1">Nenhuma automacao criada</h3>
+                        <p className="text-sm text-white/40 max-w-xs">Crie regras para automatizar acoes quando contatos mudarem de estagio, deals forem criados, e mais.</p>
                     </div>
                 ) : (
                     <div className="grid gap-3">
@@ -385,7 +528,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         <span className="text-blue-400 font-medium">{getTriggerLabel(auto.trigger_type)}</span>
                                                         {describeTrigger(auto) && (
                                                             <>
-                                                                <span className="text-white/20">•</span>
+                                                                <span className="text-white/20">|</span>
                                                                 <span>{describeTrigger(auto)}</span>
                                                             </>
                                                         )}
@@ -422,32 +565,31 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                 )}
             </ScrollArea>
 
-            {/* ─── Create/Edit Dialog ─────────────────────────────────────── */}
+            {/* Create/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="sm:max-w-lg bg-zinc-950 border-white/10">
+                <DialogContent className="w-[96vw] max-w-[1200px] sm:max-w-[1200px] max-h-[92vh] overflow-hidden bg-zinc-950 border-white/10">
                     <DialogHeader>
-                        <DialogTitle className="text-white">{editingId ? 'Editar' : 'Nova'} Automação</DialogTitle>
+                        <DialogTitle className="text-white">{editingId ? 'Editar' : 'Nova'} Automacao</DialogTitle>
                         <DialogDescription className="text-white/50">
-                            Configure quando a automação deve disparar e quais ações executar.
+                            Configure quando a automacao deve disparar e quais acoes executar.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-5 py-2">
+                    <div className="max-h-[68vh] overflow-y-auto pr-1 space-y-4 py-2">
                         {/* Name */}
                         <div className="space-y-1.5">
                             <Label className="text-white/70 text-xs">Nome</Label>
                             <Input
                                 value={name}
                                 onChange={e => setName(e.target.value)}
-                                placeholder="Ex: Qualificado → Atribuir Vendedor"
+                                placeholder="Ex: Qualificado -> Atribuir Vendedor"
                                 className="bg-white/5 border-white/10 text-white"
                             />
                         </div>
 
-                        <Separator className="bg-white/10" />
-
-                        {/* Trigger */}
-                        <div className="space-y-3">
+                        <div className="grid gap-4 lg:grid-cols-2 items-start">
+                            {/* Trigger */}
+                            <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 min-w-0">
                             <Label className="text-white/70 text-xs flex items-center gap-1.5">
                                 <Zap className="h-3 w-3 text-blue-400" /> Quando...
                             </Label>
@@ -464,7 +606,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
                             {/* Trigger Config */}
                             {triggerType === 'stage_changed' && (
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                     <div className="space-y-1">
                                         <Label className="text-white/50 text-[10px]">De (opcional)</Label>
                                         <Select value={triggerConfig.from_stage || '_any'} onValueChange={v => setTriggerConfig({ ...triggerConfig, from_stage: v === '_any' ? undefined : v })}>
@@ -494,7 +636,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
                             {triggerType === 'lead_score_above' && (
                                 <div className="space-y-1">
-                                    <Label className="text-white/50 text-[10px]">Score mínimo</Label>
+                                    <Label className="text-white/50 text-[10px]">Score minimo</Label>
                                     <Input
                                         type="number"
                                         min={0} max={100}
@@ -507,87 +649,200 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                             )}
 
                             {triggerType === 'custom_field_changed' && (
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <Label className="text-white/50 text-[10px]">Campo *</Label>
-                                        <Select
-                                            value={triggerConfig.field_id || ''}
-                                            onValueChange={v => setTriggerConfig({ ...triggerConfig, field_id: v, field_value: '' })}
-                                        >
-                                            <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
-                                                <SelectValue placeholder="Selecione o campo" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {customFields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-white/50 text-[10px]">Igual a (opcional)</Label>
-                                        {(() => {
-                                            const selectedField = getCustomFieldById(triggerConfig.field_id);
-                                            const fieldOptions = selectedField?.type === 'select' ? (selectedField.options || []) : [];
+                                <div className="space-y-3 rounded-md border border-white/10 bg-white/[0.03] p-2.5">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-white/60 text-[10px]">Contato fizer (todas com E)</Label>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 text-[10px] text-white/50 hover:text-white"
+                                                onClick={() => addTriggerCondition('changed_conditions')}
+                                            >
+                                                <Plus className="h-3 w-3 mr-1" /> E
+                                            </Button>
+                                        </div>
 
-                                            if (fieldOptions.length > 0) {
-                                                return (
+                                        {getChangedConditions(triggerConfig).map((condition, index) => (
+                                            <div key={`changed-${index}`} className="space-y-1.5">
+                                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                                                     <Select
-                                                        value={triggerConfig.field_value || ANY_VALUE_SENTINEL}
-                                                        onValueChange={v => setTriggerConfig({
-                                                            ...triggerConfig,
-                                                            field_value: v === ANY_VALUE_SENTINEL ? '' : v,
-                                                        })}
+                                                        value={condition.field_id || ''}
+                                                        onValueChange={v => updateTriggerCondition('changed_conditions', index, { field_id: v, field_value: '' })}
                                                     >
                                                         <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
-                                                            <SelectValue placeholder="Qualquer valor" />
+                                                            <SelectValue placeholder="Campo" />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value={ANY_VALUE_SENTINEL}>Qualquer valor</SelectItem>
-                                                            {fieldOptions.map(option => (
-                                                                <SelectItem key={option.id} value={option.value}>
-                                                                    {option.label}
-                                                                </SelectItem>
-                                                            ))}
+                                                            {customFields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
                                                         </SelectContent>
                                                     </Select>
-                                                );
-                                            }
 
-                                            return (
-                                                <Input
-                                                    value={triggerConfig.field_value || ''}
-                                                    onChange={e => setTriggerConfig({ ...triggerConfig, field_value: e.target.value })}
-                                                    className="bg-white/5 border-white/10 text-white h-8 text-xs"
-                                                    placeholder="Ex: VIP"
-                                                />
-                                            );
-                                        })()}
+                                                    {(() => {
+                                                        const selectedField = getCustomFieldById(condition.field_id);
+                                                        const fieldOptions = selectedField?.type === 'select' ? (selectedField.options || []) : [];
+                                                        if (fieldOptions.length > 0) {
+                                                            return (
+                                                                <Select
+                                                                    value={condition.field_value || ANY_VALUE_SENTINEL}
+                                                                    onValueChange={v => updateTriggerCondition('changed_conditions', index, {
+                                                                        field_value: v === ANY_VALUE_SENTINEL ? '' : v,
+                                                                    })}
+                                                                >
+                                                                    <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                                        <SelectValue placeholder="Qualquer valor" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value={ANY_VALUE_SENTINEL}>Qualquer valor</SelectItem>
+                                                                        {fieldOptions.map(option => (
+                                                                            <SelectItem key={option.id} value={option.value}>
+                                                                                {option.label}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <Input
+                                                                value={condition.field_value || ''}
+                                                                onChange={e => updateTriggerCondition('changed_conditions', index, { field_value: e.target.value })}
+                                                                className="bg-white/5 border-white/10 text-white h-8 text-xs"
+                                                                placeholder="Igual a (opcional)"
+                                                            />
+                                                        );
+                                                    })()}
+
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-white/30 hover:text-red-400"
+                                                        onClick={() => removeTriggerCondition('changed_conditions', index)}
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                                {index < getChangedConditions(triggerConfig).length - 1 && (
+                                                    <p className="text-[10px] text-emerald-300/70 font-medium pl-1">E</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <Separator className="bg-white/10" />
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-white/60 text-[10px]">E contato estiver (todas com E)</Label>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 text-[10px] text-white/50 hover:text-white"
+                                                onClick={() => addTriggerCondition('state_conditions')}
+                                            >
+                                                <Plus className="h-3 w-3 mr-1" /> E
+                                            </Button>
+                                        </div>
+
+                                        {getStateConditions(triggerConfig).length === 0 && (
+                                            <p className="text-[10px] text-white/35">Opcional. Adicione condicoes de estado do contato.</p>
+                                        )}
+
+                                        {getStateConditions(triggerConfig).map((condition, index) => (
+                                            <div key={`state-${index}`} className="space-y-1.5">
+                                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                                    <Select
+                                                        value={condition.field_id || ''}
+                                                        onValueChange={v => updateTriggerCondition('state_conditions', index, { field_id: v, field_value: '' })}
+                                                    >
+                                                        <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                            <SelectValue placeholder="Campo" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {customFields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
+                                                        </SelectContent>
+                                                    </Select>
+
+                                                    {(() => {
+                                                        const selectedField = getCustomFieldById(condition.field_id);
+                                                        const fieldOptions = selectedField?.type === 'select' ? (selectedField.options || []) : [];
+                                                        if (fieldOptions.length > 0) {
+                                                            return (
+                                                                <Select
+                                                                    value={condition.field_value || ANY_VALUE_SENTINEL}
+                                                                    onValueChange={v => updateTriggerCondition('state_conditions', index, {
+                                                                        field_value: v === ANY_VALUE_SENTINEL ? '' : v,
+                                                                    })}
+                                                                >
+                                                                    <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
+                                                                        <SelectValue placeholder="Qualquer valor" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value={ANY_VALUE_SENTINEL}>Qualquer valor</SelectItem>
+                                                                        {fieldOptions.map(option => (
+                                                                            <SelectItem key={option.id} value={option.value}>
+                                                                                {option.label}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <Input
+                                                                value={condition.field_value || ''}
+                                                                onChange={e => updateTriggerCondition('state_conditions', index, { field_value: e.target.value })}
+                                                                className="bg-white/5 border-white/10 text-white h-8 text-xs"
+                                                                placeholder="Igual a (opcional)"
+                                                            />
+                                                        );
+                                                    })()}
+
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-white/30 hover:text-red-400"
+                                                        onClick={() => removeTriggerCondition('state_conditions', index)}
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                                {index < getStateConditions(triggerConfig).length - 1 && (
+                                                    <p className="text-[10px] text-emerald-300/70 font-medium pl-1">E</p>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}
                         </div>
 
-                        <Separator className="bg-white/10" />
-
-                        {/* Actions */}
-                        <div className="space-y-3">
+                            {/* Actions */}
+                            <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 min-w-0">
                             <div className="flex items-center justify-between">
                                 <Label className="text-white/70 text-xs flex items-center gap-1.5">
-                                    <ArrowRight className="h-3 w-3 text-amber-400" /> Então faça...
+                                    <ArrowRight className="h-3 w-3 text-amber-400" /> Entao faca...
                                 </Label>
                                 <Button variant="ghost" size="sm" className="h-6 text-[10px] text-white/50 hover:text-white" onClick={addAction}>
-                                    <Plus className="h-3 w-3 mr-1" /> Ação
+                                    <Plus className="h-3 w-3 mr-1" /> Acao
                                 </Button>
                             </div>
 
                             {actions.length === 0 && (
-                                <p className="text-xs text-white/30 text-center py-3">Nenhuma ação adicionada.</p>
+                                <p className="text-xs text-white/30 text-center py-3">Nenhuma acao adicionada.</p>
                             )}
 
                             {actions.map((action, i) => (
                                 <div key={i} className="p-3 rounded-lg bg-white/5 border border-white/10 space-y-2">
                                     <div className="flex items-center gap-2">
                                         <Select value={action.type} onValueChange={v => updateAction(i, 'type', v)}>
-                                            <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8 flex-1">
+                                            <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8 flex-1 min-w-0">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -605,7 +860,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     {action.type === 'move_to_stage' && (
                                         <Select value={action.config.stage || ''} onValueChange={v => updateAction(i, 'stage', v)}>
                                             <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
-                                                <SelectValue placeholder="Selecione o estágio" />
+                                                <SelectValue placeholder="Selecione o estagio" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {STAGES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
@@ -616,7 +871,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     {action.type === 'assign_owner' && (
                                         <Select value={action.config.owner_id || ''} onValueChange={v => updateAction(i, 'owner_id', v)}>
                                             <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
-                                                <SelectValue placeholder="Selecione o responsável" />
+                                                <SelectValue placeholder="Selecione o responsavel" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>)}
@@ -625,11 +880,11 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     )}
 
                                     {action.type === 'create_deal' && (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                             <Input
                                                 value={action.config.title || ''}
                                                 onChange={e => updateAction(i, 'title', e.target.value)}
-                                                placeholder="Título do deal"
+                                                placeholder="Titulo do deal"
                                                 className="bg-white/5 border-white/10 text-white text-xs h-8"
                                             />
                                             <Input
@@ -646,13 +901,13 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                         <Input
                                             value={action.config.message || ''}
                                             onChange={e => updateAction(i, 'message', e.target.value)}
-                                            placeholder="Mensagem da notificação"
+                                            placeholder="Mensagem da notificacao"
                                             className="bg-white/5 border-white/10 text-white text-xs h-8"
                                         />
                                     )}
 
                                     {action.type === 'update_custom_field' && (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                             <Select
                                                 value={action.config.field_id || ''}
                                                 onValueChange={v => {
@@ -710,7 +965,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
                                     {action.type === 'api_call' && (
                                         <div className="space-y-4 pt-2">
-                                            <div className="flex gap-2">
+                                            <div className="grid grid-cols-1 gap-2 md:grid-cols-[100px_minmax(0,1fr)_auto]">
                                                 <div className="w-[100px]">
                                                     <Select value={action.config.method || 'GET'} onValueChange={v => updateAction(i, 'method', v)}>
                                                         <SelectTrigger className="bg-white/5 border-white/10 text-white text-xs h-8">
@@ -724,7 +979,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
-                                                <div className="flex flex-1 gap-1">
+                                                <div className="flex min-w-0 flex-1 gap-1">
                                                     <Input
                                                         value={action.config.url || ''}
                                                         ref={element => { variableFieldRefs.current[`action-${i}-url`] = element; }}
@@ -737,7 +992,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget);
                                                         }}
                                                         placeholder="URL do Webhook (ex: https://api.exemplo.com/webhook)"
-                                                        className="bg-white/5 border-white/10 text-white text-xs h-8 flex-1"
+                                                        className="bg-white/5 border-white/10 text-white text-xs h-8 flex-1 min-w-0"
                                                     />
                                                     <VariableSelector
                                                         customFields={customFields}
@@ -760,14 +1015,14 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                     </Button>
                                                 </div>
                                                 {(action.config.headers || []).map((header: any, hIndex: number) => (
-                                                    <div key={hIndex} className="flex gap-2">
+                                                    <div key={hIndex} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                                                         <Input
                                                             value={header.key}
                                                             onChange={e => updateActionHeader(i, hIndex, 'key', e.target.value)}
                                                             placeholder="Key (ex: Authorization)"
-                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1 min-w-0"
                                                         />
-                                                        <div className="flex flex-1 gap-1">
+                                                        <div className="flex min-w-0 flex-1 gap-1">
                                                             <Input
                                                                 value={header.value}
                                                                 ref={element => { variableFieldRefs.current[`action-${i}-header-${hIndex}-value`] = element; }}
@@ -780,7 +1035,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                     rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget);
                                                                 }}
                                                                 placeholder="Value (ex: Bearer token...)"
-                                                                className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                                className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1 min-w-0"
                                                             />
                                                             <div className="scale-[0.875] origin-right">
                                                                 <VariableSelector
@@ -809,7 +1064,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         <Label className="text-white/70 font-medium">Body (Payload)</Label>
                                                         <Select value={action.config.bodyType || 'json'} onValueChange={v => updateAction(i, 'bodyType', v)}>
                                                             <SelectTrigger className="w-[180px] bg-black/20 border-white/10 text-white text-[10px] h-6 px-2">
-                                                                <SelectValue placeholder="Tipo de Envío" />
+                                                                <SelectValue placeholder="Tipo de Envio" />
                                                             </SelectTrigger>
                                                             <SelectContent>
                                                                 <SelectItem value="none">Nenhum</SelectItem>
@@ -855,18 +1110,18 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         <div className="space-y-2">
                                                             <div className="flex justify-end">
                                                                 <Button variant="ghost" size="sm" className="h-6 text-[10px] text-white/50 hover:text-white" onClick={() => addActionFormData(i)}>
-                                                                    <Plus className="h-3 w-3 mr-1" /> Adicionar Parâmetro
+                                                                    <Plus className="h-3 w-3 mr-1" /> Adicionar Parametro
                                                                 </Button>
                                                             </div>
                                                             {(action.config.formData || []).map((data: any, dIndex: number) => (
-                                                                <div key={dIndex} className="flex gap-2">
+                                                                <div key={dIndex} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                                                                     <Input
                                                                         value={data.key}
                                                                         onChange={e => updateActionFormData(i, dIndex, 'key', e.target.value)}
                                                                         placeholder="Key (ex: email)"
-                                                                        className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                                        className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1 min-w-0"
                                                                     />
-                                                                    <div className="flex flex-1 gap-1">
+                                                                    <div className="flex min-w-0 flex-1 gap-1">
                                                                         <Input
                                                                             value={data.value}
                                                                             ref={element => { variableFieldRefs.current[`action-${i}-formdata-${dIndex}-value`] = element; }}
@@ -879,7 +1134,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                                 rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget);
                                                                             }}
                                                                             placeholder="Value (ex: {{contact.email}})"
-                                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1"
+                                                                            className="bg-black/20 border-white/10 text-white h-7 text-xs flex-1 min-w-0"
                                                                         />
                                                                         <div className="scale-[0.875] origin-right">
                                                                             <VariableSelector
@@ -898,7 +1153,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                     </Button>
                                                                 </div>
                                                             ))}
-                                                            {!(action.config.formData?.length > 0) && <p className="text-[10px] text-white/30 mt-1">Nenhum parâmetro configurado.</p>}
+                                                            {!(action.config.formData?.length > 0) && <p className="text-[10px] text-white/30 mt-1">Nenhum parametro configurado.</p>}
                                                         </div>
                                                     )}
                                                 </div>
@@ -907,6 +1162,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     )}
                                 </div>
                             ))}
+                            </div>
                         </div>
                     </div>
 
@@ -916,7 +1172,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                         </Button>
                         <Button onClick={handleSave} className="gap-1.5">
                             <Zap className="h-3.5 w-3.5" />
-                            {editingId ? 'Salvar' : 'Criar'} Automação
+                            {editingId ? 'Salvar' : 'Criar'} Automacao
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -924,3 +1180,4 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
         </div>
     );
 }
+

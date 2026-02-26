@@ -34,6 +34,11 @@ import { Badge } from '../ui/badge';
 import { uploadToS3Action } from '@/actions/upload-s3';
 
 const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
+const FORM_GROUP_CLASS = 'group space-y-2';
+const FORM_LABEL_CLASS = 'text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80 transition-colors group-focus-within:text-primary';
+const FORM_INPUT_CLASS = 'h-12 rounded-2xl border border-white/10 bg-background/60 px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all placeholder:text-muted-foreground/60 hover:border-primary/40 focus-visible:border-primary/70 focus-visible:bg-background/90 focus-visible:ring-0';
+const FORM_SELECT_TRIGGER_CLASS = 'h-12 rounded-2xl border border-white/10 bg-background/60 px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 focus:bg-background/90';
+const SECTION_CARD_CLASS = 'rounded-[24px] border border-white/10 bg-gradient-to-br from-background/90 via-background/70 to-primary/[0.08] p-5 md:p-6 shadow-[0_28px_80px_-55px_rgba(16,185,129,0.9)] backdrop-blur-xl';
 
 function extractWhatsappJidLocalPart(value?: string | null): string {
   if (!value) return '';
@@ -59,7 +64,7 @@ function SaveButton() {
     <Button
       type="submit"
       disabled={pending}
-      className="rounded-xl bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all font-medium h-10 px-6 border border-white/10 dark:border-white/5"
+      className="h-11 rounded-2xl border border-white/20 bg-gradient-to-r from-emerald-300 via-primary to-cyan-300 px-7 font-semibold text-black shadow-[0_18px_40px_-18px_rgba(16,185,129,0.9)] transition-all hover:brightness-110 hover:shadow-[0_22px_42px_-16px_rgba(16,185,129,0.95)]"
     >
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       <Save className="mr-2 h-4 w-4" />
@@ -92,11 +97,11 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between h-auto min-h-[44px] bg-background/50 border-border/40 hover:bg-background/80 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4"
+          className="min-h-[48px] h-auto w-full justify-between rounded-2xl border border-white/10 bg-background/60 px-4 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 hover:bg-background/80"
         >
           <div className="flex flex-wrap gap-1.5 py-1.5">
             {selectedTags.length > 0 ? selectedTags.map(tag => (
-              <Badge key={tag.id} style={{ backgroundColor: tag.color, color: tag.color.startsWith('#FEE') || tag.color === '#FFFFFF' || tag.color.toLowerCase() === '#fff' ? '#000' : '#fff' }} className="border-transparent rounded-lg px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+              <Badge key={tag.id} style={{ backgroundColor: tag.color, color: tag.color.startsWith('#FEE') || tag.color === '#FFFFFF' || tag.color.toLowerCase() === '#fff' ? '#000' : '#fff' }} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
                 {tag.label}
                 <X className="ml-1.5 h-3 w-3 hover:bg-black/20 rounded-full transition-colors" />
               </Badge>
@@ -105,7 +110,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-xl border-border/40 shadow-xl overflow-hidden">
+      <PopoverContent className="w-[--radix-popover-trigger-width] overflow-hidden rounded-2xl border border-white/10 p-0 shadow-2xl">
         <Command>
           <CommandInput placeholder="Buscar etiqueta..." />
           <CommandList>
@@ -188,8 +193,8 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
   };
 
   return (
-    <div className="group space-y-3 p-1">
-      <Label htmlFor={fieldName} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">{field.label}</Label>
+    <div className="group space-y-3">
+      <Label htmlFor={fieldName} className={FORM_LABEL_CLASS}>{field.label}</Label>
 
       {/* The hidden input stores the entire array serialized as JSON */}
       <input type="hidden" name={fieldName} value={JSON.stringify(files)} />
@@ -197,20 +202,20 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
       {files.length > 0 && (
         <div className="space-y-3">
           {files.map((file, index) => (
-            <div key={index} className="flex flex-col gap-2 p-3 rounded-xl bg-background/50 border border-border/40 shadow-sm">
+            <div key={index} className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-background/55 p-3.5 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)]">
               <div className="flex items-center justify-between gap-2">
                 <a href={file.url} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-blue-500 hover:underline truncate max-w-[80%]" title={file.name}>
                   {file.name}
                 </a>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0" onClick={() => handleRemoveFile(index)}>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-xl text-destructive hover:bg-destructive/10" onClick={() => handleRemoveFile(index)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
               <Input
-                placeholder="Nota / Descrição (Opcional)"
+                placeholder="Nota / Descricao (Opcional)"
                 value={file.note}
                 onChange={(e) => handleNoteChange(index, e.target.value)}
-                className="h-9 text-[12px] bg-background border-border/40 placeholder:text-muted-foreground/50"
+                className="h-10 rounded-xl border-white/10 bg-background/70 text-[12px] placeholder:text-muted-foreground/50"
               />
             </div>
           ))}
@@ -222,7 +227,7 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
           type="file"
           onChange={handleFileChange}
           disabled={uploading}
-          className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[11px] file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 text-[12px]"
+          className="h-12 rounded-2xl border border-white/10 bg-background/60 text-[12px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all file:mr-4 file:rounded-xl file:border-0 file:bg-primary/15 file:px-4 file:py-2 file:text-[11px] file:font-semibold file:text-primary hover:border-primary/40 hover:file:bg-primary/25"
         />
         {uploading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
@@ -259,7 +264,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
 
   useEffect(() => {
     if (state.success) {
-      toast({ title: "Contato salvo!", description: "As informações do contato foram salvas com sucesso." });
+      toast({ title: "Contato salvo!", description: "As informacoes do contato foram salvas com sucesso." });
       onSave(state.contact);
       setIsOpen(false);
     }
@@ -272,13 +277,13 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     switch (field.type) {
       case 'select':
         return (
-          <div key={field.id} className="group space-y-2">
-            <Label htmlFor={fieldName} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">{field.label}</Label>
+          <div className={FORM_GROUP_CLASS}>
+            <Label htmlFor={fieldName} className={FORM_LABEL_CLASS}>{field.label}</Label>
             <Select name={fieldName} defaultValue={defaultValue}>
-              <SelectTrigger id={fieldName} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4">
+              <SelectTrigger id={fieldName} className={FORM_SELECT_TRIGGER_CLASS}>
                 <SelectValue placeholder={field.placeholder || 'Selecione...'} />
               </SelectTrigger>
-              <SelectContent className="rounded-xl border-border/40 shadow-xl">
+              <SelectContent className="rounded-2xl border border-white/10 shadow-2xl">
                 {field.options?.map(option => (
                   <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                 ))}
@@ -288,13 +293,13 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
         );
       case 'file':
         return (
-          <FileUploadField key={field.id} field={field} fieldName={fieldName} defaultValue={defaultValue} />
+          <FileUploadField field={field} fieldName={fieldName} defaultValue={defaultValue} />
         );
       default:
         return (
-          <div key={field.id} className="group space-y-2">
-            <Label htmlFor={fieldName} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">{field.label}</Label>
-            <Input id={fieldName} name={fieldName} type={field.type} placeholder={field.placeholder} defaultValue={defaultValue} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4" />
+          <div className={FORM_GROUP_CLASS}>
+            <Label htmlFor={fieldName} className={FORM_LABEL_CLASS}>{field.label}</Label>
+            <Input id={fieldName} name={fieldName} type={field.type} placeholder={field.placeholder} defaultValue={defaultValue} className={FORM_INPUT_CLASS} />
           </div>
         )
     }
@@ -303,169 +308,211 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-[800px] p-0 gap-0 overflow-hidden bg-background/80 backdrop-blur-2xl border-border/40 shadow-2xl rounded-3xl">
-        {/* Glow effects */}
-        <div className="pointer-events-none absolute -top-40 -right-40 h-[400px] w-[400px] rounded-full bg-primary/20 blur-[100px]" />
-        <div className="pointer-events-none absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full bg-blue-500/10 blur-[100px]" />
+      <DialogContent className="sm:max-w-[980px] gap-0 overflow-hidden rounded-[30px] border border-white/10 bg-background/95 p-0 shadow-[0_42px_120px_-70px_rgba(16,185,129,0.95)]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_20%,rgba(14,165,233,0.12),transparent_36%),radial-gradient(circle_at_92%_12%,rgba(16,185,129,0.16),transparent_34%),radial-gradient(circle_at_30%_100%,rgba(59,130,246,0.10),transparent_42%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-emerald-400/10 to-transparent" />
 
-        <DialogHeader className="relative z-10 p-8 pb-4">
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
-            {contact ? 'Editar Contato' : 'Criar Novo Contato'}
-          </DialogTitle>
-          <DialogDescription className="text-sm font-medium text-muted-foreground mt-1.5">
-            Preencha os detalhes abaixo para adicionar ou atualizar um contato no seu CRM.
-          </DialogDescription>
+        <DialogHeader className="relative z-10 border-b border-white/10 px-6 py-5 md:px-8 md:py-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <span className="inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+                Cadastro CRM
+              </span>
+              <DialogTitle className="text-2xl font-semibold tracking-tight md:text-[2rem]">
+                {contact ? 'Editar Contato' : 'Criar Novo Contato'}
+              </DialogTitle>
+              <DialogDescription className="max-w-2xl text-sm font-medium text-muted-foreground/85">
+                Atualize os dados com rapidez. O layout foi otimizado para preenchimento direto por blocos.
+              </DialogDescription>
+            </div>
+            <div className="hidden max-w-[200px] rounded-2xl border border-white/10 bg-background/55 px-4 py-3 text-right md:block">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Modo rapido</p>
+              <p className="mt-1 text-xs text-muted-foreground/80">Preencha por aba e salve sem trocar de tela.</p>
+            </div>
+          </div>
         </DialogHeader>
 
         <form action={formAction} className="relative z-10 flex flex-col">
           <input type="hidden" name="id" value={contact?.id || ''} />
           <input type="hidden" name="workspaceId" value={workspaceId} />
 
-          <Tabs defaultValue="personal" className="w-full flex flex-col relative z-10">
-            <div className="px-8 mb-2">
-              <TabsList className="grid w-full grid-cols-3 bg-muted/30 p-1 rounded-xl h-11 border border-border/20">
-                <TabsTrigger value="personal" className="rounded-lg text-[11px] font-semibold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all">Pessoal</TabsTrigger>
-                <TabsTrigger value="location" className="rounded-lg text-[11px] font-semibold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all">Local / Mídia</TabsTrigger>
-                <TabsTrigger value="management" className="rounded-lg text-[11px] font-semibold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all">Gestão</TabsTrigger>
-              </TabsList>
-            </div>
+          <Tabs defaultValue="personal" className="relative z-10 px-6 py-5 md:px-8 md:py-6">
+            <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <TabsList className="grid h-auto grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-background/40 p-2 md:grid-cols-1">
+                  <TabsTrigger value="personal" className="h-11 gap-2 rounded-xl border border-transparent text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary md:justify-start md:px-3">
+                    <UserIcon className="h-4 w-4" />
+                    <span>Pessoal</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="location" className="h-11 gap-2 rounded-xl border border-transparent text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary md:justify-start md:px-3">
+                    <MapPin className="h-4 w-4" />
+                    <span>Local / Midia</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="management" className="h-11 gap-2 rounded-xl border border-transparent text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary md:justify-start md:px-3">
+                    <Briefcase className="h-4 w-4" />
+                    <span>Gestao</span>
+                  </TabsTrigger>
+                </TabsList>
 
-            <div className="flex-1 overflow-y-auto max-h-[55vh] px-8 py-2">
-              <TabsContent forceMount value="personal" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
-                {/* Seção Pessoal */}
-                <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 space-y-6 shadow-sm transition-all hover:bg-card/50">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <UserIcon className="h-4 w-4" />
-                    </div>
-                    <h3 className="font-semibold text-[15px] tracking-tight">Informações Pessoais</h3>
-                  </div>
+                <div className="hidden rounded-2xl border border-white/10 bg-background/45 p-4 md:block">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Fluxo sugerido</p>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground/85">
+                    1. Preencha dados pessoais.
+                    <br />
+                    2. Ajuste local e midia.
+                    <br />
+                    3. Defina dono e etiquetas.
+                  </p>
+                </div>
+              </aside>
 
-                  <div className="space-y-5">
-                    <div className="group space-y-2">
-                      <Label htmlFor="name" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Nome Completo <span className="text-primary">*</span></Label>
-                      <Input id="name" name="name" placeholder="Ex: João da Silva" required defaultValue={contact?.name || ''} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4" />
-                    </div>
-
-                    <div className="group space-y-2">
-                      <Label htmlFor="phone_number_jid" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">WhatsApp</Label>
-                      <input
-                        type="hidden"
-                        name="phone_number_jid"
-                        value={phoneJidLocalPart ? `${phoneJidLocalPart}${WHATSAPP_JID_SUFFIX}` : ''}
-                      />
-                      <div className="flex items-center rounded-xl border border-border/40 bg-background/50 overflow-hidden focus-within:ring-1 focus-within:ring-ring focus-within:bg-background transition-all shadow-sm hover:border-border/80">
-                        <div className="pl-4 pr-3 text-muted-foreground/70">
-                          <Phone className="h-4 w-4" />
+              <div className="min-w-0">
+                <div className="max-h-[56vh] space-y-6 overflow-y-auto pr-1">
+                  <TabsContent forceMount value="personal" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
+                    <div className={SECTION_CARD_CLASS}>
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary">
+                          <UserIcon className="h-4 w-4" />
                         </div>
-                        <Input
-                          id="phone_number_jid"
-                          name="phone_number_jid_local"
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="5511987654321"
-                          value={phoneJidLocalPart}
-                          onChange={(e) => setPhoneJidLocalPart(e.target.value.replace(/\D/g, ''))}
-                          className="h-11 border-0 shadow-none bg-transparent focus-visible:ring-0 px-0 placeholder:text-muted-foreground/50"
-                        />
-                        <div className="bg-foreground/[0.02] px-4 h-11 flex items-center justify-center text-[11px] text-muted-foreground border-l border-border/40 font-medium tracking-wider">
-                          @s.whatsapp.net
+                        <h3 className="text-[16px] font-semibold tracking-tight">Informacoes Pessoais</h3>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div className={FORM_GROUP_CLASS}>
+                          <Label htmlFor="name" className={FORM_LABEL_CLASS}>
+                            Nome Completo <span className="text-primary">*</span>
+                          </Label>
+                          <Input id="name" name="name" placeholder="Ex: Joao da Silva" required defaultValue={contact?.name || ''} className={FORM_INPUT_CLASS} />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                          <div className={FORM_GROUP_CLASS}>
+                            <Label htmlFor="phone_number_jid" className={FORM_LABEL_CLASS}>WhatsApp</Label>
+                            <input
+                              type="hidden"
+                              name="phone_number_jid"
+                              value={phoneJidLocalPart ? `${phoneJidLocalPart}${WHATSAPP_JID_SUFFIX}` : ''}
+                            />
+                            <div className="flex items-center overflow-hidden rounded-2xl border border-white/10 bg-background/60 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 focus-within:border-primary/70">
+                              <div className="pl-4 pr-3 text-muted-foreground/70">
+                                <Phone className="h-4 w-4" />
+                              </div>
+                              <Input
+                                id="phone_number_jid"
+                                name="phone_number_jid_local"
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="5511987654321"
+                                value={phoneJidLocalPart}
+                                onChange={(e) => setPhoneJidLocalPart(e.target.value.replace(/\D/g, ''))}
+                                className="h-12 border-0 bg-transparent px-0 shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0"
+                              />
+                              <div className="flex h-12 items-center justify-center border-l border-white/10 bg-foreground/[0.03] px-4 text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+                                @s.whatsapp.net
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className={FORM_GROUP_CLASS}>
+                            <Label htmlFor="email" className={FORM_LABEL_CLASS}>E-mail</Label>
+                            <div className="relative">
+                              <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                              <Input id="email" name="email" type="email" placeholder="joao@exemplo.com" defaultValue={contact?.email || ''} className={`${FORM_INPUT_CLASS} pl-11`} />
+                            </div>
+                          </div>
+                        </div>
+
+                        {customFields.length > 0 && (
+                          <div className="space-y-4 border-t border-white/10 pt-5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary">
+                                <LayoutList className="h-4 w-4" />
+                              </div>
+                              <h3 className="text-[16px] font-semibold tracking-tight">Informacoes Adicionais</h3>
+                            </div>
+                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                              {customFields.map((field) => (
+                                <div key={field.id} className={field.type === 'file' ? 'md:col-span-2' : ''}>
+                                  {renderCustomField(field)}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent forceMount value="location" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
+                    <div className={SECTION_CARD_CLASS}>
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary">
+                          <MapPin className="h-4 w-4" />
+                        </div>
+                        <h3 className="text-[16px] font-semibold tracking-tight">Localizacao e Midia</h3>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div className={FORM_GROUP_CLASS}>
+                          <Label htmlFor="address" className={FORM_LABEL_CLASS}>Endereco Completo</Label>
+                          <div className="relative">
+                            <MapPin className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                            <Input id="address" name="address" placeholder="Rua, Numero, Bairro, Cidade" defaultValue={contact?.address || ''} className={`${FORM_INPUT_CLASS} pl-11`} />
+                          </div>
+                        </div>
+
+                        <div className={FORM_GROUP_CLASS}>
+                          <Label htmlFor="avatar_url" className={FORM_LABEL_CLASS}>URL do Avatar</Label>
+                          <div className="relative">
+                            <Link className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                            <Input id="avatar_url" name="avatar_url" type="url" placeholder="https://exemplo.com/avatar.png" defaultValue={contact?.avatar_url || ''} className={`${FORM_INPUT_CLASS} pl-11`} />
+                          </div>
                         </div>
                       </div>
                     </div>
+                  </TabsContent>
 
-                    <div className="group space-y-2">
-                      <Label htmlFor="email" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">E-mail</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
-                        <Input id="email" name="email" type="email" placeholder="joao@exemplo.com" defaultValue={contact?.email || ''} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm pl-11" />
+                  <TabsContent forceMount value="management" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
+                    <div className={SECTION_CARD_CLASS}>
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary">
+                          <Briefcase className="h-4 w-4" />
+                        </div>
+                        <h3 className="text-[16px] font-semibold tracking-tight">Atribuicao e Organizacao</h3>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div className={FORM_GROUP_CLASS}>
+                          <Label htmlFor="owner_id" className={FORM_LABEL_CLASS}>Vendedor Responsavel</Label>
+                          <Select name="owner_id" defaultValue={contact?.owner_id || 'unassigned'}>
+                            <SelectTrigger id="owner_id" className={FORM_SELECT_TRIGGER_CLASS}>
+                              <SelectValue placeholder="Selecione um proprietario" />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-2xl border border-white/10 shadow-2xl">
+                              <SelectItem value="unassigned">Nenhum</SelectItem>
+                              {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className={FORM_GROUP_CLASS}>
+                          <Label className={`${FORM_LABEL_CLASS} flex items-center gap-2`}>
+                            <TagIcon className="h-3.5 w-3.5 text-primary/80" />
+                            Etiquetas
+                          </Label>
+                          <MultiSelectTags availableTags={availableTags} initialSelectedTags={contact?.tags} />
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </TabsContent>
                 </div>
-              </TabsContent>
-
-              <TabsContent forceMount value="location" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
-                {/* Seção Endereço/Outros */}
-                <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 space-y-6 shadow-sm transition-all hover:bg-card/50">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <MapPin className="h-4 w-4" />
-                    </div>
-                    <h3 className="font-semibold text-[15px] tracking-tight">Localização e Mídia</h3>
-                  </div>
-
-                  <div className="space-y-5">
-                    <div className="group space-y-2">
-                      <Label htmlFor="address" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Endereço Completo</Label>
-                      <div className="relative">
-                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
-                        <Input id="address" name="address" placeholder="Rua, Número, Bairro, Cidade" defaultValue={contact?.address || ''} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm pl-11" />
-                      </div>
-                    </div>
-
-                    <div className="group space-y-2">
-                      <Label htmlFor="avatar_url" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">URL do Avatar</Label>
-                      <div className="relative">
-                        <Link className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
-                        <Input id="avatar_url" name="avatar_url" type="url" placeholder="https://exemplo.com/avatar.png" defaultValue={contact?.avatar_url || ''} className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm pl-11" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent forceMount value="management" className="mt-0 space-y-6 focus-visible:outline-none focus-visible:ring-0 data-[state=inactive]:hidden">
-                <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 space-y-6 shadow-sm transition-all hover:bg-card/50">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <Briefcase className="h-4 w-4" />
-                    </div>
-                    <h3 className="font-semibold text-[15px] tracking-tight">Atribuição e Organização</h3>
-                  </div>
-
-                  <div className="space-y-5">
-                    <div className="group space-y-2">
-                      <Label htmlFor="owner_id" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest group-focus-within:text-primary transition-colors">Vendedor Responsável</Label>
-                      <Select name="owner_id" defaultValue={contact?.owner_id || 'unassigned'}>
-                        <SelectTrigger id="owner_id" className="h-11 bg-background/50 border-border/40 hover:border-border/80 focus:bg-background transition-all rounded-xl shadow-sm px-4">
-                          <SelectValue placeholder="Selecione um proprietário" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl border-border/40 shadow-xl">
-                          <SelectItem value="unassigned">Nenhum</SelectItem>
-                          {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="group space-y-2">
-                      <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 group-focus-within:text-primary transition-colors">Etiquetas (Tags)</Label>
-                      <MultiSelectTags availableTags={availableTags} initialSelectedTags={contact?.tags} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Informações Adicionais */}
-                {customFields.length > 0 && (
-                  <div className="rounded-2xl border border-border/30 bg-card/30 backdrop-blur-md p-6 space-y-6 shadow-sm transition-all hover:bg-card/50">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <LayoutList className="h-4 w-4" />
-                      </div>
-                      <h3 className="font-semibold text-[15px] tracking-tight">Informações Adicionais</h3>
-                    </div>
-                    <div className="space-y-5">
-                      {customFields.map(renderCustomField)}
-                    </div>
-                  </div>
-                )}
-              </TabsContent>
+              </div>
             </div>
           </Tabs>
 
-          <div className="px-8 pb-4">
+          <div className="px-6 pb-4 md:px-8">
             {state.error && (
-              <Alert variant="destructive" className="mt-2 rounded-xl border-destructive/30 bg-destructive/5 text-destructive backdrop-blur-sm">
+              <Alert variant="destructive" className="mt-2 rounded-2xl border-destructive/30 bg-destructive/10 text-destructive backdrop-blur-md">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Erro ao Salvar</AlertTitle>
                 <AlertDescription>{state.error}</AlertDescription>
@@ -473,8 +520,10 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
             )}
           </div>
 
-          <DialogFooter className="relative z-10 p-8 pt-5 border-t border-border/20 bg-background/30 backdrop-blur-md rounded-b-3xl">
-            <Button type="button" variant="ghost" className="rounded-xl hover:bg-foreground/5 transition-colors font-medium h-10 px-6" onClick={() => setIsOpen(false)}>Cancelar</Button>
+          <DialogFooter className="relative z-10 rounded-b-[30px] border-t border-white/10 bg-background/40 px-6 py-5 backdrop-blur-xl md:px-8">
+            <Button type="button" variant="ghost" className="h-11 rounded-2xl px-6 font-medium transition-colors hover:bg-foreground/5" onClick={() => setIsOpen(false)}>
+              Cancelar
+            </Button>
             <SaveButton />
           </DialogFooter>
         </form>
@@ -482,3 +531,4 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
     </Dialog>
   );
 }
+

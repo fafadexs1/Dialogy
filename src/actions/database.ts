@@ -488,6 +488,9 @@ create table if not exists public.chats (
 create index if not exists idx_chats_workspace on public.chats(workspace_id);
 create index if not exists idx_chats_contact on public.chats(contact_id);
 create index if not exists idx_chats_agent on public.chats(agent_id);
+create index if not exists idx_chats_workspace_status on public.chats(workspace_id, status);
+create index if not exists idx_chats_workspace_contact_id on public.chats(workspace_id, contact_id, id);
+create index if not exists idx_chats_workspace_status_agent on public.chats(workspace_id, status, agent_id);
 -- Garantir coluna de protocolo em chats (para bases já criadas)
 alter table if exists public.chats add column if not exists protocol text;
 create unique index if not exists idx_chats_protocol on public.chats(protocol);
@@ -534,6 +537,11 @@ create table if not exists public.messages (
 create index if not exists idx_messages_workspace on public.messages(workspace_id);
 create index if not exists idx_messages_chat on public.messages(chat_id);
 create index if not exists idx_messages_created_at on public.messages(created_at);
+create index if not exists idx_messages_chat_created on public.messages(chat_id, created_at desc);
+create index if not exists idx_messages_chat_created_id_desc on public.messages(chat_id, created_at desc, id desc);
+create index if not exists idx_messages_workspace_created on public.messages(workspace_id, created_at desc);
+create index if not exists idx_messages_unread on public.messages(chat_id)
+  where from_me = false and coalesce(is_read, false) = false;
 
 -- Garantir colunas opcionais novas em messages
 alter table if exists public.messages add column if not exists platform public.meta_channel_type_enum;
@@ -584,6 +592,7 @@ create table if not exists public.meta_contacts (
 );
 create unique index if not exists uq_meta_contacts_channel_external on public.meta_contacts(channel_id, external_id);
 create index if not exists idx_meta_contacts_contact on public.meta_contacts(contact_id);
+create index if not exists idx_meta_contacts_contact_created_desc on public.meta_contacts(contact_id, created_at desc);
 
 -- Add FK constraint and migration for contacts.meta_contact_id
 alter table if exists public.contacts add column if not exists meta_contact_id uuid;
