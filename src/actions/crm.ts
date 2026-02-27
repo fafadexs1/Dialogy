@@ -34,6 +34,24 @@ function normalizeWhatsappJid(value?: string | null): string | null {
     return `${localPart}${WHATSAPP_JID_SUFFIX}`;
 }
 
+function normalizeComparableValue(value: unknown): string {
+    return String(value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+}
+
+function matchesConversionValue(expected: string | null | undefined, candidate: string | null | undefined): boolean {
+    const candidateText = String(candidate ?? '').trim();
+    if (!candidateText) return false;
+
+    const expectedText = String(expected ?? '').trim();
+    if (!expectedText) return true; // Empty expected means "any non-empty value".
+
+    return normalizeComparableValue(expectedText) === normalizeComparableValue(candidateText);
+}
+
 export async function getContacts(
     workspaceId: string,
     params: {
@@ -255,6 +273,19 @@ export const saveContactAction = withDebug(
                 [contactId]
             );
             const currentFields = currentFieldsRes.rows.reduce((acc, row) => ({ ...acc, [row.field_id]: row.value }), {});
+            const conversionConfigRes = await client.query(
+                `
+                SELECT
+                    COALESCE(to_jsonb(w)->>'conversion_custom_field_id', '') AS conversion_custom_field_id,
+                    COALESCE(to_jsonb(w)->>'conversion_custom_field_value', '') AS conversion_custom_field_value
+                FROM workspaces w
+                WHERE w.id = $1
+                `,
+                [workspaceId]
+            );
+            const conversionFieldId = conversionConfigRes.rows[0]?.conversion_custom_field_id || '';
+            const conversionFieldValue = conversionConfigRes.rows[0]?.conversion_custom_field_value || '';
+            const previousConversionRawValue = conversionFieldId ? (currentFields[conversionFieldId] || '') : '';
 
             // Update tags
             await client.query('DELETE FROM contact_tags WHERE contact_id = $1', [contactId]);
@@ -300,6 +331,25 @@ export const saveContactAction = withDebug(
             if (updatedContact) {
                 // Formatting for frontend compatibility
                 updatedContact.owner = updatedContact.owner_id ? { id: updatedContact.owner_id, name: updatedContact.owner_name } : undefined;
+            }
+
+            if (contactId && conversionFieldId) {
+                const updatedCustomFields = (updatedContact?.custom_fields || {}) as Record<string, string>;
+                const nextConversionRawValue = updatedCustomFields[conversionFieldId] || '';
+                const wasConverted = matchesConversionValue(conversionFieldValue, previousConversionRawValue);
+                const isConverted = matchesConversionValue(conversionFieldValue, nextConversionRawValue);
+                const missingConversionTimestamp = isConverted && !updatedContact?.converted_at;
+
+                if ((!wasConverted && isConverted) || missingConversionTimestamp) {
+                    await client.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS converted_at timestamptz`);
+                    await client.query(
+                        `UPDATE contacts SET converted_at = COALESCE(converted_at, timezone('utc', now())) WHERE id = $1`,
+                        [contactId]
+                    );
+                    if (updatedContact && !updatedContact.converted_at) {
+                        updatedContact.converted_at = new Date().toISOString();
+                    }
+                }
             }
 
             await client.query('COMMIT');
@@ -562,6 +612,97 @@ export async function getCustomFieldDefinitions(workspaceId: string): Promise<{ 
     }
 }
 
+export async function getWorkspaceConversionFieldConfig(workspaceId: string): Promise<{
+    config: { fieldId: string; fieldValue: string } | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { config: null, error: "Usuário não autenticado." };
+
+    try {
+        if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
+            return { config: null, error: "Acesso não autorizado." };
+        }
+
+        const res = await db.query(
+            `
+            SELECT
+                COALESCE(to_jsonb(w)->>'conversion_custom_field_id', '') AS conversion_custom_field_id,
+                COALESCE(to_jsonb(w)->>'conversion_custom_field_value', '') AS conversion_custom_field_value
+            FROM workspaces w
+            WHERE w.id = $1
+            `,
+            [workspaceId]
+        );
+
+        const row = res.rows[0] || {};
+        return {
+            config: {
+                fieldId: row.conversion_custom_field_id || '',
+                fieldValue: row.conversion_custom_field_value || '',
+            }
+        };
+    } catch (error) {
+        console.error("[GET_WORKSPACE_CONVERSION_FIELD_CONFIG] Error:", error);
+        return { config: null, error: "Falha ao buscar configuração de conversão." };
+    }
+}
+
+export const updateWorkspaceConversionFieldConfig = withDebug(
+    'update_workspace_conversion_field_config',
+    async function updateWorkspaceConversionFieldConfig(
+        workspaceId: string,
+        data: { fieldId?: string | null; fieldValue?: string | null }
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
+
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para editar essa configuração." };
+        }
+
+        const fieldId = data.fieldId ? String(data.fieldId) : null;
+        const fieldValue = fieldId ? String(data.fieldValue || '') : '';
+
+        try {
+            await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_id uuid`);
+            await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_value text`);
+
+            if (fieldId) {
+                const fieldRes = await db.query(
+                    `SELECT 1 FROM custom_field_definitions WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+                    [fieldId, workspaceId]
+                );
+                if ((fieldRes.rowCount || 0) === 0) {
+                    return { success: false, error: "Campo de conversão inválido para este workspace." };
+                }
+            }
+
+            await db.query(
+                `
+                UPDATE workspaces
+                SET conversion_custom_field_id = $1,
+                    conversion_custom_field_value = $2
+                WHERE id = $3
+                `,
+                [fieldId, fieldValue, workspaceId]
+            );
+
+            revalidatePath('/crm');
+            revalidatePath('/analytics');
+            return { success: true };
+        } catch (error) {
+            console.error("[UPDATE_WORKSPACE_CONVERSION_FIELD_CONFIG] Error:", error);
+            return { success: false, error: "Falha ao salvar configuração de conversão." };
+        }
+    },
+    {
+        contextResolver: (workspaceId, data) => ({ payload: { workspaceId, fieldId: data.fieldId } })
+    }
+);
+
 export const createCustomFieldDefinition = withDebug(
     'create_custom_field',
     async function createCustomFieldDefinition(
@@ -593,6 +734,71 @@ export const createCustomFieldDefinition = withDebug(
     }
 );
 
+export const updateCustomFieldDefinition = withDebug(
+    'update_custom_field',
+    async function updateCustomFieldDefinition(
+        fieldId: string,
+        field: Partial<Omit<CustomFieldDefinition, 'id' | 'workspace_id'>>
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+
+        try {
+            const fieldRes = await db.query('SELECT workspace_id FROM custom_field_definitions WHERE id = $1', [fieldId]);
+            if (fieldRes.rowCount === 0) return { success: false, error: "Campo nÃ£o encontrado." };
+            const workspaceId = fieldRes.rows[0].workspace_id;
+
+            if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+                return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para editar campos." };
+            }
+
+            const setClauses: string[] = [];
+            const values: any[] = [];
+            let idx = 1;
+
+            if (field.label !== undefined) {
+                setClauses.push(`label = $${idx++}`);
+                values.push(field.label);
+            }
+            if (field.type !== undefined) {
+                setClauses.push(`type = $${idx++}`);
+                values.push(field.type);
+            }
+            if (field.placeholder !== undefined) {
+                setClauses.push(`placeholder = $${idx++}`);
+                values.push(field.placeholder);
+            }
+            if (field.options !== undefined) {
+                setClauses.push(`options = $${idx++}`);
+                values.push(JSON.stringify(field.options || []));
+            }
+
+            if (setClauses.length === 0) {
+                return { success: false, error: "Nenhuma alteraÃ§Ã£o enviada." };
+            }
+
+            values.push(fieldId);
+
+            await db.query(
+                `UPDATE custom_field_definitions
+                 SET ${setClauses.join(', ')}
+                 WHERE id = $${idx}`,
+                values
+            );
+
+            revalidatePath('/crm');
+            return { success: true };
+        } catch (error) {
+            console.error("[UPDATE_CUSTOM_FIELD] Error:", error);
+            return { success: false, error: "Falha ao atualizar campo personalizado." };
+        }
+    },
+    {
+        contextResolver: (fieldId, field) => ({ payload: { fieldId, label: field.label } })
+    }
+);
+
 
 export const deleteCustomFieldDefinition = withDebug(
     'delete_custom_field',
@@ -609,6 +815,16 @@ export const deleteCustomFieldDefinition = withDebug(
             if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
                 return { success: false, error: "Você não tem permissão para apagar campos." };
             }
+
+            await db.query(
+                `
+                UPDATE workspaces
+                SET conversion_custom_field_id = NULL,
+                    conversion_custom_field_value = ''
+                WHERE conversion_custom_field_id = $1
+                `,
+                [fieldId]
+            );
 
             await db.query('DELETE FROM custom_field_definitions WHERE id = $1', [fieldId]);
             revalidatePath('/crm');

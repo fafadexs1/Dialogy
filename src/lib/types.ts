@@ -97,6 +97,7 @@ export type Contact = {
   owner_id?: string;
   meta_contact_id?: string; // Reference to meta_contacts for Instagram/Messenger
   created_at?: string;
+  converted_at?: string | null;
   custom_fields?: Record<string, any>;
   lead_score?: number;
 }
@@ -615,6 +616,21 @@ export interface AnalyticsData {
   firstContactResolutionRate: number;
   conversationsByHour: { hour: string; count: number }[];
   conversationsByChannel: { name: string; value: number; color: string }[];
+}
+
+export type ConversionCounterMode = 'won_deals' | 'unique_converted_contacts';
+
+export interface ConversionSettings {
+  counterMode: ConversionCounterMode;
+}
+
+export interface ConversionMetrics {
+  counterMode: ConversionCounterMode;
+  counterValue: number;
+  wonDeals: number;
+  convertedContacts: number;
+  totalRevenue: number;
+  lastConversionAt: string | null;
 }
 
 export interface AgentPerformance {

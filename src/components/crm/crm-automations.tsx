@@ -59,6 +59,33 @@ const CLEAR_VALUE_SENTINEL = '__clear__';
 type VariableFieldElement = HTMLInputElement | HTMLTextAreaElement;
 type TriggerFieldCondition = { field_id: string; field_value?: string };
 
+function toCustomFieldVariableBaseKey(label: string): string {
+    return String(label || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+}
+
+function toCustomFieldVariableKey(field: CustomFieldDefinition, allFields: CustomFieldDefinition[]): string {
+    const baseKey = toCustomFieldVariableBaseKey(field.label);
+    if (!baseKey) return field.id;
+
+    let sameBaseCount = 0;
+    for (const candidate of allFields) {
+        if (toCustomFieldVariableBaseKey(candidate.label) === baseKey) {
+            sameBaseCount += 1;
+        }
+    }
+
+    if (sameBaseCount <= 1) return baseKey;
+    const shortId = field.id.replace(/-/g, '').slice(0, 8).toLowerCase();
+    return shortId ? `${baseKey}_${shortId}` : baseKey;
+}
+
 function sanitizeTriggerConfigForSave(type: string, config: AutomationTriggerConfig): AutomationTriggerConfig {
     if (type !== 'custom_field_changed') return config;
 
@@ -106,7 +133,11 @@ const VariableSelector = ({ customFields, onSelect }: { customFields: CustomFiel
                 <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" onClick={() => onSelect('{{event.actor_full_name}}')}>Usuario que executou</DropdownMenuItem>
                 {customFields.length > 0 && <Separator className="my-1 bg-white/10" />}
                 {customFields.map(cf => (
-                    <DropdownMenuItem className="text-xs text-white/70 hover:text-white cursor-pointer" key={cf.id} onClick={() => onSelect(`{{contact.custom_fields.${cf.id}}}`)}>
+                    <DropdownMenuItem
+                        className="text-xs text-white/70 hover:text-white cursor-pointer"
+                        key={cf.id}
+                        onClick={() => onSelect(`{{contact.custom_fields.${toCustomFieldVariableKey(cf, customFields)}}}`)}
+                    >
                         {cf.label}
                     </DropdownMenuItem>
                 ))}

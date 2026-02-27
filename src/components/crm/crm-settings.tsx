@@ -31,7 +31,18 @@ import { Checkbox } from '../ui/checkbox';
 import { DialogClose } from '@radix-ui/react-dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Textarea } from '../ui/textarea';
-import { getTags, createTag, updateTag, deleteTag, getCustomFieldDefinitions, createCustomFieldDefinition, deleteCustomFieldDefinition } from '@/actions/crm';
+import {
+    getTags,
+    createTag,
+    updateTag,
+    deleteTag,
+    getCustomFieldDefinitions,
+    getWorkspaceConversionFieldConfig,
+    createCustomFieldDefinition,
+    updateCustomFieldDefinition,
+    updateWorkspaceConversionFieldConfig,
+    deleteCustomFieldDefinition
+} from '@/actions/crm';
 import { getTeams } from '@/actions/teams';
 import { toast } from '@/hooks/use-toast';
 
@@ -297,6 +308,10 @@ function OptionsManager({
 
 export function CrmSettings({ children, user }: { children: React.ReactNode, user: User | null }) {
     const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
+    const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+    const [conversionFieldId, setConversionFieldId] = useState('');
+    const [conversionFieldValue, setConversionFieldValue] = useState('');
+    const [savingConversionConfig, setSavingConversionConfig] = useState(false);
     const [newFieldLabel, setNewFieldLabel] = useState('');
     const [newFieldType, setNewFieldType] = useState<CustomFieldDefinition['type']>('text');
     const [newFieldOptions, setNewFieldOptions] = useState('');
@@ -309,15 +324,23 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
     const fetchAllData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
-        const [tagsResult, fieldsResult, teamsResult] = await Promise.all([
+        const [tagsResult, fieldsResult, teamsResult, conversionResult] = await Promise.all([
             getTags(user.activeWorkspaceId),
             getCustomFieldDefinitions(user.activeWorkspaceId),
-            getTeams(user.activeWorkspaceId)
+            getTeams(user.activeWorkspaceId),
+            getWorkspaceConversionFieldConfig(user.activeWorkspaceId),
         ]);
 
         if (!tagsResult.error) setTags(tagsResult.tags || []);
-        if (!fieldsResult.error) setFields(fieldsResult.fields || []);
+        const loadedFields = fieldsResult.fields || [];
+        if (!fieldsResult.error) setFields(loadedFields);
         if (!teamsResult.error) setTeams(teamsResult.teams || []);
+        if (!conversionResult.error && conversionResult.config) {
+            const configFieldId = conversionResult.config.fieldId || '';
+            const fieldExists = loadedFields.some(field => field.id === configFieldId);
+            setConversionFieldId(fieldExists ? configFieldId : '');
+            setConversionFieldValue(fieldExists ? (conversionResult.config.fieldValue || '') : '');
+        }
 
         setLoading(false);
     }, [user?.activeWorkspaceId]);
@@ -378,16 +401,68 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
             options: options,
         };
 
-        const result = await createCustomFieldDefinition(user.activeWorkspaceId, newField);
+        const result = editingFieldId
+            ? await updateCustomFieldDefinition(editingFieldId, newField)
+            : await createCustomFieldDefinition(user.activeWorkspaceId, newField);
+
         if (result.success) {
-            toast({ title: 'Campo Criado!' })
+            toast({ title: editingFieldId ? 'Campo Atualizado!' : 'Campo Criado!' })
             setNewFieldLabel('');
             setNewFieldType('text');
             setNewFieldOptions('');
             setNewFieldPlaceholder('');
+            setEditingFieldId(null);
             fetchAllData();
         } else {
-            toast({ title: 'Erro ao Criar Campo', description: result.error, variant: 'destructive' })
+            toast({
+                title: editingFieldId ? 'Erro ao Atualizar Campo' : 'Erro ao Criar Campo',
+                description: result.error,
+                variant: 'destructive'
+            })
+        }
+    };
+
+    const handleEditField = (field: CustomFieldDefinition) => {
+        setEditingFieldId(field.id);
+        setNewFieldLabel(field.label || '');
+        setNewFieldType(field.type);
+        setNewFieldPlaceholder(field.placeholder || '');
+        setNewFieldOptions(
+            field.type === 'select'
+                ? (field.options || []).map(option => option.label).join(', ')
+                : ''
+        );
+    };
+
+    const cancelFieldEdit = () => {
+        setEditingFieldId(null);
+        setNewFieldLabel('');
+        setNewFieldType('text');
+        setNewFieldOptions('');
+        setNewFieldPlaceholder('');
+    };
+
+    const selectedConversionField = fields.find(field => field.id === conversionFieldId);
+    const selectedConversionFieldOptions =
+        selectedConversionField?.type === 'select'
+            ? (selectedConversionField.options || [])
+            : [];
+
+    const handleSaveConversionConfig = async () => {
+        if (!user?.activeWorkspaceId) return;
+
+        setSavingConversionConfig(true);
+        const result = await updateWorkspaceConversionFieldConfig(user.activeWorkspaceId, {
+            fieldId: conversionFieldId || null,
+            fieldValue: conversionFieldId ? conversionFieldValue : '',
+        });
+        setSavingConversionConfig(false);
+
+        if (result.success) {
+            toast({ title: 'Configuração de conversão salva!' });
+            fetchAllData();
+        } else {
+            toast({ title: 'Erro ao salvar configuração', description: result.error, variant: 'destructive' });
         }
     };
 
@@ -427,6 +502,87 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                                     <p className="text-sm text-muted-foreground mt-1">Crie campos únicos para capturar informações essenciais para o seu negócio.</p>
                                 </div>
 
+                                <div className="p-4 border border-border/30 rounded-xl bg-background/20 space-y-3">
+                                    <div>
+                                        <h4 className="text-sm font-semibold">Campo de Conversão (Analytics)</h4>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Selecione qual campo do CRM define quando um lead é considerado convertido.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Campo</Label>
+                                            <Select
+                                                value={conversionFieldId || '__none__'}
+                                                onValueChange={(value) => {
+                                                    const nextFieldId = value === '__none__' ? '' : value;
+                                                    setConversionFieldId(nextFieldId);
+                                                    setConversionFieldValue('');
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-10 bg-background/50 border-border/40">
+                                                    <SelectValue placeholder="Selecione um campo" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="__none__">Nenhum campo</SelectItem>
+                                                    {fields.map(field => (
+                                                        <SelectItem key={field.id} value={field.id}>
+                                                            {field.label}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-1.5 md:col-span-2">
+                                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Valor de Conversão</Label>
+                                            {selectedConversionFieldOptions.length > 0 ? (
+                                                <Select
+                                                    value={conversionFieldValue || '__any__'}
+                                                    onValueChange={(value) => setConversionFieldValue(value === '__any__' ? '' : value)}
+                                                    disabled={!conversionFieldId}
+                                                >
+                                                    <SelectTrigger className="h-10 bg-background/50 border-border/40">
+                                                        <SelectValue placeholder="Qualquer valor preenchido" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__any__">Qualquer valor preenchido</SelectItem>
+                                                        {selectedConversionFieldOptions.map(option => (
+                                                            <SelectItem key={option.id} value={option.value}>
+                                                                {option.label}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <Input
+                                                    value={conversionFieldValue}
+                                                    onChange={(e) => setConversionFieldValue(e.target.value)}
+                                                    className="h-10 bg-background/50 border-border/40"
+                                                    placeholder={conversionFieldId ? 'Ex: cliente' : 'Selecione um campo primeiro'}
+                                                    disabled={!conversionFieldId}
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-xs text-muted-foreground">
+                                            Se o valor ficar vazio, qualquer valor preenchido no campo contará como conversão.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            className="h-9"
+                                            onClick={handleSaveConversionConfig}
+                                            disabled={savingConversionConfig}
+                                        >
+                                            {savingConversionConfig && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                                            Salvar Conversão
+                                        </Button>
+                                    </div>
+                                </div>
+
                                 <div>
                                     <form onSubmit={handleAddField} className="flex flex-col gap-5 p-5 border border-border/30 rounded-xl bg-background/30 mb-8 shadow-sm">
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
@@ -457,10 +613,15 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <div className="md:pt-[24px]">
-                                                <Button type="submit" className="h-11 w-full rounded-xl bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground shadow-md shadow-primary/20 transition-all font-medium">
+                                            <div className="md:pt-[24px] flex gap-2">
+                                                {editingFieldId && (
+                                                    <Button type="button" variant="outline" className="h-11 rounded-xl border-border/40" onClick={cancelFieldEdit}>
+                                                        Cancelar
+                                                    </Button>
+                                                )}
+                                                <Button type="submit" className="h-11 flex-1 rounded-xl bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground shadow-md shadow-primary/20 transition-all font-medium">
                                                     <PlusCircle className="mr-2 h-4 w-4" />
-                                                    Adicionar Campo
+                                                    {editingFieldId ? 'Salvar Campo' : 'Adicionar Campo'}
                                                 </Button>
                                             </div>
                                         </div>
@@ -521,10 +682,21 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg hover:bg-destructive/10 hover:text-destructive border border-transparent hover:border-destructive/20 transition-all opacity-100 sm:opacity-40 sm:group-hover:opacity-100" onClick={() => handleRemoveField(field.id)}>
-                                                                <Trash2 className="h-3.5 w-3.5 text-destructive/70" />
-                                                                <span className="sr-only">Remover</span>
-                                                            </Button>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 shrink-0 rounded-lg hover:bg-background border border-transparent hover:border-border/50 transition-all opacity-100 sm:opacity-40 sm:group-hover:opacity-100"
+                                                                    onClick={() => handleEditField(field)}
+                                                                >
+                                                                    <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                                                    <span className="sr-only">Editar</span>
+                                                                </Button>
+                                                                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg hover:bg-destructive/10 hover:text-destructive border border-transparent hover:border-destructive/20 transition-all opacity-100 sm:opacity-40 sm:group-hover:opacity-100" onClick={() => handleRemoveField(field.id)}>
+                                                                    <Trash2 className="h-3.5 w-3.5 text-destructive/70" />
+                                                                    <span className="sr-only">Remover</span>
+                                                                </Button>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>

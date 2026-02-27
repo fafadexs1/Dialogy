@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -23,12 +23,22 @@ interface SearchDetailsDialogProps {
     onSelectChat: (chat: Chat) => void;
 }
 
+type SearchResultFilter = 'all' | 'contacts' | 'chats' | 'messages';
+
+const FILTER_LABELS: Record<SearchResultFilter, string> = {
+    all: 'Todos',
+    contacts: 'Contatos',
+    chats: 'Conversas',
+    messages: 'Mensagens',
+};
+
 export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, workspaceId, onSelectChat }: SearchDetailsDialogProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [remoteChats, setRemoteChats] = useState<Chat[]>([]);
     const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
     const [crmContacts, setCrmContacts] = useState<Contact[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const [resultFilter, setResultFilter] = useState<SearchResultFilter>('all');
     const upsertChats = useInboxStore((state) => state.upsertChats);
     const router = useRouter();
     const { toast } = useToast();
@@ -73,6 +83,12 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         return () => { active = false; };
     }, [isOpen, workspaceId, searchQuery]);
 
+    useEffect(() => {
+        if (isProtocolSearch && (resultFilter === 'contacts' || resultFilter === 'messages')) {
+            setResultFilter('all');
+        }
+    }, [isProtocolSearch, resultFilter]);
+
     const handleSelectChat = (chat: Chat) => {
         upsertChats([chat]);
         onSelectChat(chat);
@@ -112,7 +128,22 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
         }
     };
 
-    const hasResults = remoteChats.length > 0 || (!isProtocolSearch && (crmContacts.length > 0 || remoteMessages.length > 0));
+    const totalResults = remoteChats.length + (isProtocolSearch ? 0 : crmContacts.length + remoteMessages.length);
+    const filterOptions: Array<{ id: SearchResultFilter; label: string; count: number }> = [
+        { id: 'all', label: FILTER_LABELS.all, count: totalResults },
+        { id: 'chats', label: FILTER_LABELS.chats, count: remoteChats.length },
+    ];
+
+    if (!isProtocolSearch) {
+        filterOptions.push({ id: 'contacts', label: FILTER_LABELS.contacts, count: crmContacts.length });
+        filterOptions.push({ id: 'messages', label: FILTER_LABELS.messages, count: remoteMessages.length });
+    }
+
+    const showContacts = !isProtocolSearch && crmContacts.length > 0 && (resultFilter === 'all' || resultFilter === 'contacts');
+    const showChats = remoteChats.length > 0 && (resultFilter === 'all' || resultFilter === 'chats');
+    const showMessages = !isProtocolSearch && remoteMessages.length > 0 && (resultFilter === 'all' || resultFilter === 'messages');
+    const hasAnyResults = remoteChats.length > 0 || (!isProtocolSearch && (crmContacts.length > 0 || remoteMessages.length > 0));
+    const hasVisibleResults = showChats || showContacts || showMessages;
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -143,11 +174,68 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                     )}
                 </div>
 
+                <div className="px-6 pb-2 flex flex-wrap gap-2">
+                    {filterOptions.map((option) => {
+                        const isActive = resultFilter === option.id;
+
+                        return (
+                            <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setResultFilter(option.id)}
+                                aria-pressed={isActive}
+                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
+                                    isActive
+                                        ? 'border-blue-400/40 bg-blue-500/20 text-blue-100'
+                                        : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10'
+                                }`}
+                            >
+                                <span>{option.label}</span>
+                                <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] text-white/80">
+                                    {option.count}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+
                 <ScrollArea className="flex-1 min-h-0 max-h-[70vh] p-6 overflow-y-auto">
                     <div className="space-y-8 pb-6 pr-1">
 
-                        {/* 1. Chats (Contact/Protocol Matches) */}
-                        {remoteChats.length > 0 && (
+                        {/* 1. CRM Contacts */}
+                        {showContacts && (
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <UserIcon className="h-4 w-4" />
+                                    Contatos no CRM ({crmContacts.length})
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {crmContacts.map(contact => (
+                                        <button
+                                            key={contact.id}
+                                            onClick={() => handleContactClick(contact)}
+                                            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
+                                        >
+                                            <Avatar className="h-10 w-10 border border-white/10">
+                                                <AvatarImage src={contact.avatar_url} />
+                                                <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
+                                            </Avatar>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-medium text-white truncate group-hover:text-blue-300 transition-colors">{contact.name}</p>
+                                                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                                    <Phone className="h-3 w-3" />
+                                                    {contact.phone_number_jid || contact.email || 'Dados indisponíveis'}
+                                                </p>
+                                            </div>
+                                            <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors opacity-0 group-hover:opacity-100" />
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 2. Chats (Contact/Protocol Matches) */}
+                        {showChats && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <MessageSquare className="h-4 w-4" />
@@ -211,8 +299,8 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                             </div>
                         )}
 
-                        {/* 2. Messages (Content Matches) */}
-                        {!isProtocolSearch && remoteMessages.length > 0 && (
+                        {/* 3. Messages (Content Matches) */}
+                        {showMessages && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                     <MessageSquare className="h-4 w-4" />
@@ -269,41 +357,13 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                             </div>
                         )}
 
-                        {/* 3. CRM Contacts */}
-                        {crmContacts.length > 0 && (
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                    <UserIcon className="h-4 w-4" />
-                                    Contatos no CRM ({crmContacts.length})
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {crmContacts.map(contact => (
-                                        <button
-                                            key={contact.id}
-                                            onClick={() => handleContactClick(contact)}
-                                            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
-                                        >
-                                            <Avatar className="h-10 w-10 border border-white/10">
-                                                <AvatarImage src={contact.avatar_url} />
-                                                <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
-                                            </Avatar>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="font-medium text-white truncate group-hover:text-blue-300 transition-colors">{contact.name}</p>
-                                                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                                    <Phone className="h-3 w-3" />
-                                                    {contact.phone_number_jid || contact.email || 'Dados indisponíveis'}
-                                                </p>
-                                            </div>
-                                            <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors opacity-0 group-hover:opacity-100" />
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {!hasResults && (
+                        {!hasVisibleResults && (
                             <div className="text-center py-12 text-muted-foreground">
-                                <p>Nenhum resultado encontrado para "{searchQuery}"</p>
+                                <p>
+                                    {hasAnyResults
+                                        ? `Nenhum resultado para o filtro "${FILTER_LABELS[resultFilter]}".`
+                                        : `Nenhum resultado encontrado para "${searchQuery}"`}
+                                </p>
                             </div>
                         )}
                     </div>

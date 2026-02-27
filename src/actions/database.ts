@@ -111,6 +111,10 @@ alter table if exists public.workspaces add column if not exists close_message_t
 alter table if exists public.workspaces add column if not exists transfer_team_message_template text not null default '';
 alter table if exists public.workspaces add column if not exists marketing_auto_close_seconds integer not null default 300;
 alter table if exists public.workspaces add column if not exists queue_auto_close_seconds integer not null default 0;
+alter table if exists public.workspaces add column if not exists conversion_counter_mode text not null default 'won_deals';
+alter table if exists public.workspaces add column if not exists conversion_custom_field_id uuid;
+alter table if exists public.workspaces add column if not exists conversion_custom_field_value text;
+create index if not exists idx_workspaces_conversion_custom_field_id on public.workspaces(conversion_custom_field_id);
 
 -- 3) Agora adiciona a FK users.last_active_workspace_id -> workspaces.id
 DO $$
@@ -279,6 +283,7 @@ create table if not exists public.contacts (
   avatar_url text,
   owner_id uuid,
   meta_contact_id uuid,
+  converted_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint contacts_workspace_id_fkey
@@ -286,7 +291,9 @@ create table if not exists public.contacts (
   constraint contacts_owner_id_fkey
     foreign key (owner_id) references public.users(id) on delete set null
 );
+alter table if exists public.contacts add column if not exists converted_at timestamptz;
 create index if not exists idx_contacts_workspace on public.contacts(workspace_id);
+create index if not exists idx_contacts_workspace_converted_at on public.contacts(workspace_id, converted_at);
 create unique index if not exists uq_contacts_workspace_phone_jid on public.contacts(workspace_id, phone_number_jid);
 create index if not exists idx_contacts_meta_contact on public.contacts(meta_contact_id);
 

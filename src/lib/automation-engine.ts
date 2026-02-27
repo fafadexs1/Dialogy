@@ -29,6 +29,12 @@ type TriggerCustomFieldCondition = {
     field_value?: string;
 };
 
+type ContactCustomFieldEntry = {
+    id?: string;
+    label?: string;
+    value?: unknown;
+};
+
 function normalizeComparableValue(value: unknown): string {
     if (value === null || value === undefined) return '';
     return String(value)
@@ -48,6 +54,53 @@ function valuesMatch(expected: unknown, actual: unknown): boolean {
 
 function hasValue(value: unknown): boolean {
     return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function toCustomFieldVariableBaseKey(label: unknown): string {
+    if (label === null || label === undefined) return '';
+    return String(label)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+}
+
+function toCustomFieldVariableKey(baseKey: string, fieldId: string, totalByBase: Record<string, number>): string {
+    if (!baseKey) return '';
+    if ((totalByBase[baseKey] || 0) <= 1) return baseKey;
+    const shortId = fieldId.replace(/-/g, '').slice(0, 8).toLowerCase();
+    return shortId ? `${baseKey}_${shortId}` : baseKey;
+}
+
+function buildContactCustomFieldVariableMap(entries: ContactCustomFieldEntry[]): Record<string, string> {
+    const byBaseCount: Record<string, number> = {};
+    for (const entry of entries) {
+        const baseKey = toCustomFieldVariableBaseKey(entry.label);
+        if (!baseKey) continue;
+        byBaseCount[baseKey] = (byBaseCount[baseKey] || 0) + 1;
+    }
+
+    const map: Record<string, string> = {};
+    for (const entry of entries) {
+        const fieldId = String(entry.id || '');
+        const value = entry.value === null || entry.value === undefined ? '' : String(entry.value);
+        if (fieldId) {
+            // Backward-compatible access: {{contact.custom_fields.<uuid>}}
+            map[fieldId] = value;
+        }
+
+        const baseKey = toCustomFieldVariableBaseKey(entry.label);
+        const variableKey = toCustomFieldVariableKey(baseKey, fieldId, byBaseCount);
+        if (variableKey && !Object.prototype.hasOwnProperty.call(map, variableKey)) {
+            // Friendly access by label-based key: {{contact.custom_fields.como_conheceu}}
+            map[variableKey] = value;
+        }
+    }
+
+    return map;
 }
 
 function extractCustomFieldConditions(config: Record<string, any>): {
@@ -170,36 +223,54 @@ async function matchesTrigger(automation: CrmAutomation, event: AutomationEvent)
         case 'custom_field_changed': {
             const { changedConditions, stateConditions } = extractCustomFieldConditions(config);
             const changedFields = event.data?.changed_fields || {};
+            let contactCustomFieldsCache: Record<string, string> | null = null;
+            const getContactCustomFields = async (): Promise<Record<string, string>> => {
+                if (contactCustomFieldsCache) return contactCustomFieldsCache;
+                contactCustomFieldsCache = await loadContactCustomFields(event);
+                return contactCustomFieldsCache;
+            };
 
-            // "Quando fizer X e Y": all configured changed fields must be present in this change batch.
-            for (const condition of changedConditions) {
-                const fieldId = condition.field_id!;
-                const hasDirectChangedField = Object.prototype.hasOwnProperty.call(changedFields, fieldId);
-                const rawChangedValue = hasDirectChangedField
-                    ? changedFields[fieldId]
-                    : event.data?.custom_field_id === fieldId
-                        ? event.data?.new_value
-                        : undefined;
+            // "Quando fizer X e Y":
+            // - at least one configured field must change in this event
+            // - all configured values must be true in the current contact state
+            if (changedConditions.length > 0) {
+                let hasAnyConfiguredFieldChanged = false;
+                const contactCustomFields = await getContactCustomFields();
 
-                if (rawChangedValue === undefined) return false;
-                if (hasValue(condition.field_value) && !valuesMatch(condition.field_value, rawChangedValue)) {
-                    return false;
+                for (const condition of changedConditions) {
+                    const fieldId = condition.field_id!;
+                    const hasDirectChangedField = Object.prototype.hasOwnProperty.call(changedFields, fieldId);
+                    const isLegacyChangedField = event.data?.custom_field_id === fieldId;
+                    const hasChangedInThisEvent = hasDirectChangedField || isLegacyChangedField;
+
+                    if (hasChangedInThisEvent) {
+                        hasAnyConfiguredFieldChanged = true;
+                    }
+
+                    if (hasValue(condition.field_value)) {
+                        const currentValue = contactCustomFields[fieldId];
+                        if (!valuesMatch(condition.field_value, currentValue)) {
+                            return false;
+                        }
+                    } else if (!hasChangedInThisEvent) {
+                        return false;
+                    }
                 }
-            }
 
-            // Legacy fallback (single field/value) when no new changed_conditions were configured.
-            if (changedConditions.length === 0) {
+                if (!hasAnyConfiguredFieldChanged) return false;
+            } else {
+                // Legacy fallback (single field/value) when no new changed_conditions were configured.
                 if (config.field_id) {
                     const hasDirectChangedField = Object.prototype.hasOwnProperty.call(changedFields, config.field_id);
-                    const rawChangedValue = hasDirectChangedField
-                        ? changedFields[config.field_id]
-                        : event.data?.custom_field_id === config.field_id
-                            ? event.data?.new_value
-                            : undefined;
-                    if (rawChangedValue === undefined) return false;
+                    const hasChangedInThisEvent = hasDirectChangedField || event.data?.custom_field_id === config.field_id;
+                    if (!hasChangedInThisEvent) return false;
 
-                    if (hasValue(config.field_value) && !valuesMatch(config.field_value, rawChangedValue)) {
-                        return false;
+                    if (hasValue(config.field_value)) {
+                        const contactCustomFields = await getContactCustomFields();
+                        const currentValue = contactCustomFields[config.field_id];
+                        if (!valuesMatch(config.field_value, currentValue)) {
+                            return false;
+                        }
                     }
                 } else if (hasValue(config.field_value) && !valuesMatch(config.field_value, event.data?.new_value)) {
                     return false;
@@ -208,7 +279,7 @@ async function matchesTrigger(automation: CrmAutomation, event: AutomationEvent)
 
             // "E estiver X e Y": all configured state conditions must match current contact custom fields.
             if (stateConditions.length > 0) {
-                const contactCustomFields = await loadContactCustomFields(event);
+                const contactCustomFields = await getContactCustomFields();
                 for (const condition of stateConditions) {
                     const fieldId = condition.field_id!;
                     const currentValue = contactCustomFields[fieldId];
@@ -236,7 +307,7 @@ async function matchesTrigger(automation: CrmAutomation, event: AutomationEvent)
 function replaceVariables(template: string, context: { contact?: any; event?: any; actor?: any }): string {
     if (!template) return template;
 
-    return template.replace(/\{\{(contact|event|actor)\.([\w.]+)\}\}/g, (match, root, path) => {
+    return template.replace(/\{\{(contact|event|actor)\.([\w.-]+)\}\}/g, (match, root, path) => {
         const source = root === 'contact'
             ? context.contact
             : root === 'event'
@@ -263,16 +334,27 @@ async function executeActions(actions: AutomationAction[], event: AutomationEven
                 SELECT c.*, 
                        u.full_name as owner_name,
                        COALESCE(
-                           (SELECT json_object_agg(ccfv.field_id, ccfv.value)
+                           (SELECT json_agg(
+                               json_build_object(
+                                   'id', ccfv.field_id,
+                                   'label', cfd.label,
+                                   'value', ccfv.value
+                               )
+                           )
                             FROM contact_custom_field_values ccfv
+                            LEFT JOIN custom_field_definitions cfd ON cfd.id = ccfv.field_id
                             WHERE ccfv.contact_id = c.id
-                           ), '{}'
-                       ) as custom_fields
+                           ), '[]'
+                       ) as custom_field_entries
                 FROM contacts c
                 LEFT JOIN users u ON c.owner_id = u.id
                 WHERE c.id = $1
             `, [event.contactId]);
             fullContactData = contactRes.rows[0];
+            const entries = Array.isArray(fullContactData?.custom_field_entries)
+                ? (fullContactData.custom_field_entries as ContactCustomFieldEntry[])
+                : [];
+            fullContactData.custom_fields = buildContactCustomFieldVariableMap(entries);
         } catch (e) {
             console.error('[AUTOMATION] Failed to fetch contact context for variables', e);
         }

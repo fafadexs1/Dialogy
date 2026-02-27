@@ -47,11 +47,11 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers } from '@/actions/analytics';
+import { getAnalyticsData, getAgentPerformance, getWorkspaceMembers, getConversionSettings, getConversionMetrics, updateConversionSettings } from '@/actions/analytics';
 import { getTeams } from '@/actions/teams';
-import type { AnalyticsData, AgentPerformance, Team } from '@/lib/types';
+import type { AnalyticsData, AgentPerformance, Team, ConversionCounterMode, ConversionMetrics } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -163,6 +163,9 @@ export default function AnalyticsPage() {
     const [isPending, startTransition] = useTransition();
     const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
     const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
+    const [conversionMetrics, setConversionMetrics] = useState<ConversionMetrics | null>(null);
+    const [conversionCounterMode, setConversionCounterMode] = useState<ConversionCounterMode>('won_deals');
+    const [isSavingConversionMode, setIsSavingConversionMode] = useState(false);
     const [allMembers, setAllMembers] = useState<User[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
 
@@ -189,15 +192,18 @@ export default function AnalyticsPage() {
     const fetchPageData = useCallback((
         workspaceId: string,
         filters: { teamId?: string; agentId?: string },
-        dateRange: { from: string, to: string }
+        dateRange: { from: string, to: string },
+        counterMode: ConversionCounterMode
     ) => {
         startTransition(async () => {
-            const [data, performance] = await Promise.all([
+            const [data, performance, conversions] = await Promise.all([
                 getAnalyticsData(workspaceId, filters, dateRange),
-                getAgentPerformance(workspaceId, { teamId: filters.teamId }, dateRange)
+                getAgentPerformance(workspaceId, { teamId: filters.teamId }, dateRange),
+                getConversionMetrics(workspaceId, filters, dateRange, counterMode),
             ]);
             if (data) setAnalyticsData(data);
             if (performance) setAgentPerformance(performance);
+            if (conversions) setConversionMetrics(conversions);
         });
     }, []);
 
@@ -209,7 +215,12 @@ export default function AnalyticsPage() {
             });
             getTeams(user.activeWorkspaceId).then(res => {
                 if (res.teams) setTeams(res.teams);
-            })
+            });
+            getConversionSettings(user.activeWorkspaceId).then(res => {
+                if (res.settings) {
+                    setConversionCounterMode(res.settings.counterMode);
+                }
+            });
         }
     }, [user?.activeWorkspaceId]);
 
@@ -221,9 +232,9 @@ export default function AnalyticsPage() {
                 agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
             };
             const dateRange = getDateRange(timeRange);
-            fetchPageData(user.activeWorkspaceId, filters, dateRange);
+            fetchPageData(user.activeWorkspaceId, filters, dateRange, conversionCounterMode);
         }
-    }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, timeRange, fetchPageData]);
+    }, [user?.activeWorkspaceId, selectedTeamId, selectedAgentId, timeRange, conversionCounterMode, fetchPageData]);
 
     // Reset agent filter when team changes
     useEffect(() => {
@@ -236,6 +247,22 @@ export default function AnalyticsPage() {
         if (!selectedTeam) return [];
         return allMembers.filter(member => (member as any).team_id === selectedTeamId);
     }, [allMembers, teams, selectedTeamId]);
+
+    const handleCounterModeChange = useCallback(async (nextValue: string) => {
+        const normalized = (nextValue === 'unique_converted_contacts'
+            ? 'unique_converted_contacts'
+            : 'won_deals') as ConversionCounterMode;
+        setConversionCounterMode(normalized);
+
+        if (!user?.activeWorkspaceId) return;
+
+        setIsSavingConversionMode(true);
+        const result = await updateConversionSettings(user.activeWorkspaceId, normalized);
+        if (!result.success) {
+            console.error('[ANALYTICS] Failed to save conversion counter mode:', result.error);
+        }
+        setIsSavingConversionMode(false);
+    }, [user?.activeWorkspaceId]);
 
 
     if (!user) {
@@ -256,6 +283,9 @@ export default function AnalyticsPage() {
     const channelsData = analyticsData?.conversationsByChannel?.length
         ? analyticsData.conversationsByChannel
         : [{ name: 'Sem dados', value: 100, color: '#333' }];
+
+    const formatBRL = (value: number) =>
+        value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
     const performanceToDisplay = selectedAgentId === 'all'
         ? agentPerformance
@@ -559,20 +589,71 @@ export default function AnalyticsPage() {
                         </section>
                         <section>
                             <Card className='h-full bg-zinc-950/40 border-white/5 backdrop-blur-md text-white hover:border-blue-500/20 transition-all cursor-default group'>
-                                <CardHeader>
-                                    <CardTitle className='flex items-center gap-2 text-white group-hover:text-blue-400 transition-colors'>
-                                        <div className="p-1.5 rounded-lg bg-blue-500/10"><TrendingUp className="h-4 w-4 text-blue-500" /></div>
-                                        Conversões e Oportunidades
-                                    </CardTitle>
-                                    <CardDescription className="text-zinc-500">Resultados de negócio gerados.</CardDescription>
+                                <CardHeader className="flex flex-row items-start justify-between gap-3">
+                                    <div>
+                                        <CardTitle className='flex items-center gap-2 text-white group-hover:text-blue-400 transition-colors'>
+                                            <div className="p-1.5 rounded-lg bg-blue-500/10"><TrendingUp className="h-4 w-4 text-blue-500" /></div>
+                                            Conversões e Oportunidades
+                                        </CardTitle>
+                                        <CardDescription className="text-zinc-500">Resultados de negócio gerados no período.</CardDescription>
+                                    </div>
+                                    <Select value={conversionCounterMode} onValueChange={handleCounterModeChange}>
+                                        <SelectTrigger className="w-[220px] h-8 bg-white/5 border-white/10 text-zinc-200 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                            <SelectItem value="won_deals">Contar por Oportunidades Ganhas</SelectItem>
+                                            <SelectItem value="unique_converted_contacts">Contar por Leads Convertidos</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </CardHeader>
                                 <CardContent className='space-y-4'>
-                                    <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
-                                        <div className="h-12 w-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-600">
-                                            <TrendingUp size={24} />
+                                    {isPending ? (
+                                        <div className="space-y-3">
+                                            <Skeleton className="h-16 w-full bg-white/5 rounded-xl" />
+                                            <Skeleton className="h-16 w-full bg-white/5 rounded-xl" />
                                         </div>
-                                        <p className="text-sm text-zinc-500 max-w-xs">Relatórios de conversão de leads e vendas atribuídas estarão disponíveis em breve.</p>
-                                    </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                                <p className="text-xs text-zinc-500 mb-1">
+                                                    {conversionCounterMode === 'unique_converted_contacts'
+                                                        ? 'Leads Convertidos'
+                                                        : 'Oportunidades Ganhas'}
+                                                </p>
+                                                <div className="flex items-end justify-between">
+                                                    <span className="text-3xl font-bold text-white">{conversionMetrics?.counterValue ?? 0}</span>
+                                                    {isSavingConversionMode && (
+                                                        <span className="text-[11px] text-zinc-500">salvando método...</span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                                                    <p className="text-[11px] text-zinc-500">Receita convertida</p>
+                                                    <p className="text-base font-semibold text-emerald-400">
+                                                        {formatBRL(conversionMetrics?.totalRevenue || 0)}
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                                                    <p className="text-[11px] text-zinc-500">Leads únicos</p>
+                                                    <p className="text-base font-semibold text-white">
+                                                        {conversionMetrics?.convertedContacts ?? 0}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                                                <p className="text-[11px] text-zinc-500">Última conversão registrada</p>
+                                                <p className="text-sm text-zinc-200">
+                                                    {conversionMetrics?.lastConversionAt
+                                                        ? format(new Date(conversionMetrics.lastConversionAt), "dd/MM/yyyy 'às' HH:mm")
+                                                        : 'Nenhuma conversão no período'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
                                 </CardContent>
                             </Card>
                         </section>

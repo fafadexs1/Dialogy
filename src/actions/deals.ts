@@ -14,6 +14,33 @@ async function getAuthUser() {
     return user;
 }
 
+let conversionSchemaEnsured = false;
+async function ensureConversionSchema(): Promise<void> {
+    if (conversionSchemaEnsured) return;
+    await db.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS converted_at timestamptz`);
+    conversionSchemaEnsured = true;
+}
+
+async function syncContactConvertedAt(contactId: string): Promise<void> {
+    if (!contactId) return;
+    await ensureConversionSchema();
+    await db.query(
+        `
+        UPDATE contacts c
+        SET converted_at = src.first_converted_at
+        FROM (
+            SELECT MIN(closed_at) AS first_converted_at
+            FROM deals
+            WHERE contact_id = $1
+              AND won = true
+              AND closed_at IS NOT NULL
+        ) src
+        WHERE c.id = $1
+        `,
+        [contactId]
+    );
+}
+
 // ─── READ ───────────────────────────────────────────────────────────────────
 
 export async function getDeals(
@@ -196,6 +223,9 @@ export async function updateDeal(
         }
 
         const deal = { ...res.rows[0], value: parseFloat(res.rows[0].value) };
+        if ((data.won !== undefined || data.closed_at !== undefined) && deal.contact_id) {
+            await syncContactConvertedAt(deal.contact_id);
+        }
 
         revalidatePath('/crm');
         return { deal };
@@ -210,7 +240,16 @@ export async function deleteDeal(dealId: string): Promise<{ success: boolean; er
     if (!user) return { success: false, error: 'Não autenticado.' };
 
     try {
+        const existingRes = await db.query('SELECT contact_id FROM deals WHERE id = $1', [dealId]);
+        if ((existingRes.rowCount || 0) === 0) {
+            return { success: false, error: 'Deal não encontrado.' };
+        }
+        const contactId = existingRes.rows[0].contact_id as string | null;
+
         await db.query('DELETE FROM deals WHERE id = $1', [dealId]);
+        if (contactId) {
+            await syncContactConvertedAt(contactId);
+        }
         revalidatePath('/crm');
         return { success: true };
     } catch (error) {

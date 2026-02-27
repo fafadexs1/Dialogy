@@ -3,6 +3,7 @@
 import { db } from '@/lib/db';
 import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import type { ConversionCounterMode, ConversionMetrics, ConversionSettings } from '@/lib/types';
 
 // Helper to add agent and team filters to a query
 const addFilters = (
@@ -74,6 +75,28 @@ const addFilters = (
 
     return [finalQueryBefore + queryAfterInsertion, newParams];
 };
+
+function normalizeConversionCounterMode(mode: unknown): ConversionCounterMode {
+    return mode === 'unique_converted_contacts' ? 'unique_converted_contacts' : 'won_deals';
+}
+
+let conversionSchemaEnsured = false;
+async function ensureConversionSchema(): Promise<void> {
+    if (conversionSchemaEnsured) return;
+    await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_counter_mode text NOT NULL DEFAULT 'won_deals'`);
+    await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_id uuid`);
+    await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_value text`);
+    await db.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS converted_at timestamptz`);
+    conversionSchemaEnsured = true;
+}
+
+async function hasWorkspaceAccess(userId: string, workspaceId: string): Promise<boolean> {
+    const result = await db.query(
+        `SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1`,
+        [userId, workspaceId]
+    );
+    return (result.rowCount || 0) > 0;
+}
 
 
 export async function getAnalyticsData(
@@ -224,6 +247,203 @@ export async function getAnalyticsData(
         };
     } catch (error) {
         console.error("[GET_ANALYTICS_DATA] Error:", error);
+        return null;
+    }
+}
+
+export async function getConversionSettings(workspaceId: string): Promise<{ settings: ConversionSettings | null; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { settings: null, error: "Usuário não autenticado." };
+
+    try {
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return { settings: null, error: "Acesso não autorizado." };
+        }
+
+        const res = await db.query(
+            `
+            SELECT COALESCE(to_jsonb(w)->>'conversion_counter_mode', 'won_deals') AS conversion_counter_mode
+            FROM workspaces w
+            WHERE w.id = $1
+            `,
+            [workspaceId]
+        );
+
+        if ((res.rowCount || 0) === 0) {
+            return { settings: { counterMode: 'won_deals' } };
+        }
+
+        return {
+            settings: {
+                counterMode: normalizeConversionCounterMode(res.rows[0].conversion_counter_mode),
+            }
+        };
+    } catch (error) {
+        console.error('[GET_CONVERSION_SETTINGS] Error:', error);
+        return { settings: null, error: "Falha ao buscar configuração de conversão." };
+    }
+}
+
+export async function updateConversionSettings(
+    workspaceId: string,
+    counterMode: ConversionCounterMode
+): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Usuário não autenticado." };
+
+    try {
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return { success: false, error: "Acesso não autorizado." };
+        }
+
+        await ensureConversionSchema();
+
+        const res = await db.query(
+            `UPDATE workspaces SET conversion_counter_mode = $1 WHERE id = $2`,
+            [normalizeConversionCounterMode(counterMode), workspaceId]
+        );
+        if ((res.rowCount || 0) === 0) {
+            return { success: false, error: "Workspace não encontrado." };
+        }
+
+        return { success: true };
+    } catch (error) {
+        console.error('[UPDATE_CONVERSION_SETTINGS] Error:', error);
+        return { success: false, error: "Falha ao salvar configuração de conversão." };
+    }
+}
+
+export async function getConversionMetrics(
+    workspaceId: string,
+    filters: { teamId?: string; agentId?: string },
+    dateRange: { from: string; to: string },
+    counterMode?: ConversionCounterMode
+): Promise<ConversionMetrics | null> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    try {
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return null;
+        }
+        await ensureConversionSchema();
+
+        const workspaceRes = await db.query(
+            `
+            SELECT
+                COALESCE(to_jsonb(w)->>'conversion_counter_mode', 'won_deals') AS conversion_counter_mode,
+                COALESCE(to_jsonb(w)->>'conversion_custom_field_id', '') AS conversion_custom_field_id,
+                COALESCE(to_jsonb(w)->>'conversion_custom_field_value', '') AS conversion_custom_field_value
+            FROM workspaces w
+            WHERE w.id = $1
+            `,
+            [workspaceId]
+        );
+
+        const workspaceRow = workspaceRes.rows[0] || {};
+        const mode = normalizeConversionCounterMode(counterMode || workspaceRow.conversion_counter_mode);
+        const conversionFieldId = String(workspaceRow.conversion_custom_field_id || '');
+        const conversionFieldValue = String(workspaceRow.conversion_custom_field_value || '').trim();
+
+        const dealParams: Array<string> = [workspaceId, dateRange.from, dateRange.to];
+        const dealWhereClauses = [
+            `d.workspace_id = $1`,
+            `d.won = true`,
+            `d.closed_at BETWEEN $2 AND $3`,
+        ];
+
+        if (filters.agentId) {
+            dealWhereClauses.push(`d.owner_id = $${dealParams.length + 1}`);
+            dealParams.push(filters.agentId);
+        } else if (filters.teamId) {
+            dealWhereClauses.push(
+                `EXISTS (
+                    SELECT 1
+                    FROM team_members tm
+                    WHERE tm.user_id = d.owner_id
+                      AND tm.team_id = $${dealParams.length + 1}
+                )`
+            );
+            dealParams.push(filters.teamId);
+        }
+
+        const dealsRes = await db.query(
+            `
+            SELECT
+                COUNT(*)::int AS won_deals,
+                COUNT(DISTINCT d.contact_id)::int AS converted_contacts_from_deals,
+                COALESCE(SUM(d.value), 0)::numeric AS total_revenue,
+                MAX(d.closed_at) AS last_conversion_at_from_deals
+            FROM deals d
+            WHERE ${dealWhereClauses.join(' AND ')}
+            `,
+            dealParams
+        );
+
+        const dealsRow = dealsRes.rows[0] || {};
+        const wonDeals = Number(dealsRow.won_deals || 0);
+        let convertedContacts = Number(dealsRow.converted_contacts_from_deals || 0);
+        let lastConversionAt = dealsRow.last_conversion_at_from_deals || null;
+
+        if (conversionFieldId) {
+            const contactParams: Array<string> = [workspaceId, dateRange.from, dateRange.to, conversionFieldId];
+            const contactWhereClauses = [
+                `c.workspace_id = $1`,
+                `c.converted_at BETWEEN $2 AND $3`,
+                `cfv.field_id = $4`,
+            ];
+
+            if (conversionFieldValue) {
+                contactWhereClauses.push(`LOWER(TRIM(cfv.value)) = LOWER(TRIM($${contactParams.length + 1}))`);
+                contactParams.push(conversionFieldValue);
+            } else {
+                contactWhereClauses.push(`NULLIF(TRIM(cfv.value), '') IS NOT NULL`);
+            }
+
+            if (filters.agentId) {
+                contactWhereClauses.push(`c.owner_id = $${contactParams.length + 1}`);
+                contactParams.push(filters.agentId);
+            } else if (filters.teamId) {
+                contactWhereClauses.push(
+                    `EXISTS (
+                        SELECT 1
+                        FROM team_members tm
+                        WHERE tm.user_id = c.owner_id
+                          AND tm.team_id = $${contactParams.length + 1}
+                    )`
+                );
+                contactParams.push(filters.teamId);
+            }
+
+            const contactsRes = await db.query(
+                `
+                SELECT
+                    COUNT(DISTINCT c.id)::int AS converted_contacts,
+                    MAX(c.converted_at) AS last_conversion_at
+                FROM contacts c
+                JOIN contact_custom_field_values cfv ON cfv.contact_id = c.id
+                WHERE ${contactWhereClauses.join(' AND ')}
+                `,
+                contactParams
+            );
+
+            convertedContacts = Number(contactsRes.rows[0]?.converted_contacts || 0);
+            lastConversionAt = contactsRes.rows[0]?.last_conversion_at || null;
+        }
+
+        return {
+            counterMode: mode,
+            counterValue: mode === 'unique_converted_contacts' ? convertedContacts : wonDeals,
+            wonDeals,
+            convertedContacts,
+            totalRevenue: Number(dealsRow.total_revenue || 0),
+            lastConversionAt,
+        };
+    } catch (error) {
+        console.error('[GET_CONVERSION_METRICS] Error:', error);
         return null;
     }
 }
