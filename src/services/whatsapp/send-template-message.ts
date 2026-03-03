@@ -20,51 +20,68 @@ interface ApiConfig {
     api_key: string;
 }
 
-/**
- * Generate alternate Brazilian phone number format
- * Brazilian mobile numbers can have 8 or 9 digits after DDD
- * Format: 55 + DDD(2 digits) + number(8 or 9 digits)
- * 
- * If number has 9 digits after DDD (13 total after 55), remove the leading 9
- * If number has 8 digits after DDD (12 total after 55), add a leading 9
- * 
- * @param number - Phone number in format 55XXXXXXXXXXX
- * @returns Alternate format or null if not applicable
- */
-function getAlternateBrazilianNumber(number: string): string | null {
-    // Clean the number - remove any non-digit characters and @s.whatsapp.net suffix
-    const cleanNumber = number.replace(/@s\.whatsapp\.net/g, '').replace(/\D/g, '');
+function sanitizePhoneNumber(value: string): string {
+    return value.replace(/@.*$/, '').replace(/\D/g, '');
+}
 
-    // Only process Brazilian numbers (starting with 55)
-    if (!cleanNumber.startsWith('55')) {
+function getBrazilianNumberVariants(value: string): { withoutNinthDigit: string; withNinthDigit: string } | null {
+    const cleanNumber = sanitizePhoneNumber(value);
+
+    let nationalNumber: string | null = null;
+    if (cleanNumber.startsWith('55') && (cleanNumber.length === 12 || cleanNumber.length === 13)) {
+        nationalNumber = cleanNumber.slice(2);
+    } else if (cleanNumber.length === 10 || cleanNumber.length === 11) {
+        nationalNumber = cleanNumber;
+    } else {
         return null;
     }
 
-    // Get the part after country code (55)
-    const withoutCountryCode = cleanNumber.slice(2);
-
-    // Brazilian format: DDD (2 digits) + number (8-9 digits)
-    // Total length after 55: 10 digits (8-digit number) or 11 digits (9-digit number)
-
-    if (withoutCountryCode.length === 11) {
-        // Has 9 digits in number (55 + DD + 9 + 8 digits = 13 total)
-        // Try removing the 9th digit (first digit after DDD)
-        const ddd = withoutCountryCode.slice(0, 2);
-        const afterNine = withoutCountryCode.slice(3); // Skip DDD (2) + 9 (1)
-
-        // Only remove if the 3rd digit is actually a 9
-        if (withoutCountryCode[2] === '9') {
-            return `55${ddd}${afterNine}`;
-        }
-    } else if (withoutCountryCode.length === 10) {
-        // Has 8 digits in number (55 + DD + 8 digits = 12 total)
-        // Try adding a 9 after DDD
-        const ddd = withoutCountryCode.slice(0, 2);
-        const restOfNumber = withoutCountryCode.slice(2);
-        return `55${ddd}9${restOfNumber}`;
+    const ddd = nationalNumber.slice(0, 2);
+    if (!/^\d{2}$/.test(ddd)) {
+        return null;
     }
 
-    return null;
+    if (nationalNumber.length === 11) {
+        // 2-digit DDD + 9-digit mobile number. Only convert if the extra digit is actually 9.
+        if (nationalNumber[2] !== '9') {
+            return null;
+        }
+
+        return {
+            withoutNinthDigit: `55${ddd}${nationalNumber.slice(3)}`,
+            withNinthDigit: `55${nationalNumber}`,
+        };
+    }
+
+    return {
+        withoutNinthDigit: `55${nationalNumber}`,
+        withNinthDigit: `55${ddd}9${nationalNumber.slice(2)}`,
+    };
+}
+
+function buildTemplateSendCandidates(number: string): string[] {
+    const candidates: string[] = [];
+
+    const addCandidate = (candidate?: string | null) => {
+        if (!candidate) return;
+        const normalized = candidate.trim();
+        if (!normalized) return;
+        if (!candidates.includes(normalized)) {
+            candidates.push(normalized);
+        }
+    };
+
+    const brazilianVariants = getBrazilianNumberVariants(number);
+    if (brazilianVariants) {
+        // Business rule: prioritize sending without the extra mobile "9" first.
+        addCandidate(brazilianVariants.withoutNinthDigit);
+        addCandidate(brazilianVariants.withNinthDigit);
+    }
+
+    addCandidate(sanitizePhoneNumber(number));
+    addCandidate(number);
+
+    return candidates;
 }
 
 export const sendTemplateMessage = withDebug(
@@ -94,31 +111,26 @@ export const sendTemplateMessage = withDebug(
             );
         };
 
-        try {
-            // First attempt with original number
-            const result = await sendRequest(number);
-            return result;
-        } catch (firstError: any) {
-            // Check if this is a Brazilian number and we can try alternate format
-            const alternateNumber = getAlternateBrazilianNumber(number);
+        const candidates = buildTemplateSendCandidates(number);
+        let firstError: unknown = null;
 
-            if (alternateNumber) {
-                console.log(`[TEMPLATE_FALLBACK] First attempt failed for ${number}, trying alternate format: ${alternateNumber}`);
+        for (let attempt = 0; attempt < candidates.length; attempt++) {
+            const candidate = candidates[attempt];
 
-                try {
-                    const retryResult = await sendRequest(alternateNumber);
-                    console.log(`[TEMPLATE_FALLBACK] Success with alternate number: ${alternateNumber}`);
-                    return retryResult;
-                } catch (secondError: any) {
-                    console.error(`[TEMPLATE_FALLBACK] Both attempts failed. Original: ${number}, Alternate: ${alternateNumber}`);
-                    // Throw the original error as it's more relevant
-                    throw firstError;
+            try {
+                if (attempt > 0) {
+                    console.log(`[TEMPLATE_FALLBACK] Retrying sendTemplate (${attempt + 1}/${candidates.length}) with number: ${candidate}`);
                 }
+                return await sendRequest(candidate);
+            } catch (error) {
+                if (!firstError) {
+                    firstError = error;
+                }
+                console.warn(`[TEMPLATE_FALLBACK] Attempt ${attempt + 1}/${candidates.length} failed for number ${candidate}`);
             }
-
-            // Not a Brazilian number or no alternate format available
-            throw firstError;
         }
+
+        throw firstError ?? new Error(`Falha ao enviar template para o numero ${number}.`);
     },
     {
         contextResolver: (apiConfig, instanceName, payload) => ({
