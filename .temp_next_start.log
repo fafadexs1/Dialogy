@@ -1,0 +1,15 @@
+
+> nextn@0.1.0 start
+> next start -p 9045
+
+▲ Next.js 16.1.6
+- Local:         http://localhost:9045
+- Network:       http://192.168.1.8:9045
+
+✓ Starting...
+Next.js config loaded with experimental.serverActions.bodySizeLimit: 100mb
+⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+✓ Ready in 1631ms
+[TASK_QUEUE] Evolution webhook queue initialized with concurrency 2
+
+C:\Users\fabri\OneDrive\Área de Trabalho\Dialogy\Conexão\Dialogy>
