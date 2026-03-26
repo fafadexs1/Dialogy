@@ -13,8 +13,34 @@ export interface SGPPayload {
     type?: string;
 }
 
+export interface AgentSendQuotedPayload {
+    key?: {
+        id?: string;
+    };
+    message?: Record<string, any>;
+}
+
+export interface AgentSendListPayload {
+    title?: string;
+    description?: string;
+    buttonText: string;
+    footerText?: string;
+    sections: Array<{
+        title: string;
+        rows: Array<{
+            title: string;
+            description?: string;
+            rowId: string;
+        }>;
+    }>;
+    delay?: number;
+    quoted?: AgentSendQuotedPayload;
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+}
+
 export interface AgentSendPayload {
-    type?: 'text' | 'template';
+    type?: 'text' | 'template' | 'list';
     chatId?: string;
     phoneNumber?: string; // JID format
     content?: string; // For text messages
@@ -25,6 +51,41 @@ export interface AgentSendPayload {
         language: string;
         components: any[];
     };
+    list?: AgentSendListPayload;
+    title?: string;
+    description?: string;
+    buttonText?: string;
+    footerText?: string;
+    sections?: AgentSendListPayload['sections'];
+    delay?: number;
+    quoted?: AgentSendQuotedPayload;
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+}
+
+export function normalizeAgentListPayload(body: any): AgentSendListPayload | undefined {
+    if (!body || typeof body !== 'object') {
+        return undefined;
+    }
+
+    const listSource = body.list && typeof body.list === 'object' ? body.list : {};
+    const normalized = {
+        title: listSource.title ?? body.title,
+        description: listSource.description ?? body.description,
+        buttonText: listSource.buttonText ?? body.buttonText,
+        footerText: listSource.footerText ?? body.footerText,
+        sections: listSource.sections ?? body.sections,
+        delay: listSource.delay ?? body.delay,
+        quoted: listSource.quoted ?? body.quoted,
+        mentionsEveryOne: listSource.mentionsEveryOne ?? body.mentionsEveryOne,
+        mentioned: listSource.mentioned ?? body.mentioned,
+    };
+
+    if (!normalized.buttonText || !Array.isArray(normalized.sections)) {
+        return undefined;
+    }
+
+    return normalized;
 }
 
 export function isSGPPayload(body: any): body is SGPPayload {

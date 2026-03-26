@@ -182,7 +182,6 @@ export const transferChatAction = withDebug(
 
             let finalAgentId = agentId;
             let transferTargetName = '';
-            let transferTemplate: string | undefined;
 
             // Load balancing logic for team transfer
             if (teamId) {
@@ -237,9 +236,6 @@ export const transferChatAction = withDebug(
             const isFirstAssignment = !current_chat_agent_id;
             const isActualTransfer = !!current_chat_agent_id && current_chat_agent_id !== finalAgentId;
 
-            const { transferTeamMessageTemplate } = await getWorkspaceTemplates(workspaceId);
-            transferTemplate = transferTeamMessageTemplate || undefined;
-
             // Update chat with the new agent and status
             await client.query(`
             UPDATE chats
@@ -273,41 +269,30 @@ export const transferChatAction = withDebug(
 
             await client.query('COMMIT');
             console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
-            if (transferTemplate && isActualTransfer) {
-                const appliedTemplate = transferTemplate.replace(/{{\s*dest\s*}}/gi, transferTargetName || 'novo atendente');
-                try {
-                    await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, isSystemAgent, lastInstanceName || undefined, {
-                        event: 'transfer_notice',
-                        to_agent_id: finalAgentId,
-                        to_team_id: teamId,
-                        to_name: transferTargetName,
-                        authored_by: currentAgentId,
-                        template_applied: true,
-                    });
-                } catch (templateErr) {
-                    console.error('[TRANSFER_CHAT] Falha ao enviar mensagem de transferncia:', templateErr);
-                }
-            }
-            // revalidatePath('/', 'layout'); // Removed to prevent page refresh
+            if (isActualTransfer) {
+                // Run template notice asynchronously so transfer UX stays snappy.
+                (async () => {
+                    try {
+                        const { transferTeamMessageTemplate } = await getWorkspaceTemplates(workspaceId);
+                        const transferTemplate = transferTeamMessageTemplate || undefined;
+                        if (!transferTemplate) return;
 
-            // Fetch updated chat with full details (tags, colors) to return to frontend
-            const updatedRows = await fetchChats({
-                workspaceId,
-                userId: currentAgentId, // Keep view as current agent
-                limit: 1,
-                includeChatId: chatId,
-                ownership: 'everyone',
-                statuses: []
-            });
-
-            let updatedChat: Chat | undefined;
-            if (updatedRows.length > 0) {
-                const timezone = await getWorkspaceTimezone(workspaceId);
-                const { chats } = await hydrateChats(updatedRows, timezone);
-                updatedChat = chats[0];
+                        const appliedTemplate = transferTemplate.replace(/{{\s*dest\s*}}/gi, transferTargetName || 'novo atendente');
+                        await sendAutomatedMessageAction(chatId, appliedTemplate, currentAgentId, isSystemAgent, lastInstanceName || undefined, {
+                            event: 'transfer_notice',
+                            to_agent_id: finalAgentId,
+                            to_team_id: teamId,
+                            to_name: transferTargetName,
+                            authored_by: currentAgentId,
+                            template_applied: true,
+                        });
+                    } catch (templateErr) {
+                        console.error('[TRANSFER_CHAT] Falha ao enviar mensagem de transferncia:', templateErr);
+                    }
+                })();
             }
 
-            return { success: true, chat: updatedChat };
+            return { success: true };
 
         } catch (error) {
             await client.query('ROLLBACK');
@@ -1665,6 +1650,11 @@ export const getOrCreateChatAction = withDebug(
             // Create new chat
             const newChatId = randomUUID();
             const protocol = buildChatProtocol(newChatId);
+            const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+            const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+            if (!chatLimitStatus.allowed) {
+                throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+            }
             const newChat = await db.query(
                 `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', $4, NOW(), $5) RETURNING id`,
                 [newChatId, workspaceId, contactId, user.id, protocol]

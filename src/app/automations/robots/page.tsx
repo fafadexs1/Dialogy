@@ -140,7 +140,7 @@ function AgentForm({
             </div>
             <div className="flex items-center justify-between rounded-md border border-input bg-muted/20 px-3 py-2">
               <div>
-                <p className="text-sm font-medium text-white">Ocultar mensagens no chatlist</p>
+                <p className="text-sm font-medium text-foreground">Ocultar mensagens no chatlist</p>
                 <p className="text-xs text-muted-foreground">Não mostra mensagens de marketing no preview.</p>
               </div>
               <Switch checked={hideMarketing} onCheckedChange={setHideMarketing} />

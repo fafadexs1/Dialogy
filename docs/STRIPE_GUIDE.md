@@ -1,119 +1,96 @@
-# Guia de Configuração Stripe para Dialogy
+# Guia de Configuracao Stripe para Dialogy
 
-Este guia passo a passo explica como configurar seus produtos no Stripe e integrar com o Dialogy.
+Este guia explica como cadastrar os produtos da Dialogy no Stripe mantendo os slugs tecnicos atuais do sistema.
 
-## Parte 1: Configuração no Painel da Stripe
+## Parte 1: Configuracao no painel da Stripe
 
-1.  **Acesse o Dashboard**: Vá para [dashboard.stripe.com](https://dashboard.stripe.com) e faça login.
-2.  **Modo de Teste**: Certifique-se de que o "Modo de teste" (Test Mode) está ativado no canto superior direito (para desenvolvimento).
+1. Acesse [dashboard.stripe.com](https://dashboard.stripe.com).
+2. Ative o modo de teste enquanto estiver configurando.
 
-### Criando os Produtos (Planos)
+### Produtos publicos
 
-### Criando os Produtos (Planos)
+Crie tres produtos recorrentes mensais com estes nomes e valores:
 
-Você precisa criar 3 produtos separadamente. Use **exatamente** os dados abaixo para cada um:
+#### 1. Plano Essencial
+- Nome: `Dialogy Essencial`
+- Descricao: `Organize seu atendimento em um so lugar.`
+- Preco: `197,00`
+- Moeda: `BRL`
+- Periodo: `Mensal`
+- Slug tecnico no sistema: `starter`
 
-#### 1. Plano Starter
-*   **Nome**: `Dialogy Starter`
-*   **Descrição**: `Ideal para quem está começando.`
-*   **Modelo de preço**: `Padrão`
-*   **Preço**: `97,00`
-*   **Moeda**: `BRL`
-*   **Período de faturamento**: `Mensal`
-*   *(Clique em "Salvar produto" e copie o ID do preço `price_...`)*
+#### 2. Plano Profissional
+- Nome: `Dialogy Profissional`
+- Descricao: `Estruture sua operacao e responda mais rapido.`
+- Preco: `397,00`
+- Moeda: `BRL`
+- Periodo: `Mensal`
+- Slug tecnico no sistema: `pro`
 
-#### 2. Plano Pro
-*   **Nome**: `Dialogy Pro`
-*   **Descrição**: `Para empresas em crescimento.`
-*   **Modelo de preço**: `Padrão`
-*   **Preço**: `297,00`
-*   **Moeda**: `BRL`
-*   **Período de faturamento**: `Mensal`
-*   *(Clique em "Salvar produto" e copie o ID do preço `price_...`)*
+#### 3. Plano Operacao
+- Nome: `Dialogy Operacao`
+- Descricao: `Escalone com automacoes, permissoes e integracoes.`
+- Preco: `897,00`
+- Moeda: `BRL`
+- Periodo: `Mensal`
+- Slug tecnico no sistema: `business`
 
-#### 3. Plano Business
-*   **Nome**: `Dialogy Business`
-*   **Descrição**: `Para operações robustas.`
-*   **Modelo de preço**: `Padrão`
-*   **Preço**: `697,00`
-*   **Moeda**: `BRL`
-*   **Período de faturamento**: `Mensal`
-*   *(Clique em "Salvar produto" e copie o ID do preço `price_...`)*
+### Obter os Price IDs
 
-### Obtendo os IDs de Preço (Price IDs)
+Depois de salvar cada produto:
 
-Após salvar, você verá a página de detalhes do produto.
-1.  Role até a seção **Preços**.
-2.  Você verá um ID que começa com `price_...` (ex: `price_1Pxyz...`).
-3.  **Copie este ID**. Este é o `stripePriceId` que usaremos no código.
+1. Abra a secao `Precos`.
+2. Copie o ID `price_...`.
+3. Guarde esse valor para mapear no painel interno.
 
-**Repita para os planos Pro e Business.**
+## Parte 2: Configuracao no Dialogy
 
-## Parte 2: Configuração no Código (Dialogy)
+### Mapeamento no codigo
 
-Agora vamos conectar esses IDs ao nosso sistema.
+Os slugs tecnicos continuam estes:
 
-### 1. Atualizar `src/lib/plans.ts`
+- `starter` -> Dialogy Essencial
+- `pro` -> Dialogy Profissional
+- `business` -> Dialogy Operacao
+- `enterprise` -> Enterprise
 
-Abra o arquivo `src/lib/plans.ts` e cole os IDs que você copiou nos campos `stripePriceId` correspondentes.
+### Variaveis de ambiente
 
-```typescript
-export const PLANS: Record<PlanType, PlanDetails> = {
-    starter: {
-        id: 'starter',
-        // ...
-        stripePriceId: 'price_1Pxyz...', // COLE AQUI O ID DO STARTER
-    },
-    pro: {
-        id: 'pro',
-        // ...
-        stripePriceId: 'price_1Pzyx...', // COLE AQUI O ID DO PRO
-    },
-    business: {
-        id: 'business',
-        // ...
-        stripePriceId: 'price_1Pyzx...', // COLE AQUI O ID DO BUSINESS
-    },
-    // ...
-};
-```
-
-### 2. Variáveis de Ambiente (`.env.local`)
-
-Você precisa adicionar as chaves da Stripe ao seu arquivo `.env.local`. Pegue essas chaves em **Desenvolvedores > Chaves de API** no dashboard da Stripe.
+Adicione as chaves no `.env.local`:
 
 ```env
-# Stripe (Mode Teste)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-*   `STRIPE_WEBHOOK_SECRET`: Você obterá este valor ao configurar o webhook (veja abaixo).
+### Webhook
 
-### 3. Configurar Webhook (Para atualizações automáticas)
+Para ambiente local:
 
-Para que o Dialogy saiba quando um pagamento foi feito, precisamos ouvir eventos da Stripe.
+1. Rode `stripe login` ou configure `STRIPE_SECRET_KEY` valida no ambiente.
+2. Rode `npm run dev`.
+3. O runner local inicia `stripe listen --forward-to http://localhost:9002/api/webhooks/stripe` automaticamente.
+4. Quando o Stripe CLI retorna um `whsec_...` a tempo, o valor e injetado no processo Next para sincronizar a verificacao do webhook.
 
-1.  Se estiver rodando localhost, use o **Stripe CLI** para testar webhooks:
-    *   Instale o Stripe CLI.
-    *   Rode: `stripe login`
-    *   Rode: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
-    *   Ele te dará um segredo de webhook (`whsec_...`). Coloque no `.env.local`.
+Fallback manual:
 
-2.  Em **Produção** (Vercel/Deploy):
-    *   Vá em **Desenvolvedores > Webhooks** no Stripe.
-    *   Adicione um endpoint: `https://sua-url.com/api/webhooks/stripe`.
-    *   Eventos para ouvir:
-        *   `checkout.session.completed`
-        *   `invoice.payment_succeeded`
-        *   `customer.subscription.updated`
-        *   `customer.subscription.deleted`
+1. Rode `npm run dev:next`
+2. Rode `stripe listen --skip-update --forward-to http://localhost:9002/api/webhooks/stripe`
 
-## Próximos Passos Sugeridos
+Em producao:
 
-Eu posso implementar a infraestrutura necessária para você agora se desejar:
+1. Crie o endpoint `https://sua-url.com/api/webhooks/stripe`
+2. Ouça estes eventos:
+   - `checkout.session.completed`
+   - `invoice.payment_succeeded`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
 
-1.  Criar `src/lib/stripe.ts` (Cliente Stripe).
-2.  Criar `src/app/api/webhooks/stripe/route.ts` (Ouvinte de eventos).
-3.  Criar uma Server Action para criar sessões de checkout (`createCheckoutSession`).
+## Extras publicos
+
+- Pacote extra de 500 chats: `R$ 99/mensal`
+- Canal extra: `R$ 39/mensal`
+- IA Copilot por workspace: `R$ 149/mensal`
+
+Custos oficiais da Meta ou do BSP continuam fora do plano principal.

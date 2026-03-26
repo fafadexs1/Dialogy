@@ -5,6 +5,7 @@ import type { Message, Chat, Contact } from '@/lib/types';
 
 const WEBHOOK_TIMEOUT_MS = Number(process.env.WEBHOOK_TIMEOUT_MS ?? 8000);
 const FAILED_MESSAGE_STATUSES = new Set(['FAILED', 'ERROR']);
+type WebhookWhatsappInstanceType = 'cloud' | 'baileys';
 
 interface WebhookPayload {
     event: 'message.created';
@@ -17,6 +18,7 @@ interface WebhookPayload {
         status: Chat['status'];
         channel: string; // e.g., 'WhatsApp'
         instance_name: string;
+        instance_type?: WebhookWhatsappInstanceType;
         assigned_agent: {
             id: string | undefined;
             name: string | undefined;
@@ -99,6 +101,43 @@ function toIsoDate(value: string | Date): string {
     }
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function normalizeWhatsappInstanceType(
+    instanceType: string | null | undefined
+): WebhookWhatsappInstanceType | undefined {
+    if (instanceType === 'wa_cloud') {
+        return 'cloud';
+    }
+    if (instanceType === 'baileys') {
+        return 'baileys';
+    }
+    return undefined;
+}
+
+async function resolveWhatsappInstanceType(
+    instanceName: string | undefined,
+    knownInstanceType?: Chat['instance_type'] | null
+): Promise<WebhookWhatsappInstanceType | undefined> {
+    const normalizedKnownType = normalizeWhatsappInstanceType(knownInstanceType);
+    if (normalizedKnownType) {
+        return normalizedKnownType;
+    }
+
+    const trimmedInstanceName = instanceName?.trim();
+    if (!trimmedInstanceName || trimmedInstanceName === 'N/A') {
+        return undefined;
+    }
+
+    const res = await db.query(
+        `SELECT type
+         FROM evolution_api_instances
+         WHERE instance_name = $1
+         LIMIT 1`,
+        [trimmedInstanceName]
+    );
+
+    return normalizeWhatsappInstanceType(res.rows[0]?.type);
 }
 
 export async function dispatchMessageToWebhooksById(
@@ -247,8 +286,11 @@ export async function dispatchMessageToWebhooks(
             return;
         }
 
-        const workspaceName = await getWorkspaceName(chat.workspace_id);
-        const contactWithDetails = await getContactWithCustomFields(chat.contact.id);
+        const [workspaceName, contactWithDetails, instanceType] = await Promise.all([
+            getWorkspaceName(chat.workspace_id),
+            getContactWithCustomFields(chat.contact.id),
+            resolveWhatsappInstanceType(instanceName || message.instance_name, chat.instance_type),
+        ]);
 
         if (!contactWithDetails) {
             console.error(`[WEBHOOK_DISPATCHER] Erro crítico: Não foi possível encontrar detalhes do contato ${chat.contact.id}. Abortando.`);
@@ -266,6 +308,7 @@ export async function dispatchMessageToWebhooks(
                 status: chat.status,
                 channel: 'WhatsApp', // Placeholder
                 instance_name: instanceName || 'N/A',
+                ...(instanceType ? { instance_type: instanceType } : {}),
                 assigned_agent: {
                     id: chat.agent?.id,
                     name: chat.agent?.name,
@@ -364,8 +407,9 @@ export async function dispatchMessageToWebhooks(
         const sendWebhook = async (agent: any) => {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+            const logContext = `agent='${agent.name}' agentId=${agent.id} workspace=${chat.workspace_id} instance=${instanceName || 'N/A'}`;
             try {
-                console.log(`[WEBHOOK_DISPATCHER] Enviando para o agente '${agent.name}' na URL: ${agent.webhook_url}`);
+                console.log(`[WEBHOOK_DISPATCHER] Enviando para ${logContext} url=${agent.webhook_url}`);
                 const response = await fetch(agent.webhook_url, {
                     method: 'POST',
                     headers: {
@@ -384,7 +428,7 @@ export async function dispatchMessageToWebhooks(
                     headers: { target: agent.webhook_url },
                 });
                 if (!response.ok) {
-                    console.error(`[WEBHOOK_DISPATCHER] Webhook respondeu com status ${response.status} para '${agent.name}'.`);
+                    console.error(`[WEBHOOK_DISPATCHER] Webhook respondeu com status ${response.status} para ${logContext}.`);
                 }
             } catch (error: any) {
                 const reason = error?.name === 'AbortError' ? 'timeout' : (error?.message || 'erro desconhecido');
@@ -394,7 +438,7 @@ export async function dispatchMessageToWebhooks(
                     responseBody: { error: reason, dropped: true },
                     headers: { target: agent.webhook_url },
                 });
-                console.error(`[WEBHOOK_DISPATCHER] Falha ao enviar webhook para '${agent.name}':`, error);
+                console.error(`[WEBHOOK_DISPATCHER] Falha ao enviar webhook para ${logContext}:`, error);
             } finally {
                 clearTimeout(timer);
             }

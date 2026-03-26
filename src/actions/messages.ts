@@ -16,6 +16,7 @@ import { sendImageMessage } from '@/services/whatsapp/send-image-message';
 import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
+import { sendListMessage } from '@/services/whatsapp/send-list-message';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
 import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
@@ -48,6 +49,34 @@ type MediaFilePayload = {
     deleteAfterSend?: boolean;
     storageBucket?: string;
     storagePath?: string;
+};
+
+type InteractiveListRow = {
+    title: string;
+    description?: string;
+    rowId: string;
+};
+
+type InteractiveListSection = {
+    title: string;
+    rows: InteractiveListRow[];
+};
+
+type InteractiveListPayload = {
+    title?: string;
+    description?: string;
+    buttonText: string;
+    footerText?: string;
+    sections: InteractiveListSection[];
+    delay?: number;
+    quoted?: {
+        key?: {
+            id?: string;
+        };
+        message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
 };
 
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
@@ -194,6 +223,36 @@ function serializeErrorPayload(error: unknown): unknown {
     }
 
     return error ?? null;
+}
+
+function normalizeWhatsappPhoneNumber(value: string): string {
+    return value.replace(/@.*$/, '').replace(/\D/g, '') || value;
+}
+
+function buildInteractiveListPreview(list: InteractiveListPayload): string {
+    const summary = [list.title, list.description].filter(Boolean).join(' - ').trim();
+    if (summary) {
+        return summary;
+    }
+    return `[Lista interativa] ${list.buttonText}`;
+}
+
+function isValidInteractiveList(list: InteractiveListPayload | undefined): list is InteractiveListPayload {
+    if (!list?.buttonText?.trim()) return false;
+    if (!Array.isArray(list.sections) || list.sections.length === 0) return false;
+
+    return list.sections.every((section) =>
+        typeof section?.title === 'string' &&
+        section.title.trim().length > 0 &&
+        Array.isArray(section.rows) &&
+        section.rows.length > 0 &&
+        section.rows.every((row) =>
+            typeof row?.title === 'string' &&
+            row.title.trim().length > 0 &&
+            typeof row?.rowId === 'string' &&
+            row.rowId.trim().length > 0
+        )
+    );
 }
 
 async function resolveMetaSendContext(chatId: string, client: any): Promise<MetaSendContext | null> {
@@ -539,7 +598,7 @@ async function internalSendMessage(
                 }
 
                 // Envio Direto via API
-                const apiConfig = await getEvolutionApiConfig(instanceName);
+                const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId: chatInfo.workspace_id });
                 if (!apiConfig) throw new Error(`Configuração API não encontrada par instância ${instanceName}`);
 
                 if (template) {
@@ -636,7 +695,7 @@ async function internalSendMedia(
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
 
-        const apiConfig = await getEvolutionApiConfig(instanceName);
+        const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
         if (!apiConfig) throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
 
         const senderColumn = metadata?.sentBy === 'system_agent' ? 'sender_system_agent_id' : 'sender_user_id';
@@ -1120,7 +1179,7 @@ export const retryMessageAction = withDebug(
         }
 
         try {
-            const apiConfig = await getEvolutionApiConfig(instanceName);
+            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId: messageRow.workspace_id });
             if (!apiConfig) {
                 return { success: false, error: `Configuracao da API nao encontrada para a instancia ${instanceName}.` };
             }
@@ -1460,6 +1519,11 @@ export const sendAgentTemplateAction = withDebug(
                 const newChatId = randomUUID();
                 const protocol = buildChatProtocol(newChatId);
                 // For system agents, avoid setting agent_id (FK to users) to prevent constraint violations.
+                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                if (!chatLimitStatus.allowed) {
+                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                }
                 const newChatRes = await client.query(
                     `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4) RETURNING id`,
                     [newChatId, workspaceId, contactId, protocol]
@@ -1468,7 +1532,7 @@ export const sendAgentTemplateAction = withDebug(
             }
 
             // 3. Get API Config
-            const apiConfig = await getEvolutionApiConfig(instanceName);
+            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
             if (!apiConfig) {
                 throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
             }
@@ -1539,6 +1603,191 @@ export const sendAgentTemplateAction = withDebug(
     }
 );
 
+export const sendAgentListAction = withDebug(
+    'send_agent_list',
+    async function sendAgentListAction(
+        input: {
+            agentId: string;
+            workspaceId: string;
+            instanceName: string;
+            chatId?: string;
+            numberid?: string;
+            list: InteractiveListPayload;
+            metadata?: MessageMetadata;
+        }
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any; chatId?: string }> {
+        const { agentId, workspaceId, instanceName, chatId: providedChatId, numberid, list, metadata } = input;
+
+        if (!instanceName || (!providedChatId && !numberid) || !isValidInteractiveList(list)) {
+            return { success: false, error: 'Campos obrigatorios faltando ou lista invalida.' };
+        }
+
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            let chatId = providedChatId;
+            let fullJid: string;
+
+            if (chatId) {
+                const chatRes = await client.query(
+                    `SELECT ct.phone_number_jid
+                     FROM chats c
+                     JOIN contacts ct ON ct.id = c.contact_id
+                     WHERE c.id = $1 AND c.workspace_id = $2
+                     LIMIT 1`,
+                    [chatId, workspaceId]
+                );
+
+                if ((chatRes.rowCount ?? 0) === 0) {
+                    throw new Error('Chat nao encontrado para o workspace informado.');
+                }
+
+                fullJid = chatRes.rows[0].phone_number_jid;
+                if (!fullJid) {
+                    throw new Error('Chat nao possui contato WhatsApp valido.');
+                }
+            } else {
+                const normalizedNumber = normalizeWhatsappPhoneNumber(numberid!);
+                fullJid = `${normalizedNumber}@s.whatsapp.net`;
+
+                let contactRes = await client.query(
+                    'SELECT id FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+                    [workspaceId, fullJid]
+                );
+
+                let contactId;
+                if ((contactRes.rowCount ?? 0) === 0) {
+                    const newContactRes = await client.query(
+                        `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid)
+                         VALUES ($1, $2, $3, $4)
+                         RETURNING id`,
+                        [workspaceId, normalizedNumber, normalizedNumber, fullJid]
+                    );
+                    contactId = newContactRes.rows[0].id;
+                } else {
+                    contactId = contactRes.rows[0].id;
+                }
+
+                const chatRes = await client.query(
+                    `SELECT id
+                     FROM chats
+                     WHERE workspace_id = $1
+                       AND contact_id = $2
+                       AND status IN ('gerais', 'atendimentos')
+                     LIMIT 1`,
+                    [workspaceId, contactId]
+                );
+
+                if ((chatRes.rowCount ?? 0) > 0) {
+                    chatId = chatRes.rows[0].id;
+                } else {
+                    const newChatId = randomUUID();
+                    const protocol = buildChatProtocol(newChatId);
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
+                    const newChatRes = await client.query(
+                        `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
+                         VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
+                         RETURNING id`,
+                        [newChatId, workspaceId, contactId, protocol]
+                    );
+                    chatId = newChatRes.rows[0].id;
+                }
+            }
+
+            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
+            if (!apiConfig) {
+                throw new Error(`Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.`);
+            }
+
+            const apiResponse = await sendListMessage(apiConfig, instanceName, {
+                number: fullJid,
+                title: list.title,
+                description: list.description,
+                buttonText: list.buttonText,
+                footerText: list.footerText,
+                sections: list.sections,
+                delay: list.delay,
+                quoted: list.quoted,
+                mentionsEveryOne: list.mentionsEveryOne,
+                mentioned: list.mentioned,
+            });
+
+            const apiMessageId = apiResponse?.key?.id ?? apiResponse?.message_id ?? apiResponse?.id ?? null;
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me,
+                    message_id_from_api, api_message_status, instance_name,
+                    metadata, is_read, sender_system_agent_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    workspaceId,
+                    chatId,
+                    'text',
+                    buildInteractiveListPreview(list),
+                    true,
+                    apiMessageId,
+                    'SENT',
+                    instanceName,
+                    {
+                        interactiveType: 'list',
+                        interactivePayload: {
+                            kind: 'list',
+                            title: list.title,
+                            description: list.description,
+                            buttonText: list.buttonText,
+                            footerText: list.footerText,
+                            sections: list.sections,
+                            delay: list.delay,
+                            quoted: list.quoted,
+                            mentionsEveryOne: list.mentionsEveryOne,
+                            mentioned: list.mentioned,
+                        },
+                        ...(metadata ?? {}),
+                    },
+                    true,
+                    agentId,
+                ]
+            );
+
+            await client.query('COMMIT');
+
+            if (metadata?.isMarketing && chatId) {
+                try {
+                    const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
+                } catch (err) {
+                    console.error('[SEND_AGENT_LIST_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
+                }
+            }
+
+            return { success: true, apiResponse, chatId };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[SEND_AGENT_LIST_ACTION] Erro:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Ocorreu um erro desconhecido.';
+            return { success: false, error: `Falha ao enviar lista: ${errorMessage}` };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({
+            payload: {
+                instanceName: input.instanceName,
+                hasChatId: Boolean(input.chatId),
+                hasPhoneNumber: Boolean(input.numberid),
+                sections: input.list?.sections?.length ?? 0,
+            }
+        })
+    }
+);
+
 
 export const startNewConversation = withDebug(
     'start_conversation',
@@ -1598,6 +1847,11 @@ export const startNewConversation = withDebug(
             } else {
                 const newChatId = randomUUID();
                 const protocol = buildChatProtocol(newChatId);
+                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                if (!chatLimitStatus.allowed) {
+                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                }
                 const newChatRes = await client.query(
                     `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'atendimentos', $4, NOW(), $5) RETURNING id`,
                     [newChatId, workspaceId, contactId, senderId, protocol]

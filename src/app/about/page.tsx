@@ -1,26 +1,33 @@
-import { getSeoMetadata } from '@/lib/seo-helper';
-import { Navbar } from '@/components/landing/navbar';
 import { Footer } from '@/components/landing/footer';
+import { Navbar } from '@/components/landing/navbar';
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import { Section } from '@/components/landing/ui';
+import { buildPageMetadata } from '@/lib/seo/metadata';
+import { JsonLd, getBreadcrumbSchema, getOrganizationSchema } from '@/lib/seo/schema';
 
 export async function generateMetadata() {
-    return getSeoMetadata({
-        pathname: '/about',
-        fallbackTitle: 'Sobre Nós | Dialogy',
-        fallbackDescription: 'Conheça a missão e os valores por trás da Dialogy, a plataforma líder em automação de comunicação.',
-    });
+    return buildPageMetadata({ pathname: '/about' });
 }
 
-export default function AboutPage() {
+export default async function AboutPage() {
+    const organizationSchema = await getOrganizationSchema();
+    const breadcrumbSchema = getBreadcrumbSchema([
+        { name: 'Home', path: '/' },
+        { name: 'Sobre', path: '/about' },
+    ]);
+
     return (
         <div className="min-h-screen w-full bg-[#020617] text-white">
+            <JsonLd id="about-organization-schema" data={organizationSchema} />
+            <JsonLd id="about-breadcrumb-schema" data={breadcrumbSchema} />
+            <StoredSeoJsonLd pathname="/about" />
             <Navbar />
-            <main className="pt-32 pb-20">
+            <main className="pb-20 pt-32">
                 <Section>
-                    <h1 className="text-5xl font-bold mb-8">Sobre a Dialogy</h1>
-                    <p className="text-xl text-white/70 max-w-3xl leading-relaxed">
-                        Estamos construindo o futuro da comunicação entre empresas e clientes.
-                        Acreditamos que a automação não deve soar robótica, mas sim empoderar humanos a fazerem mais.
+                    <h1 className="mb-8 text-5xl font-bold">Sobre a Dialogy</h1>
+                    <p className="max-w-3xl text-xl leading-relaxed text-white/70">
+                        A Dialogy esta construindo uma plataforma de CRM conversacional e atendimento omnichannel
+                        para operacoes que precisam crescer com clareza, automacao e inteligencia aplicada.
                     </p>
                 </Section>
             </main>

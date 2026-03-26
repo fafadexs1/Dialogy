@@ -31,12 +31,35 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/use-online-status';
 
+const META_CONFIG_PLACEHOLDERS = new Set([
+    '1234567890123456',
+]);
+
+function getMetaEmbeddedSignupConfig() {
+    const appId = (process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || process.env.NEXT_PUBLIC_META_APP_ID || '').trim();
+    const configId = (process.env.NEXT_PUBLIC_META_CONFIG_ID || '').trim();
+
+    return {
+        appId,
+        configId,
+        hasValidAppId: /^\d{8,}$/.test(appId),
+        hasValidConfigId: /^\d{8,}$/.test(configId) && !META_CONFIG_PLACEHOLDERS.has(configId),
+    };
+}
+
 
 function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void }) {
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string>('');
     const [manualMode, setManualMode] = useState(false);
+    const {
+        appId: metaAppId,
+        configId: metaConfigId,
+        hasValidAppId: hasValidMetaAppId,
+        hasValidConfigId: hasValidMetaConfigId,
+    } = getMetaEmbeddedSignupConfig();
+    const canStartMetaEmbeddedSignup = hasValidMetaAppId && hasValidMetaConfigId;
 
     // Form data state
     const [formData, setFormData] = useState<Partial<EvolutionInstanceCreationPayload>>({
@@ -106,8 +129,23 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
 
     // --- AUTOMATED META FLOW ---
     const handleMetaLogin = () => {
-        const appId = process.env.NEXT_PUBLIC_META_APP_ID || '740952588412789';
-        const configId = process.env.NEXT_PUBLIC_META_CONFIG_ID || '3807812312846037';
+        if (!hasValidMetaAppId) {
+            toast({
+                title: 'ConfiguraÃ§Ã£o Meta ausente',
+                description: 'Defina NEXT_PUBLIC_FACEBOOK_APP_ID ou NEXT_PUBLIC_META_APP_ID com o App ID correto antes de conectar o WhatsApp.',
+                variant: 'destructive'
+            });
+            return;
+        }
+
+        if (!hasValidMetaConfigId) {
+            toast({
+                title: 'Config ID da Meta ausente',
+                description: 'Defina NEXT_PUBLIC_META_CONFIG_ID com o Config ID real do Facebook Login for Business / WhatsApp Embedded Signup.',
+                variant: 'destructive'
+            });
+            return;
+        }
 
         if (!window.FB) {
             toast({ title: 'Erro', description: 'SDK do Facebook não carregado. Verifique bloqueadores de anúncios.', variant: 'destructive' });
@@ -229,11 +267,12 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                 }
             })();
         }, {
-            config_id: configId,
+            config_id: metaConfigId,
             response_type: 'code',
             override_default_response_type: true,
             extras: {
-                version: "v3"
+                feature: 'whatsapp_embedded_signup',
+                sessionInfoVersion: 3,
             }
         });
     };
@@ -291,16 +330,26 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose }: { workspaceId: str
                     </p>
                 </div>
 
-                <Card className="w-full max-w-md border-2 border-blue-100 hover:border-blue-300 transition-colors shadow-lg cursor-pointer group" onClick={handleMetaLogin}>
+                <Card
+                    className={cn(
+                        "w-full max-w-md border-2 border-blue-100 transition-colors shadow-lg group",
+                        canStartMetaEmbeddedSignup ? "cursor-pointer hover:border-blue-300" : "cursor-not-allowed opacity-70"
+                    )}
+                    onClick={canStartMetaEmbeddedSignup ? handleMetaLogin : undefined}
+                >
                     <CardHeader className="text-center pb-2">
                         <div className="mx-auto w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                             <svg className="w-8 h-8 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24" role="img" xmlns="http://www.w3.org/2000/svg"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.791-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
                         </div>
                         <CardTitle className="text-xl">WhatsApp Cloud API (Oficial)</CardTitle>
-                        <CardDescription>Recomendado para empresas</CardDescription>
+                        <CardDescription>
+                            {canStartMetaEmbeddedSignup
+                                ? 'Recomendado para empresas'
+                                : 'Configure NEXT_PUBLIC_META_CONFIG_ID com o Config ID real da Meta para habilitar esta conexão.'}
+                        </CardDescription>
                     </CardHeader>
                     <CardFooter className="justify-center pt-2 pb-6">
-                        <Button className="bg-[#1877F2] hover:bg-[#1877F2]/90 w-full font-semibold">
+                        <Button className="bg-[#1877F2] hover:bg-[#1877F2]/90 w-full font-semibold" disabled={!canStartMetaEmbeddedSignup}>
                             Conectar com Facebook
                         </Button>
                     </CardFooter>

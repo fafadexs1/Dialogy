@@ -502,6 +502,26 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
         if (Number.isNaN(parsed.getTime())) return undefined;
         return formatInTimeZone(parsed, workspaceTimezone, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
     })();
+    const senderName = message.sender?.name || (isFromMe ? 'Você' : 'Contato');
+    const senderAvatar = (message.sender as any)?.avatar || (message.sender as any)?.avatar_url || undefined;
+    const senderInitial = senderName.trim().charAt(0).toUpperCase() || '?';
+    const timeLabel = (() => {
+        const createdAt = new Date(message.createdAt);
+        if (!Number.isNaN(createdAt.getTime())) {
+            return formatInTimeZone(createdAt, workspaceTimezone, 'HH:mm', { locale: ptBR });
+        }
+
+        if (typeof message.timestamp === 'string' && message.timestamp.trim().length > 0) {
+            const parsedTimestamp = new Date(message.timestamp);
+            if (!Number.isNaN(parsedTimestamp.getTime())) {
+                return formatInTimeZone(parsedTimestamp, workspaceTimezone, 'HH:mm', { locale: ptBR });
+            }
+
+            return message.timestamp;
+        }
+
+        return '--:--';
+    })();
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const hasSharedContacts =
@@ -571,24 +591,22 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                     <div
                         className={`group flex items-start gap-3 ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
                     >
-                        {message.sender && (
-                            <Avatar className="h-8 w-8 border border-white/10 ring-1 ring-white/5">
-                                <AvatarImage src={(message.sender as any).avatar || (message.sender as any).avatar_url || undefined} alt={message.sender.name || ''} data-ai-hint="person" />
-                                <AvatarFallback className="bg-muted text-muted-foreground text-xs dark:bg-white/10 dark:text-white/70">{message.sender.name?.charAt(0) || '?'}</AvatarFallback>
-                            </Avatar>
-                        )}
+                        <Avatar className="h-8 w-8 shrink-0 border border-slate-200/80 bg-white shadow-sm dark:border-white/10 dark:bg-[#0B0B10]">
+                            <AvatarImage src={senderAvatar} alt={senderName} data-ai-hint="person" />
+                            <AvatarFallback className="bg-slate-100 text-slate-600 text-xs font-medium dark:bg-zinc-900 dark:text-zinc-300">{senderInitial}</AvatarFallback>
+                        </Avatar>
                         <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                             <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
                                     className={cn(
                                         "break-words rounded-[22px] md:rounded-2xl p-3 md:p-3 max-w-[85%] md:max-w-lg shadow-sm md:shadow-lg relative",
                                         isDeleted
-                                            ? 'bg-muted/30 text-muted-foreground italic border border-border/50 dark:bg-white/5 dark:text-white/50 dark:border-white/10'
+                                            ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
                                             : isInternalNote
-                                                ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-200'
+                                                ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
                                                 : (isFromMe
-                                                    ? 'bg-blue-600 text-white rounded-tr-sm shadow-md dark:bg-gradient-to-br dark:from-blue-600 dark:to-violet-600 dark:border dark:border-white/10'
-                                                    : 'bg-white dark:bg-white/10 backdrop-blur-md border border-border/50 dark:border-white/10 text-foreground dark:text-white rounded-tl-sm shadow-sm')
+                                                    ? 'rounded-tr-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_16px_30px_-18px_rgba(59,130,246,0.85)]'
+                                                    : 'rounded-tl-sm border border-slate-200/80 bg-white text-slate-800 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.85)]')
                                     )}
                                 >
                                     {isInternalNote && (
@@ -602,7 +620,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 "mb-2 rounded-xl border-l-2 px-2 py-1",
                                                 isFromMe
                                                     ? 'border-white/80 bg-white/20 text-white'
-                                                    : 'border-blue-500/40 bg-muted/50 text-foreground dark:bg-white/10 dark:text-white'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-zinc-200'
                                             )}
                                         >
                                             <p
@@ -613,7 +631,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                             >
                                                 {replyPreview.author}
                                             </p>
-                                            <p className={cn("text-xs line-clamp-2", isFromMe ? 'text-white' : 'text-foreground/80 dark:text-white/80')}>
+                                            <p className={cn("text-xs line-clamp-2", isFromMe ? 'text-white' : 'text-slate-600 dark:text-zinc-300')}>
                                                 {replyPreview.content}
                                             </p>
                                         </div>
@@ -689,11 +707,11 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                 )}
                             </div>
                             <div
-                                className={cn("flex items-center text-[10px] text-muted-foreground/60 mt-1.5 dark:text-white/40", isFromMe ? 'flex-row-reverse gap-1' : 'flex-row gap-1')}
+                                className={cn("mt-1.5 flex items-center text-[11px] font-medium text-slate-500 dark:text-zinc-500", isFromMe ? 'flex-row-reverse gap-1.5' : 'flex-row gap-1.5')}
                                 title={statusTitle}
                             >
                                 <span className="mx-1">
-                                    {formatInTimeZone(new Date(message.createdAt), workspaceTimezone, 'HH:mm', { locale: ptBR })}
+                                    {timeLabel}
                                 </span>
                                 {message.from_me && !isDeleted && (
                                     <div className="flex items-center gap-1">

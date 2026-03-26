@@ -221,3 +221,45 @@ Stack: error: column "plan" of relation "workspaces" does not exist
 [2025-12-16T05:22:35.921Z] Received webhook body length: 843
 [2025-12-16T05:22:35.921Z] Secret found: true, Signature present: true
 [2025-12-16T05:22:35.943Z] Event constructed: invoice_payment.paid
+[2026-03-26T19:05:29.500Z] Received webhook body length: 1476
+[2026-03-26T19:05:29.502Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.513Z] Received webhook body length: 1675
+[2026-03-26T19:05:29.514Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.519Z] Received webhook body length: 6035
+[2026-03-26T19:05:29.519Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.525Z] Received webhook body length: 4102
+[2026-03-26T19:05:29.526Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.531Z] Received webhook body length: 5971
+[2026-03-26T19:05:29.532Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.536Z] Received webhook body length: 1474
+[2026-03-26T19:05:29.537Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.542Z] Received webhook body length: 6037
+[2026-03-26T19:05:29.542Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.560Z] Received webhook body length: 6032
+[2026-03-26T19:05:29.561Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.664Z] Event constructed: setup_intent.succeeded
+[2026-03-26T19:05:29.664Z] Unhandled event type: setup_intent.succeeded
+[2026-03-26T19:05:29.667Z] Event constructed: payment_method.attached
+[2026-03-26T19:05:29.667Z] Unhandled event type: payment_method.attached
+[2026-03-26T19:05:29.672Z] Event constructed: checkout.session.completed
+[2026-03-26T19:05:29.673Z] Checkout Session Completed: ID=cs_test_b1luQAsHmdUl2UxK8pGXourCu4yixUUwTnCXvUJuSqr6ZNFetkuL49JJfP, Metadata={"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","calculatedMonthlyAmount":"1280.00","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","planId":"starter","monthlyChats":"30000"}
+[2026-03-26T19:05:29.679Z] Event constructed: invoice.created
+[2026-03-26T19:05:29.680Z] Unhandled event type: invoice.created
+[2026-03-26T19:05:29.683Z] Event constructed: customer.subscription.created
+[2026-03-26T19:05:29.683Z] Unhandled event type: customer.subscription.created
+[2026-03-26T19:05:29.690Z] Event constructed: setup_intent.created
+[2026-03-26T19:05:29.691Z] Unhandled event type: setup_intent.created
+[2026-03-26T19:05:29.697Z] Event constructed: invoice.finalized
+[2026-03-26T19:05:29.697Z] Unhandled event type: invoice.finalized
+[2026-03-26T19:05:29.704Z] Received webhook body length: 6045
+[2026-03-26T19:05:29.705Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:29.714Z] Event constructed: invoice.paid
+[2026-03-26T19:05:29.714Z] Unhandled event type: invoice.paid
+[2026-03-26T19:05:29.734Z] Event constructed: invoice.payment_succeeded
+[2026-03-26T19:05:29.767Z] Referral ledger result for invoice in_1TFJDeE1wcragUjYvwave5Ai: {"recorded":false,"reason":"invoice_amount_invalid"}
+[2026-03-26T19:05:29.767Z] Invoice event invoice.payment_succeeded applied to subscription undefined
+[2026-03-26T19:05:30.346Z] Plan activated for workspace e3b476a1-5de8-4744-80b5-a5d23fe15fab
+[2026-03-26T19:05:43.523Z] Received webhook body length: 5560
+[2026-03-26T19:05:43.524Z] Secret found: true, Signature present: true
+[2026-03-26T19:05:43.555Z] Event constructed: invoice.upcoming
+[2026-03-26T19:05:43.556Z] Unhandled event type: invoice.upcoming

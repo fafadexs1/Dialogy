@@ -1,85 +1,81 @@
-import React from 'react';
+import { buildPageMetadata } from '@/lib/seo/metadata';
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
+import { JsonLd, getBreadcrumbSchema } from '@/lib/seo/schema';
+
+const updatedAtLabel = '20/03/2026';
+
+export async function generateMetadata() {
+    return buildPageMetadata({ pathname: '/terms' });
+}
 
 export default function TermsOfUsePage() {
+    const breadcrumbSchema = getBreadcrumbSchema([
+        { name: 'Home', path: '/' },
+        { name: 'Termos de Uso', path: '/terms' },
+    ]);
+
     return (
-        <div className="min-h-screen bg-background py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-4xl mx-auto bg-card p-8 rounded-lg shadow-sm border border-border">
-                <h1 className="text-3xl font-bold text-foreground mb-8">Termos de Uso</h1>
+        <div className="min-h-screen bg-background px-4 py-12 sm:px-6 lg:px-8">
+            <JsonLd id="terms-breadcrumb-schema" data={breadcrumbSchema} />
+            <StoredSeoJsonLd pathname="/terms" />
+            <div className="mx-auto max-w-4xl rounded-lg border border-border bg-card p-8 shadow-sm">
+                <h1 className="mb-8 text-3xl font-bold text-foreground">Termos de Uso</h1>
 
-                <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none text-muted-foreground space-y-6">
-                    <p>
-                        Última atualização: {new Date().toLocaleDateString('pt-BR')}
-                    </p>
+                <div className="prose prose-sm max-w-none space-y-6 text-muted-foreground sm:prose-base dark:prose-invert">
+                    <p>Ultima atualizacao: {updatedAtLabel}</p>
 
                     <p>
-                        Bem-vindo ao Dialogy! Estes termos e condições descrevem as regras e regulamentos para o uso do nosso aplicativo e serviços.
-                    </p>
-                    <p>
-                        Ao acessar este site e usar nossos serviços, presumimos que você aceita estes termos e condições na íntegra. Não continue a usar o Dialogy se você não aceitar todos os termos e condições declarados nesta página.
+                        Estes Termos de Uso regulam o acesso e a utilizacao da plataforma Dialogy. Ao usar o servico,
+                        o usuario declara que leu e concorda com as regras aqui descritas.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">1. Licença de Uso</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">1. Licenca de uso</h2>
                     <p>
-                        Concedemos a você uma licença limitada, não exclusiva, intransferível e revogável para usar nossos serviços para fins pessoais ou comerciais internos, sujeito a estes Termos.
+                        A Dialogy concede uma licenca limitada, nao exclusiva, intransferivel e revogavel para uso da
+                        plataforma conforme os planos contratados e as politicas aplicaveis.
                     </p>
-                    <p>
-                        Você concorda em não:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li>Modificar, copiar, preparar trabalhos derivados, descompilar ou fazer engenharia reversa de qualquer material e software contido neste site;</li>
-                        <li>Remover quaisquer direitos autorais ou outras notações de propriedade dos materiais;</li>
-                        <li>Transferir os materiais para outra pessoa ou "espelhar" os materiais em qualquer outro servidor;</li>
-                        <li>Usar o serviço para qualquer finalidade ilegal ou não autorizada.</li>
+
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">2. Uso aceitavel</h2>
+                    <p>Ao utilizar a plataforma, o usuario se compromete a nao:</p>
+                    <ul className="list-disc space-y-2 pl-5">
+                        <li>enviar spam, mensagens em massa nao solicitadas ou conteudo ilegal;</li>
+                        <li>violar politicas de terceiros integrados, como Meta e provedores de comunicacao;</li>
+                        <li>tentar acessar areas, dados ou recursos sem autorizacao;</li>
+                        <li>usar a plataforma para distribuir malware, fraudes ou abuso operacional.</li>
                     </ul>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">2. Uso Aceitável (WhatsApp e Mensagens)</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">3. Contas e seguranca</h2>
                     <p>
-                        O Dialogy integra-se com serviços de terceiros, como o WhatsApp. Ao usar nossa plataforma, você concorda em cumprir estritamente as políticas desses terceiros.
-                    </p>
-                    <p>
-                        É estritamente proibido:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li>Enviar SPAM ou mensagens em massa não solicitadas;</li>
-                        <li>Enviar conteúdo ofensivo, ameaçador, difamatório ou ilegal;</li>
-                        <li>Violar a privacidade de terceiros;</li>
-                        <li>Usar a plataforma para disseminar vírus ou malware.</li>
-                    </ul>
-                    <p>
-                        A violação destas regras pode resultar na suspensão imediata ou encerramento da sua conta sem aviso prévio.
+                        O usuario e responsavel pelas credenciais de acesso e por todas as atividades realizadas em sua
+                        conta. Qualquer uso indevido ou suspeita de comprometimento deve ser comunicado imediatamente.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">3. Contas e Segurança</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">4. Integracoes e terceiros</h2>
                     <p>
-                        Para acessar a maioria dos recursos do Serviço, você deve registrar uma conta. Você é responsável por manter a confidencialidade das credenciais da sua conta e é totalmente responsável por todas as atividades que ocorrem sob sua conta. Você concorda em notificar imediatamente o Dialogy sobre qualquer uso não autorizado de sua conta ou qualquer outra violação de segurança.
+                        A Dialogy depende de integracoes com terceiros para parte da operacao. A disponibilidade,
+                        limites e politicas desses terceiros podem impactar o servico, sem que isso represente violacao
+                        contratual automatica pela plataforma.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">4. Isenção de Responsabilidade</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">5. Isencao e limitacao de responsabilidade</h2>
                     <p>
-                        Os materiais e serviços no site do Dialogy são fornecidos "como estão". O Dialogy não oferece garantias, expressas ou implícitas, e, por este meio, isenta e nega todas as outras garantias, incluindo, sem limitação, garantias implícitas ou condições de comercialização, adequação a um fim específico ou não violação de propriedade intelectual ou outra violação de direitos.
-                    </p>
-                    <p>
-                        Além disso, o Dialogy não garante ou faz qualquer representação relativa à precisão, aos resultados prováveis ou à confiabilidade do uso dos materiais em seu site ou de outra forma relacionado a esses materiais ou em sites vinculados a este site.
-                    </p>
-
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">5. Limitação de Responsabilidade</h2>
-                    <p>
-                        Em nenhum caso o Dialogy ou seus fornecedores serão responsáveis por quaisquer danos (incluindo, sem limitação, danos por perda de dados ou lucro ou devido a interrupção dos negócios) decorrentes do uso ou da incapacidade de usar os materiais no Dialogy, mesmo que o Dialogy ou um representante autorizado do Dialogy tenha sido notificado oralmente ou por escrito da possibilidade de tais danos.
+                        O servico e fornecido conforme disponibilidade e escopo contratado. Na extensao maxima permitida
+                        pela legislacao aplicavel, a Dialogy nao sera responsavel por danos indiretos, lucros cessantes
+                        ou perdas decorrentes de uso indevido, indisponibilidade de terceiros ou descumprimento das
+                        regras aqui previstas.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">6. Precisão dos Materiais</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">6. Alteracoes e encerramento</h2>
                     <p>
-                        Os materiais exibidos no site do Dialogy podem incluir erros técnicos, tipográficos ou fotográficos. O Dialogy não garante que qualquer material em seu site seja preciso, completo ou atual. O Dialogy pode fazer alterações nos materiais contidos em seu site a qualquer momento, sem aviso prévio. No entanto, o Dialogy não se compromete a atualizar os materiais.
+                        A Dialogy pode atualizar estes termos, funcionalidades e regras operacionais sempre que
+                        necessario. O uso continuado da plataforma apos a publicacao de nova versao representa aceite
+                        das alteracoes.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">7. Modificações</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">7. Lei aplicavel</h2>
                     <p>
-                        O Dialogy pode revisar estes termos de serviço do site a qualquer momento, sem aviso prévio. Ao usar este site, você concorda em ficar vinculado à versão atual desses termos de serviço.
-                    </p>
-
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">8. Lei Aplicável</h2>
-                    <p>
-                        Estes termos e condições são regidos e interpretados de acordo com as leis do Brasil e você se submete irrevogavelmente à jurisdição exclusiva dos tribunais naquele estado ou localidade.
+                        Estes termos sao regidos pelas leis brasileiras. Eventuais disputas serao tratadas no foro
+                        competente, observadas as disposicoes legais aplicaveis.
                     </p>
                 </div>
             </div>

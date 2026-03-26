@@ -112,6 +112,7 @@ import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { motion } from 'framer-motion';
+import { useTheme } from 'next-themes';
 
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
@@ -205,9 +206,11 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
         setIsSubmitting(true);
 
         let additionalMetadata: Record<string, any> = {};
+        const trimmedNotes = notes.trim();
+        const canCreateSgpOrder = trimmedNotes.length > 0;
 
-        if (selectedSgpContract) {
-            const osResult = await createSGPServiceOrder(chat.id, selectedSgpContract, notes);
+        if (selectedSgpContract && canCreateSgpOrder) {
+            const osResult = await createSGPServiceOrder(chat.id, selectedSgpContract, trimmedNotes);
             if (!osResult.success) {
                 toast({ title: "Erro ao criar OS no SGP", description: osResult.error, variant: "destructive" });
                 setIsSubmitting(false);
@@ -221,6 +224,11 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
                 sgp_os_created: true
             };
             toast({ title: "OS criada no SGP", description: `Protocolo: ${protocol}` });
+        } else if (selectedSgpContract && !canCreateSgpOrder) {
+            toast({
+                title: "OS no SGP ignorada",
+                description: "Adicione uma nota para gerar ocorrencia no SGP.",
+            });
         }
 
         // Always send close message - the template will only be sent if configured in workspace settings
@@ -422,11 +430,13 @@ export default function ChatPanel({
     onToggleRTL,
     onBack,
 }: ChatPanelProps) {
+    const { resolvedTheme } = useTheme();
 
     const updateChat = useInboxStore(state => state.updateChat);
     const drafts = useInboxStore(state => state.drafts);
     const setDraft = useInboxStore(state => state.setDraft);
     const [newMessage, setNewMessage] = useState('');
+    const emojiPickerTheme = resolvedTheme === 'light' ? 'light' : 'dark';
     const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
     const chatRef = useRef(chat?.id);
@@ -1796,21 +1806,21 @@ export default function ChatPanel({
         <div className="flex-1 flex flex-col bg-transparent min-w-0 relative h-full">
             {/* Header */}
             {/* Header */}
-            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-border dark:border-white/10 bg-background/50 dark:bg-black/60 backdrop-blur-md px-3 md:px-6 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 md:pt-0 md:pb-0">
+            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-md md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
                 <div className="flex items-center gap-3">
                     {onBack && (
-                        <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1">
+                        <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
                     <motion.div layoutId={`avatar-morph-${chat.id}`}>
-                        <Avatar className="h-10 w-10 border border-border ring-2 ring-background">
+                        <Avatar className="h-10 w-10 border border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)] dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/40 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.9)]">
                             <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-                            <AvatarFallback className="bg-muted text-foreground">{chat.contact.name.charAt(0)}</AvatarFallback>
+                            <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                     </motion.div>
                     <div className="min-w-0 flex-1">
-                        <h2 className="font-semibold text-foreground flex items-center gap-2 min-w-0">
+                        <h2 className="flex items-center gap-2 min-w-0 font-semibold text-slate-900 dark:text-white">
                             <span className="truncate">{chat.contact.name}</span>
                             {chat.status === 'atendimentos' && (
                                 <Badge variant="secondary" className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden 2xl:inline-flex">
@@ -1818,18 +1828,18 @@ export default function ChatPanel({
                                 </Badge>
                             )}
                         </h2>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 overflow-hidden min-w-0">
+                        <p className="flex items-center gap-1 overflow-hidden min-w-0 text-xs text-slate-500 dark:text-zinc-500">
                             {chat.instance_name && (
-                                <span className="flex items-center gap-1 shrink-0">
+                                <span className="flex items-center gap-1 shrink-0 text-slate-500 dark:text-zinc-500">
                                     {headerPlatformIcon}
                                     <span className="hidden lg:inline truncate max-w-[80px]">{chat.instance_name}</span>
                                 </span>
                             )}
                             <span className="hidden lg:inline mx-1">•</span>
-                            <span className="truncate">{chat.contact.phone}</span>
+                            <span className="truncate text-slate-600 dark:text-zinc-400">{chat.contact.phone}</span>
                             <span className="hidden sm:inline-flex items-center shrink-0">
                                 <span className="mx-1">•</span>
-                                <span className="text-xs whitespace-nowrap">ID: {chat.id}</span>
+                                <span className="text-xs whitespace-nowrap text-slate-400 dark:text-zinc-600">ID: {chat.id}</span>
                             </span>
                         </p>
                     </div>
@@ -1850,7 +1860,7 @@ export default function ChatPanel({
                     <div className="md:hidden">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="-mr-2">
+                                <Button variant="ghost" size="icon" className="-mr-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                                     <MoreVertical className="h-5 w-5" />
                                 </Button>
                             </DropdownMenuTrigger>
@@ -1889,7 +1899,7 @@ export default function ChatPanel({
                         <div className="2xl:hidden">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+                                    <Button variant="ghost" size="icon" className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                                         <MoreVertical className="h-5 w-5" />
                                     </Button>
                                 </DropdownMenuTrigger>
@@ -1930,7 +1940,7 @@ export default function ChatPanel({
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                            className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
                                             onClick={() => onToggleContactPanel()}
                                         >
                                             <ArrowRightLeft className="h-4 w-4" />
@@ -1939,14 +1949,14 @@ export default function ChatPanel({
                                     <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
                                 </Tooltip>
 
-                                <div className="w-px h-6 bg-border mx-1" />
+                                <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-white/10" />
 
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                                            className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
                                             onClick={handleExportChat}
                                         >
                                             <FileText className="h-4 w-4" />
@@ -1960,7 +1970,7 @@ export default function ChatPanel({
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="text-muted-foreground hover:text-purple-600 hover:bg-purple-500/10"
+                                            className="text-slate-500 hover:bg-cyan-500/10 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-300"
                                             onClick={handleTrainAgent}
                                         >
                                             <Brain className="h-4 w-4" />
@@ -1993,7 +2003,7 @@ export default function ChatPanel({
 
             {/* Messages Area */}
 
-            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
+            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6] dark:bg-[#050507]">
                 <Virtuoso
                     key={chat?.id}
                     ref={virtuosoRef}
@@ -2163,7 +2173,7 @@ export default function ChatPanel({
                                     "border rounded-2xl relative flex-1 transition-all duration-200 overflow-hidden",
                                     isInternalNote
                                         ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
-                                        : "bg-background dark:bg-zinc-900/80 border-border dark:border-zinc-700/60",
+                                        : "bg-white border-slate-200 shadow-[0_20px_45px_-28px_rgba(15,23,42,0.18)] dark:bg-[#0B0B10] dark:border-white/10 dark:shadow-[0_20px_45px_-28px_rgba(0,0,0,0.95)]",
                                     canSendFromComposer && !isInternalNote && "shadow-[0_12px_32px_-20px_rgba(34,211,238,0.45)]",
                                     isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40"
                                 )}>
@@ -2189,7 +2199,10 @@ export default function ChatPanel({
                                     <div className="relative min-w-0 px-4 pt-3 pb-1">
                                         {showTextInput && isComposerTextEmpty && (
                                             <div className="absolute inset-0 px-4 pt-3 pb-1 pointer-events-none select-none">
-                                                <span className="text-[15px] leading-relaxed text-muted-foreground/40">Digite aqui o seu texto...</span>
+                                                <span className={cn(
+                                                    "text-[15px] leading-relaxed",
+                                                    isInternalNote ? "text-muted-foreground/50" : "text-slate-400 dark:text-zinc-500"
+                                                )}>Digite aqui o seu texto...</span>
                                             </div>
                                         )}
                                         {showTextInput ? (
@@ -2199,7 +2212,10 @@ export default function ChatPanel({
                                                 disabled={isAiTyping}
                                                 onChange={handleMessageChange}
                                                 onPaste={handlePaste}
-                                                className="w-full bg-transparent border-0 focus:ring-0 p-0 text-foreground placeholder:text-muted-foreground/50 resize-none max-h-[120px] min-h-[28px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto text-[15px] leading-relaxed"
+                                                className={cn(
+                                                    "w-full bg-transparent border-0 focus:ring-0 p-0 resize-none max-h-[120px] min-h-[28px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto text-[15px] leading-relaxed",
+                                                    isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white"
+                                                )}
                                                 tagName="div"
                                                 onKeyUp={saveCursorPosition}
                                                 onClick={saveCursorPosition}
@@ -2217,7 +2233,12 @@ export default function ChatPanel({
                                                     <DropdownMenuTrigger asChild>
                                                         <button
                                                             type="button"
-                                                            className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg border border-border/60 dark:border-zinc-600/50 transition-colors duration-150"
+                                                            className={cn(
+                                                                "h-8 w-8 flex items-center justify-center rounded-lg border transition-colors duration-150",
+                                                                isInternalNote
+                                                                    ? "text-muted-foreground hover:text-foreground border-border/60 dark:border-zinc-600/50"
+                                                                    : "text-slate-500 hover:text-slate-900 border-slate-200 hover:border-slate-300 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/5"
+                                                            )}
                                                             disabled={isAiTyping}
                                                         >
                                                             <Plus className="h-4 w-4" />
@@ -2254,7 +2275,12 @@ export default function ChatPanel({
                                                     {/* Plus button with border (like reference) */}
                                                     <button
                                                         type="button"
-                                                        className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg border border-border/60 dark:border-zinc-600/50 transition-colors duration-150 mr-0.5"
+                                                        className={cn(
+                                                            "h-8 w-8 flex items-center justify-center rounded-lg border transition-colors duration-150 mr-0.5",
+                                                            isInternalNote
+                                                                ? "text-muted-foreground hover:text-foreground border-border/60 dark:border-zinc-600/50"
+                                                                : "text-slate-500 hover:text-slate-900 border-slate-200 hover:border-slate-300 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/5"
+                                                        )}
                                                         onClick={() => fileInputRef.current?.click()}
                                                         disabled={isAiTyping}
                                                         aria-label="Anexar arquivo"
@@ -2263,24 +2289,39 @@ export default function ChatPanel({
                                                     </button>
 
                                                     {/* Separator */}
-                                                    <div className="w-px h-4 bg-border/40 dark:bg-zinc-600/40 mx-0.5" />
+                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
 
                                                     {/* Emoji */}
                                                     <Popover>
                                                         <PopoverTrigger asChild>
-                                                            <button type="button" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg transition-colors duration-150" disabled={isAiTyping} aria-label="Abrir emojis">
+                                                            <button
+                                                                type="button"
+                                                                className={cn(
+                                                                    "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
+                                                                    isInternalNote
+                                                                        ? "text-muted-foreground hover:text-foreground"
+                                                                        : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
+                                                                )}
+                                                                disabled={isAiTyping}
+                                                                aria-label="Abrir emojis"
+                                                            >
                                                                 <Smile className="h-[18px] w-[18px]" />
                                                             </button>
                                                         </PopoverTrigger>
                                                         <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                            <EmojiPicker onEmojiClick={onEmojiClick} theme={"dark" as any} />
+                                                            <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
                                                         </PopoverContent>
                                                     </Popover>
 
                                                     {/* Attach file */}
                                                     <button
                                                         type="button"
-                                                        className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg transition-colors duration-150"
+                                                        className={cn(
+                                                            "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
+                                                            isInternalNote
+                                                                ? "text-muted-foreground hover:text-foreground"
+                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
+                                                        )}
                                                         onClick={() => fileInputRef.current?.click()}
                                                         disabled={isAiTyping}
                                                         aria-label="Anexar arquivo"
@@ -2289,13 +2330,18 @@ export default function ChatPanel({
                                                     </button>
 
                                                     {/* Separator */}
-                                                    <div className="w-px h-4 bg-border/40 dark:bg-zinc-600/40 mx-0.5" />
+                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
 
                                                     {/* Shortcuts */}
                                                     <PopoverTrigger asChild>
                                                         <button
                                                             type="button"
-                                                            className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg transition-colors duration-150"
+                                                            className={cn(
+                                                                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
+                                                                isInternalNote
+                                                                    ? "text-muted-foreground hover:text-foreground"
+                                                                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
+                                                            )}
                                                             disabled={isAiTyping}
                                                             aria-label="Respostas rápidas"
                                                         >
@@ -2310,7 +2356,7 @@ export default function ChatPanel({
                                                             "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
                                                             isInternalNote
                                                                 ? "text-yellow-500"
-                                                                : "text-muted-foreground hover:text-foreground"
+                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
                                                         )}
                                                         onClick={() => setIsInternalNote(!isInternalNote)}
                                                         disabled={isAiTyping}
@@ -2320,7 +2366,7 @@ export default function ChatPanel({
                                                     </button>
 
                                                     {/* Separator */}
-                                                    <div className="w-px h-4 bg-border/40 dark:bg-zinc-600/40 mx-0.5" />
+                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
 
                                                     {/* Spell check */}
                                                     <TooltipProvider>
@@ -2332,7 +2378,9 @@ export default function ChatPanel({
                                                                         "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
                                                                         isSpellChecking
                                                                             ? "text-blue-500"
-                                                                            : "text-muted-foreground hover:text-foreground"
+                                                                            : isInternalNote
+                                                                                ? "text-muted-foreground hover:text-foreground"
+                                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
                                                                     )}
                                                                     onClick={handleSpellCheck}
                                                                     disabled={isSpellChecking || isAiTyping || isComposerTextEmpty}
@@ -2383,12 +2431,22 @@ export default function ChatPanel({
                                             <div className="md:hidden">
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <button type="button" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-lg transition-colors duration-150" disabled={isAiTyping} aria-label="Abrir emojis">
+                                                        <button
+                                                            type="button"
+                                                            className={cn(
+                                                                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
+                                                                isInternalNote
+                                                                    ? "text-muted-foreground hover:text-foreground"
+                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
+                                                            )}
+                                                            disabled={isAiTyping}
+                                                            aria-label="Abrir emojis"
+                                                        >
                                                             <Smile className="h-[18px] w-[18px]" />
                                                         </button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                        <EmojiPicker onEmojiClick={onEmojiClick} theme={"dark" as any} />
+                                                        <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
                                                     </PopoverContent>
                                                 </Popover>
                                             </div>

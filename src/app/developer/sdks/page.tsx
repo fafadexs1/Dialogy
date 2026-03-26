@@ -1,9 +1,9 @@
-'use client';
-
 import Image from "next/image";
-import React from "react";
 import Link from "next/link";
-import { Code2, Box, Terminal, Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, Terminal } from "lucide-react";
+
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
 function SdkCard({ language, icon, version, installCmd }: { language: string, icon: string, version: string, installCmd: string }) {
     return (
@@ -33,9 +33,14 @@ function SdkCard({ language, icon, version, installCmd }: { language: string, ic
     );
 }
 
+export async function generateMetadata() {
+    return buildPageMetadata({ pathname: '/developer/sdks' });
+}
+
 export default function SdksPage() {
     return (
         <div className="min-h-screen bg-[#030712] text-white selection:bg-blue-500/30">
+            <StoredSeoJsonLd pathname="/developer/sdks" />
             {/* Navbar */}
             <nav className="border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">

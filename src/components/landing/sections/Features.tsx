@@ -1,85 +1,157 @@
 'use client';
 
 import React from 'react';
+import {
+    ArrowRight,
+    Bot,
+    CheckCircle2,
+    LayoutDashboard,
+    Route,
+    TimerReset
+} from 'lucide-react';
 import { SectionWrapper, FadeIn } from '../ui/SectionWrapper';
-import { GlassCard } from '../ui/GlassCard';
-import { LayoutDashboard, Users, Clock, ShieldCheck } from 'lucide-react';
+
+const features = [
+    {
+        title: 'Toda a conversa em volta do atendimento',
+        description: 'Historico, dados do cliente, tags e proxima acao aparecem no mesmo contexto do chat.',
+        icon: LayoutDashboard,
+    },
+    {
+        title: 'Fila com prioridade real',
+        description: 'Distribua contatos por canal, responsavel, atraso e momento do funil sem improviso.',
+        icon: TimerReset,
+    },
+    {
+        title: 'IA para acelerar, nao para esconder o processo',
+        description: 'Sugestao de resposta, resumo e automacao entram como apoio para o operador trabalhar melhor.',
+        icon: Bot,
+    },
+];
+
+const workflowSteps = [
+    {
+        title: '1. Entrada unificada',
+        description: 'WhatsApp, Instagram, Facebook e Mercado Livre chegam no mesmo inbox.',
+    },
+    {
+        title: '2. Regras e prioridade',
+        description: 'Tags, fila, SLA e responsavel deixam claro o que precisa ser atendido primeiro.',
+    },
+    {
+        title: '3. Conversa com contexto',
+        description: 'O time responde vendo historico, CRM e sugestao de acao sem sair da tela.',
+    },
+];
 
 export function Features() {
-    const features = [
-        {
-            title: "Tudo numa tela só",
-            description: "Adeus, abas infinitas. Gerencie conversas, dados do cliente e histórico de pedidos sem sair do chat.",
-            icon: <LayoutDashboard className="w-6 h-6 text-brand-green" />,
-            image: "/dashboard-mock.png" // Placeholder
-        },
-        {
-            title: "Controle & SLA",
-            description: "Defina tempos de resposta, escale chamados atrasados e monitore a performance da equipe em tempo real.",
-            icon: <Clock className="w-6 h-6 text-brand-blue" />,
-            image: "/sla-mock.png"
-        }
-    ];
-
     return (
-        <SectionWrapper id="features">
-            <div className="space-y-32">
-                {features.map((feature, i) => (
-                    <div key={i} className={`flex flex-col md:flex-row items-center gap-12 ${i % 2 === 1 ? 'md:flex-row-reverse' : ''}`}>
+        <SectionWrapper id="features" className="py-24">
+            <div className="space-y-10">
+                <div className="max-w-3xl">
+                    <FadeIn>
+                        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
+                            O que muda na pratica
+                        </p>
+                    </FadeIn>
+                    <FadeIn delay={0.1}>
+                        <h2 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+                            Uma home mais limpa tambem precisa explicar melhor o produto.
+                        </h2>
+                    </FadeIn>
+                    <FadeIn delay={0.2}>
+                        <p className="mt-5 text-lg leading-8 text-slate-600">
+                            A proposta agora fica mais objetiva: menos brilho decorativo, mais foco no que seu time ganha ao operar em um inbox unico.
+                        </p>
+                    </FadeIn>
+                </div>
 
-                        {/* Text Side */}
-                        <div className="flex-1 space-y-6">
-                            <FadeIn delay={0.1}>
-                                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center mb-6">
-                                    {feature.icon}
+                <div className="grid gap-5 lg:grid-cols-3">
+                    {features.map((feature, index) => (
+                        <FadeIn key={feature.title} delay={0.1 + index * 0.05}>
+                            <div className="h-full rounded-[30px] border border-black/10 bg-white p-6 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.5)]">
+                                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                                    <feature.icon className="h-5 w-5" />
                                 </div>
-                                <h3 className="text-3xl md:text-4xl font-bold text-white">{feature.title}</h3>
-                                <p className="text-lg text-gray-400 leading-relaxed">
-                                    {feature.description}
-                                </p>
-                            </FadeIn>
+                                <h3 className="mt-5 text-xl font-semibold text-slate-950">{feature.title}</h3>
+                                <p className="mt-3 text-sm leading-7 text-slate-600">{feature.description}</p>
+                            </div>
+                        </FadeIn>
+                    ))}
+                </div>
 
-                            <FadeIn delay={0.2} className="pt-4">
-                                <ul className="space-y-3 text-gray-300">
-                                    {['Métricas detalhadas', 'Visualização Kanban', 'Filtros avançados'].map(item => (
-                                        <li key={item} className="flex items-center gap-2">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-brand-green" />
-                                            {item}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </FadeIn>
-                        </div>
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                    <FadeIn delay={0.15}>
+                        <div className="rounded-[32px] border border-black/10 bg-white p-6 md:p-8">
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
+                                        Fluxo operacional
+                                    </p>
+                                    <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                                        Da primeira mensagem ate o fechamento, sem trocar de tela.
+                                    </h3>
+                                </div>
+                                <div className="hidden h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white md:flex">
+                                    <Route className="h-5 w-5" />
+                                </div>
+                            </div>
 
-                        {/* Visual Side */}
-                        <div className="flex-1 w-full">
-                            <FadeIn delay={0.3} direction={i % 2 === 0 ? 'left' : 'right'}>
-                                <GlassCard className="aspect-video w-full flex items-center justify-center bg-[#050507] overflow-hidden relative group">
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent opacity-50" />
-
-                                    {/* Abstract UI representation since we don't have images yet */}
-                                    <div className="relative w-3/4 h-3/4 bg-[#0A0A0E] rounded-lg border border-white/5 shadow-2xl p-4 flex flex-col gap-3 group-hover:scale-105 transition-transform duration-500">
-                                        <div className="h-4 w-1/3 bg-white/10 rounded" />
-                                        <div className="h-2 w-full bg-white/5 rounded" />
-                                        <div className="h-2 w-2/3 bg-white/5 rounded" />
-
-                                        <div className="mt-auto flex gap-2">
-                                            <div className="h-8 w-8 rounded-full bg-white/10" />
-                                            <div className="flex-1 space-y-1">
-                                                <div className="h-2 w-1/2 bg-white/10 rounded" />
-                                                <div className="h-2 w-1/4 bg-white/5 rounded" />
+                            <div className="mt-8 grid gap-4">
+                                {workflowSteps.map((step, index) => (
+                                    <div key={step.title} className="rounded-3xl border border-black/10 bg-[#faf9f4] p-5">
+                                        <div className="flex items-start gap-4">
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm">
+                                                <span className="text-sm font-semibold">{index + 1}</span>
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold text-slate-950">{step.title}</p>
+                                                <p className="mt-2 text-sm leading-6 text-slate-600">{step.description}</p>
                                             </div>
                                         </div>
                                     </div>
-
-                                    {/* Decorative elements */}
-                                    <div className="absolute -top-10 -right-10 w-40 h-40 bg-brand-green/20 blur-[50px] rounded-full" />
-                                    <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-brand-blue/20 blur-[50px] rounded-full" />
-                                </GlassCard>
-                            </FadeIn>
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    </FadeIn>
+
+                    <FadeIn delay={0.2}>
+                        <div className="flex h-full flex-col justify-between rounded-[32px] border border-slate-950 bg-slate-950 p-6 text-white md:p-8">
+                            <div>
+                                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-400">
+                                    Resultado esperado
+                                </p>
+                                <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                                    Menos ruido visual, mais entendimento imediato do valor da Dialogy.
+                                </h3>
+                                <p className="mt-4 text-sm leading-7 text-slate-300">
+                                    A landing passa a vender clareza operacional: o visitante entende mais rapido o produto, a entrega e a proxima acao.
+                                </p>
+                            </div>
+
+                            <div className="mt-8 space-y-4">
+                                {[
+                                    'Mensagem mais direta para gestor e operador.',
+                                    'Cards e secoes com contraste leve, sem cansar a leitura.',
+                                    'CTA mais visivel e proximo do argumento comercial.',
+                                ].map((item) => (
+                                    <div key={item} className="flex items-start gap-3 rounded-3xl bg-white/5 px-4 py-4">
+                                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-brand-green" />
+                                        <p className="text-sm leading-6 text-slate-200">{item}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <a
+                                href="#pricing"
+                                className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-brand-green"
+                            >
+                                Ir para os planos
+                                <ArrowRight className="h-4 w-4" />
+                            </a>
+                        </div>
+                    </FadeIn>
+                </div>
             </div>
         </SectionWrapper>
     );

@@ -1,34 +1,87 @@
-
 'use client';
 
-import { useSettings } from "../settings-context";
-import { Loader2, CreditCard, Check, Zap, Users, MessageSquare, Shield, HelpCircle, Download } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
-import { getCurrentPlanAction } from "@/actions/billing-ui";
-import { getBillingHistoryAction } from "@/actions/stripe";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { PLANS, PlanType } from "@/lib/plans-types";
-import { cn } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
+import { useEffect, useState } from 'react';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import {
+    CalendarDays,
+    CreditCard,
+    Download,
+    HelpCircle,
+    Loader2,
+    MessageSquare,
+    Zap,
+    PartyPopper,
+} from 'lucide-react';
+import { BillingPlanSelector } from './billing-plan-selector';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useSettings } from '../settings-context';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Progress } from '@/components/ui/progress';
+import { getCurrentPlanAction } from '@/actions/billing-ui';
+import {
+    createBillingPortalSessionAction,
+    getBillingHistoryAction,
+    getBillingOverviewAction,
+    type BillingOverview,
+} from '@/actions/stripe';
+import { useToast } from '@/hooks/use-toast';
+import { calculatePlanPrice, CHAT_VOLUME_MAX, CHAT_VOLUME_MIN, PLANS, type PlanType, type SelfServePlanType } from '@/lib/plans-types';
+import { cn } from '@/lib/utils';
 
-import { useSearchParams, useRouter } from "next/navigation";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { PartyPopper } from "lucide-react";
+function formatCurrency(value: number, currency = 'BRL') {
+    return value.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: currency.toUpperCase(),
+    });
+}
 
-function formatCurrency(value: number) {
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+function formatLongDate(date: string) {
+    return format(new Date(date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
+}
+
+function getBillingStatusMeta(status?: string | null) {
+    switch ((status || '').toLowerCase()) {
+        case 'active':
+            return { label: 'Ativa', className: 'bg-green-100 text-green-700 hover:bg-green-100' };
+        case 'paid':
+            return { label: 'Pago', className: 'bg-green-100 text-green-700 hover:bg-green-100' };
+        case 'trialing':
+            return { label: 'Em teste', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' };
+        case 'open':
+            return { label: 'Aberta', className: 'bg-amber-100 text-amber-700 hover:bg-amber-100' };
+        case 'past_due':
+            return { label: 'Pagamento pendente', className: 'bg-amber-100 text-amber-700 hover:bg-amber-100' };
+        case 'unpaid':
+        case 'uncollectible':
+            return { label: 'Inadimplente', className: 'bg-red-100 text-red-700 hover:bg-red-100' };
+        case 'incomplete':
+        case 'incomplete_expired':
+            return { label: 'Pendente', className: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-100' };
+        case 'canceled':
+        case 'cancelled':
+        case 'void':
+            return { label: 'Cancelada', className: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-100' };
+        case 'inactive':
+            return { label: 'Inativa', className: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-100' };
+        default:
+            return { label: 'Sem assinatura', className: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-100' };
+    }
 }
 
 export default function BillingPage() {
     const { user, loading: userLoading } = useSettings();
+    const { toast } = useToast();
     const [planData, setPlanData] = useState<any>(null);
     const [invoices, setInvoices] = useState<any[]>([]);
+    const [billingOverview, setBillingOverview] = useState<BillingOverview | null>(null);
     const [loading, setLoading] = useState(true);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [trialDays, setTrialDays] = useState<number | null>(null);
+    const [isManagingBilling, setIsManagingBilling] = useState(false);
 
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -36,46 +89,83 @@ export default function BillingPage() {
     useEffect(() => {
         if (searchParams.get('success') === 'true') {
             setShowSuccessModal(true);
-            // Clean URL
+            setTrialDays(Number(searchParams.get('trial_days') || '0') || null);
             router.replace('/settings/billing');
         }
     }, [searchParams, router]);
 
     useEffect(() => {
-        if (user?.activeWorkspaceId) {
-            setLoading(true);
-            Promise.all([
-                getCurrentPlanAction(user.activeWorkspaceId),
-                getBillingHistoryAction(user.activeWorkspaceId)
-            ])
-                .then(([planData, invoicesData]) => {
-                    setPlanData(planData);
-                    if (invoicesData && 'invoices' in invoicesData) {
-                        setInvoices(invoicesData.invoices || []);
-                    }
-                })
-                .finally(() => setLoading(false));
+        if (!user?.activeWorkspaceId) {
+            return;
         }
-    }, [user, showSuccessModal]); // Re-fetch when success modal triggers to ensure fresh data
+
+        setLoading(true);
+        Promise.all([
+            getCurrentPlanAction(user.activeWorkspaceId),
+            getBillingHistoryAction(user.activeWorkspaceId),
+            getBillingOverviewAction(user.activeWorkspaceId),
+        ])
+            .then(([currentPlan, invoicesData, overviewData]) => {
+                setPlanData(currentPlan);
+                setInvoices('invoices' in invoicesData ? invoicesData.invoices || [] : []);
+                setBillingOverview(overviewData.overview || null);
+            })
+            .finally(() => setLoading(false));
+    }, [user, showSuccessModal]);
+
+    async function handleManageBilling() {
+        if (!user?.activeWorkspaceId || !billingOverview?.canManage) {
+            return;
+        }
+
+        if (!billingOverview.portalAvailable) {
+            window.location.href = '/pricing';
+            return;
+        }
+
+        setIsManagingBilling(true);
+        const result = await createBillingPortalSessionAction(user.activeWorkspaceId);
+        setIsManagingBilling(false);
+
+        if (result.url) {
+            window.location.href = result.url;
+            return;
+        }
+
+        toast({
+            title: 'Nao foi possivel abrir o portal',
+            description: result.error || 'Tente novamente em instantes.',
+            variant: 'destructive',
+        });
+    }
 
     if (userLoading || loading) {
         return (
             <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-        )
+        );
     }
 
     if (!planData) {
-        return <p>Não foi possível carregar as informações do plano.</p>
+        return <p>Nao foi possivel carregar as informacoes do plano.</p>;
     }
 
     const { plan: currentPlanId, usage, limits } = planData;
-    const currentDetails = PLANS[currentPlanId as PlanType] || PLANS['starter'];
-
-    // Calculate usage percentages
-    const usersPct = (usage.users / (limits.users || 1)) * 100;
+    const currentDetails = PLANS[currentPlanId as PlanType] || PLANS.starter;
+    const currentPlanPrice = currentPlanId !== 'enterprise'
+        ? calculatePlanPrice(currentPlanId as SelfServePlanType, limits.monthly_chats)
+        : currentDetails.price;
+    const chatsPct = (usage.chats / (limits.monthly_chats || 1)) * 100;
     const whatsappPct = (usage.whatsapp / (limits.whatsapp || 1)) * 100;
+    const billingStatus = getBillingStatusMeta(billingOverview?.status);
+    const canManageBilling = billingOverview?.canManage ?? false;
+    const nextBillingLabel =
+        billingOverview?.status?.toLowerCase() === 'trialing'
+            ? 'Fim do teste'
+            : billingOverview?.cancelAtPeriodEnd
+                ? 'Acesso ate'
+                : 'Proxima renovacao';
 
     return (
         <div className="max-w-6xl mx-auto space-y-8 pb-10">
@@ -85,15 +175,18 @@ export default function BillingPage() {
                         <div className="mx-auto bg-green-100 p-3 rounded-full w-fit mb-4">
                             <PartyPopper className="h-8 w-8 text-green-600" />
                         </div>
-                        <DialogTitle className="text-xl text-center">Pagamento Confirmado!</DialogTitle>
+                        <DialogTitle className="text-xl text-center">
+                            {trialDays ? `Teste de ${trialDays} dias ativado!` : 'Assinatura iniciada!'}
+                        </DialogTitle>
                         <DialogDescription className="text-center pt-2">
-                            Seu plano foi atualizado com sucesso. <br />
-                            Todos os novos limites já estão disponíveis para uso no seu workspace.
+                            {trialDays
+                                ? 'Seu workspace entrou em teste e os novos limites ja estao disponiveis.'
+                                : 'Seu plano foi atualizado com sucesso e os novos limites ja estao disponiveis no workspace.'}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter className="sm:justify-center mt-4">
                         <Button onClick={() => setShowSuccessModal(false)} className="w-full sm:w-auto min-w-[120px]">
-                            Maravilha!
+                            Fechar
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -102,145 +195,119 @@ export default function BillingPage() {
             <header className="mb-6">
                 <h1 className="text-2xl font-bold flex items-center gap-2">
                     <CreditCard className="text-primary" />
-                    Assinatura e Limites
+                    Assinatura e limites
                 </h1>
-                <p className="text-muted-foreground">Gerencie seu plano atual, acompanhe o uso de recursos e veja opções de upgrade.</p>
+                <p className="text-muted-foreground">Gerencie seu plano, acompanhe chats do mes atual e mantenha a equipe inteira sem limite de usuarios.</p>
             </header>
 
-            {/* Current Plan Status */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card className="md:col-span-1 border-primary/20 bg-primary/5">
                     <CardHeader>
-                        <CardTitle className="flex justify-between items-center">
-                            Plano Atual
+                        <CardTitle className="flex justify-between items-center gap-3">
+                            <span>Plano atual</span>
                             <Badge variant="default" className="bg-primary">{currentDetails.label}</Badge>
                         </CardTitle>
                         <CardDescription>
-                            Renova mensalmente
+                            {billingOverview?.portalAvailable ? 'Assinatura recorrente gerenciada pela Stripe.' : 'Ainda sem cobranca recorrente ativa.'}
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="text-3xl font-bold">
-                            {formatCurrency(currentDetails.price)}
-                            <span className="text-sm font-normal text-muted-foreground">/mês</span>
+                            {formatCurrency(currentPlanPrice)}
+                            <span className="text-sm font-normal text-muted-foreground">/mes</span>
                         </div>
-                        <Button className="w-full" disabled>Gerenciar Assinatura (Em breve)</Button>
+
+                        <div className="space-y-3 rounded-lg border bg-background/60 p-4 text-sm">
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-muted-foreground">Status</span>
+                                <Badge variant="secondary" className={billingStatus.className}>
+                                    {billingStatus.label}
+                                </Badge>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-muted-foreground flex items-center gap-2">
+                                    <CalendarDays className="h-4 w-4" />
+                                    {nextBillingLabel}
+                                </span>
+                                <span className="font-medium text-right">
+                                    {billingOverview?.nextBillingDate ? formatLongDate(billingOverview.nextBillingDate) : 'Nao definida'}
+                                </span>
+                            </div>
+                        </div>
+
+                        {billingOverview?.cancelAtPeriodEnd && billingOverview.nextBillingDate && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                A assinatura foi configurada para encerrar no fim do ciclo atual.
+                            </p>
+                        )}
+
+                        <Button
+                            className="w-full"
+                            disabled={!canManageBilling || isManagingBilling}
+                            onClick={handleManageBilling}
+                        >
+                            {isManagingBilling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {!canManageBilling
+                                ? 'Somente o proprietario pode gerenciar'
+                                : billingOverview?.portalAvailable
+                                    ? 'Gerenciar assinatura'
+                                    : 'Ver planos'}
+                        </Button>
                     </CardContent>
                 </Card>
 
-                {/* Usage Stats */}
                 <Card className="md:col-span-2">
                     <CardHeader>
-                        <CardTitle>Uso do Workspace</CardTitle>
-                        <CardDescription>Acompanhe o consumo dos recursos do seu plano.</CardDescription>
+                        <CardTitle>Uso do workspace</CardTitle>
+                        <CardDescription>Acompanhe o consumo por chats no mes atual. Usuarios permanecem ilimitados em todos os planos.</CardDescription>
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {/* Users Usage */}
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="flex items-center gap-2"><Users className="w-4 h-4" /> Usuários</span>
-                                <span className={cn(usage.users >= limits.users ? "text-destructive font-bold" : "text-muted-foreground")}>
-                                    {usage.users} / {limits.users}
+                                <span className="flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Chats no mes</span>
+                                <span className={cn(usage.chats >= limits.monthly_chats ? 'text-destructive font-bold' : 'text-muted-foreground')}>
+                                    {usage.chats.toLocaleString('pt-BR')} / {limits.monthly_chats.toLocaleString('pt-BR')}
                                 </span>
                             </div>
-                            <Progress value={Math.min(usersPct, 100)} className={cn("h-2", usage.users >= limits.users && "bg-destructive/20")} indicatorClassName={usage.users >= limits.users ? "bg-destructive" : ""} />
-                            <p className="text-xs text-muted-foreground">Membros da equipe com acesso ao painel.</p>
+                            <Progress
+                                value={Math.min(chatsPct, 100)}
+                                className={cn('h-2', usage.chats >= limits.monthly_chats && 'bg-destructive/20')}
+                                indicatorClassName={usage.chats >= limits.monthly_chats ? 'bg-destructive' : ''}
+                            />
+                            <p className="text-xs text-muted-foreground">Contagem baseada em novos chats criados no mes atual do workspace.</p>
                         </div>
 
-                        {/* WhatsApp Usage */}
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="flex items-center gap-2"><Zap className="w-4 h-4" /> Conexões WhatsApp</span>
-                                <span className={cn(usage.whatsapp >= limits.whatsapp ? "text-destructive font-bold" : "text-muted-foreground")}>
+                                <span className="flex items-center gap-2"><Zap className="w-4 h-4" /> Canais conectados</span>
+                                <span className={cn(usage.whatsapp >= limits.whatsapp ? 'text-destructive font-bold' : 'text-muted-foreground')}>
                                     {usage.whatsapp} / {limits.whatsapp}
                                 </span>
                             </div>
-                            <Progress value={Math.min(whatsappPct, 100)} className={cn("h-2", usage.whatsapp >= limits.whatsapp && "bg-destructive/20")} indicatorClassName={usage.whatsapp >= limits.whatsapp ? "bg-destructive" : ""} />
-                            <p className="text-xs text-muted-foreground">Números de WhatsApp conectados (Baileys ou API Oficial).</p>
+                            <Progress
+                                value={Math.min(whatsappPct, 100)}
+                                className={cn('h-2', usage.whatsapp >= limits.whatsapp && 'bg-destructive/20')}
+                                indicatorClassName={usage.whatsapp >= limits.whatsapp ? 'bg-destructive' : ''}
+                            />
+                            <p className="text-xs text-muted-foreground">Canais conectados via QR Code ou API oficial.</p>
                         </div>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Plans Matrix */}
-            <div className="pt-8">
-                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                    <Shield className="w-5 h-5" />
-                    Planos Disponíveis
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {Object.values(PLANS).filter(p => p.id !== 'enterprise').map((plan: any) => {
-                        const isCurrent = currentPlanId === plan.id;
-                        return (
-                            <Card key={plan.id} className={cn("relative flex flex-col", isCurrent && "border-primary shadow-md")}>
-                                {isCurrent && (
-                                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs px-3 py-1 rounded-full font-medium">
-                                        Plano Atual
-                                    </div>
-                                )}
-                                <CardHeader>
-                                    <CardTitle>{plan.label}</CardTitle>
-                                    <div className="text-3xl font-bold mt-2">
-                                        {formatCurrency(plan.price)}
-                                        <span className="text-sm font-normal text-muted-foreground">/mês</span>
-                                    </div>
-                                    <CardDescription>
-                                        {plan.id === 'starter' && "Para quem está começando a escalar."}
-                                        {plan.id === 'pro' && "Para equipes em crescimento."}
-                                        {plan.id === 'business' && "Para operações robustas."}
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4 flex-1">
-                                    <ul className="space-y-2 text-sm">
-                                        <li className="flex items-center gap-2">
-                                            <Check className="w-4 h-4 text-green-500" />
-                                            <span>Até <b>{plan.limits.users}</b> usuários</span>
-                                        </li>
-                                        <li className="flex items-center gap-2">
-                                            <Check className="w-4 h-4 text-green-500" />
-                                            <span>Até <b>{plan.limits.whatsapp}</b> conexões WhatsApp</span>
-                                        </li>
-                                        <li className="flex items-center gap-2">
-                                            <Check className="w-4 h-4 text-green-500" />
-                                            <span>Histórico de <b>{plan.limits.history_months} meses</b></span>
-                                        </li>
-                                        <li className="flex items-center gap-2">
-                                            {plan.limits.departments ? <Check className="w-4 h-4 text-green-500" /> : <Check className="w-4 h-4 text-muted-foreground opacity-20" />}
-                                            <span className={!plan.limits.departments ? "text-muted-foreground line-through decoration-slate-400/50" : ""}>Departamentos</span>
-                                        </li>
-                                        <li className="flex items-center gap-2">
-                                            {plan.limits.campaigns ? <Check className="w-4 h-4 text-green-500" /> : <Check className="w-4 h-4 text-muted-foreground opacity-20" />}
-                                            <span className={!plan.limits.campaigns ? "text-muted-foreground line-through decoration-slate-400/50" : ""}>
-                                                Campanhas de Disparo
-                                            </span>
-                                        </li>
-                                        <li className="flex items-center gap-2">
-                                            {plan.limits.api ? <Check className="w-4 h-4 text-green-500" /> : <Check className="w-4 h-4 text-muted-foreground opacity-20" />}
-                                            <span className={!plan.limits.api ? "text-muted-foreground line-through decoration-slate-400/50" : ""}>API & Webhooks</span>
-                                        </li>
-                                    </ul>
-                                </CardContent>
-                                <CardFooter>
-                                    <Button
-                                        className="w-full"
-                                        variant={isCurrent ? "outline" : "default"}
-                                        disabled={isCurrent}
-                                        onClick={() => window.location.href = '/pricing'}
-                                    >
-                                        {isCurrent ? "Plano Atual" : "Fazer Upgrade"}
-                                    </Button>
-                                </CardFooter>
-                            </Card>
-                        )
-                    })}
-                </div>
-            </div>
+            <BillingPlanSelector
+                currentPlanId={currentPlanId}
+                canManageBilling={canManageBilling}
+                currentMonthlyChats={limits.monthly_chats}
+                hasSubscription={!!billingOverview?.status}
+                hasActiveSubscription={['active', 'trialing', 'past_due'].includes(billingOverview?.status?.toLowerCase() || '')}
+            />
 
-            {/* Billing History */}
             <div className="pt-8">
                 <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
                     <CreditCard className="w-5 h-5" />
-                    Histórico de Faturas
+                    Historico de faturas
                 </h2>
                 <Card>
                     <CardContent className="p-0">
@@ -259,39 +326,36 @@ export default function BillingPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {invoices.map((invoice) => (
-                                        <tr key={invoice.id} className="border-b last:border-0 hover:bg-muted/30">
-                                            <td className="px-4 py-3">
-                                                {format(new Date(invoice.created * 1000), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                                            </td>
-                                            <td className="px-4 py-3 font-medium">
-                                                {(invoice.amount_paid / 100).toLocaleString('pt-BR', { style: 'currency', currency: invoice.currency })}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <Badge variant={invoice.status === 'paid' ? 'default' : 'secondary'} className={cn(
-                                                    invoice.status === 'paid' && "bg-green-100 text-green-700 hover:bg-green-100",
-                                                    invoice.status === 'open' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-100",
-                                                    invoice.status === 'void' && "bg-gray-100 text-gray-700 hover:bg-gray-100",
-                                                    invoice.status === 'uncollectible' && "bg-red-100 text-red-700 hover:bg-red-100",
-                                                )}>
-                                                    {invoice.status === 'paid' ? 'Pago' :
-                                                        invoice.status === 'open' ? 'Aberto' :
-                                                            invoice.status === 'void' ? 'Cancelado' :
-                                                                invoice.status === 'uncollectible' ? 'Não Pago' : invoice.status}
-                                                </Badge>
-                                            </td>
-                                            <td className="px-4 py-3 text-right">
-                                                {invoice.invoice_pdf && (
-                                                    <Button variant="ghost" size="sm" asChild>
-                                                        <a href={invoice.invoice_pdf} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1">
-                                                            <Download className="w-3 h-3" />
-                                                            <span className="hidden sm:inline">PDF</span>
-                                                        </a>
-                                                    </Button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {invoices.map((invoice) => {
+                                        const amount = invoice.amount_paid > 0 ? invoice.amount_paid : invoice.amount_due;
+                                        const statusMeta = getBillingStatusMeta(invoice.status);
+
+                                        return (
+                                            <tr key={invoice.id} className="border-b last:border-0 hover:bg-muted/30">
+                                                <td className="px-4 py-3">
+                                                    {format(new Date(invoice.created * 1000), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                                                </td>
+                                                <td className="px-4 py-3 font-medium">
+                                                    {formatCurrency(amount / 100, invoice.currency)}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <Badge variant="secondary" className={statusMeta.className}>
+                                                        {statusMeta.label}
+                                                    </Badge>
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    {invoice.invoice_pdf && (
+                                                        <Button variant="ghost" size="sm" asChild>
+                                                            <a href={invoice.invoice_pdf} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1">
+                                                                <Download className="w-3 h-3" />
+                                                                <span className="hidden sm:inline">PDF</span>
+                                                            </a>
+                                                        </Button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         )}
@@ -304,10 +368,10 @@ export default function BillingPage() {
                 <div className="space-y-1">
                     <h4 className="font-semibold text-sm">Precisa de um plano personalizado?</h4>
                     <p className="text-sm text-muted-foreground">
-                        Para grandes operações ou necessidades específicas de Enterprise, entre em contato com nosso time de vendas para uma cotação sob medida.
+                        Para grandes operacoes ou necessidades especificas de Enterprise, fale com o time comercial.
                     </p>
                 </div>
             </div>
         </div>
-    )
+    );
 }

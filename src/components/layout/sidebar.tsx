@@ -6,6 +6,7 @@ import {
   Bot,
   CreditCard,
   Fingerprint,
+  Gift,
   HelpCircle,
   LogOut,
   LucideIcon,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "next-themes";
 import type { User } from "@/lib/types";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { cn } from "@/lib/utils";
@@ -38,6 +40,7 @@ const mainNavItems: NavItem[] = [
   { href: "/crm", icon: Users, labelKey: "nav.crm", exact: false },
   { href: "/campaigns", icon: Send, labelKey: "nav.campaigns", exact: false },
   { href: "/analytics", icon: BarChart2, labelKey: "nav.analytics", exact: false },
+  { href: "/referrals", icon: Gift, labelKey: "nav.referrals", exact: false, attention: true },
   { href: "/integrations", icon: Puzzle, labelKey: "nav.integrations", exact: false },
   { href: "/support", icon: HelpCircle, labelKey: "nav.support", exact: false },
   { href: "/nexus", icon: Sparkles, labelKey: "nav.nexus", exact: false },
@@ -75,15 +78,23 @@ type NavItem = {
   icon: LucideIcon;
   labelKey: string;
   exact?: boolean;
+  attention?: boolean;
 };
 
 interface SidebarProps {
   user: User;
 }
 
-function SidebarTooltip({ label }: { label: string }) {
+function SidebarTooltip({ label, light = false }: { label: string; light?: boolean }) {
   return (
-    <span className="pointer-events-none absolute left-14 top-1/2 -translate-y-1/2 whitespace-nowrap rounded-lg bg-zinc-950/90 px-3 py-1.5 text-xs text-white opacity-0 shadow-xl border border-white/10 backdrop-blur-md transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-1 z-50">
+    <span
+      className={cn(
+        "pointer-events-none absolute left-14 top-1/2 z-50 -translate-y-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs opacity-0 shadow-xl backdrop-blur-md transition-all duration-200 group-hover:translate-x-1 group-hover:opacity-100",
+        light
+          ? "border border-slate-200/80 bg-white/95 text-slate-700"
+          : "border border-white/10 bg-zinc-950/90 text-white"
+      )}
+    >
       {label}
     </span>
   );
@@ -93,10 +104,12 @@ function SidebarIconLink({
   item,
   label,
   isActive,
+  light = false,
 }: {
   item: NavItem;
   label: string;
   isActive: boolean;
+  light?: boolean;
 }) {
   const Icon = item.icon;
 
@@ -108,12 +121,34 @@ function SidebarIconLink({
         className={cn(
           "flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg transition-all duration-300 relative group overflow-hidden",
           isActive
-            ? "bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-400 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)] border border-emerald-500/20"
-            : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
+            ? light
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-[0_10px_24px_-18px_rgba(16,185,129,0.75)]"
+              : "bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-400 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)] border border-emerald-500/20"
+            : light
+              ? "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
         )}
         aria-label={label}
       >
-        <Icon className={cn("h-4 w-4 2xl:h-5 2xl:w-5 transition-transform duration-300 group-hover:scale-110", isActive && "scale-105")} />
+        <motion.span
+          animate={
+            item.attention && !isActive
+              ? { y: [0, -4, 0], rotate: [0, -8, 8, 0] }
+              : { y: 0, rotate: 0 }
+          }
+          transition={
+            item.attention && !isActive
+              ? { duration: 1.8, repeat: Infinity, repeatDelay: 1.1, ease: "easeInOut" }
+              : { duration: 0.2 }
+          }
+          className="relative flex items-center justify-center"
+        >
+          <Icon className={cn("h-4 w-4 2xl:h-5 2xl:w-5 transition-transform duration-300 group-hover:scale-110", isActive && "scale-105")} />
+        </motion.span>
+
+        {item.attention && !isActive ? (
+          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
+        ) : null}
 
         {isActive && (
           <motion.div
@@ -122,7 +157,7 @@ function SidebarIconLink({
           />
         )}
       </Link>
-      <SidebarTooltip label={label} />
+      <SidebarTooltip label={label} light={light} />
     </div>
   );
 }
@@ -151,6 +186,7 @@ function FlyoutMenu({
   containerRef,
   highlight,
   onClose,
+  light = false,
 }: {
   label: string;
   icon: LucideIcon;
@@ -161,6 +197,7 @@ function FlyoutMenu({
   containerRef: React.RefObject<HTMLDivElement | null>;
   highlight?: boolean;
   onClose?: () => void;
+  light?: boolean;
 }) {
   return (
     <div ref={containerRef} className="relative group w-full flex items-center justify-center py-0.5">
@@ -170,8 +207,12 @@ function FlyoutMenu({
         className={cn(
           "flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg transition-all duration-300 relative group overflow-hidden",
           isActive
-            ? "bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-400 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)] border border-emerald-500/20"
-            : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
+            ? light
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-[0_10px_24px_-18px_rgba(16,185,129,0.75)]"
+              : "bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-400 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)] border border-emerald-500/20"
+            : light
+              ? "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
         )}
         aria-expanded={isOpen}
         aria-label={label}
@@ -184,7 +225,7 @@ function FlyoutMenu({
           />
         )}
       </button>
-      <SidebarTooltip label={label} />
+      <SidebarTooltip label={label} light={light} />
 
       <AnimatePresence>
         {isOpen && (
@@ -193,10 +234,15 @@ function FlyoutMenu({
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: -10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute left-14 top-1/2 z-50 w-72 -translate-y-1/2 rounded-2xl border border-white/10 bg-zinc-950/90 shadow-2xl backdrop-blur-xl p-2 space-y-1"
+            className={cn(
+              "absolute left-14 top-1/2 z-50 w-72 -translate-y-1/2 rounded-2xl p-2 shadow-2xl backdrop-blur-xl",
+              light
+                ? "border border-slate-200/80 bg-white/95"
+                : "border border-white/10 bg-zinc-950/90"
+            )}
           >
-            <div className="px-3 py-2 border-b border-white/5 mb-1">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+            <div className={cn("mb-1 px-3 py-2 border-b", light ? "border-slate-200/80" : "border-white/5")}>
+              <p className={cn("text-[11px] font-bold uppercase tracking-wider", light ? "text-slate-500" : "text-zinc-500")}>
                 {label}
               </p>
             </div>
@@ -205,16 +251,26 @@ function FlyoutMenu({
                 key={item.href}
                 href={item.href}
                 prefetch={false}
-                className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/5 transition-colors group relative overflow-hidden"
+                className={cn(
+                  "group relative flex items-center gap-3 overflow-hidden rounded-xl px-3 py-2 transition-colors",
+                  light ? "hover:bg-slate-50" : "hover:bg-white/5"
+                )}
                 onClick={onClose}
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 border border-white/5 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-colors">
+                <span
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-lg border transition-colors",
+                    light
+                      ? "border-slate-200 bg-slate-50 text-slate-500 group-hover:border-emerald-200 group-hover:text-emerald-600"
+                      : "border-white/5 bg-zinc-900 text-zinc-400 group-hover:border-emerald-500/30 group-hover:text-emerald-400"
+                  )}
+                >
                   <item.icon className="h-3.5 w-3.5" />
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors truncate">{item.label}</p>
+                  <p className={cn("truncate text-sm font-medium transition-colors", light ? "text-slate-800 group-hover:text-slate-950" : "text-zinc-200 group-hover:text-white")}>{item.label}</p>
                   {item.description ? (
-                    <p className="text-[11px] text-zinc-500 truncate">{item.description}</p>
+                    <p className={cn("truncate text-[11px]", light ? "text-slate-500" : "text-zinc-500")}>{item.description}</p>
                   ) : null}
                 </div>
               </Link>
@@ -233,6 +289,7 @@ function AccountMenu({
   containerRef,
   onSignOut,
   signingOut,
+  light = false,
 }: {
   user: User;
   isOpen: boolean;
@@ -240,6 +297,7 @@ function AccountMenu({
   containerRef: React.RefObject<HTMLDivElement | null>;
   onSignOut: () => void;
   signingOut: boolean;
+  light?: boolean;
 }) {
   const { t } = useI18n();
 
@@ -255,15 +313,14 @@ function AccountMenu({
         aria-expanded={isOpen}
         aria-label={t("account.label")}
       >
-        <Avatar className="h-8 w-8 2xl:h-9 2xl:w-9 border-2 border-zinc-800 bg-zinc-900">
+        <Avatar className={cn("h-8 w-8 2xl:h-9 2xl:w-9 border-2", light ? "border-slate-200 bg-slate-100" : "border-zinc-800 bg-zinc-900")}>
           {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} className="object-cover" /> : null}
-          <AvatarFallback className="bg-zinc-800 text-xs font-semibold text-zinc-400">
+          <AvatarFallback className={cn("text-xs font-semibold", light ? "bg-slate-200 text-slate-600" : "bg-zinc-800 text-zinc-400")}>
             {user.name?.charAt(0).toUpperCase() || "?"}
           </AvatarFallback>
         </Avatar>
-        <div className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 border-[1.5px] border-zinc-950" />
       </button>
-      <SidebarTooltip label={user.name || t("account.yourAccount")} />
+      <SidebarTooltip label={user.name || t("account.yourAccount")} light={light} />
 
       <AnimatePresence>
         {isOpen && (
@@ -272,40 +329,50 @@ function AccountMenu({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute left-14 bottom-2 z-50 w-72 rounded-2xl border border-white/10 bg-zinc-950/90 shadow-2xl backdrop-blur-xl p-3 space-y-2 overflow-hidden"
+            className={cn(
+              "absolute left-14 bottom-2 z-50 w-72 overflow-hidden rounded-2xl p-3 shadow-2xl backdrop-blur-xl",
+              light
+                ? "border border-slate-200/80 bg-white/95"
+                : "border border-white/10 bg-zinc-950/90"
+            )}
           >
             <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-emerald-500/10 to-transparent pointer-events-none" />
 
-            <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/5 px-3 py-3 relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-50" />
-              <Avatar className="h-10 w-10 border border-white/10 relative z-10">
+            <div className={cn("relative flex items-center gap-3 overflow-hidden rounded-xl border px-3 py-3", light ? "border-slate-200/80 bg-slate-50" : "border-white/5 bg-white/5")}>
+              <div className={cn("absolute inset-0 opacity-50", light ? "bg-gradient-to-br from-white to-slate-50" : "bg-gradient-to-br from-white/5 to-transparent")} />
+              <Avatar className={cn("relative z-10 h-10 w-10 border", light ? "border-slate-200" : "border-white/10")}>
                 {user.avatar ? <AvatarImage src={user.avatar} alt={user.name} className="object-cover" /> : null}
-                <AvatarFallback className="bg-zinc-800 text-zinc-400">
+                <AvatarFallback className={cn(light ? "bg-slate-200 text-slate-600" : "bg-zinc-800 text-zinc-400")}>
                   {user.name?.charAt(0).toUpperCase() || "?"}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1 relative z-10">
-                <p className="text-sm font-semibold text-white truncate">
+                <p className={cn("truncate text-sm font-semibold", light ? "text-slate-900" : "text-white")}>
                   {user.name || t("account.userFallback")}
                 </p>
-                <p className="text-xs text-zinc-400 truncate">{user.email}</p>
+                <p className={cn("truncate text-xs", light ? "text-slate-500" : "text-zinc-400")}>{user.email}</p>
               </div>
             </div>
 
             <div className="space-y-1 relative z-10">
-              <AccountLink href="/settings/profile" icon={UserIcon} label={t("account.profile")} />
-              <AccountLink href="/settings/billing" icon={CreditCard} label={t("account.billing")} />
-              <AccountLink href="/settings" icon={Settings} label={t("account.settings")} />
+              <AccountLink href="/settings/profile" icon={UserIcon} label={t("account.profile")} light={light} />
+              <AccountLink href="/settings/billing" icon={CreditCard} label={t("account.billing")} light={light} />
+              <AccountLink href="/settings" icon={Settings} label={t("account.settings")} light={light} />
               {user.is_superadmin ? (
-                <AccountLink href="/team/logs" icon={Monitor} label={t("account.systemLogs")} />
+                <AccountLink href="/team/logs" icon={Monitor} label={t("account.systemLogs")} light={light} />
               ) : null}
             </div>
 
-            <div className="pt-2 border-t border-white/5 relative z-10">
+            <div className={cn("relative z-10 pt-2 border-t", light ? "border-slate-200/80" : "border-white/5")}>
               <button
                 type="button"
                 onClick={onSignOut}
-                className="flex w-full items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm font-medium text-rose-300 transition hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-200 group"
+                className={cn(
+                  "group flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-sm font-medium transition",
+                  light
+                    ? "border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700"
+                    : "border-rose-500/20 bg-rose-500/5 text-rose-300 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-200"
+                )}
                 disabled={signingOut}
               >
                 <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
@@ -323,18 +390,32 @@ function AccountLink({
   href,
   icon: Icon,
   label,
+  light = false,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
+  light?: boolean;
 }) {
   return (
     <Link
       href={href}
       prefetch={false}
-      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white group"
+      className={cn(
+        "group flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition",
+        light
+          ? "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          : "text-zinc-400 hover:bg-white/5 hover:text-white"
+      )}
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-zinc-500 group-hover:text-emerald-400 group-hover:border-emerald-500/20 transition-colors">
+      <span
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-lg border transition-colors",
+          light
+            ? "border-slate-200 bg-slate-50 text-slate-500 group-hover:border-emerald-200 group-hover:text-emerald-600"
+            : "border-white/5 bg-white/5 text-zinc-500 group-hover:border-emerald-500/20 group-hover:text-emerald-400"
+        )}
+      >
         <Icon className="h-4 w-4" />
       </span>
       <span>{label}</span>
@@ -348,14 +429,24 @@ function AccountLink({
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const { t } = useI18n();
+  const { resolvedTheme } = useTheme();
   const [openMenu, setOpenMenu] = useState<"team" | "automation" | "account" | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const initialTheme = user.themePreference === "light" || user.themePreference === "dark"
+    ? user.themePreference
+    : "dark";
+  const isLightSidebar = (mounted ? resolvedTheme ?? initialTheme : initialTheme) === "light";
 
   const teamRef = useRef<HTMLDivElement>(null);
   const automationRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
   const filteredNavItems = mainNavItems;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const teamItems = useMemo(
     () =>
@@ -446,17 +537,29 @@ export function Sidebar({ user }: SidebarProps) {
   };
 
   return (
-    <aside className="relative z-50 flex h-full w-[64px] 2xl:w-[78px] flex-col items-center gap-4 border-r border-white/5 bg-black backdrop-blur-xl px-2 py-4 shadow-2xl">
+    <aside
+      className={cn(
+        "relative z-50 flex h-full w-[64px] 2xl:w-[78px] flex-col items-center gap-4 px-2 py-4 backdrop-blur-xl",
+        isLightSidebar
+          ? "border-r border-slate-200/80 bg-white/95 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.18)]"
+          : "border-r border-white/10 bg-[#050507]/95 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.85)]"
+      )}
+    >
       <div className="flex flex-col items-center gap-4 w-full">
         <Link
           href="/inbox"
           prefetch={false}
-          className="group relative flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10 transition-all duration-300 hover:bg-emerald-500/10 hover:ring-emerald-500/30 hover:shadow-[0_0_20px_-4px_rgba(16,185,129,0.2)]"
+          className={cn(
+            "group relative flex h-9 w-9 2xl:h-11 2xl:w-11 items-center justify-center rounded-lg transition-all duration-300",
+            isLightSidebar
+              ? "bg-slate-50 ring-1 ring-slate-200 hover:bg-emerald-50 hover:ring-emerald-200 hover:shadow-[0_12px_24px_-18px_rgba(16,185,129,0.6)]"
+              : "bg-white/5 ring-1 ring-white/10 hover:bg-emerald-500/10 hover:ring-emerald-500/30 hover:shadow-[0_12px_24px_-18px_rgba(16,185,129,0.45)]"
+          )}
           aria-label={t("nav.chat")}
         >
           <DialogyLogo />
         </Link>
-        <div className="h-px w-6 bg-white/5" />
+        <div className={cn("h-px w-6", isLightSidebar ? "bg-slate-200/90" : "bg-white/10")} />
         <WorkspaceSwitcher user={user} />
       </div>
 
@@ -468,10 +571,11 @@ export function Sidebar({ user }: SidebarProps) {
               item={item}
               label={t(item.labelKey)}
               isActive={isActive(item)}
+              light={isLightSidebar}
             />
           ))}
 
-          <div className="h-px w-6 bg-white/5 my-2" />
+          <div className={cn("my-2 h-px w-6", isLightSidebar ? "bg-slate-200/90" : "bg-white/10")} />
 
           <FlyoutMenu
             label={t("nav.team")}
@@ -482,6 +586,7 @@ export function Sidebar({ user }: SidebarProps) {
             onToggle={() => setOpenMenu(openMenu === "team" ? null : "team")}
             containerRef={teamRef}
             onClose={() => setOpenMenu(null)}
+            light={isLightSidebar}
           />
 
           <FlyoutMenu
@@ -494,6 +599,7 @@ export function Sidebar({ user }: SidebarProps) {
             containerRef={automationRef}
             highlight
             onClose={() => setOpenMenu(null)}
+            light={isLightSidebar}
           />
         </nav>
       </div>
@@ -501,7 +607,7 @@ export function Sidebar({ user }: SidebarProps) {
       <div className="flex w-full flex-col items-center gap-4 pb-2">
         <div className="relative group w-full flex items-center justify-center">
           <LanguageToggle />
-          <SidebarTooltip label={t("language.label")} />
+          <SidebarTooltip label={t("language.label")} light={isLightSidebar} />
         </div>
         <AccountMenu
           user={user}
@@ -510,6 +616,7 @@ export function Sidebar({ user }: SidebarProps) {
           containerRef={accountRef}
           onSignOut={handleSignOut}
           signingOut={signingOut}
+          light={isLightSidebar}
         />
       </div>
     </aside>

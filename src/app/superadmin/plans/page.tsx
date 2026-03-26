@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { getPlans, savePlan, deletePlan, savePlanIntegration } from '@/actions/plans';
 import { getIntegrations } from '@/actions/integrations';
+import { UNLIMITED_USERS } from '@/lib/plans-types';
 import type { Plan, Integration } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
@@ -66,7 +67,8 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
 
         // Extract limits
         const limits: any = {
-            users: parseInt(formData.get('limit_users') as string || '1'),
+            users: UNLIMITED_USERS,
+            monthly_chats: parseInt(formData.get('limit_monthly_chats') as string || '500'),
             whatsapp: parseInt(formData.get('limit_whatsapp') as string || '1'),
             history_months: parseInt(formData.get('limit_history') as string || '1'),
             departments: formData.get('limit_departments') === 'on',
@@ -108,7 +110,8 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
 
     // Default limit values
     const limits = (planToEdit?.limits as any) || {
-        users: 5,
+        users: UNLIMITED_USERS,
+        monthly_chats: 500,
         whatsapp: 1,
         history_months: 3,
         departments: false,
@@ -144,7 +147,7 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="name">Nome do Plano</Label>
-                                    <Input id="name" name="name" defaultValue={planToEdit?.name} placeholder="Ex: Starter" required />
+                                    <Input id="name" name="name" defaultValue={planToEdit?.name} placeholder="Ex: Essencial" required />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="slug">Slug (Identificador)</Label>
@@ -189,8 +192,9 @@ function PlanForm({ onSave, planToEdit }: { onSave: () => void, planToEdit?: Pla
                                 {/* Numeric Limits */}
                                 <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label>Usuários Permitidos</Label>
-                                        <Input type="number" name="limit_users" defaultValue={limits.users} min="1" />
+                                        <Label>Chats por Mes</Label>
+                                        <Input type="number" name="limit_monthly_chats" defaultValue={limits.monthly_chats ?? 500} min="1" />
+                                        <p className="text-xs text-muted-foreground">Usuarios sao ilimitados em todos os planos. Ajuste aqui apenas o volume mensal de chats.</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Conexões WhatsApp</Label>

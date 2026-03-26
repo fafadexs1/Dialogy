@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentTemplateAction } from '@/actions/messages';
-import { isSGPPayload, adaptSGPPayload, AgentSendPayload } from '@/lib/sgp-payloads';
+import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentTemplateAction, sendAgentListAction } from '@/actions/messages';
+import { isSGPPayload, adaptSGPPayload, normalizeAgentListPayload, AgentSendPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
 
@@ -69,6 +69,11 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
         // 4. Create new chat
         const chatId = randomUUID();
         const protocol = buildChatProtocol(chatId);
+        const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+        const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+        if (!chatLimitStatus.allowed) {
+            throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+        }
         const newChatRes = await client.query(
             `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING id`,
             [chatId, workspaceId, contactId, protocol]
@@ -130,6 +135,11 @@ export async function POST(request: Request) {
         }
 
         const { type = 'text', phoneNumber, instance, chatId: providedChatId } = payload;
+        const listPayload = normalizeAgentListPayload({
+            ...body,
+            ...payload,
+            list: payload.list ?? body.list,
+        });
 
         // Common Metadata
         const isMarketing = agent.type === 'marketing';
@@ -169,6 +179,38 @@ export async function POST(request: Request) {
             } else {
                 return NextResponse.json({ success: false, error: result.error || 'Failed to send template.' }, { status: 500 });
             }
+        }
+        else if (type === 'list') {
+            if (!listPayload) {
+                return NextResponse.json({ error: 'List payload is required for type "list".' }, { status: 400 });
+            }
+            if (!providedChatId && !phoneNumber) {
+                return NextResponse.json({ error: 'Either chatId or phoneNumber is required for sending lists.' }, { status: 400 });
+            }
+            if (!instance) {
+                return NextResponse.json({ error: 'instance is required for sending lists.' }, { status: 400 });
+            }
+
+            const result = await sendAgentListAction({
+                agentId: agent.id,
+                workspaceId: agent.workspace_id,
+                instanceName: instance,
+                chatId: providedChatId,
+                numberid: phoneNumber,
+                list: listPayload,
+                metadata,
+            });
+
+            if (result.success) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'List sent successfully.',
+                    chatId: result.chatId,
+                    apiResponse: result.apiResponse,
+                });
+            }
+
+            return NextResponse.json({ success: false, error: result.error || 'Failed to send list.' }, { status: 500 });
         }
 
         // --- TEXT / MEDIA FLOW ---

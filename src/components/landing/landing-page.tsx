@@ -1,53 +1,49 @@
-'use client';
-
-import React from 'react';
+import type { CSSProperties } from 'react';
 import { Navbar } from './sections/Navbar';
-import { Hero } from './sections/Hero';
-import { SocialProof } from './sections/SocialProof';
-import { Features } from './sections/Features';
-
-import { Omnichannel } from './sections/Omnichannel';
-import { Pricing } from './sections/Pricing';
-import { Footer } from './sections/Footer';
-import SectionReveal from './ui/SectionReveal';
-import { FloatingButtons } from './ui/FloatingButtons';
-import { AntigravityBackground } from '../ui/antigravity-background';
+import { NewHero } from './sections/NewHero';
+import { ChatVolumePricingSection } from '@/components/pricing/chat-volume-pricing-section';
+import { OmnichannelOrbit } from './sections/OmnichannelOrbit';
+import { AutomagicShowcase } from './sections/AutomagicShowcase';
+import { AsymmetricFeatures } from './sections/AsymmetricFeatures';
+import { BrutalistSocialProof } from './sections/BrutalistSocialProof';
+import { HomeSeoContent } from './sections/HomeSeoContent';
+import { MinimalFooter } from './sections/MinimalFooter';
 
 export default function LandingPage() {
+    const deferredSectionStyle: CSSProperties = {
+        contentVisibility: 'auto',
+        containIntrinsicSize: '900px',
+    };
+
     return (
-        <div className="min-h-screen bg-[#050507] text-gray-100 font-body selection:bg-brand-green/30 selection:text-white relative overflow-x-hidden">
-            {/* Background Effect */}
-            <div className="fixed inset-0 z-0">
-                <AntigravityBackground />
+        <div className="relative isolate min-h-screen overflow-x-hidden bg-[#f8f9fa] font-sans text-black selection:bg-brand-green selection:text-black">
+            <div className="relative z-50">
+                <Navbar />
             </div>
 
-            <Navbar />
-
-            <main className="relative z-10">
-                <Hero />
-
-                <SectionReveal delay={0.1}>
-                    <SocialProof />
-                </SectionReveal>
-
-                <SectionReveal delay={0.2}>
-                    <Features />
-                </SectionReveal>
-
-                <SectionReveal delay={0.1}>
-                    <Omnichannel />
-                </SectionReveal>
-
-                <SectionReveal delay={0.1}>
-                    <Pricing />
-                </SectionReveal>
+            <main className="relative z-10 flex flex-col">
+                <NewHero />
+                <ChatVolumePricingSection variant="landing" />
+                <div style={deferredSectionStyle}>
+                    <OmnichannelOrbit />
+                </div>
+                <div style={deferredSectionStyle}>
+                    <AutomagicShowcase />
+                </div>
+                <div style={deferredSectionStyle}>
+                    <AsymmetricFeatures />
+                </div>
+                <div style={deferredSectionStyle}>
+                    <BrutalistSocialProof />
+                </div>
+                <div style={deferredSectionStyle}>
+                    <HomeSeoContent />
+                </div>
             </main>
 
-            <Footer />
-
-            {/* Floating WhatsApp and Login buttons */}
-            <FloatingButtons />
+            <div style={deferredSectionStyle}>
+                <MinimalFooter />
+            </div>
         </div>
     );
 }
-

@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
-import { CheckCircle2, Edit, Loader2, Save, ArrowRight, Settings2 } from 'lucide-react';
+import { Loader2, Save, ArrowRight, Settings2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import Link from 'next/link';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -23,7 +23,6 @@ interface IntegrationCardProps {
 }
 
 const INTEGRATION_ICON_FALLBACK = '/integration-fallback.svg';
-
 
 function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { integration: Integration, onSave: () => void, isOpen: boolean, setIsOpen: (open: boolean) => void }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -43,7 +42,7 @@ function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { int
         setIsSubmitting(true);
         const result = await updateIntegration(formData);
         if (result.success) {
-            toast({ title: 'Integração atualizada!' });
+            toast({ title: 'Integracao atualizada!' });
             onSave();
             setIsOpen(false);
         } else {
@@ -54,37 +53,37 @@ function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { int
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-            <DialogContent className="bg-zinc-950 border-white/10 text-white">
+            <DialogContent className="border-slate-200 bg-white text-slate-950">
                 <form onSubmit={handleSubmit}>
                     <DialogHeader>
-                        <DialogTitle>Editar Integração: {integration.name}</DialogTitle>
-                        <DialogDescription className="text-zinc-400">Altere os detalhes de exibição desta integração.</DialogDescription>
+                        <DialogTitle>Editar Integracao: {integration.name}</DialogTitle>
+                        <DialogDescription className="text-slate-500">Altere os detalhes de exibicao desta integracao.</DialogDescription>
                     </DialogHeader>
-                    <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+                    <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">
                         <div className="space-y-2">
-                            <Label htmlFor="name" className="text-zinc-300">Nome</Label>
-                            <Input id="name" name="name" value={formData.name} onChange={handleInputChange} className="bg-white/5 border-white/10 text-white" />
+                            <Label htmlFor="name" className="text-slate-700">Nome</Label>
+                            <Input id="name" name="name" value={formData.name} onChange={handleInputChange} className="border-slate-200 bg-white text-slate-900" />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="description" className="text-zinc-300">Descrição</Label>
-                            <Input id="description" name="description" value={formData.description} onChange={handleInputChange} className="bg-white/5 border-white/10 text-white" />
+                            <Label htmlFor="description" className="text-slate-700">Descricao</Label>
+                            <Input id="description" name="description" value={formData.description} onChange={handleInputChange} className="border-slate-200 bg-white text-slate-900" />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="icon_url" className="text-zinc-300">URL do Ícone</Label>
-                            <Input id="icon_url" name="icon_url" value={formData.icon_url} onChange={handleInputChange} className="bg-white/5 border-white/10 text-white" />
+                            <Label htmlFor="icon_url" className="text-slate-700">URL do Icone</Label>
+                            <Input id="icon_url" name="icon_url" value={formData.icon_url} onChange={handleInputChange} className="border-slate-200 bg-white text-slate-900" />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label htmlFor="tag" className="text-zinc-300">Tag</Label>
-                                <Input id="tag" name="tag" value={formData.tag} onChange={handleInputChange} className="bg-white/5 border-white/10 text-white" />
+                                <Label htmlFor="tag" className="text-slate-700">Tag</Label>
+                                <Input id="tag" name="tag" value={formData.tag} onChange={handleInputChange} className="border-slate-200 bg-white text-slate-900" />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="tag_type" className="text-zinc-300">Tipo da Tag</Label>
+                                <Label htmlFor="tag_type" className="text-slate-700">Tipo da Tag</Label>
                                 <Select name="tag_type" value={formData.tag_type} onValueChange={(val) => handleSelectChange('tag_type', val)}>
-                                    <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                                    <SelectContent className="bg-zinc-900 border-white/10 text-white">
-                                        <SelectItem value="primary">Primária</SelectItem>
-                                        <SelectItem value="secondary">Secundária</SelectItem>
+                                    <SelectTrigger className="border-slate-200 bg-white text-slate-900"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="border-slate-200 bg-white text-slate-900">
+                                        <SelectItem value="primary">Primaria</SelectItem>
+                                        <SelectItem value="secondary">Secundaria</SelectItem>
                                         <SelectItem value="beta">Beta</SelectItem>
                                     </SelectContent>
                                 </Select>
@@ -92,11 +91,11 @@ function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { int
                         </div>
                     </div>
                     <DialogFooter>
-                        <DialogClose asChild><Button variant="ghost" className="text-zinc-400 hover:text-white hover:bg-white/10">Cancelar</Button></DialogClose>
+                        <DialogClose asChild><Button variant="ghost" className="text-slate-500 hover:bg-slate-100 hover:text-slate-950">Cancelar</Button></DialogClose>
                         <Button type="submit" disabled={isSubmitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             <Save className="mr-2 h-4 w-4" />
-                            Salvar Alterações
+                            Salvar Alteracoes
                         </Button>
                     </DialogFooter>
                 </form>
@@ -105,41 +104,29 @@ function EditIntegrationDialog({ integration, onSave, isOpen, setIsOpen }: { int
     );
 }
 
-
 export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () => { } }: IntegrationCardProps) {
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-
-    const getTagVariant = (tagType: Integration['tag_type']) => {
-        switch (tagType) {
-            case 'primary': return 'default';
-            case 'secondary': return 'secondary';
-            case 'beta': return 'outline';
-            default: return 'secondary';
-        }
-    }
 
     const CardWrapper = ({ children }: { children: React.ReactNode }) => {
         if (integration.href && integration.href !== '#') {
             return (
-                <Link href={integration.href} className="flex flex-col flex-grow h-full no-underline text-current">
+                <Link href={integration.href} className="flex h-full flex-grow flex-col text-current no-underline">
                     {children}
                 </Link>
             );
         }
-        return <div className="flex flex-col flex-grow h-full">{children}</div>;
+        return <div className="flex h-full flex-grow flex-col">{children}</div>;
     };
-
 
     return (
         <>
-            <Card className="flex flex-col h-full border-white/5 bg-zinc-950/40 backdrop-blur-sm transition-all duration-300 hover:bg-zinc-950/60 hover:border-emerald-500/20 hover:shadow-lg hover:shadow-black/20 hover:-translate-y-1 group overflow-hidden relative">
-                {/* Background gradient hint */}
-                <div className="absolute inset-0 bg-gradient-to-br from-transparent via-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+            <Card className="group relative flex h-full flex-col overflow-hidden border border-slate-200/80 bg-white shadow-[0_18px_40px_-28px_rgba(15,23,42,0.14)] transition-all duration-300 hover:-translate-y-1 hover:border-emerald-200 hover:shadow-[0_24px_60px_-34px_rgba(15,23,42,0.18)]">
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-transparent via-emerald-500/5 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
 
                 <CardWrapper>
-                    <CardHeader className="flex-row items-start justify-between gap-4 pb-2 z-10 relative">
-                        <div className="p-2.5 bg-white/5 rounded-2xl border border-white/5 group-hover:bg-white/10 group-hover:scale-105 transition-all duration-300">
-                            <Avatar className="w-10 h-10 rounded-xl">
+                    <CardHeader className="relative z-10 flex-row items-start justify-between gap-4 pb-2">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 transition-all duration-300 group-hover:scale-105 group-hover:bg-emerald-50">
+                            <Avatar className="h-10 w-10 rounded-xl">
                                 <AvatarImage
                                     src={integration.icon_url}
                                     alt={integration.name}
@@ -147,7 +134,7 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
                                     className="object-cover"
                                     fallbackSrc={INTEGRATION_ICON_FALLBACK}
                                 />
-                                <AvatarFallback className="rounded-xl bg-zinc-800 text-zinc-400">{integration.name.slice(0, 2)}</AvatarFallback>
+                                <AvatarFallback className="rounded-xl bg-slate-100 text-slate-600">{integration.name.slice(0, 2)}</AvatarFallback>
                             </Avatar>
                         </div>
 
@@ -155,35 +142,35 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-4 hover:bg-white/10 text-zinc-400 hover:text-white"
+                                className="absolute right-4 top-4 h-8 w-8 opacity-0 transition-opacity text-slate-500 hover:bg-slate-100 hover:text-slate-950 group-hover:opacity-100"
                                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditDialogOpen(true); }}
                             >
                                 <Settings2 className="h-4 w-4" />
                             </Button>
                         )}
                     </CardHeader>
-                    <CardContent className="flex-grow z-10 relative">
-                        <div className="flex items-center gap-2 mb-2">
-                            <CardTitle className="text-lg font-semibold tracking-tight text-white group-hover:text-emerald-400 transition-colors">
+                    <CardContent className="relative z-10 flex-grow">
+                        <div className="mb-2 flex items-center gap-2">
+                            <CardTitle className="text-lg font-semibold tracking-tight text-slate-950 transition-colors group-hover:text-emerald-600">
                                 {integration.name}
                             </CardTitle>
                             {integration.status === 'active' &&
                                 <div className="relative flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
                                 </div>
                             }
                         </div>
 
-                        <CardDescription className="text-sm leading-relaxed line-clamp-2 min-h-[2.5rem] text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                        <CardDescription className="min-h-[2.5rem] text-sm leading-relaxed text-slate-500 transition-colors group-hover:text-slate-600">
                             {integration.description}
                         </CardDescription>
 
-                        <div className="flex items-center gap-2 mt-4">
+                        <div className="mt-4 flex items-center gap-2">
                             {integration.tag && (
                                 <Badge
                                     variant="outline"
-                                    className={cn("text-[10px] px-2 py-0.5 h-6 font-medium border-0 backdrop-blur-md", {
+                                    className={cn("h-6 border-0 px-2 py-0.5 text-[10px] font-medium backdrop-blur-md", {
                                         'bg-blue-500/10 text-blue-400': integration.tag_type === 'secondary',
                                         'bg-amber-500/10 text-amber-400': integration.tag_type === 'beta',
                                         'bg-emerald-500/10 text-emerald-400': integration.tag_type === 'primary',
@@ -193,31 +180,31 @@ export function IntegrationCard({ integration, isSuperAdmin, onEditSuccess = () 
                                 </Badge>
                             )}
                             {integration.limitStatus && (
-                                <Badge variant="outline" className={cn("text-[10px] h-6 ml-auto border-white/10 bg-white/5", {
-                                    "text-red-400 border-red-500/20 bg-red-500/5": integration.limitStatus.reached,
-                                    "text-zinc-400": !integration.limitStatus.reached
+                                <Badge variant="outline" className={cn("ml-auto h-6 border-slate-200 bg-slate-50 text-[10px]", {
+                                    "border-red-500/20 bg-red-500/5 text-red-400": integration.limitStatus.reached,
+                                    "text-slate-500": !integration.limitStatus.reached
                                 })}>
                                     {integration.limitStatus.current} / {integration.limitStatus.max}
                                 </Badge>
                             )}
                         </div>
                     </CardContent>
-                    <CardFooter className='mt-auto pt-2 z-10 relative'>
+                    <CardFooter className='relative z-10 mt-auto pt-2'>
                         <Button
                             variant={integration.status === 'active' ? "default" : "secondary"}
                             size="sm"
-                            className={cn("w-full gap-2 transition-all font-medium rounded-lg h-9", {
-                                'bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-400 text-zinc-300 border border-white/5 hover:border-emerald-500/30': integration.status === 'active',
-                                'bg-white/5 text-zinc-500 hover:bg-white/10': integration.status !== 'active'
+                            className={cn("h-9 w-full gap-2 rounded-lg font-medium transition-all", {
+                                'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700': integration.status === 'active',
+                                'bg-slate-100 text-slate-500 hover:bg-slate-200': integration.status !== 'active'
                             })}
                             disabled={(!integration.href || integration.href === '#') || !isSuperAdmin}
                             onClick={(e) => { if ((!integration.href || integration.href === '#') || !isSuperAdmin) e.preventDefault(); }}
                         >
                             {integration.status === 'active' ? (
                                 <>
-                                    Gerenciar <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                                    Gerenciar <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                                 </>
-                            ) : (integration.status === 'coming_soon' ? 'Em Breve' : 'Habilitar')}
+                            ) : (integration.status === 'coming_soon' ? 'Em breve' : 'Habilitar')}
                         </Button>
                     </CardFooter>
                 </CardWrapper>

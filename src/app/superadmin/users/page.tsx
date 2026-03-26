@@ -16,6 +16,7 @@ import { getUsers, toggleSuperAdmin, createSuperAdminInvite, deleteUser } from '
 import type { User } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getPlanLabel } from '@/lib/plans-types';
 
 
 export default function UsersPage() {
@@ -236,7 +237,7 @@ export default function UsersPage() {
                                                         <div className="flex items-center gap-2">
                                                             <span className="font-medium text-sm">{ws.name}</span>
                                                             <Badge variant="outline" className="text-[10px] h-5 capitalize bg-background">
-                                                                {(ws as any).plan || 'starter'}
+                                                                {getPlanLabel((ws as any).plan)}
                                                             </Badge>
                                                             {(ws as any).role && (
                                                                 <Badge variant="secondary" className="text-[10px] h-5 capitalize">

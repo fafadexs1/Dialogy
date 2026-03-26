@@ -1,114 +1,123 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Menu, X, Code2, Users, User } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, Menu, X } from 'lucide-react';
 import Link from 'next/link';
+import { BrandMark } from '../BrandMark';
+
+const sectionLinks = [
+    { href: '#features', label: 'Beneficios' },
+    { href: '#omnichannel', label: 'Canais' },
+    { href: '#pricing', label: 'Precos' },
+];
 
 export function Navbar() {
     const [scrolled, setScrolled] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
-    const [showLoginText, setShowLoginText] = useState(true);
 
     useEffect(() => {
         const handleScroll = () => {
             const scrollPos = window.scrollY || document.documentElement.scrollTop;
-            setScrolled(scrollPos > 10);
+            setScrolled(scrollPos > 12);
         };
+
         window.addEventListener('scroll', handleScroll, { passive: true });
-        // Initial check on mount
         handleScroll();
+
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    // Collapse login text after 3 seconds
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setShowLoginText(false);
-        }, 3500);
-        return () => clearTimeout(timer);
-    }, []);
-
     return (
-        <motion.nav
-            initial={{ y: -100 }}
-            animate={{ y: 0 }}
-            className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-300 ${scrolled
-                ? 'bg-black/95 border-b border-white/10 py-3 shadow-2xl shadow-black/50'
-                : 'bg-black/40 backdrop-blur-md py-6 border-b border-white/5'
-                }`}
-        >
-            <div className="max-w-7xl mx-auto px-4 md:px-8 flex items-center justify-between">
-                <div className="flex items-center">
-                    <img
-                        src="/logo.png"
-                        alt="Dialogy Logo"
-                        className="h-6 md:h-8 w-auto object-contain"
-                    />
-                </div>
+        <header className={`fixed inset-x-0 top-0 z-[100] transition-all duration-300 ${scrolled ? 'py-2 md:py-3' : 'py-3 md:py-5'}`}>
+            <div className="mx-auto max-w-7xl px-3 md:px-8">
+                <div className={`rounded-full border bg-white/95 px-4 py-2.5 shadow-[0_14px_32px_-24px_rgba(15,23,42,0.28)] transition-all duration-300 md:bg-white/90 md:backdrop-blur md:shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)] ${scrolled ? 'border-black/10' : 'border-black/5'}`}>
+                    <div className="flex items-center justify-between gap-4">
+                        <Link href="/" className="shrink-0">
+                            <BrandMark
+                                className="gap-2.5"
+                                labelClassName="text-lg md:text-xl"
+                            />
+                        </Link>
 
-                {/* Desktop Menu */}
-                <div className="hidden md:flex items-center gap-8">
-                    <a href="/developer" className="flex items-center gap-1.5 text-sm font-medium text-gray-300 hover:text-white transition-colors">
-                        <Code2 size={14} />
-                        Desenvolvedores
-                    </a>
-                    <a href="/creators" className="flex items-center gap-1.5 text-sm font-medium text-gray-300 hover:text-white transition-colors">
-                        <Users size={14} />
-                        Criadores
-                    </a>
-                    <a href="#features" className="text-sm font-medium text-gray-300 hover:text-white transition-colors">Funcionalidades</a>
-                    <a href="/pricing" className="text-sm font-medium text-gray-300 hover:text-white transition-colors">Preços</a>
-                </div>
+                        <nav className="hidden items-center gap-8 md:flex">
+                            {sectionLinks.map((item) => (
+                                <a
+                                    key={item.href}
+                                    href={item.href}
+                                    className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-950"
+                                >
+                                    {item.label}
+                                </a>
+                            ))}
+                            <Link href="/developer" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-950">
+                                Developer
+                            </Link>
+                        </nav>
 
-                {/* CTA */}
-                <div className="hidden md:flex items-center gap-4">
-                    <a href="/login" className="text-sm font-medium text-white hover:text-brand-green transition-colors">Login</a>
-                    <a href="/pricing" className="px-5 py-2 bg-white text-black text-sm font-semibold rounded-lg hover:bg-gray-100 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] transition-all">
-                        Começar Agora
-                    </a>
-                </div>
+                        <div className="hidden items-center gap-3 md:flex">
+                            <Link href="/login" className="rounded-full px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:text-slate-950">
+                                Login
+                            </Link>
+                            <Link
+                                href="/pricing"
+                                className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-slate-800"
+                            >
+                                Ver planos
+                                <ArrowRight className="h-4 w-4" />
+                            </Link>
+                        </div>
 
-                {/* Mobile Login + Toggle */}
-                <div className="md:hidden flex items-center gap-3">
-                    <Link
-                        href="/login"
-                        className="relative flex items-center gap-2 px-3 py-2 rounded-full bg-gradient-to-r from-brand-green/20 to-brand-green/10 border border-brand-green/30 text-brand-green hover:from-brand-green/30 hover:to-brand-green/20 hover:border-brand-green/50 transition-all duration-500 group overflow-hidden"
-                    >
-                        <User className="w-4 h-4 flex-shrink-0" />
-                        <span
-                            className={`text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-500 ease-out ${showLoginText ? 'max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
-                                }`}
+                        <button
+                            type="button"
+                            className="rounded-full border border-black/10 p-2 text-slate-900 md:hidden"
+                            onClick={() => setMobileOpen((open) => !open)}
+                            aria-label={mobileOpen ? 'Fechar menu' : 'Abrir menu'}
                         >
-                            Login
-                        </span>
-                        {/* Shimmer effect */}
-                        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-shimmer" />
-                    </Link>
-                    <button className="text-white p-2" onClick={() => setMobileOpen(!mobileOpen)}>
-                        {mobileOpen ? <X /> : <Menu />}
-                    </button>
+                            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                        </button>
+                    </div>
                 </div>
+
+                {mobileOpen && (
+                    <div className="mt-2 rounded-[24px] border border-black/10 bg-white p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.3)] md:hidden">
+                        <div className="flex flex-col gap-2">
+                            {sectionLinks.map((item) => (
+                                <a
+                                    key={item.href}
+                                    href={item.href}
+                                    onClick={() => setMobileOpen(false)}
+                                    className="rounded-2xl px-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                                >
+                                    {item.label}
+                                </a>
+                            ))}
+                            <Link
+                                href="/developer"
+                                onClick={() => setMobileOpen(false)}
+                                className="rounded-2xl px-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950"
+                            >
+                                Developer
+                            </Link>
+                            <div className="mt-3 flex gap-3">
+                                <Link
+                                    href="/login"
+                                    onClick={() => setMobileOpen(false)}
+                                    className="flex-1 rounded-full border border-black/10 px-4 py-3 text-center text-sm font-medium text-slate-900"
+                                >
+                                    Login
+                                </Link>
+                                <Link
+                                    href="/pricing"
+                                    onClick={() => setMobileOpen(false)}
+                                    className="flex-1 rounded-full bg-slate-950 px-4 py-3 text-center text-sm font-semibold text-white"
+                                >
+                                    Ver planos
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
-
-            {/* Mobile Menu */}
-            {mobileOpen && (
-                <div className="absolute top-full left-0 w-full bg-[#050507] border-b border-white/10 p-4 flex flex-col gap-4 md:hidden animate-in slide-in-from-top-2">
-                    <a href="/developer" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 text-gray-300 py-2">
-                        <Code2 size={16} /> Desenvolvedores
-                    </a>
-                    <a href="/creators" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 text-gray-300 py-2">
-                        <Users size={16} /> Criadores
-                    </a>
-                    <a href="#features" onClick={() => setMobileOpen(false)} className="text-gray-300 py-2">Funcionalidades</a>
-                    <a href="/pricing" onClick={() => setMobileOpen(false)} className="text-gray-300 py-2">Preços</a>
-                    <a href="/pricing" onClick={() => setMobileOpen(false)} className="w-full py-3 bg-white text-black font-bold text-center rounded-lg">Começar Agora</a>
-                </div>
-            )}
-
-            {/* Bottom neon line on scroll */}
-            <div className={`absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-brand-green/50 to-transparent transition-opacity duration-300 ${scrolled ? 'opacity-100' : 'opacity-0'}`} />
-        </motion.nav>
+        </header>
     );
 }
-

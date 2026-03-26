@@ -10,7 +10,7 @@ import type { User } from '@/lib/types';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 
 import { Crown } from 'lucide-react';
-import { PLANS, PlanType } from '@/lib/plans-types';
+import { getPlanLabel } from '@/lib/plans-types';
 
 // Custom event to signal workspace change
 export const WORKSPACE_CHANGED_EVENT = 'dialogy:workspace-changed';
@@ -78,7 +78,6 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
             <AvatarImage src={currentWorkspace.avatar} alt={currentWorkspace.name} className="object-cover" />
             <AvatarFallback className="rounded-md">{currentWorkspace.name.charAt(0).toUpperCase()}</AvatarFallback>
           </Avatar>
-          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-sidebar rounded-full" />
         </div>
       </Button>
 
@@ -90,7 +89,7 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
           <div className="max-h-64 overflow-y-auto space-y-1">
             {user.workspaces?.map((ws) => {
               const isActive = user.activeWorkspaceId === ws.id;
-              const plan = PLANS[(ws.plan as PlanType) || 'starter'];
+              const planLabel = getPlanLabel(ws.plan);
 
               return (
                 <button
@@ -117,7 +116,7 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
                     <p className="text-sm font-semibold truncate leading-tight">{ws.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground bg-sidebar-accent px-1.5 py-0.5 rounded-md">
-                        {plan?.label || ws.plan || 'Starter'}
+                        {planLabel}
                       </span>
                       <p className="text-[11px] text-muted-foreground">{isActive ? 'Ativo' : 'Selecionar'}</p>
                     </div>

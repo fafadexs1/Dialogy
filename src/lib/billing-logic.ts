@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { getPlan, PlanType, PlanLimits } from '@/lib/plans';
+import { getPlan, PlanType, PlanLimits, normalizePlanLimits } from '@/lib/plans';
 
 export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: PlanType, limits: PlanLimits }> {
     try {
@@ -21,16 +21,13 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
         const planType = (plan as PlanType) || 'starter';
 
         const planDetails = await getPlan(planType);
-        // Fallback to starter definition if DB lookup fails for some reason
-        const baseLimits = planDetails?.limits || (await getPlan('starter'))?.limits || {
-            users: 5, whatsapp: 1, history_months: 3, departments: false, campaigns: false, api: false, transcription: false, ai_byok: true
-        };
+        const baseLimits = normalizePlanLimits(planDetails?.limits, planType);
 
         // Merge custom limits if they exist
-        const limits: PlanLimits = {
+        const limits: PlanLimits = normalizePlanLimits({
             ...baseLimits,
             ...(custom_limits || {})
-        };
+        }, planType);
 
         return { plan: planType, limits };
     } catch (error) {
@@ -38,7 +35,7 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
         // Fallback to starter if something explodes, to be safe
         return {
             plan: 'starter',
-            limits: { users: 5, whatsapp: 1, history_months: 3, departments: false, campaigns: false, api: false, transcription: false, ai_byok: true }
+            limits: normalizePlanLimits(null, 'starter')
         };
     }
 }
@@ -57,4 +54,21 @@ export async function checkLimit(workspaceId: string, feature: keyof PlanLimits,
     }
 
     return { allowed: currentCount < (limit as number), limit: limit as number, plan };
+}
+
+export async function getMonthlyChatLimitStatus(workspaceId: string): Promise<{ allowed: boolean, limit: number, plan: PlanType, current: number }> {
+    const countRes = await db.query(
+        `SELECT COUNT(*) as count
+         FROM chats
+         WHERE workspace_id = $1
+           AND created_at >= date_trunc('month', CURRENT_TIMESTAMP)`,
+        [workspaceId]
+    );
+    const current = parseInt(countRes.rows[0]?.count || '0', 10);
+    const limitCheck = await checkLimit(workspaceId, 'monthly_chats', current);
+
+    return {
+        ...limitCheck,
+        current,
+    };
 }

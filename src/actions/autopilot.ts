@@ -13,6 +13,80 @@ async function isWorkspaceMember(userId: string, workspaceId: string): Promise<b
     return (res.rowCount ?? 0) > 0;
 }
 
+export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<{
+    apiKey: string | null,
+    aiModel: string | null,
+    transcriptionModel: string | null,
+    hasGlobalKey: boolean,
+    error?: string,
+}> {
+    const hasGlobalKey = !!(process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY);
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return {
+            apiKey: null,
+            aiModel: null,
+            transcriptionModel: null,
+            hasGlobalKey,
+            error: 'Usuário não autenticado.',
+        };
+    }
+
+    if (!await isWorkspaceMember(user.id, workspaceId)) {
+        return {
+            apiKey: null,
+            aiModel: null,
+            transcriptionModel: null,
+            hasGlobalKey,
+            error: 'Acesso não autorizado.',
+        };
+    }
+
+    try {
+        const integrationRes = await db.query(`
+            SELECT config, is_active
+            FROM workspace_integrations
+            WHERE workspace_id = $1 AND provider = 'gemini'
+            LIMIT 1
+        `, [workspaceId]);
+
+        if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
+            const integrationConfig = integrationRes.rows[0].config || {};
+            const apiKey = typeof integrationConfig.apiKey === 'string' && integrationConfig.apiKey.trim().length > 0
+                ? integrationConfig.apiKey.trim()
+                : null;
+            const aiModel = typeof integrationConfig.aiModel === 'string' && integrationConfig.aiModel.trim().length > 0
+                ? integrationConfig.aiModel.trim()
+                : null;
+            const transcriptionModel = typeof integrationConfig.transcriptionModel === 'string' && integrationConfig.transcriptionModel.trim().length > 0
+                ? integrationConfig.transcriptionModel.trim()
+                : null;
+
+            if (apiKey || aiModel || transcriptionModel) {
+                return { apiKey, aiModel, transcriptionModel, hasGlobalKey };
+            }
+        }
+
+        return {
+            apiKey: null,
+            aiModel: null,
+            transcriptionModel: null,
+            hasGlobalKey,
+        };
+    } catch (error) {
+        console.error(`[GET_WORKSPACE_AI_RUNTIME_CONFIG] Erro ao resolver config do workspace ${workspaceId}:`, error);
+        return {
+            apiKey: null,
+            aiModel: null,
+            transcriptionModel: null,
+            hasGlobalKey,
+            error: 'Falha ao buscar configuração de IA do workspace.',
+        };
+    }
+}
+
 
 export async function getAutopilotConfig(workspaceId: string, agentId?: string): Promise<{
     config: AutopilotConfig | null,

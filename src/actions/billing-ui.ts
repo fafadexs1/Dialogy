@@ -9,7 +9,7 @@ export async function getCurrentPlanAction(workspaceId: string): Promise<{
     plan: PlanType,
     limits: PlanLimits,
     details: any,
-    usage: { users: number, whatsapp: number }
+    usage: { users: number, chats: number, whatsapp: number }
 } | null> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -19,8 +19,15 @@ export async function getCurrentPlanAction(workspaceId: string): Promise<{
         const { plan, limits } = await getWorkspaceLimits(workspaceId);
 
         // Parallel Usage Counts
-        const [usersCountRes, whatsappCountRes] = await Promise.all([
+        const [usersCountRes, chatsCountRes, whatsappCountRes] = await Promise.all([
             db.query('SELECT COUNT(*) as count FROM user_workspace_roles WHERE workspace_id = $1', [workspaceId]),
+            db.query(
+                `SELECT COUNT(*) as count
+                 FROM chats
+                 WHERE workspace_id = $1
+                   AND created_at >= date_trunc('month', CURRENT_TIMESTAMP)`,
+                [workspaceId]
+            ),
             db.query('SELECT COUNT(*) as count FROM evolution_api_instances WHERE workspace_id = $1', [workspaceId])
         ]);
 
@@ -30,6 +37,7 @@ export async function getCurrentPlanAction(workspaceId: string): Promise<{
             details: PLANS[plan],
             usage: {
                 users: parseInt(usersCountRes.rows[0].count, 10),
+                chats: parseInt(chatsCountRes.rows[0].count, 10),
                 whatsapp: parseInt(whatsappCountRes.rows[0].count, 10)
             }
         };

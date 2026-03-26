@@ -2,6 +2,8 @@
 
 import { HTMLInputTypeAttribute } from "react";
 
+export type InterfaceTheme = 'light' | 'dark' | 'system';
+
 export type Workspace = {
   id: string;
   name: string;
@@ -57,6 +59,7 @@ export type User = {
   memberSince?: string;
   geminiUsage?: number; // Old, to be removed
   autopilotUsage?: number;
+  themePreference?: InterfaceTheme;
   // RBAC properties
   role?: Role;
   permissions?: string[];
@@ -228,6 +231,31 @@ export type MessageMetadata = {
   packId?: string;
   buyerId?: string;
   questionId?: string;
+  interactiveType?: 'list';
+  interactivePayload?: {
+    kind: 'list';
+    title?: string;
+    description?: string;
+    buttonText: string;
+    footerText?: string;
+    sections: Array<{
+      title: string;
+      rows: Array<{
+        title: string;
+        description?: string;
+        rowId: string;
+      }>;
+    }>;
+    delay?: number;
+    quoted?: {
+      key?: {
+        id?: string;
+      };
+      message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+  };
 }
 
 export type Message = {
@@ -500,6 +528,7 @@ export interface WhatsappCluster {
 export interface EvolutionInstance {
   id: string;
   instance_name: string;
+  webhook_key?: string | null;
   display_name: string;
   status: 'connected' | 'disconnected' | 'pending';
   type: 'baileys' | 'wa_cloud' | 'mercadolivre';
@@ -726,6 +755,7 @@ export interface Plan {
   price: number;
   limits?: {
     users?: number;
+    monthly_chats?: number;
     whatsapp?: number;
     history_months?: number;
     departments?: boolean;

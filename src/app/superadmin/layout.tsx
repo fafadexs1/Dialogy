@@ -1,11 +1,12 @@
 
-'use server';
-
 import React, { ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
+import ErrorBoundary from '@/components/layout/error-boundary';
 import { Sidebar } from './sidebar';
+import { ThemeProvider } from '@/providers/theme-provider';
+import { Toaster } from '@/components/ui/toaster';
 
 async function checkSuperAdmin(userId: string) {
     if (!userId) return false;
@@ -30,13 +31,26 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
     }
 
     return (
-        <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-            <Sidebar />
-            <div className="flex flex-col">
-                <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-                    {children}
-                </main>
-            </div>
-        </div>
+        <>
+            <ErrorBoundary>
+                <ThemeProvider
+                    attribute="class"
+                    defaultTheme="dark"
+                    storageKey={`dialogy-theme-${user.id}`}
+                    enableSystem
+                    disableTransitionOnChange
+                >
+                    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+                        <Sidebar />
+                        <div className="flex flex-col">
+                            <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
+                                {children}
+                            </main>
+                        </div>
+                    </div>
+                </ThemeProvider>
+            </ErrorBoundary>
+            <Toaster />
+        </>
     );
 }

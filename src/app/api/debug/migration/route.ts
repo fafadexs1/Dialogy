@@ -1,8 +1,14 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getDangerousAdminAccess } from '@/lib/security/dangerous-admin';
 
 export async function GET() {
+    const access = await getDangerousAdminAccess();
+    if (!access.ok) {
+        return NextResponse.json({ success: false, error: access.message }, { status: access.status });
+    }
+
     try {
         await db.query(`
             ALTER TABLE chats 

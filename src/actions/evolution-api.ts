@@ -7,6 +7,7 @@ import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, Ev
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { buildEvolutionWebhookUrl, getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 
 function parseEnvInt(value: string | undefined, fallback: number): number {
     if (!value) return fallback;
@@ -20,6 +21,17 @@ const EVOLUTION_LIMITS = {
     businessFieldMax: parseEnvInt(process.env.EVOLUTION_BUSINESS_FIELD_MAX_LENGTH, 100),
 } as const;
 
+function extractEvolutionInstanceNames(payload: any): string[] {
+    const instances = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
+    if (!Array.isArray(instances)) {
+        return [];
+    }
+
+    return instances
+        .map((instance: any) => instance?.name || instance?.instanceName || instance?.instance?.instanceName)
+        .filter((name: unknown): name is string => typeof name === 'string' && name.trim().length > 0);
+}
+
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
@@ -31,7 +43,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
     try {
         const res = await db.query(
             `SELECT 
-                id, instance_name, display_name, type, cluster_id, webhook_url,
+                id, instance_name, to_jsonb(evolution_api_instances)->>'webhook_key' as webhook_key, display_name, type, cluster_id, webhook_url,
                 to_jsonb(evolution_api_instances)->>'business_name' as business_name,
                 to_jsonb(evolution_api_instances)->>'waba_name' as waba_name,
                 to_jsonb(evolution_api_instances)->>'display_phone_number' as display_phone_number,
@@ -161,63 +173,68 @@ export async function createEvolutionApiInstance(
         await client.query('BEGIN');
 
         // 1. Encontrar um cluster ativo com a menor carga (lógica de load balance a ser implementada)
-        const clusterRes = await client.query('SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC LIMIT 1');
+        const clusterRes = await client.query(
+            'SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC'
+        );
         if (clusterRes.rowCount === 0) {
             throw new Error('Nenhum servidor (cluster) de WhatsApp ativo foi encontrado.');
         }
-        const cluster = clusterRes.rows[0];
+        const clusters = clusterRes.rows;
+        const cluster = clusters[0];
         const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
 
-        // 2. Gerar o próximo `instanceName` sequencial para o cluster selecionado.
-        // 2. Gerar o próximo `instanceName` sequencial para o cluster selecionado.
-        const [lastInstanceRes, evoInstances] = await Promise.all([
-            client.query(
-                `SELECT instance_name FROM evolution_api_instances 
-                 WHERE cluster_id = $1 AND instance_name LIKE 'zap%' 
-                 ORDER BY LENGTH(instance_name) DESC, instance_name DESC 
-                 LIMIT 1`,
-                [cluster.id]
-            ),
-            fetchEvolutionAPI('/instance/fetchInstances', apiConfig)
-        ]);
+        // 2. Gerar o próximo `instanceName` sequencial GLOBALMENTE.
+        // O webhook URL é global (/api/webhooks/evolution/{instanceName}),
+        // então o nome precisa ser único em toda a plataforma.
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('dialogy_evolution_instance_name_generation'))`);
 
-        let newInstanceNumber = 1;
-        if ((lastInstanceRes.rowCount ?? 0) > 0) {
-            const lastInstanceName = lastInstanceRes.rows[0].instance_name;
-            const lastNumber = parseInt(lastInstanceName.replace('zap', ''), 10);
-            if (!isNaN(lastNumber)) {
-                newInstanceNumber = lastNumber + 1;
+        const reservedNames = new Set<string>();
+        const dbInstancesRes = await client.query(
+            `SELECT instance_name
+             FROM evolution_api_instances
+             WHERE instance_name LIKE 'zap%'`
+        );
+
+        for (const row of dbInstancesRes.rows) {
+            if (typeof row.instance_name === 'string' && row.instance_name.trim().length > 0) {
+                reservedNames.add(row.instance_name.trim());
             }
         }
 
-        // Validate against Evolution API existing instances to prevent collisions
-        // (in case DB is out of sync with Evolution)
-        const instancesArray = Array.isArray(evoInstances) ? evoInstances : (evoInstances?.data || []);
+        const evoInstancesByCluster = await Promise.allSettled(
+            clusters.map((activeCluster) =>
+                fetchEvolutionAPI('/instance/fetchInstances', {
+                    api_url: activeCluster.api_url,
+                    api_key: activeCluster.api_key,
+                })
+            )
+        );
 
-        let existingEvoNames = new Set<string>();
-        if (Array.isArray(instancesArray)) {
-            // Updated based on real payload: properties are at root level, and 'name' is the field
-            existingEvoNames = new Set(
-                instancesArray.map((i: any) => i.name || i.instanceName || i?.instance?.instanceName).filter(Boolean)
-            );
+        for (const result of evoInstancesByCluster) {
+            if (result.status !== 'fulfilled') {
+                console.warn('[EVO_ACTION] Falha ao listar instancias de um cluster durante a reserva global:', result.reason);
+                continue;
+            }
+
+            for (const name of extractEvolutionInstanceNames(result.value)) {
+                if (name.startsWith('zap')) {
+                    reservedNames.add(name);
+                }
+            }
         }
 
-        while (existingEvoNames.has(`zap${newInstanceNumber}`)) {
-            console.log(`[EVO_ACTION] Instance name zap${newInstanceNumber} exists in Evolution but not in DB. Skipping...`);
+        let newInstanceNumber = 1;
+        while (reservedNames.has(`zap${newInstanceNumber}`)) {
             newInstanceNumber++;
         }
 
         const instanceName = `zap${newInstanceNumber}`;
+        const webhookKey = randomUUID();
         payload.instanceName = instanceName;
 
         // 3. Preparar o payload para a API da Evolution
         // 3. Preparar o payload para a API da Evolution
-        const webhookBaseUrl = process.env.NEXTAUTH_URL;
-        if (!webhookBaseUrl) {
-            throw new Error('A variável de ambiente NEXTAUTH_URL não está definida.');
-        }
-
-        const webhookUrlForInstance = `${webhookBaseUrl}/api/webhooks/evolution/${payload.instanceName}`;
+        const webhookUrlForInstance = buildEvolutionWebhookUrl(webhookKey);
 
         // Ensure webhook object exists and set the URL
         if (!payload.webhook) {
@@ -302,13 +319,14 @@ export async function createEvolutionApiInstance(
 
         await client.query(
             `INSERT INTO evolution_api_instances (
-                workspace_id, cluster_id, instance_name, display_name, type, webhook_url,
+                workspace_id, cluster_id, instance_name, webhook_key, display_name, type, webhook_url,
                 business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
                 workspaceId,
                 cluster.id,
                 payload.instanceName,
+                webhookKey,
                 payload.displayName,
                 instanceType,
                 webhookUrlForInstance,
@@ -387,17 +405,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
 }
 
 async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string; api_key: string; } | null> {
-    const instanceRes = await db.query(
-        `SELECT c.api_url, c.api_key 
-       FROM evolution_api_instances i
-       JOIN whatsapp_clusters c ON i.cluster_id = c.id
-       WHERE i.instance_name = $1`,
-        [instanceName]
-    );
-    if (instanceRes.rows.length === 0) {
-        return null;
-    }
-    return instanceRes.rows[0];
+    return getEvolutionApiConfig(instanceName);
 }
 
 export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {

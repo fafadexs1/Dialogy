@@ -1,7 +1,9 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { db } from '@/lib/db';
 import { withDebug } from '@/lib/observability/logger';
+import { applyReferralToUser } from '@/lib/referrals-server';
 import { redirect } from 'next/navigation';
 import type { User } from '@/lib/types';
 
@@ -50,6 +52,7 @@ export const register = withDebug(
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
     const phone = formData.get('phone') as string;
+    const referralCode = formData.get('referralCode') as string | null;
 
     if (!firstName || !lastName || !email || !password || !phone) {
       return { success: false, message: "Todos os campos sao obrigatorios.", user: null };
@@ -83,6 +86,29 @@ export const register = withDebug(
       if (!data.user) {
         throw new Error("Falha ao receber os dados do usuario da autenticacao.");
       }
+
+      await db.query(
+        `
+          INSERT INTO users (id, full_name, email, avatar_url, phone)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (id) DO UPDATE
+          SET
+            full_name = COALESCE(users.full_name, EXCLUDED.full_name),
+            email = COALESCE(users.email, EXCLUDED.email),
+            avatar_url = COALESCE(users.avatar_url, EXCLUDED.avatar_url),
+            phone = COALESCE(users.phone, EXCLUDED.phone),
+            updated_at = NOW()
+        `,
+        [
+          data.user.id,
+          fullName,
+          data.user.email,
+          data.user.user_metadata?.avatar_url || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+          phone,
+        ]
+      );
+
+      await applyReferralToUser(data.user.id, referralCode);
 
       // On success, simply return a success state. The client will handle the redirect.
       const user: User = {

@@ -1,15 +1,23 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Send, Loader2, User, PhoneCall, ShieldCheck } from 'lucide-react';
-import { sendMessage } from '@/actions/support';
-import { useToast } from '@/hooks/use-toast';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2, Send, ShieldCheck } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
+
+import { sendMessage } from '@/actions/support';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+interface MessageAuthor {
+    id: string;
+    display_name: string;
+    email: string | null;
+    avatar_url: string | null;
+}
 
 interface Message {
     id: string;
@@ -17,12 +25,21 @@ interface Message {
     created_at: string;
     is_staff: boolean;
     user_id: string;
+    ticket_id: string;
+    author: MessageAuthor | null;
 }
 
 interface ChatInterfaceProps {
     ticketId: string;
     initialMessages: Message[];
-    currentUserValues?: any;
+}
+
+function getInitials(name?: string | null) {
+    const source = name?.trim();
+    if (!source) return 'US';
+
+    const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
+    return parts.map((part) => part[0]?.toUpperCase() || '').join('') || 'US';
 }
 
 export function ChatInterface({ ticketId, initialMessages }: ChatInterfaceProps) {
@@ -32,42 +49,30 @@ export function ChatInterface({ ticketId, initialMessages }: ChatInterfaceProps)
     const bottomRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
 
-    // Scroll to bottom on load and new message
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
     async function handleSend() {
-        if (!newMessage.trim()) return;
+        const content = newMessage.trim();
+        if (!content) return;
 
         setIsSending(true);
-        const tempId = Math.random().toString();
-        const optimisticMessage: Message = {
-            id: tempId,
-            message: newMessage,
-            created_at: new Date().toISOString(),
-            is_staff: false, // Optimistic assumption: user is sending
-            user_id: 'me'
-        };
-
-        // Optimistic update
-        setMessages(prev => [...prev, optimisticMessage]);
-        setNewMessage('');
 
         try {
-            await sendMessage(ticketId, optimisticMessage.message);
-            // In a real app with Supabase Realtime, we would wait for subscription. 
-            // Here, success implies it's saved.
-            // We could re-fetch or just leave the optimistic one (it might lack real ID)
+            const result = await sendMessage(ticketId, content);
+            const savedMessage = result.message;
+            if (savedMessage) {
+                setMessages((prev) => [...prev, savedMessage]);
+            }
+            setNewMessage('');
         } catch (error) {
             console.error(error);
             toast({
-                title: "Erro ao enviar",
-                description: "Não foi possível enviar sua mensagem.",
-                variant: "destructive"
+                title: 'Erro ao enviar',
+                description: 'Nao foi possivel enviar sua mensagem.',
+                variant: 'destructive',
             });
-            // Revert optimistic
-            setMessages(prev => prev.filter(m => m.id !== tempId));
         } finally {
             setIsSending(false);
         }
@@ -77,54 +82,65 @@ export function ChatInterface({ ticketId, initialMessages }: ChatInterfaceProps)
         <div className="space-y-4">
             <div className="space-y-6 pb-4">
                 {messages.length === 0 && (
-                    <div className="text-center py-10 text-muted-foreground text-sm">
+                    <div className="py-10 text-center text-sm text-muted-foreground">
                         Nenhuma resposta ainda.
                     </div>
                 )}
 
-                {messages.map((msg) => (
-                    <div
-                        key={msg.id}
-                        className={cn(
-                            "flex gap-3",
-                            msg.is_staff ? "flex-row" : "flex-row-reverse"
-                        )}
-                    >
-                        <Avatar className={cn("h-8 w-8", msg.is_staff ? "bg-primary/10" : "bg-muted")}>
-                            {msg.is_staff ? (
-                                <AvatarFallback className="text-primary font-bold"><ShieldCheck className="h-4 w-4" /></AvatarFallback>
-                            ) : (
-                                <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
-                            )}
-                        </Avatar>
+                {messages.map((msg) => {
+                    const authorName = msg.author?.display_name || (msg.is_staff ? 'Suporte Dialogy' : 'Usuario');
+                    const roleLabel = msg.is_staff ? 'Suporte' : 'Solicitante';
 
-                        <div className={cn(
-                            "flex flex-col max-w-[80%]",
-                            msg.is_staff ? "items-start" : "items-end"
-                        )}>
-                            <div className="flex items-center gap-2 mb-1 px-1">
-                                <span className="text-xs font-semibold text-foreground">
-                                    {msg.is_staff ? 'Suporte Dialogy' : 'Você'}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                    {formatDistanceToNow(new Date(msg.created_at), { addSuffix: true, locale: ptBR })}
-                                </span>
-                            </div>
-                            <div className={cn(
-                                "p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm",
-                                msg.is_staff
-                                    ? "bg-card border border-border rounded-tl-none"
-                                    : "bg-primary text-primary-foreground rounded-tr-none"
-                            )}>
-                                {msg.message}
+                    return (
+                        <div
+                            key={msg.id}
+                            className={cn(
+                                'flex gap-3',
+                                msg.is_staff ? 'flex-row' : 'flex-row-reverse'
+                            )}
+                        >
+                            <Avatar className={cn('h-8 w-8', msg.is_staff ? 'bg-primary/10' : 'bg-muted')}>
+                                <AvatarImage src={msg.author?.avatar_url || undefined} alt={authorName} />
+                                <AvatarFallback className={cn(msg.is_staff ? 'text-primary font-bold' : '')}>
+                                    {msg.is_staff ? <ShieldCheck className="h-4 w-4" /> : getInitials(authorName)}
+                                </AvatarFallback>
+                            </Avatar>
+
+                            <div
+                                className={cn(
+                                    'flex max-w-[80%] flex-col',
+                                    msg.is_staff ? 'items-start' : 'items-end'
+                                )}
+                            >
+                                <div className="mb-1 flex items-center gap-2 px-1">
+                                    <span className="text-xs font-semibold text-foreground">
+                                        {authorName}
+                                    </span>
+                                    <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                                        {roleLabel}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {formatDistanceToNow(new Date(msg.created_at), { addSuffix: true, locale: ptBR })}
+                                    </span>
+                                </div>
+                                <div
+                                    className={cn(
+                                        'rounded-2xl p-3 text-sm leading-relaxed whitespace-pre-wrap shadow-sm',
+                                        msg.is_staff
+                                            ? 'rounded-tl-none border border-border bg-card'
+                                            : 'rounded-tr-none bg-primary text-primary-foreground'
+                                    )}
+                                >
+                                    {msg.message}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
                 <div ref={bottomRef} />
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-4 shadow-sm sticky bottom-4">
+            <div className="sticky bottom-4 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex gap-2">
                     <Textarea
                         value={newMessage}
@@ -134,20 +150,20 @@ export function ChatInterface({ ticketId, initialMessages }: ChatInterfaceProps)
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
-                                handleSend();
+                                void handleSend();
                             }
                         }}
                     />
                     <Button
                         size="icon"
-                        onClick={handleSend}
+                        onClick={() => void handleSend()}
                         disabled={isSending || !newMessage.trim()}
                         className="h-[60px] w-[60px] shrink-0"
                     >
                         {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                     </Button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2 text-center">
+                <p className="mt-2 text-center text-xs text-muted-foreground">
                     Pressione Enter para enviar
                 </p>
             </div>

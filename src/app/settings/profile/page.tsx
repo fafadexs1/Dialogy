@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState, useRef } from 'react';
+import { useActionState, useEffect, useState, useRef, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Loader2, Save, UserCircle, UploadCloud, Bell } from "lucide-react";
 import { useSettings } from "../settings-context";
@@ -9,12 +9,13 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { updateUserProfile } from '@/actions/user';
+import { updateUserProfile, updateUserThemePreference } from '@/actions/user';
 import { toast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n/i18n-provider';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import type { InterfaceTheme } from '@/lib/types';
 
 function SubmitButton() {
   const { t } = useI18n();
@@ -120,6 +121,7 @@ export default function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isThemePending, startThemeTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -187,6 +189,19 @@ export default function ProfilePage() {
       });
     }
   }, [state]);
+
+  const handleThemeChange = (theme: InterfaceTheme) => {
+    startThemeTransition(async () => {
+      const result = await updateUserThemePreference(theme);
+      if (!result.success) {
+        toast({
+          title: t("Erro ao atualizar"),
+          description: result.error || t("Nao foi possivel salvar sua preferencia de tema."),
+          variant: "destructive",
+        });
+      }
+    });
+  };
 
   if (loading || !user) {
     return <div className="flex items-center justify-center h-full">
@@ -282,7 +297,12 @@ export default function ProfilePage() {
               <Label className="text-sm">{t("Tema da interface")}</Label>
               <p className="text-xs text-muted-foreground">{t("Claro, escuro ou seguir o sistema.")}</p>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-3">
+              {isThemePending && (
+                <span className="text-xs text-muted-foreground">{t("Salvando...")}</span>
+              )}
+              <ThemeToggle onThemeChange={handleThemeChange} disabled={isThemePending} />
+            </div>
           </div>
         </CardContent>
       </Card>

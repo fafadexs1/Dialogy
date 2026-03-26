@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Loader2 } from 'lucide-react';
 import { createNexusAuthPayload, getNexusUrl } from '@/actions/nexus';
+
+const NEXUS_READY_TIMEOUT_MS = 7000;
+const MAX_BOOT_RETRIES = 1;
 
 export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -11,83 +14,128 @@ export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [authPayload, setAuthPayload] = useState<string | null>(null);
-    const [nexusUrl, setNexusUrl] = useState<string>(propNexusUrl || '');
+    const [nexusUrl, setNexusUrl] = useState<string>((propNexusUrl || '').trim());
+    const [bootRetry, setBootRetry] = useState(0);
+    const readyRef = useRef(false);
+    const requestIdRef = useRef(0);
 
-    // 1. Prepare Auth Payload & Fetch URL (if not provided)
     useEffect(() => {
-        async function init() {
-            if (!user) return;
+        if (!propNexusUrl) return;
+        setNexusUrl(propNexusUrl.trim());
+    }, [propNexusUrl]);
 
+    const workspaceId = user?.activeWorkspaceId || user?.last_active_workspace_id || null;
+
+    useEffect(() => {
+        // Reset lifecycle whenever workspace changes.
+        readyRef.current = false;
+        setAuthPayload(null);
+        setErrorMessage(null);
+        setBootRetry(0);
+        setLoading(Boolean(workspaceId));
+    }, [workspaceId]);
+
+    useEffect(() => {
+        if (!workspaceId) {
+            setLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const currentRequestId = ++requestIdRef.current;
+
+        (async () => {
             try {
                 setErrorMessage(null);
                 setLoading(true);
+                readyRef.current = false;
 
-                // If URL passed via props, preserve it. Else fetch or fallback
-                if (!nexusUrl) {
-                    const url = await getNexusUrl();
-                    setNexusUrl(url);
+                let resolvedUrl = nexusUrl;
+                if (!resolvedUrl) {
+                    resolvedUrl = (await getNexusUrl()).trim();
+                    if (!resolvedUrl) {
+                        throw new Error('URL do NexusFlow nao configurada.');
+                    }
+                    if (!cancelled && currentRequestId === requestIdRef.current) {
+                        setNexusUrl(resolvedUrl);
+                    }
                 }
 
-                const wsId = user.activeWorkspaceId || user.last_active_workspace_id;
-                if (!wsId) {
-                    throw new Error('Workspace ativo nao encontrado para iniciar SSO do NexusFlow.');
-                }
+                const sso = await createNexusAuthPayload(workspaceId);
+                if (cancelled || currentRequestId !== requestIdRef.current) return;
 
-                const sso = await createNexusAuthPayload(wsId);
                 if (!sso.success || !sso.authPayload) {
                     throw new Error(sso.error || 'Falha ao preparar autenticacao segura do NexusFlow.');
                 }
 
                 setAuthPayload(sso.authPayload);
             } catch (err) {
+                if (cancelled || currentRequestId !== requestIdRef.current) return;
                 console.error('[NexusEmbed] Error preparing auth:', err);
                 setErrorMessage('Nao foi possivel autenticar com seguranca no NexusFlow para este workspace.');
                 setAuthPayload(null);
+                setLoading(false);
             }
-        }
-        init();
-    }, [user, nexusUrl]);
+        })();
 
-
-    // 2. Handle Handshake & PostMessage (Legacy + Backup)
-    useEffect(() => {
-        const iframe = iframeRef.current;
-        if (!iframe || !authPayload) return;
-
-        const sendAuth = () => {
-            // For legacy support if the URL param fails or is missing
-            // We can still try postMessage, but URL param is primary now.
-            // We won't focus heavily on postMessage here as URL is the fix.
+        return () => {
+            cancelled = true;
         };
+    }, [workspaceId, bootRetry]);
+
+    useEffect(() => {
+        if (!authPayload || !nexusUrl) return;
+
+        let nexusOrigin = '';
+        try {
+            nexusOrigin = new URL(nexusUrl).origin;
+        } catch {
+            nexusOrigin = '';
+        }
 
         const handleMessage = (event: MessageEvent) => {
-            if (event.data.type === 'NEXUS_READY') {
-                console.log("Nexus is READY. UI Loaded.");
+            if (nexusOrigin && event.origin !== nexusOrigin) return;
+            if (event.data?.type === 'NEXUS_READY') {
+                console.log('[NexusEmbed] Nexus is READY.');
+                readyRef.current = true;
                 setLoading(false);
+                setErrorMessage(null);
             }
         };
 
         window.addEventListener('message', handleMessage);
 
-        // Visual timeout to ensure we don't show loading forever if Nexus loads but doesn't send READY
-        // (Since we are using URL auth, it might just load and work)
         const timeout = setTimeout(() => {
+            if (readyRef.current) return;
+
+            if (bootRetry < MAX_BOOT_RETRIES) {
+                console.warn(`[NexusEmbed] Timeout waiting for NEXUS_READY. Retrying bootstrap (${bootRetry + 1}/${MAX_BOOT_RETRIES})...`);
+                setBootRetry((prev) => prev + 1);
+                return;
+            }
+
             setLoading(false);
-        }, 5000);
+            setErrorMessage('Nao foi possivel concluir a conexao inicial com o NexusFlow. Tente recarregar a pagina.');
+        }, NEXUS_READY_TIMEOUT_MS);
 
         return () => {
             window.removeEventListener('message', handleMessage);
             clearTimeout(timeout);
         };
-    }, [authPayload]);
+    }, [authPayload, nexusUrl, bootRetry]);
 
+    const iframeSrc = useMemo(() => {
+        if (!authPayload || !nexusUrl) return '';
+        const separator = nexusUrl.includes('?') ? '&' : '?';
+        return `${nexusUrl}${separator}auth=${authPayload}&dialogy_boot=${bootRetry}`;
+    }, [authPayload, nexusUrl, bootRetry]);
 
     if (!user || !authPayload || !nexusUrl) {
         return (
             <div className="w-full h-[calc(100vh-20px)] relative rounded-2xl overflow-hidden border border-border shadow-2xl bg-black flex items-center justify-center">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
                 <span className="ml-3 text-lg font-medium text-muted-foreground">
-                    {errorMessage || 'Preparing Neural Link...'}
+                    {errorMessage || (bootRetry > 0 ? 'Retrying secure link...' : 'Preparing Neural Link...')}
                 </span>
             </div>
         );
@@ -103,15 +151,10 @@ export function NexusEmbed({ nexusUrl: propNexusUrl }: { nexusUrl?: string }) {
             )}
             <iframe
                 ref={iframeRef}
-                src={`${nexusUrl}?auth=${authPayload}`}
+                src={iframeSrc}
                 className="w-full h-full border-none bg-background/50"
                 allow="clipboard-write"
                 title="NexusFlow"
-                onLoad={() => {
-                    // Fallback: If onload fires, we assume it's loading. 
-                    // We wait a bit then remove loader if we haven't received READY yet.
-                    setTimeout(() => setLoading(false), 2000);
-                }}
             />
         </div>
     );

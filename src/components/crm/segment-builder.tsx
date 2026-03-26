@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useMemo } from 'react';
@@ -26,16 +25,16 @@ const STATIC_FIELDS: { value: Field; label: string; type: 'text' | 'date' | 'sel
     { value: 'email', label: 'Email', type: 'text' },
     { value: 'phone_number_jid', label: 'Telefone', type: 'text' },
     { value: 'tags', label: 'Tags', type: 'select' },
-    { value: 'last_activity', label: 'Última Atividade', type: 'date' },
+    { value: 'last_activity', label: 'Ultima Atividade', type: 'date' },
 ];
 
 const OPERATORS: { value: Operator; label: string; types: string[] }[] = [
     { value: 'equals', label: 'Igual a', types: ['text', 'select', 'date', 'number'] },
-    { value: 'contains', label: 'Contém', types: ['text'] },
+    { value: 'contains', label: 'Contem', types: ['text'] },
     { value: 'gt', label: 'Maior que', types: ['date', 'number'] },
     { value: 'lt', label: 'Menor que', types: ['date', 'number'] },
-    { value: 'is_set', label: 'Está preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
-    { value: 'is_not_set', label: 'Não está preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
+    { value: 'is_set', label: 'Esta preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
+    { value: 'is_not_set', label: 'Nao esta preenchido', types: ['text', 'select', 'date', 'boolean', 'number'] },
 ];
 
 export function SegmentBuilder({ onSave, onCancel, tags, customFields }: SegmentBuilderProps) {
@@ -45,8 +44,6 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
         operator: 'AND',
         conditions: [{ field: 'name', operator: 'contains', value: '' }]
     });
-
-    // NLP state
     const [nlpInput, setNlpInput] = useState('');
     const [nlpLoading, setNlpLoading] = useState(false);
 
@@ -60,7 +57,7 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
             return {
                 value: `custom_field_${cf.id}` as Field,
                 label: cf.label,
-                type: type,
+                type,
                 options: cf.options
             };
         });
@@ -109,7 +106,7 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
             if (!description.trim()) {
                 setDescription(nlpInput);
             }
-            toast({ title: '✨ Filtros gerados com IA!', description: `${result.criteria.conditions.length} condição(ões) criada(s).` });
+            toast({ title: 'Filtros gerados com IA!', description: `${result.criteria.conditions.length} condicao(oes) criada(s).` });
         } catch {
             toast({ title: 'Erro', description: 'Falha ao conectar com a IA.', variant: 'destructive' });
         } finally {
@@ -118,34 +115,33 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
     };
 
     return (
-        <Card className="p-6 bg-zinc-950 border-white/10 text-white space-y-6">
-            <div className="flex justify-between items-center mb-4">
+        <Card className="space-y-6 border border-slate-200 bg-white p-6 text-slate-950 shadow-[0_22px_60px_-40px_rgba(15,23,42,0.24)]">
+            <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Novo Segmento Inteligente</h3>
                 <Button variant="ghost" size="icon" onClick={onCancel}><X className="w-4 h-4" /></Button>
             </div>
 
-            {/* NLP Input */}
-            <div className="p-4 rounded-xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/20 space-y-3">
-                <Label className="text-white/80 text-xs flex items-center gap-1.5">
+            <div className="space-y-3 rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-purple-500/10 p-4">
+                <Label className="flex items-center gap-1.5 text-xs text-slate-600">
                     <Sparkles className="w-3.5 h-3.5 text-blue-400" /> Descreva o segmento em linguagem natural
                 </Label>
                 <Textarea
                     value={nlpInput}
                     onChange={e => setNlpInput(e.target.value)}
-                    placeholder="Ex: contatos com score acima de 70 que não tiveram atividade nos últimos 5 dias"
-                    className="bg-white/5 border-white/10 text-white text-sm resize-none min-h-[60px]"
+                    placeholder="Ex: contatos com score acima de 70 que nao tiveram atividade nos ultimos 5 dias"
+                    className="min-h-[60px] resize-none border-slate-200 bg-white text-sm text-slate-900"
                     rows={2}
                 />
                 <Button
                     size="sm"
-                    className="gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                    className="gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700"
                     onClick={handleNlpGenerate}
                     disabled={nlpLoading || !nlpInput.trim()}
                 >
                     {nlpLoading ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando...</>
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
                     ) : (
-                        <><Sparkles className="w-3.5 h-3.5" /> Gerar com IA</>
+                        <><Sparkles className="h-3.5 w-3.5" /> Gerar com IA</>
                     )}
                 </Button>
             </div>
@@ -157,16 +153,16 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="Ex: Leads Quentes"
-                        className="bg-white/5 border-white/10"
+                        className="border-slate-200 bg-white"
                     />
                 </div>
                 <div className="grid gap-2">
-                    <Label>Descrição (Opcional)</Label>
+                    <Label>Descricao (Opcional)</Label>
                     <Input
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Ex: Contatos sem resposta há 3 dias"
-                        className="bg-white/5 border-white/10"
+                        placeholder="Ex: Contatos sem resposta ha 3 dias"
+                        className="border-slate-200 bg-white"
                     />
                 </div>
             </div>
@@ -182,15 +178,15 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                         const availableOps = OPERATORS.filter(op => op.types.includes(fieldType));
 
                         return (
-                            <div key={index} className="flex gap-2 items-center">
+                            <div key={index} className="flex items-center gap-2">
                                 <Select
                                     value={condition.field as string}
                                     onValueChange={(val) => updateCondition(index, { field: val as Field, operator: 'is_set', value: '' })}
                                 >
-                                    <SelectTrigger className="w-[150px] bg-white/5 border-white/10 text-white">
+                                    <SelectTrigger className="w-[150px] border-slate-200 bg-white text-slate-900">
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                    <SelectContent className="border-slate-200 bg-white text-slate-900">
                                         {allFields.map(f => <SelectItem key={f.value as string} value={f.value as string}>{f.label}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
@@ -199,10 +195,10 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                                     value={condition.operator}
                                     onValueChange={(val) => updateCondition(index, { operator: val as Operator })}
                                 >
-                                    <SelectTrigger className="w-[150px] bg-white/5 border-white/10 text-white">
+                                    <SelectTrigger className="w-[150px] border-slate-200 bg-white text-slate-900">
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                    <SelectContent className="border-slate-200 bg-white text-slate-900">
                                         {availableOps.map(op => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
@@ -214,10 +210,10 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                                                 value={condition.value}
                                                 onValueChange={(val) => updateCondition(index, { value: val })}
                                             >
-                                                <SelectTrigger className="w-full bg-white/5 border-white/10 text-white">
+                                                <SelectTrigger className="w-full border-slate-200 bg-white text-slate-900">
                                                     <SelectValue placeholder="Selecione uma tag" />
                                                 </SelectTrigger>
-                                                <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                                <SelectContent className="border-slate-200 bg-white text-slate-900">
                                                     {tags.map(t => (
                                                         <SelectItem key={t.id} value={t.value}>{t.label}</SelectItem>
                                                     ))}
@@ -228,10 +224,10 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                                                 value={condition.value}
                                                 onValueChange={(val) => updateCondition(index, { value: val })}
                                             >
-                                                <SelectTrigger className="w-full bg-white/5 border-white/10 text-white">
+                                                <SelectTrigger className="w-full border-slate-200 bg-white text-slate-900">
                                                     <SelectValue placeholder="Selecione..." />
                                                 </SelectTrigger>
-                                                <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                                <SelectContent className="border-slate-200 bg-white text-slate-900">
                                                     {(fieldDef as any).options.map((opt: any) => {
                                                         const value = typeof opt === 'string' ? opt : opt.value;
                                                         const label = typeof opt === 'string' ? opt : opt.label;
@@ -244,39 +240,39 @@ export function SegmentBuilder({ onSave, onCancel, tags, customFields }: Segment
                                                 type="date"
                                                 value={condition.value}
                                                 onChange={(e) => updateCondition(index, { value: e.target.value })}
-                                                className="bg-white/5 border-white/10"
+                                                className="border-slate-200 bg-white"
                                             />
                                         ) : fieldType === 'number' ? (
                                             <Input
                                                 type="number"
                                                 value={condition.value}
                                                 onChange={(e) => updateCondition(index, { value: e.target.value })}
-                                                className="bg-white/5 border-white/10"
+                                                className="border-slate-200 bg-white"
                                             />
                                         ) : (
                                             <Input
                                                 value={condition.value}
                                                 onChange={(e) => updateCondition(index, { value: e.target.value })}
                                                 placeholder="Valor..."
-                                                className="bg-white/5 border-white/10"
+                                                className="border-slate-200 bg-white"
                                             />
                                         )}
                                     </div>
                                 )}
 
-                                <Button variant="ghost" size="icon" onClick={() => removeCondition(index)} className="text-white/50 hover:text-red-400">
+                                <Button variant="ghost" size="icon" onClick={() => removeCondition(index)} className="text-slate-400 hover:bg-red-50 hover:text-red-500">
                                     <Trash2 className="w-4 h-4" />
                                 </Button>
                             </div>
                         );
                     })}
                 </div>
-                <Button variant="outline" size="sm" onClick={addCondition} className="w-full border-dashed border-white/20 hover:bg-white/5 text-white/70">
+                <Button variant="outline" size="sm" onClick={addCondition} className="w-full border-dashed border-slate-200 text-slate-600 hover:bg-slate-50">
                     <Plus className="w-4 h-4 mr-2" /> Adicionar Regra
                 </Button>
             </div>
 
-            <div className="flex justify-end gap-2 pt-4 border-t border-white/10">
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
                 <Button variant="ghost" onClick={onCancel}>Cancelar</Button>
                 <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
                     <Save className="w-4 h-4 mr-2" /> Salvar Segmento

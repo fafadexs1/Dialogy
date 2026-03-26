@@ -1,74 +1,60 @@
 'use client';
 
 import React from 'react';
-import { Twitter, Linkedin, Github } from 'lucide-react';
-import { InstagramIcon } from './ui/Icons';
+import Link from 'next/link';
+import { BrandMark } from '../BrandMark';
 
 export function Footer() {
+    const year = new Date().getFullYear();
+
     return (
-        <footer className="relative z-10 bg-[#050507] border-t border-white/10 pt-20 pb-10 px-4">
-            <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-10 mb-16">
-                <div className="col-span-2 lg:col-span-2">
-                    <div className="mb-6">
-                        <img
-                            src="/logo.png"
-                            alt="Dialogy Logo"
-                            className="h-8 md:h-10 w-auto object-contain"
-                        />
-                    </div>
-                    <p className="text-gray-400 text-sm mb-6 max-w-xs">
-                        A plataforma definitiva de atendimento omnichannel e vendas com IA.
+        <footer className="relative z-10 border-t border-black/10 bg-[#efece3] px-4 pb-10 pt-16">
+            <div className="mx-auto grid max-w-7xl gap-10 md:grid-cols-4">
+                <div className="md:col-span-2">
+                    <BrandMark />
+                    <p className="mt-5 max-w-md text-sm leading-7 text-slate-600">
+                        Atendimento omnichannel, CRM e automacao em uma operacao mais simples de entender e mais facil de usar.
                     </p>
-                    <div className="flex gap-4">
-                        <a href="#" className="text-gray-500 hover:text-white transition-colors"><Twitter size={20} /></a>
-                        <a href="#" className="text-gray-500 hover:text-white transition-colors"><Linkedin size={20} /></a>
-                        <a href="#" className="text-gray-500 hover:text-white transition-colors"><InstagramIcon className="w-5 h-5" /></a>
+                    <div className="mt-6 flex flex-wrap gap-3">
+                        <Link href="/register" className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+                            Criar conta
+                        </Link>
+                        <Link href="/login" className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-white">
+                            Login
+                        </Link>
                     </div>
                 </div>
 
                 <div>
-                    <h4 className="font-semibold text-white mb-4">Produto</h4>
-                    <ul className="space-y-2 text-sm text-gray-400">
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Inbox</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Autopilot IA</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Automação</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Integrações</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Changelog</a></li>
+                    <h4 className="mb-4 font-semibold text-slate-950">Produto</h4>
+                    <ul className="space-y-3 text-sm text-slate-600">
+                        <li><Link href="/pricing" className="transition-colors hover:text-slate-950">Precos</Link></li>
+                        <li><Link href="/autopilot" className="transition-colors hover:text-slate-950">Autopilot IA</Link></li>
+                        <li><Link href="/campaigns" className="transition-colors hover:text-slate-950">Campanhas</Link></li>
+                        <li><Link href="/developer" className="transition-colors hover:text-slate-950">Developer</Link></li>
                     </ul>
                 </div>
 
                 <div>
-                    <h4 className="font-semibold text-white mb-4">Recursos</h4>
-                    <ul className="space-y-2 text-sm text-gray-400">
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Blog</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Comunidade</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Help Center</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">API Docs</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Status</a></li>
-                    </ul>
-                </div>
-
-                <div>
-                    <h4 className="font-semibold text-white mb-4">Empresa</h4>
-                    <ul className="space-y-2 text-sm text-gray-400">
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Sobre</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Carreiras</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Legal</a></li>
-                        <li><a href="#" className="hover:text-brand-green transition-colors">Contato</a></li>
+                    <h4 className="mb-4 font-semibold text-slate-950">Empresa</h4>
+                    <ul className="space-y-3 text-sm text-slate-600">
+                        <li><Link href="/about" className="transition-colors hover:text-slate-950">Sobre</Link></li>
+                        <li><Link href="/privacy" className="transition-colors hover:text-slate-950">Privacidade</Link></li>
+                        <li><Link href="/terms" className="transition-colors hover:text-slate-950">Termos</Link></li>
+                        <li><a href="https://wa.me/551151994714" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-slate-950">Contato</a></li>
                     </ul>
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center text-xs text-gray-600 gap-4">
-                <div className="flex flex-col md:flex-row gap-1 md:gap-4 items-center text-center md:text-left">
-                    <p>&copy; 2024 Dialogy.</p>
-                    <span className="hidden md:inline text-white/10">|</span>
-                    <p>Klyraai Inova Simples (I.S.) • CNPJ 63.905.247/0001-77</p>
+            <div className="mx-auto mt-12 flex max-w-7xl flex-col items-start justify-between gap-4 border-t border-black/10 pt-8 text-xs text-slate-500 md:flex-row md:items-center">
+                <div className="flex flex-col gap-1 md:flex-row md:gap-4">
+                    <p>&copy; {year} Dialogy.</p>
+                    <p>Klyraai Inova Simples (I.S.) - CNPJ 63.905.247/0001-77</p>
                 </div>
                 <div className="flex gap-6">
-                    <a href="#" className="hover:text-gray-400">Privacidade</a>
-                    <a href="#" className="hover:text-gray-400">Termos</a>
-                    <a href="#" className="hover:text-gray-400">Cookies</a>
+                    <Link href="/privacy" className="transition-colors hover:text-slate-950">Privacidade</Link>
+                    <Link href="/terms" className="transition-colors hover:text-slate-950">Termos</Link>
+                    <Link href="/developer" className="transition-colors hover:text-slate-950">Developer</Link>
                 </div>
             </div>
         </footer>

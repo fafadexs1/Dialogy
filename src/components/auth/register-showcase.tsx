@@ -3,87 +3,82 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import {
-    TrendingUp,
-    Zap,
     BarChart3,
-    Users,
-    Target,
+    CheckCircle2,
     Rocket,
-    CheckCircle2
+    Target,
+    TrendingUp,
+    Users,
+    Zap,
 } from 'lucide-react';
 
 export function RegisterShowcase() {
-    // Orbital icons configuration - growth and scale theme
     const orbits = [
         { icon: <TrendingUp className="text-[#20E401]" size={18} />, radius: 70, duration: 20, delay: 0 },
-        { icon: <Zap className="text-yellow-400" size={18} />, radius: 70, duration: 20, delay: 6.6 },
-        { icon: <Target className="text-red-400" size={18} />, radius: 70, duration: 20, delay: 13.3 },
-        { icon: <Users className="text-blue-400" size={16} />, radius: 100, duration: 28, delay: 4 },
-        { icon: <BarChart3 className="text-purple-400" size={16} />, radius: 100, duration: 28, delay: 14 },
-        { icon: <Rocket className="text-orange-400" size={16} />, radius: 100, duration: 28, delay: 24 },
+        { icon: <Zap className="text-amber-500" size={18} />, radius: 70, duration: 20, delay: 6.6 },
+        { icon: <Target className="text-rose-500" size={18} />, radius: 70, duration: 20, delay: 13.3 },
+        { icon: <Users className="text-sky-500" size={16} />, radius: 100, duration: 28, delay: 4 },
+        { icon: <BarChart3 className="text-indigo-500" size={16} />, radius: 100, duration: 28, delay: 14 },
+        { icon: <Rocket className="text-orange-500" size={16} />, radius: 100, duration: 28, delay: 24 },
     ];
 
     return (
-        <div className="hidden lg:flex flex-col items-center justify-center bg-white/5 backdrop-blur-3xl border-l border-white/10 relative overflow-hidden h-full rounded-r-[2.5rem]">
-            {/* Soft background glow */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#20E401]/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="relative hidden h-full flex-col items-center justify-between overflow-hidden rounded-r-[2.5rem] border-l border-black/10 bg-[linear-gradient(180deg,#fbfaf6_0%,#f4efe4_100%)] p-10 lg:flex">
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] bg-[size:28px_28px] opacity-30" />
+            <div className="pointer-events-none absolute left-1/2 top-[42%] h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#20E401]/8 blur-[120px]" />
 
-            {/* Header Text */}
-            <div className="text-center mb-6 z-10 px-8">
+            <div className="z-10 w-full text-left">
+                <motion.div
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                    className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.35)]"
+                >
+                    Crescimento organizado
+                </motion.div>
                 <motion.h2
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="text-3xl font-bold text-white mb-3 bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-400"
+                    className="mb-3 mt-6 max-w-md text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    Escala sem <span className="text-[#20E401]">Limites</span>
+                    Comece com uma base limpa para escalar atendimento e vendas.
                 </motion.h2>
                 <motion.p
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="text-gray-400 text-sm max-w-sm mx-auto leading-relaxed"
+                    className="max-w-md text-sm leading-7 text-slate-500"
                 >
-                    Automatize seu atendimento e veja sua operação crescer enquanto você foca no que importa.
+                    Configure sua operação, organize o time e entre já com o ambiente pronto para atender com contexto.
                 </motion.p>
             </div>
 
-            {/* Orbital Visualization */}
-            <div className="relative w-[240px] h-[240px] flex items-center justify-center mb-4">
-                {/* Central Growth Indicator */}
+            <div className="relative flex h-[260px] w-[260px] items-center justify-center">
                 <motion.div
                     initial={{ scale: 0.8, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    className="relative z-20 w-20 h-20 rounded-full bg-black border border-[#20E401]/30 flex items-center justify-center p-3 shadow-[0_0_50px_rgba(32,228,1,0.2)]"
+                    className="relative z-20 flex h-24 w-24 items-center justify-center rounded-full border border-black/10 bg-white shadow-[0_28px_70px_-38px_rgba(15,23,42,0.38)]"
                 >
-                    <div className="relative">
-                        <TrendingUp size={32} className="text-[#20E401]" />
-                        <motion.div
-                            animate={{ opacity: [0, 1, 0], scale: [1, 1.2, 1] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                            className="absolute -top-1 -right-1 w-3 h-3 bg-[#20E401] rounded-full blur-[2px]"
-                        />
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#08110d]">
+                        <TrendingUp className="h-7 w-7 text-[#20E401]" />
                     </div>
-                    <div className="absolute inset-0 rounded-full border border-[#20E401]/20 animate-ping opacity-20" />
+                    <div className="absolute inset-0 rounded-full border border-[#20E401]/15" />
                 </motion.div>
 
-                {/* Orbit Rings */}
-                <div className="absolute w-[140px] h-[140px] rounded-full border border-white/5" />
-                <div className="absolute w-[200px] h-[200px] rounded-full border border-white/5" />
+                <div className="absolute h-[150px] w-[150px] rounded-full border border-black/10" />
+                <div className="absolute h-[220px] w-[220px] rounded-full border border-black/10" />
 
-                {/* Orbiting Icons */}
                 {orbits.map((orbit, index) => (
                     <motion.div
                         key={index}
                         className="absolute"
-                        animate={{
-                            rotate: 360,
-                        }}
+                        animate={{ rotate: 360 }}
                         transition={{
                             duration: orbit.duration,
                             repeat: Infinity,
-                            ease: "linear",
-                            delay: -orbit.delay
+                            ease: 'linear',
+                            delay: -orbit.delay,
                         }}
                         style={{
                             width: orbit.radius * 2,
@@ -91,52 +86,41 @@ export function RegisterShowcase() {
                         }}
                     >
                         <motion.div
-                            className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 p-3 rounded-2xl bg-black/80 border border-white/10 shadow-2xl backdrop-blur-xl"
-                            animate={{
-                                rotate: -360,
-                            }}
+                            className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-black/10 bg-white p-3 shadow-[0_18px_34px_-28px_rgba(15,23,42,0.28)]"
+                            animate={{ rotate: -360 }}
                             transition={{
                                 duration: orbit.duration,
                                 repeat: Infinity,
-                                ease: "linear",
-                                delay: -orbit.delay
+                                ease: 'linear',
+                                delay: -orbit.delay,
                             }}
                         >
-                            <div className="hover:scale-110 transition-transform">
-                                {orbit.icon}
-                            </div>
+                            {orbit.icon}
                         </motion.div>
                     </motion.div>
                 ))}
             </div>
 
-            {/* Benefits List */}
-            <div className="z-10 px-10 space-y-3">
-                {[
-                    "Automação inteligente 24/7",
-                    "Dashboard de métricas avançadas",
-                    "Integração com múltiplos canais"
-                ].map((benefit, i) => (
-                    <motion.div
-                        key={i}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.4 + (i * 0.1) }}
-                        className="flex items-center gap-3 text-xs text-gray-400"
-                    >
-                        <div className="w-4 h-4 rounded-full bg-[#20E401]/10 flex items-center justify-center flex-shrink-0">
-                            <CheckCircle2 size={10} className="text-[#20E401]" />
-                        </div>
-                        {benefit}
-                    </motion.div>
-                ))}
-            </div>
-
-            {/* Progress indicator mockup */}
-            <div className="flex gap-2 mt-8 justify-center">
-                <div className="w-2 h-1 bg-white/10 rounded-full" />
-                <div className="w-8 h-1 bg-[#20E401] rounded-full" />
-                <div className="w-2 h-1 bg-white/10 rounded-full" />
+            <div className="z-10 w-full rounded-[28px] border border-black/10 bg-white/80 p-5 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.3)]">
+                <motion.div
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.45 }}
+                >
+                    <p className="text-sm font-semibold text-slate-950">O que voce configura ao entrar</p>
+                    <div className="mt-4 space-y-3">
+                        {[
+                            'Estrutura inicial do workspace e equipe.',
+                            'Base pronta para atendimento, comercial e automacoes.',
+                            'Mais clareza para crescer sem virar operacao improvisada.',
+                        ].map((item) => (
+                            <div key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-600">
+                                <CheckCircle2 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-[#20E401]" />
+                                {item}
+                            </div>
+                        ))}
+                    </div>
+                </motion.div>
             </div>
         </div>
     );

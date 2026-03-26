@@ -3,7 +3,7 @@
 import { db } from '@/lib/db';
 import { getCurrentUser } from './user';
 import { generateSummary } from '@/lib/genkit';
-import { getAutopilotConfig } from '@/actions/autopilot';
+import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
 export async function generateChatSummaryAction(chatId: string) {
     const currentUser = await getCurrentUser();
@@ -40,15 +40,19 @@ export async function generateChatSummaryAction(chatId: string) {
         }
 
         // 2. Get Config (Try to find any valid AI config for this workspace)
-        const { config, hasGlobalKey } = await getAutopilotConfig(workspaceId);
+        const runtimeConfig = await getWorkspaceAiRuntimeConfig(workspaceId);
 
-        // Prioritize: Config Key -> Global Env Key (handled by genkit if key is undefined, but let's be explicit if needed)
-        const apiKey = config?.gemini_api_key;
-        const aiModel = config?.ai_model;
+        if (runtimeConfig.error) {
+            return { success: false, error: runtimeConfig.error };
+        }
+
+        // Prioritize: workspace key -> global env key (handled downstream if apiKey is undefined)
+        const apiKey = runtimeConfig.apiKey;
+        const aiModel = runtimeConfig.aiModel;
 
         // Note: genkit.ts handles undefined apiKey by falling back to env var if initialized there.
         // But if strict mode, we might want to check.
-        if (!apiKey && !hasGlobalKey) {
+        if (!apiKey && !runtimeConfig.hasGlobalKey) {
             return { success: false, error: 'Chave de API do Gemini não configurada (Integração ou Agente IA).' };
         }
 

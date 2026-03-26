@@ -200,6 +200,11 @@ async function startCampaignSending(campaignId: string) {
                 } else {
                     const newChatId = randomUUID();
                     const protocol = buildChatProtocol(newChatId);
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(recipient.workspace_id);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
                     const newChatRes = await db.query(
                         `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING id`,
                         [newChatId, recipient.workspace_id, recipient.contact_id, protocol]

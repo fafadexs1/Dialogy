@@ -51,7 +51,7 @@ export default function MobileContactPanel({
         <Sheet open={isOpen} onOpenChange={onClose}>
             <SheetContent
                 side="bottom"
-                className="h-[90vh] rounded-t-[32px] border-t border-white/10 bg-zinc-950/95 backdrop-blur-3xl p-0 flex flex-col gap-0 shadow-2xl overflow-hidden"
+                className="flex h-[90vh] flex-col gap-0 overflow-hidden rounded-t-[32px] border-t border-slate-200/80 bg-white/98 p-0 shadow-2xl backdrop-blur-3xl dark:border-white/10 dark:bg-[#050507]/98"
             >
                 {/* Hidden Header for Accessibility */}
                 <SheetHeader className="hidden">
@@ -61,30 +61,30 @@ export default function MobileContactPanel({
 
                 {/* Handle Bar */}
                 <div className="w-full h-6 flex items-center justify-center pt-2 shrink-0">
-                    <div className="w-10 h-1 rounded-full bg-white/20" />
+                    <div className="h-1 w-10 rounded-full bg-border" />
                 </div>
 
                 {/* Hero Section */}
                 <div className="flex flex-col items-center px-6 pb-8 pt-2 shrink-0 relative">
                     <div className="relative mb-4 group">
                         <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur opacity-75 group-hover:opacity-100 transition duration-500"></div>
-                        <Avatar className="h-24 w-24 border-2 border-black ring-2 ring-white/10 relative shadow-2xl">
+                        <Avatar className="relative h-24 w-24 border-2 border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-2xl dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/30">
                             <AvatarImage src={contact.avatar_url || undefined} className="object-cover" />
-                            <AvatarFallback className="bg-gradient-to-br from-zinc-800 to-zinc-900 text-2xl font-light text-white/80">
+                            <AvatarFallback className="bg-slate-100 text-2xl font-light text-slate-600 dark:bg-zinc-900 dark:text-zinc-300">
                                 {contact.name?.substring(0, 2).toUpperCase()}
                             </AvatarFallback>
                         </Avatar>
                         {chat.status === 'atendimentos' && (
-                            <div className="absolute bottom-1 right-1 h-5 w-5 bg-green-500 rounded-full border-2 border-zinc-950 shadow-lg" />
+                            <div className="absolute bottom-1 right-1 h-5 w-5 rounded-full border-2 border-background bg-green-500 shadow-lg" />
                         )}
                     </div>
 
-                    <h2 className="text-2xl font-medium tracking-tight text-white text-center mb-1">
+                    <h2 className="mb-1 text-center text-2xl font-medium tracking-tight text-foreground">
                         {contact.name || contact.phone || "Contato Desconhecido"}
                     </h2>
 
                     {contact.email && (
-                        <p className="text-sm text-white/40 font-light tracking-wide mb-4">
+                        <p className="mb-4 text-sm font-light tracking-wide text-muted-foreground">
                             {contact.email}
                         </p>
                     )}
@@ -98,10 +98,10 @@ export default function MobileContactPanel({
                             trigger={
                                 <Button
                                     variant="outline"
-                                    className="h-14 flex flex-col items-center justify-center gap-1 bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 transition-all rounded-xl group"
+                                    className="group flex h-14 flex-col items-center justify-center gap-1 rounded-xl border border-border bg-background transition-all hover:bg-muted hover:border-border"
                                 >
                                     <ArrowRightLeft className="h-5 w-5 text-blue-400 group-hover:scale-110 transition-transform" />
-                                    <span className="text-[10px] uppercase tracking-wider text-white/50 font-medium">Transferir</span>
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Transferir</span>
                                 </Button>
                             }
                         />
@@ -114,10 +114,10 @@ export default function MobileContactPanel({
                                 trigger={
                                     <Button
                                         variant="outline"
-                                        className="h-14 flex flex-col items-center justify-center gap-1 bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 transition-all rounded-xl group"
+                                        className="group flex h-14 flex-col items-center justify-center gap-1 rounded-xl border border-border bg-background transition-all hover:bg-muted hover:border-border"
                                     >
                                         <MessageSquarePlus className="h-5 w-5 text-green-400 group-hover:scale-110 transition-transform" />
-                                        <span className="text-[10px] uppercase tracking-wider text-white/50 font-medium">Reabrir</span>
+                                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Reabrir</span>
                                     </Button>
                                 }
                             />
@@ -137,7 +137,7 @@ export default function MobileContactPanel({
                                         <Badge
                                             key={tag.id}
                                             variant="secondary"
-                                            className="px-3 py-1 text-xs font-normal bg-white/5 hover:bg-white/10 text-white/80 border border-white/5"
+                                            className="border-border bg-muted/60 px-3 py-1 text-xs font-normal text-foreground hover:bg-muted"
                                             style={{
                                                 borderLeft: `2px solid ${tag.color}`
                                             }}
@@ -152,14 +152,14 @@ export default function MobileContactPanel({
                         {/* Details List */}
                         <div className="space-y-4">
                             <LabelSection>Detalhes</LabelSection>
-                            <div className="bg-white/5 rounded-2xl p-4 space-y-4 border border-white/5 shadow-inner">
+                            <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-inner dark:border-white/10 dark:bg-black/40">
                                 <InfoItem
                                     icon={<Hash className="h-4 w-4 text-purple-400" />}
                                     label="Protocolo"
                                     value={chat.protocol || 'N/A'}
                                     copyable
                                 />
-                                <div className="h-px bg-white/5 w-full" />
+                                <div className="h-px w-full bg-border" />
                                 <InfoItem
                                     icon={<Phone className="h-4 w-4 text-green-400" />}
                                     label="Telefone"
@@ -168,7 +168,7 @@ export default function MobileContactPanel({
                                 />
                                 {chat.updatedAt && (
                                     <>
-                                        <div className="h-px bg-white/5 w-full" />
+                                        <div className="h-px w-full bg-border" />
                                         <InfoItem
                                             icon={<Clock className="h-4 w-4 text-orange-400" />}
                                             label="Última Atividade"
@@ -183,7 +183,7 @@ export default function MobileContactPanel({
                         {(chat.metaContactUsername || chat.metaContactExternalId) && (
                             <div className="space-y-4">
                                 <LabelSection>Meta / Integração</LabelSection>
-                                <div className="bg-white/5 rounded-2xl p-4 space-y-4 border border-white/5">
+                                <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 dark:border-white/10 dark:bg-black/40">
                                     <InfoItem
                                         icon={<ExternalLink className="h-4 w-4 text-blue-400" />}
                                         label="Username"
@@ -209,7 +209,7 @@ export default function MobileContactPanel({
 
 function LabelSection({ children }: { children: React.ReactNode }) {
     return (
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 pl-1">
+        <h3 className="pl-1 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
             {children}
         </h3>
     );
@@ -226,13 +226,13 @@ function InfoItem({ icon, label, value, copyable, truncate }: { icon: React.Reac
     return (
         <div className="flex items-center justify-between group">
             <div className="flex items-center gap-3 overflow-hidden">
-                <div className="h-8 w-8 rounded-lg bg-black/20 flex items-center justify-center shrink-0">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
                     {icon}
                 </div>
                 <div className="flex flex-col overflow-hidden">
-                    <span className="text-[10px] font-medium text-white/40 uppercase tracking-wide">{label}</span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
                     <span className={cn(
-                        "text-sm font-medium text-white/90",
+                        "text-sm font-medium text-foreground",
                         truncate && "truncate max-w-[150px]"
                     )}>{value}</span>
                 </div>
@@ -242,7 +242,7 @@ function InfoItem({ icon, label, value, copyable, truncate }: { icon: React.Reac
                     variant="ghost"
                     size="icon"
                     onClick={handleCopy}
-                    className="h-8 w-8 text-white/20 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
+                    className="h-8 w-8 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
                 >
                     <Copy className="h-3.5 w-3.5" />
                 </Button>

@@ -1,12 +1,11 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Search, MoreVertical, Clock, CheckCircle2, AlertCircle, Plus, Filter, MessageSquare, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Search, MoreVertical, Clock, CheckCircle2, AlertCircle, Plus, Filter, User, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -16,21 +15,10 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTicket, getTicketsWithPermissions, type TicketStatus, updateTicketStatus } from '@/actions/support';
+import { deleteTicket, getTicketsWithPermissions, type SupportTicket, type TicketStatus, updateTicketStatus } from '@/actions/support';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-
-type SupportTicket = {
-    id: string;
-    subject: string;
-    status: TicketStatus;
-    priority: string;
-    category: string;
-    created_at?: string | null;
-    updated_at?: string | null;
-    [key: string]: any;
-};
 
 const statusMap: Record<string, { label: string; color: string; icon: any; bg: string }> = {
     open: {
@@ -54,18 +42,18 @@ const statusMap: Record<string, { label: string; color: string; icon: any; bg: s
 };
 
 const priorityMap: Record<string, { label: string; color: string }> = {
-    low: { label: 'Baixa', color: 'text-zinc-400' },
-    medium: { label: 'Média', color: 'text-amber-400' },
+    low: { label: 'Baixa', color: 'text-slate-500' },
+    medium: { label: 'Media', color: 'text-amber-400' },
     high: { label: 'Alta', color: 'text-orange-400' },
-    critical: { label: 'Crítica', color: 'text-red-400 font-bold' },
+    critical: { label: 'Critica', color: 'text-red-400 font-bold' },
 };
 
 function formatLastUpdate(ticket: SupportTicket): string {
     const value = ticket.updated_at || ticket.created_at;
-    if (!value) return 'Sem atualização';
+    if (!value) return 'Sem atualizacao';
 
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'Sem atualização';
+    if (Number.isNaN(date.getTime())) return 'Sem atualizacao';
 
     return formatDistanceToNow(date, { addSuffix: true, locale: ptBR });
 }
@@ -90,7 +78,7 @@ export default function TicketListPage() {
                 console.error('Failed to load tickets', error);
                 toast({
                     title: 'Erro ao carregar tickets',
-                    description: 'Não foi possível carregar os tickets.',
+                    description: 'Nao foi possivel carregar os tickets.',
                     variant: 'destructive',
                 });
             } finally {
@@ -105,7 +93,7 @@ export default function TicketListPage() {
         () => [
             { value: 'all', label: 'Todos' },
             { value: 'open', label: 'Abertos' },
-            { value: 'in_progress', label: 'Em Andamento' },
+            { value: 'in_progress', label: 'Em andamento' },
             { value: 'closed', label: 'Resolvidos' }
         ],
         []
@@ -115,8 +103,14 @@ export default function TicketListPage() {
         return tickets.filter((ticket) => {
             const subject = String(ticket.subject || '').toLowerCase();
             const id = String(ticket.id || '').toLowerCase();
+            const requester = String(ticket.requester?.display_name || '').toLowerCase();
+            const responder = String(ticket.last_staff_reply?.display_name || '').toLowerCase();
             const query = search.toLowerCase();
-            const matchesSearch = subject.includes(query) || id.includes(query);
+            const matchesSearch =
+                subject.includes(query) ||
+                id.includes(query) ||
+                requester.includes(query) ||
+                responder.includes(query);
             const matchesFilter = filter === 'all' || ticket.status === filter;
             return matchesSearch && matchesFilter;
         });
@@ -152,7 +146,7 @@ export default function TicketListPage() {
         if (!result.success) {
             toast({
                 title: 'Falha ao atualizar ticket',
-                description: result.error || 'Não foi possível atualizar o status.',
+                description: result.error || 'Nao foi possivel atualizar o status.',
                 variant: 'destructive',
             });
             return;
@@ -175,7 +169,7 @@ export default function TicketListPage() {
     async function handleDelete(ticketId: string) {
         if (!isSuperAdmin) return;
 
-        const confirmed = window.confirm('Deseja realmente excluir este ticket? Esta ação não pode ser desfeita.');
+        const confirmed = window.confirm('Deseja realmente excluir este ticket? Esta acao nao pode ser desfeita.');
         if (!confirmed) return;
 
         setIsMutatingTicketId(ticketId);
@@ -185,7 +179,7 @@ export default function TicketListPage() {
         if (!result.success) {
             toast({
                 title: 'Falha ao excluir ticket',
-                description: result.error || 'Não foi possível excluir o ticket.',
+                description: result.error || 'Nao foi possivel excluir o ticket.',
                 variant: 'destructive',
             });
             return;
@@ -193,37 +187,35 @@ export default function TicketListPage() {
 
         setTickets((prev) => prev.filter((ticket) => ticket.id !== ticketId));
         toast({
-            title: 'Ticket excluído',
+            title: 'Ticket excluido',
             description: 'O ticket foi removido com sucesso.',
         });
     }
 
     return (
         <div className="relative flex min-h-screen flex-col overflow-hidden bg-background selection:bg-emerald-500/30">
-            {/* Background Effects */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/5 blur-[120px]" />
-                <div className="absolute top-[10%] left-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />
+                <div className="absolute left-[10%] top-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />
                 <div className="absolute bottom-[10%] right-[10%] h-[600px] w-[600px] rounded-full bg-violet-500/5 blur-[120px]" />
             </div>
 
-            <div className="relative z-10 w-full max-w-[1600px] mx-auto p-4 md:p-8 space-y-8">
-                {/* Header Section */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="relative z-10 mx-auto w-full max-w-[1600px] space-y-8 p-4 md:p-8">
+                <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
                     <div className="flex items-center gap-4">
                         <Link href="/support">
-                            <Button variant="ghost" size="icon" className="h-12 w-12 rounded-2xl border border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white transition-all hover:scale-105">
+                            <Button variant="ghost" size="icon" className="h-12 w-12 rounded-2xl border border-slate-200 bg-white text-slate-500 transition-all hover:scale-105 hover:bg-slate-50 hover:text-slate-950">
                                 <ArrowLeft className="h-6 w-6" />
                             </Button>
                         </Link>
                         <div>
-                            <h1 className="text-3xl font-bold tracking-tight text-white">
-                                {isSuperAdmin ? 'Gestão de Tickets' : 'Meus Tickets'}
+                            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+                                {isSuperAdmin ? 'Gestao de Tickets' : 'Meus Tickets'}
                             </h1>
-                            <p className="text-zinc-400 mt-1">
+                            <p className="mt-1 text-slate-500">
                                 {isSuperAdmin
-                                    ? 'Visualize e administre todas as solicitações de suporte.'
-                                    : 'Acompanhe o status e histórico das suas solicitações.'}
+                                    ? 'Visualize e administre todas as solicitacoes de suporte.'
+                                    : 'Acompanhe o status e historico das suas solicitacoes.'}
                             </p>
                         </div>
                     </div>
@@ -234,30 +226,29 @@ export default function TicketListPage() {
                     </Link>
                 </div>
 
-                {/* Filters & Search Toolbar */}
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="flex flex-col md:flex-row gap-4 items-center justify-between bg-zinc-950/40 backdrop-blur-md p-2 rounded-2xl border border-white/5"
+                    className="flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.14)] md:flex-row"
                 >
-                    <div className="flex gap-1 p-1 bg-white/5 rounded-xl w-full md:w-auto overflow-x-auto no-scrollbar">
+                    <div className="flex w-full gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 no-scrollbar md:w-auto">
                         {filterOptions.map((opt) => (
                             <button
                                 key={opt.value}
                                 onClick={() => setFilter(opt.value)}
                                 className={`
-                                    relative px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap
+                                    relative whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all
                                     ${filter === opt.value
-                                        ? 'text-white'
-                                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                                        ? 'text-slate-950'
+                                        : 'text-slate-500 hover:bg-slate-200 hover:text-slate-900'
                                     }
                                 `}
                             >
                                 {filter === opt.value && (
                                     <motion.div
                                         layoutId="activeFilter"
-                                        className="absolute inset-0 bg-white/10 rounded-lg"
+                                        className="absolute inset-0 rounded-lg bg-white shadow-sm"
                                         initial={false}
                                         transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                     />
@@ -267,20 +258,19 @@ export default function TicketListPage() {
                         ))}
                     </div>
 
-                    <div className="relative flex-1 max-w-md w-full">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search className="h-4 w-4 text-zinc-500" />
+                    <div className="relative w-full max-w-md flex-1">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                            <Search className="h-4 w-4 text-slate-400" />
                         </div>
                         <Input
-                            placeholder="Buscar por ID ou assunto..."
+                            placeholder="Buscar por ID, assunto ou usuario..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="pl-10 h-11 bg-white/5 border-white/5 focus-visible:ring-emerald-500/20 focus-visible:border-emerald-500/20 text-zinc-200 placeholder:text-zinc-600 rounded-xl"
+                            className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500/20 focus-visible:ring-emerald-500/20"
                         />
                     </div>
                 </motion.div>
 
-                {/* Tickets List */}
                 <AnimatePresence mode="popLayout">
                     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-3">
                         {!loading && filteredTickets.length === 0 ? (
@@ -289,12 +279,12 @@ export default function TicketListPage() {
                                 animate={{ opacity: 1, scale: 1 }}
                                 className="flex flex-col items-center justify-center py-24 text-center"
                             >
-                                <div className="h-24 w-24 rounded-full bg-white/5 flex items-center justify-center mb-6 border border-white/5">
-                                    <Search className="h-10 w-10 text-zinc-600" />
+                                <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full border border-slate-200 bg-slate-100">
+                                    <Search className="h-10 w-10 text-slate-400" />
                                 </div>
-                                <h3 className="text-xl font-semibold text-white mb-2">Nenhum ticket encontrado</h3>
-                                <p className="text-zinc-500 max-w-sm">
-                                    Não encontramos nenhum ticket com os filtros atuais. Tente limpar a busca ou mudar os filtros.
+                                <h3 className="mb-2 text-xl font-semibold text-slate-950">Nenhum ticket encontrado</h3>
+                                <p className="max-w-sm text-slate-500">
+                                    Nao encontramos nenhum ticket com os filtros atuais. Tente limpar a busca ou mudar os filtros.
                                 </p>
                             </motion.div>
                         ) : (
@@ -306,10 +296,10 @@ export default function TicketListPage() {
                                 return (
                                     <motion.div key={ticket.id} variants={itemVariants} layout>
                                         <Card
-                                            className="group relative overflow-hidden border-white/5 bg-zinc-950/40 backdrop-blur-sm transition-all duration-300 hover:bg-zinc-950/60 hover:border-emerald-500/20 hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5 cursor-pointer"
+                                            className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-slate-50 hover:shadow-[0_18px_40px_-28px_rgba(15,23,42,0.18)]"
                                             onClick={() => router.push(`/support/tickets/${ticket.id}`)}
                                         >
-                                            <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                            <CardContent className="flex flex-col justify-between gap-6 p-5 md:flex-row md:items-center">
                                                 <div className="flex items-start gap-5">
                                                     <div className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${status.bg} ${status.color}`}>
                                                         <StatusIcon className="h-5 w-5" />
@@ -317,34 +307,48 @@ export default function TicketListPage() {
 
                                                     <div className="space-y-1">
                                                         <div className="flex items-center gap-3">
-                                                            <span className="font-semibold text-lg text-zinc-100 group-hover:text-emerald-400 transition-colors">
+                                                            <span className="text-lg font-semibold text-slate-950 transition-colors group-hover:text-emerald-600">
                                                                 {ticket.subject}
                                                             </span>
-                                                            <div className="flex items-center rounded-md bg-white/5 border border-white/5 px-2 py-0.5">
-                                                                <span className="text-[10px] font-mono text-zinc-500">#{ticket.id.slice(0, 8)}</span>
+                                                            <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5">
+                                                                <span className="text-[10px] font-mono text-slate-500">#{ticket.id.slice(0, 8)}</span>
                                                             </div>
                                                         </div>
 
-                                                        <div className="flex flex-wrap items-center gap-y-2 gap-x-4 text-sm text-zinc-400">
+                                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                                                             <div className="flex items-center gap-1.5">
                                                                 <span className={`h-1.5 w-1.5 rounded-full ${priority.color === 'text-red-400 font-bold' ? 'bg-red-500' : priority.color.replace('text-', 'bg-').replace('-400', '-500')}`} />
                                                                 <span className={priority.color}>{priority.label}</span>
                                                             </div>
-                                                            <span className="h-1 w-1 rounded-full bg-zinc-700" />
+                                                            <span className="h-1 w-1 rounded-full bg-slate-300" />
                                                             <div className="flex items-center gap-1.5">
                                                                 <Filter className="h-3.5 w-3.5" />
                                                                 <span className="capitalize">{ticket.category}</span>
                                                             </div>
-                                                            <span className="h-1 w-1 rounded-full bg-zinc-700" />
+                                                            <span className="h-1 w-1 rounded-full bg-slate-300" />
                                                             <div className="flex items-center gap-1.5">
                                                                 <Clock className="h-3.5 w-3.5" />
                                                                 <span>{formatLastUpdate(ticket)}</span>
+                                                            </div>
+                                                            <span className="h-1 w-1 rounded-full bg-slate-300" />
+                                                            <div className="flex items-center gap-1.5">
+                                                                <User className="h-3.5 w-3.5" />
+                                                                <span>Solicitante: {ticket.requester?.display_name || 'Usuario'}</span>
+                                                            </div>
+                                                            <span className="h-1 w-1 rounded-full bg-slate-300" />
+                                                            <div className="flex items-center gap-1.5">
+                                                                <ShieldCheck className="h-3.5 w-3.5" />
+                                                                <span>
+                                                                    {ticket.last_staff_reply
+                                                                        ? `Respondido por ${ticket.last_staff_reply.display_name}`
+                                                                        : 'Aguardando resposta do suporte'}
+                                                                </span>
                                                             </div>
                                                         </div>
                                                     </div>
                                                 </div>
 
-                                                <div className="flex items-center justify-between md:justify-end gap-4 pl-14 md:pl-0">
+                                                <div className="flex items-center justify-between gap-4 pl-14 md:justify-end md:pl-0">
                                                     <div className={`rounded-full border px-3 py-1 text-xs font-medium ${status.bg} ${status.color}`}>
                                                         {status.label}
                                                     </div>
@@ -355,7 +359,7 @@ export default function TicketListPage() {
                                                                 <Button
                                                                     variant="ghost"
                                                                     size="icon"
-                                                                    className="h-8 w-8 text-zinc-500 hover:text-white hover:bg-white/10"
+                                                                    className="h-8 w-8 text-slate-500 hover:bg-slate-100 hover:text-slate-950"
                                                                     onClick={(e) => e.stopPropagation()}
                                                                 >
                                                                     <MoreVertical className="h-4 w-4" />
@@ -363,13 +367,13 @@ export default function TicketListPage() {
                                                             </DropdownMenuTrigger>
                                                             <DropdownMenuContent
                                                                 align="end"
-                                                                className="w-56 border-white/10 bg-zinc-950 text-zinc-300 backdrop-blur-xl"
+                                                                className="w-56 border-slate-200 bg-white text-slate-700"
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 <DropdownMenuItem
                                                                     disabled={ticket.status === 'open' || isMutatingTicketId === ticket.id}
                                                                     onClick={() => handleStatusChange(ticket.id, 'open')}
-                                                                    className="focus:bg-white/10"
+                                                                    className="focus:bg-slate-50"
                                                                 >
                                                                     <AlertCircle className="mr-2 h-4 w-4 text-blue-400" />
                                                                     Marcar como aberto
@@ -377,7 +381,7 @@ export default function TicketListPage() {
                                                                 <DropdownMenuItem
                                                                     disabled={ticket.status === 'in_progress' || isMutatingTicketId === ticket.id}
                                                                     onClick={() => handleStatusChange(ticket.id, 'in_progress')}
-                                                                    className="focus:bg-white/10"
+                                                                    className="focus:bg-slate-50"
                                                                 >
                                                                     <Clock className="mr-2 h-4 w-4 text-amber-400" />
                                                                     Marcar como em andamento
@@ -385,16 +389,16 @@ export default function TicketListPage() {
                                                                 <DropdownMenuItem
                                                                     disabled={ticket.status === 'closed' || isMutatingTicketId === ticket.id}
                                                                     onClick={() => handleStatusChange(ticket.id, 'closed')}
-                                                                    className="focus:bg-white/10"
+                                                                    className="focus:bg-slate-50"
                                                                 >
                                                                     <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-400" />
                                                                     Marcar como resolvido
                                                                 </DropdownMenuItem>
-                                                                <DropdownMenuSeparator className="bg-white/5" />
+                                                                <DropdownMenuSeparator className="bg-slate-200" />
                                                                 <DropdownMenuItem
                                                                     disabled={isMutatingTicketId === ticket.id}
                                                                     onClick={() => handleDelete(ticket.id)}
-                                                                    className="text-red-400 focus:text-red-300 focus:bg-red-500/10"
+                                                                    className="text-red-400 focus:bg-red-50 focus:text-red-500"
                                                                 >
                                                                     Excluir ticket
                                                                 </DropdownMenuItem>

@@ -25,6 +25,9 @@ export default function GlobalSeoSettingsPage() {
             titleTemplate: '%s | Site',
             description: '',
             faviconUrl: '',
+            logoUrl: '',
+            defaultOgImage: '',
+            twitterHandle: '',
             themeColor: '#ffffff',
         }
     });
@@ -92,6 +95,21 @@ export default function GlobalSeoSettingsPage() {
                         <div className="grid gap-2">
                             <Label>Default Description</Label>
                             <Input {...register('description')} placeholder="Default site description..." />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Logo URL</Label>
+                            <Input {...register('logoUrl')} placeholder="/logo.png" />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Default Open Graph Image</Label>
+                            <Input {...register('defaultOgImage')} placeholder="/logo-new.jpg" />
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label>Twitter Handle</Label>
+                            <Input {...register('twitterHandle')} placeholder="@dialogy" />
                         </div>
                     </CardContent>
                 </Card>

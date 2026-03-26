@@ -11,11 +11,11 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getAutopilotConfig } from '@/actions/autopilot';
+import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
 const TranscribeAudioInputSchema = z.object({
   audioUrl: z.string().url().describe('The public URL of the audio file to transcribe.'),
-  workspaceId: z.string().describe('The ID of the workspace to fetch Gemini config from.'),
+  workspaceId: z.string().describe('The workspace ID used to resolve Gemini configuration.'),
 });
 
 export type TranscribeAudioInput = z.infer<typeof TranscribeAudioInputSchema>;
@@ -26,11 +26,9 @@ const TranscribeAudioOutputSchema = z.object({
 
 export type TranscribeAudioOutput = z.infer<typeof TranscribeAudioOutputSchema>;
 
-
 export async function transcribeAudio(input: TranscribeAudioInput): Promise<TranscribeAudioOutput> {
   return transcribeAudioFlow(input);
 }
-
 
 const transcribeAudioFlow = ai.defineFlow(
   {
@@ -39,54 +37,50 @@ const transcribeAudioFlow = ai.defineFlow(
     outputSchema: TranscribeAudioOutputSchema,
   },
   async (input) => {
-    // 1. Fetch Gemini Configuration for the Workspace
-    const { config, error } = await getAutopilotConfig(input.workspaceId);
+    // Resolve AI runtime config without depending on a visible Autopilot agent.
+    const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
 
-    if (error || !config) {
-      throw new Error(error || 'Configuração do Gemini não encontrada para este workspace.');
+    if (runtimeConfig.error) {
+      throw new Error(runtimeConfig.error);
     }
 
-    const apiKey = config.gemini_api_key || process.env.GEMINI_API_KEY;
+    const apiKey = runtimeConfig.apiKey;
 
     if (!apiKey) {
-      throw new Error('Chave de API do Gemini não configurada. Acesse Integrações > Gemini para configurar.');
+      throw new Error('Integracao Gemini do workspace nao configurada ou inativa. Acesse Integracoes > Gemini.');
     }
-    const modelName = config.transcription_model || config.ai_model || 'gemini-2.0-flash-exp';
 
-    // 2. Initialize Google Generative AI
+    const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || 'gemini-2.0-flash-exp';
+
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: modelName });
 
-    // 3. Fetch Audio Content
     try {
       const response = await fetch(input.audioUrl);
       if (!response.ok) {
-        throw new Error(`Falha ao baixar áudio: ${response.statusText}`);
+        throw new Error(`Falha ao baixar audio: ${response.statusText}`);
       }
+
       const arrayBuffer = await response.arrayBuffer();
       const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-
-      // Determine mime type (simple check or default to audio/mp3 if unknown, 
-      // though Gemini is flexible. Better to get from headers if possible)
       const mimeType = response.headers.get('content-type') || 'audio/mp3';
 
-      // 4. Generate Content
       const result = await model.generateContent([
         {
           inlineData: {
-            mimeType: mimeType,
-            data: base64Audio
-          }
+            mimeType,
+            data: base64Audio,
+          },
         },
-        { text: 'Transcreva este áudio para Português do Brasil (PT-BR). Retorne SOMENTE o texto da transcrição. Se o áudio estiver em outro idioma, traduza para o Português.' }
+        {
+          text: 'Transcreva este audio para Portugues do Brasil (PT-BR). Retorne somente o texto da transcricao. Se o audio estiver em outro idioma, traduza para o Portugues.',
+        },
       ]);
 
-      const transcription = result.response.text();
-      return { transcription };
-
+      return { transcription: result.response.text() };
     } catch (err: any) {
       console.error('[TRANSCRIBE_AUDIO] Error:', err);
-      throw new Error(`Erro na transcrição: ${err.message}`);
+      throw new Error(`Erro na transcricao: ${err.message}`);
     }
   }
 );

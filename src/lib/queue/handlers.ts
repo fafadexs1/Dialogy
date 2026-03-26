@@ -25,7 +25,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler> = {
       throw new Error('Invalid whatsapp_send payload.');
     }
 
-    const apiConfig = await getEvolutionApiConfig(payload.instanceName);
+    const apiConfig = await getEvolutionApiConfig(payload.instanceName, { workspaceId: payload.workspaceId });
     if (!apiConfig) {
       throw new Error(`Evolution API config missing for ${payload.instanceName}`);
     }

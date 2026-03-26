@@ -203,6 +203,11 @@ export async function fetchSGPContracts(chatId: string) {
 export async function createSGPServiceOrder(chatId: string, contractId: string, notes: string) {
     const user = await getCurrentUser();
     if (!user || !user.activeWorkspaceId) return { success: false, error: "Unauthorized" };
+    const normalizedNotes = (notes || '').trim();
+
+    if (!normalizedNotes) {
+        return { success: false, error: "Notas obrigatorias para criar OS no SGP." };
+    }
 
     const workspaceId = user.activeWorkspaceId;
     const { global, user: sgpUser, isGlobalReady } = await getSGPConfig(workspaceId);
@@ -261,7 +266,7 @@ export async function createSGPServiceOrder(chatId: string, contractId: string, 
         ocorrenciatipo: 6,
         metodo: 5,
         setor: Number(sectorId), // Assuming number based on "valor do setor"
-        conteudo: notes || "Sem observações.",
+        conteudo: normalizedNotes,
         observacao: "Atendido via Dialogy",
         usuario: sgpUser.username,
         responsavel: sgpUser.username,

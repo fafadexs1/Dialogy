@@ -113,6 +113,52 @@
     --sidebar-border: 240 6% 12%;
     --sidebar-ring: 162 90% 53%;
   }
+
+  .app-shell-light,
+  .inbox-light {
+    color-scheme: light;
+
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 162 90% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 24% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 24% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 24% 95%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 162 90% 40%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 162 90% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 24% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 162 90% 40%;
+  }
+
+  .inbox-dark {
+    color-scheme: dark;
+  }
 }
 
 @layer base {
@@ -219,6 +265,15 @@
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(59, 130, 246, 0.5);
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+  }
+
+  .inbox-light .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+  }
+
+  .inbox-light .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.15);
   }
 }
 

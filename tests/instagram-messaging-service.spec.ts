@@ -26,26 +26,26 @@ describe('InstagramMessagingService', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('posts to the IG business endpoint without messaging_type', async () => {
+  it('posts to the Facebook page messaging endpoint without messaging_type', async () => {
     const service = new InstagramMessagingService(baseChannel);
     await service.sendText('user-1', 'hello');
 
     expect(globalThis.fetch).toHaveBeenCalledOnce();
     const [url, options] = (globalThis.fetch as any).mock.calls[0];
-    expect(url).toBe('https://graph.facebook.com/v20.0/ig-123/messages');
+    expect(url).toBe('https://graph.facebook.com/v24.0/page-1/messages');
 
     const body = JSON.parse(options.body);
     expect(body.messaging_type).toBeUndefined();
     expect(body.recipient).toEqual({ id: 'user-1' });
   });
 
-  it('throws when no IG business or page id is configured', async () => {
+  it('throws when no Facebook page id is configured', async () => {
     const service = new InstagramMessagingService({
       ...baseChannel,
       ig_business_id: null,
       external_page_id: null,
     });
 
-    await expect(service.sendText('user-1', 'hello')).rejects.toThrow('Instagram Business');
+    await expect(service.sendText('user-1', 'hello')).rejects.toThrow('Facebook');
   });
 });

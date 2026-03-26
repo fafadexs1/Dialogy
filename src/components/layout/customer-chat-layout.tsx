@@ -28,6 +28,7 @@ import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { formatMessageDate } from '@/lib/utils';
+import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -36,6 +37,11 @@ const SOUND_SOURCES = {
 } as const;
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 const IS_DEV = process.env.NODE_ENV !== 'production';
+const DELTA_SYNC_MIN_INTERVAL_MS = 3000;
+const HEALTHY_REALTIME_POLL_VISIBLE_MS = 60000;
+const HEALTHY_REALTIME_POLL_HIDDEN_MS = 180000;
+const FALLBACK_POLL_VISIBLE_MS = 15000;
+const FALLBACK_POLL_HIDDEN_MS = 45000;
 
 function DraggableSoundTester({
   debugCounter,
@@ -238,6 +244,10 @@ export default function CustomerChatLayout({
   const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
+  const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const deltaSyncQueuedRef = useRef(false);
+  const lastDeltaSyncCompletedAtRef = useRef(0);
+  const realtimeHealthyRef = useRef(false);
 
   const isHydratedRef = useRef(false);
   const initialResetDoneRef = useRef(false);
@@ -359,35 +369,16 @@ export default function CustomerChatLayout({
       if (data.metadata) {
         metadata = typeof data.metadata === 'object' ? data.metadata : JSON.parse(data.metadata);
       }
-      const chat = useInboxStore.getState().chats.find((c) => c.id === data.chat_id);
-      let sender = undefined;
+      const store = useInboxStore.getState();
+      const chat = store.chats.find((c) => c.id === data.chat_id);
+      const sender = resolveRealtimeSender({
+        data,
+        metadata,
+        chat,
+        currentUser: initialUser,
+        existingMessages: store.messagesByChat[data.chat_id] || [],
+      });
 
-      // Helper to determine if message is from an automated agent
-      const isSystemAgent = data.sender_system_agent_id || metadata?.sentBy === 'system_agent' || metadata?.sentBy === 'autopilot';
-
-      if (data.from_me) {
-        if (isSystemAgent) {
-          // Use a generic agent profile or the chat's agent if available (but explicitly mark as system/bot if needed)
-          sender = {
-            id: data.sender_system_agent_id || 'system_agent',
-            name: 'Assistente Virtual', // Or use a reliable way to get the agent name if possible
-            avatar: chat?.agent?.avatar_url || undefined, // Fallback to chat agent avatar
-            type: 'user'
-          } as const;
-        } else if (data.sender_user_id === initialUser?.id && initialUser) {
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar || initialUser.avatar_url || undefined, type: 'user' } as const;
-        } else if (chat?.agent && (!data.sender_user_id || data.sender_user_id === chat.agent.id)) {
-          // If sender_id matches chat agent or is missing (legacy), use chat agent
-          sender = { id: chat.agent.id, name: chat.agent.name, avatar: chat.agent.avatar || chat.agent.avatar_url || undefined, type: 'user' } as const;
-        } else if (initialUser) {
-          // Fallback to current user if nothing else matches (e.g. optimistic without ID persistence yet)
-          sender = { id: initialUser.id, name: initialUser.name, avatar: initialUser.avatar || initialUser.avatar_url || undefined, type: 'user' } as const;
-        }
-      } else if (chat?.contact) {
-        sender = { id: chat.contact.id, name: chat.contact.name, avatar: chat.contact.avatar_url ?? undefined, type: 'contact' } as const;
-      }
-
-      console.log('[REALTIME-DEBUG] Resolved sender:', JSON.stringify(sender)); // Check if avatar is in sender
       return {
         id: data.id,
         chat_id: data.chat_id,
@@ -902,8 +893,24 @@ export default function CustomerChatLayout({
     }
   }, [isLoading, initialData, fetchError]);
 
-  const runDeltaSync = useCallback(async () => {
-    if (!initialUser?.activeWorkspaceId) return;
+  const runDeltaSync = useCallback(async (options?: { force?: boolean }) => {
+    const workspaceId = initialUser?.activeWorkspaceId;
+    if (!workspaceId) return;
+
+    const force = options?.force === true;
+    const now = Date.now();
+
+    if (deltaSyncInFlightRef.current) {
+      if (force) {
+        deltaSyncQueuedRef.current = true;
+      }
+      return deltaSyncInFlightRef.current;
+    }
+
+    if (!force && now - lastDeltaSyncCompletedAtRef.current < DELTA_SYNC_MIN_INTERVAL_MS) {
+      return;
+    }
+
     const snapshot = useInboxStore.getState();
     const selectedChatId = snapshot.selectedChatId;
     const hasActivatedChat =
@@ -913,55 +920,69 @@ export default function CustomerChatLayout({
         ? snapshot.lastSyncMessages[selectedChatId] ?? null
         : null;
     const shouldSyncMessages = hasActivatedChat && lastSyncMessage !== null;
-    try {
-      const result = await syncInboxData({
-        workspaceId: initialUser.activeWorkspaceId,
-        lastSyncChats: snapshot.lastSyncChats,
-        chatId: shouldSyncMessages ? selectedChatId : null,
-        lastSyncMessages: shouldSyncMessages ? lastSyncMessage : null,
-      });
-      if (result.error) {
-        console.error('[SYNC_INBOX] Error:', result.error);
-        return;
-      }
 
-      // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
-      React.startTransition(() => {
-        // If the chat is currently selected and visible, it should remain read
-        // even if delta sync sends a stale unread_count from the chats table.
-        const deltaChatsToUpsert = result.deltaChats.map(chat => {
-          if (chat.id === snapshot.selectedChatId && document.hasFocus()) {
-            return { ...chat, unreadCount: 0 };
-          }
-          return chat;
+    const syncPromise = (async () => {
+      try {
+        const result = await syncInboxData({
+          workspaceId,
+          lastSyncChats: snapshot.lastSyncChats,
+          chatId: shouldSyncMessages ? selectedChatId : null,
+          lastSyncMessages: shouldSyncMessages ? lastSyncMessage : null,
         });
+        if (result.error) {
+          console.error('[SYNC_INBOX] Error:', result.error);
+          return;
+        }
 
-        upsertChats(deltaChatsToUpsert, result.lastSyncChats);
+        // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
+        React.startTransition(() => {
+          // If the chat is currently selected and visible, it should remain read
+          // even if delta sync sends a stale unread_count from the chats table.
+          const deltaChatsToUpsert = result.deltaChats.map(chat => {
+            if (chat.id === snapshot.selectedChatId && document.hasFocus()) {
+              return { ...chat, unreadCount: 0 };
+            }
+            return chat;
+          });
 
-        // SHARED POLLING: If the chat list received an update for the currently selected chat,
-        // we immediately push that message to the chat panel as well.
-        // This ensures that "active polling in chatlist" is shared with the chat view.
-        if (snapshot.selectedChatId) {
-          const chatFromList = result.deltaChats.find(c => c.id === snapshot.selectedChatId);
-          if (chatFromList && chatFromList.messages.length > 0) {
-            appendMessagesToChat(snapshot.selectedChatId, chatFromList.messages, undefined);
+          upsertChats(deltaChatsToUpsert, result.lastSyncChats);
+
+          // SHARED POLLING: If the chat list received an update for the currently selected chat,
+          // we immediately push that message to the chat panel as well.
+          // This ensures that "active polling in chatlist" is shared with the chat view.
+          if (snapshot.selectedChatId) {
+            const chatFromList = result.deltaChats.find(c => c.id === snapshot.selectedChatId);
+            if (chatFromList && chatFromList.messages.length > 0) {
+              appendMessagesToChat(snapshot.selectedChatId, chatFromList.messages, undefined);
+            }
           }
-        }
 
-        if (result.updatedContacts.length) {
-          result.updatedContacts.forEach((contact) => updateChatContact(contact));
-        }
-        if (result.deltaMessages.length && snapshot.selectedChatId) {
-          appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
-        }
-      });
-    } catch (error) {
-      console.error('[SYNC_INBOX] Unexpected error:', error);
+          if (result.updatedContacts.length) {
+            result.updatedContacts.forEach((contact) => updateChatContact(contact));
+          }
+          if (result.deltaMessages.length && snapshot.selectedChatId) {
+            appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
+          }
+        });
+      } catch (error) {
+        console.error('[SYNC_INBOX] Unexpected error:', error);
+      } finally {
+        lastDeltaSyncCompletedAtRef.current = Date.now();
+        deltaSyncInFlightRef.current = null;
+      }
+    })();
+
+    deltaSyncInFlightRef.current = syncPromise;
+    await syncPromise;
+
+    if (deltaSyncQueuedRef.current) {
+      deltaSyncQueuedRef.current = false;
+      await runDeltaSync({ force: true });
     }
   }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
 
   useEffect(() => {
-    runDeltaSyncRef.current = runDeltaSync;
+    runDeltaSyncRef.current = () => runDeltaSync({ force: true });
   }, [runDeltaSync]);
 
   const notifyPeers = useCallback(() => {
@@ -970,7 +991,7 @@ export default function CustomerChatLayout({
   }, [broadcastChannel]);
 
   const handleDataMutation = useCallback(async () => {
-    await runDeltaSync();
+    await runDeltaSync({ force: true });
     notifyPeers();
   }, [notifyPeers, runDeltaSync]);
 
@@ -1071,7 +1092,7 @@ export default function CustomerChatLayout({
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        runDeltaSync();
+        runDeltaSync({ force: true });
         markSelectedChatAsRead();
       }
     };
@@ -1118,10 +1139,13 @@ export default function CustomerChatLayout({
 
       if (isPolling) {
         const isVisible = document.visibilityState === 'visible';
+        const isRealtimeHealthy = realtimeHealthyRef.current;
 
-        // Adaptive polling: 15s when visible, 45s when backgrounded.
         // Realtime handles most live updates; polling is a safety-net fallback.
-        let interval = isVisible ? 15000 : 45000;
+        // When chats and messages channels are healthy, poll less often.
+        let interval = isRealtimeHealthy
+          ? (isVisible ? HEALTHY_REALTIME_POLL_VISIBLE_MS : HEALTHY_REALTIME_POLL_HIDDEN_MS)
+          : (isVisible ? FALLBACK_POLL_VISIBLE_MS : FALLBACK_POLL_HIDDEN_MS);
 
         // Exponential backoff on errors
         if (errorCount > 0) interval = Math.max(interval, 30000);
@@ -1316,7 +1340,7 @@ export default function CustomerChatLayout({
   }, [initialUser?.activeWorkspaceId, updateChatContact]);
 
   // Use centralized Realtime hook
-  useRealtimeSubscriptions({
+  const { isChatsConnected, isMessagesConnected } = useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
     selectedChatId,
     chatUpdatesChatIdsCsv: undefined, // Always subscribe to all workspace updates to catch TRANSFERS (incoming chats not yet in my list)
@@ -1326,6 +1350,8 @@ export default function CustomerChatLayout({
     onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
+  const isRealtimeHealthy = isChatsConnected && isMessagesConnected;
+  realtimeHealthyRef.current = isRealtimeHealthy;
 
   useEffect(() => {
     if (initialData) {
@@ -1485,12 +1511,13 @@ export default function CustomerChatLayout({
     <div className="flex h-screen w-full bg-background relative overflow-hidden">
       {/* Background Effects */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-50 dark:opacity-20 [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-[0.045] [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-blue-100/50 to-transparent" />
       </div>
 
       <LayoutGroup>
         <div
-          className={`relative z-10 flex h-full w-full overflow-hidden backdrop-blur-[1px] bg-background/50 dark:bg-black selection:bg-primary/30 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+          className={`relative z-10 flex h-full w-full overflow-hidden bg-background/85 backdrop-blur-[1px] selection:bg-primary/20 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           {needsAudioUnlock && (

@@ -193,16 +193,16 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
 
   if (audioBlob && !isRecording) {
     return (
-      <div className="flex items-center gap-2 w-full p-2 bg-white/5 rounded-xl border border-white/10 animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex items-center gap-2 w-full rounded-xl border border-slate-200/80 bg-white p-2 animate-in fade-in slide-in-from-bottom-2 dark:border-white/10 dark:bg-white/5">
         <Button variant="ghost" size="icon" onClick={handleCancel} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-full h-10 w-10">
           <Trash2 className="h-5 w-5" />
         </Button>
 
-        <div className="flex-1 h-10 bg-black/20 rounded-full flex items-center justify-center px-4">
-          <span className="text-white/70 text-sm font-mono">Áudio gravado: {formatTime(recordingTime)}</span>
+        <div className="flex h-10 flex-1 items-center justify-center rounded-full bg-slate-100 px-4 dark:bg-black/20">
+          <span className="text-sm font-mono text-slate-600 dark:text-white/70">Áudio gravado: {formatTime(recordingTime)}</span>
         </div>
 
-        <Button size="icon" onClick={handleSend} disabled={isSending} className="h-10 w-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20">
+        <Button size="icon" onClick={handleSend} disabled={isSending} className="h-10 w-10 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20 hover:from-blue-500 hover:to-indigo-500">
           {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-0.5" />}
         </Button>
       </div>
@@ -222,7 +222,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
           variant="ghost"
           size="icon"
           onClick={handleCancel}
-          className="text-white/50 hover:text-white hover:bg-white/10 rounded-full h-10 w-10 shrink-0"
+          className="h-10 w-10 shrink-0 rounded-full text-slate-500 hover:bg-slate-200 hover:text-slate-900 dark:text-white/50 dark:hover:text-white dark:hover:bg-white/10"
         >
           <X className="h-5 w-5" />
         </Button>
@@ -243,7 +243,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
       type="button"
       onClick={startRecording}
       disabled={isInitializing}
-      className="h-9 w-9 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-full transition-colors duration-150 shrink-0 disabled:opacity-50"
+      className="h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors duration-150 disabled:opacity-50 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
     >
       {isInitializing ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <Mic className="h-[18px] w-[18px]" />}
     </button>

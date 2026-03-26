@@ -123,6 +123,11 @@ export async function POST(request: Request) {
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
                 } else {
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(account.workspace_id);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)
                          VALUES ($1, $2, 'mercadolivre', 'gerais', NOW(), NOW()) RETURNING id`,
@@ -241,6 +246,11 @@ export async function POST(request: Request) {
                 if ((chatRes.rowCount ?? 0) > 0) {
                     chatId = chatRes.rows[0].id;
                 } else {
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(account.workspace_id);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
                     const newChat = await db.query(
                         `INSERT INTO chats (workspace_id, contact_id, source, status, created_at, updated_at)
                          VALUES ($1, $2, 'mercadolivre', 'gerais', NOW(), NOW()) RETURNING id`,

@@ -18,7 +18,6 @@ export default async function LogsPage({
         redirect('/login');
     }
 
-    // Verify superadmin status
     const userRes = await db.query('SELECT is_superadmin, last_active_workspace_id FROM users WHERE id = $1', [user.id]);
     const dbUser = userRes.rows[0];
 
@@ -33,12 +32,12 @@ export default async function LogsPage({
 
     const params = await searchParams;
     const page = Number(params.page) || 1;
-    const { logs, total, totalPages } = await getWorkspaceLogs({ workspaceId, page });
+    const { logs, totalPages } = await getWorkspaceLogs({ workspaceId, page });
 
     return (
-        <div className="flex-1 space-y-4 p-8 pt-6 bg-zinc-950 min-h-screen">
+        <div className="min-h-screen flex-1 space-y-4 bg-background p-8 pt-6">
             <div className="flex items-center justify-between space-y-2">
-                <h2 className="text-3xl font-bold tracking-tight text-white">Logs do Sistema</h2>
+                <h2 className="text-3xl font-bold tracking-tight text-slate-950">Logs do Sistema</h2>
             </div>
             <div className="hidden h-full flex-1 flex-col space-y-8 md:flex">
                 <LogsTable

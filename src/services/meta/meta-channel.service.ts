@@ -401,6 +401,11 @@ async function ensureConversation(
     if (row.chat_status === 'encerrados' || row.conversation_status === 'closed') {
       const newChatId = randomUUID();
       const protocol = buildChatProtocol(newChatId);
+      const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+      const chatLimitStatus = await getMonthlyChatLimitStatus(row.workspace_id);
+      if (!chatLimitStatus.allowed) {
+        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+      }
       const newChatInsert = await db.query(
         `
           INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
@@ -467,6 +472,11 @@ async function ensureConversation(
 
   const newChatId = randomUUID();
   const protocol = buildChatProtocol(newChatId);
+  const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+  const chatLimitStatus = await getMonthlyChatLimitStatus(channel.workspace_id);
+  if (!chatLimitStatus.allowed) {
+    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+  }
   const chatInsert = await db.query(
     `
       INSERT INTO chats (id, workspace_id, contact_id, status, protocol)

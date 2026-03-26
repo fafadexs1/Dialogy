@@ -3,7 +3,8 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sendAutomatedMessageAction, sendAutomatedMediaAction } from '@/actions/messages';
+import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentListAction } from '@/actions/messages';
+import { normalizeAgentListPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
 
@@ -15,11 +16,26 @@ interface MediaFilePayload {
 }
 
 interface AgentMessagePayload {
+  type?: 'text' | 'list';
   chatId?: string;
   phoneNumber?: string; // JID format, e.g., 5511999998888@s.whatsapp.net
   content?: string; // Caption for media, or content for text
   media?: MediaFilePayload[];
   instance?: string; // Specific instance name (e.g., "zap1")
+  list?: {
+    title?: string;
+    description?: string;
+    buttonText: string;
+    footerText?: string;
+    sections: Array<{
+      title: string;
+      rows: Array<{
+        title: string;
+        description?: string;
+        rowId: string;
+      }>;
+    }>;
+  };
 }
 
 /**
@@ -82,6 +98,11 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
     console.log(`[AGENT_API] No active chat found for ${phoneNumber}. Creating a new one.`);
     const chatId = randomUUID();
     const protocol = buildChatProtocol(chatId);
+    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+    const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+    if (!chatLimitStatus.allowed) {
+      throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+    }
     const newChatRes = await client.query(
       `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING id`,
       [chatId, workspaceId, contactId, protocol]
@@ -117,7 +138,11 @@ export async function POST(request: Request) {
     }
 
     const body: AgentMessagePayload = await request.json();
-    let { chatId, phoneNumber, content = '', media, instance } = body;
+    let { type = 'text', chatId, phoneNumber, content = '', media, instance, list } = body;
+    const listPayload = normalizeAgentListPayload({
+      ...body,
+      list,
+    });
     const isMarketing = agent.type === 'marketing';
     const marketingMetadata = isMarketing
       ? {
@@ -143,6 +168,36 @@ export async function POST(request: Request) {
     if (!chatId) {
       // This should theoretically not be reached if the above logic is correct
       return NextResponse.json({ error: 'Could not determine the target chat.' }, { status: 400 });
+    }
+
+    if (type === 'list') {
+      if (!listPayload) {
+        return NextResponse.json({ error: 'List payload is required for type "list".' }, { status: 400 });
+      }
+      if (!instance) {
+        return NextResponse.json({ error: 'instance is required for sending lists.' }, { status: 400 });
+      }
+
+      const result = await sendAgentListAction({
+        agentId: agent.id,
+        workspaceId: agent.workspace_id,
+        instanceName: instance,
+        chatId,
+        numberid: phoneNumber,
+        list: listPayload,
+        metadata: marketingMetadata as any,
+      });
+
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          message: 'List sent successfully.',
+          chatId: result.chatId,
+          apiResponse: result.apiResponse,
+        });
+      }
+
+      return NextResponse.json({ success: false, error: result.error || 'Failed to send list.' }, { status: 500 });
     }
 
     let result: { success: boolean; error?: string };

@@ -47,6 +47,7 @@ function buildUserSnapshot(user: User | null | undefined): string {
     id: user.id,
     avatar: user.avatar || user.avatar_url || '',
     activeWorkspaceId: user.activeWorkspaceId || null,
+    themePreference: user.themePreference || null,
     workspaces,
   });
 }
@@ -195,12 +196,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     const handleOnline = () => {
       setIsOffline(false);
-      console.log('[PresenceProvider] Browser online, forcing channel reconnection...');
-      // Force channel cleanup so main effect can reconnect
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
+      console.log('[PresenceProvider] Browser online, Supabase will auto-reconnect...');
       setConnectionStatus('reconnecting');
     };
 
@@ -276,25 +272,25 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   );
 
   // Debounce ref for refreshOnlineAgents
-  const lastRefreshRef = useRef<number>(0);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const refreshOnlineAgents = useCallback(async () => {
-    if (!localUser?.activeWorkspaceId) return;
+    const workspaceId = localUser?.activeWorkspaceId;
+    if (!workspaceId) return;
 
-    // Debounce: Skip if called within last 2 seconds
-    const now = Date.now();
-    if (now - lastRefreshRef.current < 2000) {
-      return;
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
     }
-    lastRefreshRef.current = now;
 
-    try {
-      const { getOnlineAgents } = await import('@/actions/user');
-      const agents = await getOnlineAgents(localUser.activeWorkspaceId);
-      setOnlineAgents(agents);
-    } catch (error) {
-      console.error("PresenceProvider: Failed to refresh online agents.", error);
-    }
+    refreshTimeoutRef.current = setTimeout(async () => {
+      try {
+        const { getOnlineAgents } = await import('@/actions/user');
+        const agents = await getOnlineAgents(workspaceId);
+        setOnlineAgents(agents);
+      } catch (error) {
+        console.error("PresenceProvider: Failed to refresh online agents.", error);
+      }
+    }, 500); // 500ms trailing debounce
   }, [localUser?.activeWorkspaceId]);
 
   const pathname = usePathname();

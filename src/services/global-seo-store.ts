@@ -10,12 +10,12 @@ const SETTINGS_KEY = 'global_seo_settings';
 const LEGACY_FILE = path.join(process.cwd(), 'data', 'seo', 'global.json');
 
 const DEFAULT_SETTINGS: GlobalSeoSettings = {
-    siteName: 'My Application',
-    titleTemplate: '%s | My Application',
-    slogan: '',
-    description: '',
+    siteName: 'Dialogy',
+    titleTemplate: '%s | Dialogy',
+    slogan: 'CRM conversacional e atendimento omnichannel com IA',
+    description: 'Centralize WhatsApp, Instagram e outros canais em uma operacao omnichannel com automacao, IA e visibilidade comercial.',
     faviconUrl: '',
-    themeColor: '#ffffff',
+    themeColor: '#09090b',
 };
 
 type GlobalSeoRecord = {

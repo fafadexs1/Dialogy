@@ -1,14 +1,42 @@
-import { getSeoMetadata } from '@/lib/seo-helper';
 import LandingPage from '@/components/landing/landing-page';
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
+import {
+  HOME_FAQ_ITEMS,
+  HOME_SEO_DESCRIPTION,
+  HOME_SEO_KEYWORDS,
+  HOME_SEO_TITLE,
+} from '@/content/home-seo';
+import { buildPageMetadata } from '@/lib/seo/metadata';
+import { JsonLd, getBreadcrumbSchema, getFaqSchema, getSoftwareApplicationSchema } from '@/lib/seo/schema';
 
 export async function generateMetadata() {
-  return getSeoMetadata({
+  return buildPageMetadata({
     pathname: '/',
-    fallbackTitle: 'Dialogy | IA Conversacional para Empresas',
-    fallbackDescription: 'Unifique seu atendimento no WhatsApp, Instagram e Web. Automação inteligente para escalar suas vendas e suporte.',
+    title: HOME_SEO_TITLE,
+    description: HOME_SEO_DESCRIPTION,
+    keywords: HOME_SEO_KEYWORDS,
   });
 }
 
-export default function Page() {
-  return <LandingPage />;
+export default async function Page() {
+  const [softwareSchema] = await Promise.all([
+    getSoftwareApplicationSchema({
+      path: '/',
+      description: HOME_SEO_DESCRIPTION,
+    }),
+  ]);
+  const breadcrumbSchema = getBreadcrumbSchema([
+    { name: 'Home', path: '/' },
+  ]);
+  const faqSchema = getFaqSchema(HOME_FAQ_ITEMS);
+
+  return (
+    <>
+      <JsonLd id="dialogy-home-software-application" data={softwareSchema} />
+      <JsonLd id="dialogy-home-breadcrumb" data={breadcrumbSchema} />
+      <JsonLd id="dialogy-home-faq" data={faqSchema} />
+      <StoredSeoJsonLd pathname="/" />
+      <LandingPage />
+    </>
+  );
 }

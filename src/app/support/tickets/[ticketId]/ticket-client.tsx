@@ -85,9 +85,9 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
     };
 
     return (
-        <div className="flex flex-col h-full bg-zinc-50/50 dark:bg-zinc-900/50 overflow-hidden">
+        <div className="flex h-full flex-col overflow-hidden bg-slate-50/70">
             {/* Header */}
-            <header className="flex-shrink-0 h-16 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 flex items-center justify-between z-10">
+            <header className="z-10 flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
                 <div className="flex items-center gap-4">
                     <Link href="/support/tickets">
                         <Button variant="ghost" size="icon" className="rounded-full">
@@ -121,7 +121,7 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Chat Area */}
-                <main className="flex-1 flex flex-col min-w-0 bg-white dark:bg-zinc-950/50">
+                <main className="flex min-w-0 flex-1 flex-col bg-slate-50/40">
                     <div className="flex-1 overflow-y-auto p-6 space-y-6">
                         {messages.map((msg) => (
                             <motion.div
@@ -156,7 +156,7 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
                                     <div
                                         className={`p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === 'user'
                                             ? 'bg-blue-600 text-white rounded-tr-none'
-                                            : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-tl-none'
+                                            : 'border border-slate-200 bg-white rounded-tl-none'
                                             }`}
                                     >
                                         {msg.content}
@@ -168,7 +168,7 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
                     </div>
 
                     {/* Input Area */}
-                    <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+                    <div className="border-t border-slate-200 bg-white p-4">
                         <div className="max-w-4xl mx-auto flex items-end gap-2">
                             <Button variant="ghost" size="icon" className="flex-shrink-0 text-muted-foreground hover:text-blue-600">
                                 <Paperclip className="h-5 w-5" />
@@ -178,7 +178,7 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
                                     value={newMessage}
                                     onChange={(e) => setNewMessage(e.target.value)}
                                     placeholder="Digite sua mensagem..."
-                                    className="min-h-[50px] max-h-[150px] resize-none pr-12 py-3 rounded-xl border-zinc-200 dark:border-zinc-800 focus-visible:ring-blue-500"
+                                    className="min-h-[50px] max-h-[150px] resize-none rounded-xl border-slate-200 py-3 pr-12 focus-visible:ring-blue-500"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
@@ -200,7 +200,7 @@ export default function TicketDetailClient({ ticketId }: { ticketId: string }) {
                 </main>
 
                 {/* Sidebar Details (Desktop only) */}
-                <aside className="hidden lg:block w-80 border-l border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 p-6 overflow-y-auto">
+                <aside className="hidden w-80 overflow-y-auto border-l border-slate-200 bg-white lg:block">
                     <div className="space-y-6">
                         <div>
                             <h3 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">Detalhes</h3>

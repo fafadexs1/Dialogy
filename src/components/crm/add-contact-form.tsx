@@ -34,11 +34,12 @@ import { Badge } from '../ui/badge';
 import { uploadToS3Action } from '@/actions/upload-s3';
 
 const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
+const LIGHT_DIALOG_SCOPE_CLASS = 'app-shell-light text-foreground';
 const FORM_GROUP_CLASS = 'group space-y-2';
 const FORM_LABEL_CLASS = 'text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80 transition-colors group-focus-within:text-primary';
-const FORM_INPUT_CLASS = 'h-12 rounded-2xl border border-white/10 bg-background/60 px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all placeholder:text-muted-foreground/60 hover:border-primary/40 focus-visible:border-primary/70 focus-visible:bg-background/90 focus-visible:ring-0';
-const FORM_SELECT_TRIGGER_CLASS = 'h-12 rounded-2xl border border-white/10 bg-background/60 px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 focus:bg-background/90';
-const SECTION_CARD_CLASS = 'rounded-[24px] border border-white/10 bg-gradient-to-br from-background/90 via-background/70 to-primary/[0.08] p-5 md:p-6 shadow-[0_28px_80px_-55px_rgba(16,185,129,0.9)] backdrop-blur-xl';
+const FORM_INPUT_CLASS = 'h-12 rounded-2xl border border-slate-200 bg-white px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)] transition-all placeholder:text-muted-foreground/60 hover:border-primary/40 focus-visible:border-primary/70 focus-visible:bg-white focus-visible:ring-0';
+const FORM_SELECT_TRIGGER_CLASS = 'h-12 rounded-2xl border border-slate-200 bg-white px-4 text-[14px] shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)] transition-all hover:border-primary/40 focus:bg-white';
+const SECTION_CARD_CLASS = 'rounded-[24px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-primary/[0.06] p-5 md:p-6 shadow-[0_28px_80px_-55px_rgba(15,23,42,0.22)] backdrop-blur-xl';
 
 function extractWhatsappJidLocalPart(value?: string | null): string {
   if (!value) return '';
@@ -97,20 +98,20 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="min-h-[48px] h-auto w-full justify-between rounded-2xl border border-white/10 bg-background/60 px-4 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 hover:bg-background/80"
+          className="min-h-[48px] h-auto w-full justify-between rounded-2xl border border-slate-200 bg-white px-4 shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)] transition-all hover:border-primary/40 hover:bg-slate-50"
         >
           <div className="flex flex-wrap gap-1.5 py-1.5">
             {selectedTags.length > 0 ? selectedTags.map(tag => (
               <Badge key={tag.id} style={{ backgroundColor: tag.color, color: tag.color.startsWith('#FEE') || tag.color === '#FFFFFF' || tag.color.toLowerCase() === '#fff' ? '#000' : '#fff' }} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
                 {tag.label}
-                <X className="ml-1.5 h-3 w-3 hover:bg-black/20 rounded-full transition-colors" />
+                <X className="ml-1.5 h-3 w-3 rounded-full transition-colors hover:bg-slate-200" />
               </Badge>
             )) : <span className="text-muted-foreground/70 font-normal">Selecione as etiquetas...</span>}
           </div>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] overflow-hidden rounded-2xl border border-white/10 p-0 shadow-2xl">
+      <PopoverContent className={`${LIGHT_DIALOG_SCOPE_CLASS} w-[--radix-popover-trigger-width] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl`}>
         <Command>
           <CommandInput placeholder="Buscar etiqueta..." />
           <CommandList>
@@ -202,7 +203,7 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
       {files.length > 0 && (
         <div className="space-y-3">
           {files.map((file, index) => (
-            <div key={index} className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-background/55 p-3.5 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)]">
+            <div key={index} className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3.5 shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)]">
               <div className="flex items-center justify-between gap-2">
                 <a href={file.url} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-blue-500 hover:underline truncate max-w-[80%]" title={file.name}>
                   {file.name}
@@ -215,7 +216,7 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
                 placeholder="Nota / Descricao (Opcional)"
                 value={file.note}
                 onChange={(e) => handleNoteChange(index, e.target.value)}
-                className="h-10 rounded-xl border-white/10 bg-background/70 text-[12px] placeholder:text-muted-foreground/50"
+                className="h-10 rounded-xl border-slate-200 bg-white text-[12px] placeholder:text-muted-foreground/50"
               />
             </div>
           ))}
@@ -227,7 +228,7 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
           type="file"
           onChange={handleFileChange}
           disabled={uploading}
-          className="h-12 rounded-2xl border border-white/10 bg-background/60 text-[12px] shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all file:mr-4 file:rounded-xl file:border-0 file:bg-primary/15 file:px-4 file:py-2 file:text-[11px] file:font-semibold file:text-primary hover:border-primary/40 hover:file:bg-primary/25"
+          className="h-12 rounded-2xl border border-slate-200 bg-white text-[12px] shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)] transition-all file:mr-4 file:rounded-xl file:border-0 file:bg-primary/15 file:px-4 file:py-2 file:text-[11px] file:font-semibold file:text-primary hover:border-primary/40 hover:file:bg-primary/25"
         />
         {uploading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
@@ -283,7 +284,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
               <SelectTrigger id={fieldName} className={FORM_SELECT_TRIGGER_CLASS}>
                 <SelectValue placeholder={field.placeholder || 'Selecione...'} />
               </SelectTrigger>
-              <SelectContent className="rounded-2xl border border-white/10 shadow-2xl">
+              <SelectContent className={`${LIGHT_DIALOG_SCOPE_CLASS} rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
                 {field.options?.map(option => (
                   <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                 ))}
@@ -308,11 +309,11 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-[980px] gap-0 overflow-hidden rounded-[30px] border border-white/10 bg-background/95 p-0 shadow-[0_42px_120px_-70px_rgba(16,185,129,0.95)]">
+      <DialogContent className={`${LIGHT_DIALOG_SCOPE_CLASS} sm:max-w-[980px] gap-0 overflow-hidden rounded-[30px] border border-slate-200 bg-white p-0 shadow-[0_42px_120px_-70px_rgba(15,23,42,0.18)]`}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_20%,rgba(14,165,233,0.12),transparent_36%),radial-gradient(circle_at_92%_12%,rgba(16,185,129,0.16),transparent_34%),radial-gradient(circle_at_30%_100%,rgba(59,130,246,0.10),transparent_42%)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-emerald-400/10 to-transparent" />
 
-        <DialogHeader className="relative z-10 border-b border-white/10 px-6 py-5 md:px-8 md:py-6">
+        <DialogHeader className="relative z-10 border-b border-slate-200 px-6 py-5 md:px-8 md:py-6">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-2">
               <span className="inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
@@ -325,7 +326,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                 Atualize os dados com rapidez. O layout foi otimizado para preenchimento direto por blocos.
               </DialogDescription>
             </div>
-            <div className="hidden max-w-[200px] rounded-2xl border border-white/10 bg-background/55 px-4 py-3 text-right md:block">
+            <div className="hidden max-w-[200px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right md:block">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Modo rapido</p>
               <p className="mt-1 text-xs text-muted-foreground/80">Preencha por aba e salve sem trocar de tela.</p>
             </div>
@@ -339,7 +340,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
           <Tabs defaultValue="personal" className="relative z-10 px-6 py-5 md:px-8 md:py-6">
             <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
               <aside className="space-y-4">
-                <TabsList className="grid h-auto grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-background/40 p-2 md:grid-cols-1">
+                <TabsList className="grid h-auto grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 md:grid-cols-1">
                   <TabsTrigger value="personal" className="h-11 gap-2 rounded-xl border border-transparent text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary md:justify-start md:px-3">
                     <UserIcon className="h-4 w-4" />
                     <span>Pessoal</span>
@@ -354,7 +355,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                   </TabsTrigger>
                 </TabsList>
 
-                <div className="hidden rounded-2xl border border-white/10 bg-background/45 p-4 md:block">
+                <div className="hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 md:block">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Fluxo sugerido</p>
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground/85">
                     1. Preencha dados pessoais.
@@ -393,7 +394,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                               name="phone_number_jid"
                               value={phoneJidLocalPart ? `${phoneJidLocalPart}${WHATSAPP_JID_SUFFIX}` : ''}
                             />
-                            <div className="flex items-center overflow-hidden rounded-2xl border border-white/10 bg-background/60 shadow-[0_14px_30px_-24px_rgba(0,0,0,0.95)] transition-all hover:border-primary/40 focus-within:border-primary/70">
+                            <div className="flex items-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_14px_30px_-24px_rgba(15,23,42,0.22)] transition-all hover:border-primary/40 focus-within:border-primary/70">
                               <div className="pl-4 pr-3 text-muted-foreground/70">
                                 <Phone className="h-4 w-4" />
                               </div>
@@ -407,7 +408,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                                 onChange={(e) => setPhoneJidLocalPart(e.target.value.replace(/\D/g, ''))}
                                 className="h-12 border-0 bg-transparent px-0 shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0"
                               />
-                              <div className="flex h-12 items-center justify-center border-l border-white/10 bg-foreground/[0.03] px-4 text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+                              <div className="flex h-12 items-center justify-center border-l border-slate-200 bg-slate-50 px-4 text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
                                 @s.whatsapp.net
                               </div>
                             </div>
@@ -423,7 +424,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                         </div>
 
                         {customFields.length > 0 && (
-                          <div className="space-y-4 border-t border-white/10 pt-5">
+                          <div className="space-y-4 border-t border-slate-200 pt-5">
                             <div className="flex items-center gap-3">
                               <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/25 bg-primary/12 text-primary">
                                 <LayoutList className="h-4 w-4" />
@@ -488,7 +489,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                             <SelectTrigger id="owner_id" className={FORM_SELECT_TRIGGER_CLASS}>
                               <SelectValue placeholder="Selecione um proprietario" />
                             </SelectTrigger>
-                            <SelectContent className="rounded-2xl border border-white/10 shadow-2xl">
+                            <SelectContent className={`${LIGHT_DIALOG_SCOPE_CLASS} rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
                               <SelectItem value="unassigned">Nenhum</SelectItem>
                               {agents.map(owner => (<SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>))}
                             </SelectContent>
@@ -520,7 +521,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
             )}
           </div>
 
-          <DialogFooter className="relative z-10 rounded-b-[30px] border-t border-white/10 bg-background/40 px-6 py-5 backdrop-blur-xl md:px-8">
+          <DialogFooter className="relative z-10 rounded-b-[30px] border-t border-slate-200 bg-slate-50 px-6 py-5 backdrop-blur-xl md:px-8">
             <Button type="button" variant="ghost" className="h-11 rounded-2xl px-6 font-medium transition-colors hover:bg-foreground/5" onClick={() => setIsOpen(false)}>
               Cancelar
             </Button>

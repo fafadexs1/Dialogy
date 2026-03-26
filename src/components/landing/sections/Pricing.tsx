@@ -1,117 +1,142 @@
 'use client';
 
-import React, { useState } from 'react';
-import { SectionWrapper, FadeIn } from '../ui/SectionWrapper';
-import { GlassCard } from '../ui/GlassCard';
-import { NeonButton } from '../ui/NeonButton';
+import React from 'react';
+import Link from 'next/link';
 import { Check } from 'lucide-react';
+import { SectionWrapper, FadeIn } from '../ui/SectionWrapper';
+
+const plans = [
+    {
+        name: 'Essencial',
+        price: 'R$ 249',
+        description: 'Para organizar o atendimento com equipe ilimitada e volume previsivel.',
+        features: [
+            'Usuarios ilimitados',
+            '500 chats/mes',
+            '2 canais conectados',
+            'Teste gratis de 7 dias',
+            'Inbox unificado',
+            'Etiquetas e notas internas',
+        ],
+        cta: 'Comecar',
+        href: '/register',
+    },
+    {
+        name: 'Profissional',
+        price: 'R$ 499',
+        description: 'Para times que precisam de controle, fila e volume maior por mes.',
+        features: [
+            'Usuarios ilimitados',
+            '2.000 chats/mes',
+            '5 canais conectados',
+            'Filas e equipes',
+            'SLA e distribuicao',
+            'Templates e relatorios',
+        ],
+        cta: 'Ver planos',
+        href: '/pricing',
+        popular: true,
+    },
+    {
+        name: 'Operacao',
+        price: 'R$ 999',
+        description: 'Para escalar com automacoes, permissoes e mais volume de conversas.',
+        features: [
+            'Usuarios ilimitados',
+            '7.500 chats/mes',
+            '12 canais conectados',
+            'Automacoes avancadas',
+            'API e webhooks',
+            'Onboarding assistido',
+        ],
+        cta: 'Falar com vendas',
+        href: 'https://wa.me/551151994714',
+        external: true,
+    },
+    {
+        name: 'Enterprise',
+        price: 'Sob consulta',
+        description: 'Projeto comercial para operacoes maiores, multiunidade ou BPO.',
+        features: [
+            'Usuarios ilimitados',
+            'Volume sob medida',
+            'Implantacao assistida',
+            'Suporte prioritario',
+            'Regras comerciais proprias',
+            'Integracoes customizadas',
+        ],
+        cta: 'Falar com vendas',
+        href: 'https://wa.me/551151994714',
+        external: true,
+    },
+];
 
 export function Pricing() {
-    const plans = [
-        {
-            name: 'Basic',
-            price: 'R$ 367',
-            description: 'Para operações iniciais.',
-            features: [
-                { name: 'WhatsApp API Oficial', included: true },
-                { name: '20.000 créditos inclusos', included: true },
-                { name: 'Integrações básicas', included: true },
-                { name: 'Chatbot de fluxograma', included: true },
-                { name: 'Suporte autoatendimento', included: true }
-            ],
-            cta: 'Começar Agora',
-            variant: 'secondary' as const
-        },
-        {
-            name: 'Advanced',
-            price: 'R$ 764',
-            description: 'Para quem precisa de escala.',
-            features: [
-                { name: 'WhatsApp API Oficial', included: true },
-                { name: '50.000 créditos inclusos', included: true },
-                { name: 'Integrações avançadas', included: true },
-                { name: 'Chatbot com IA', included: true },
-                { name: 'Suporte via WhatsApp', included: true }
-            ],
-            cta: 'Começar Agora',
-            popular: true,
-            variant: 'primary' as const,
-            glow: 'green' as const
-        },
-        {
-            name: 'Enterprise',
-            price: 'R$ 1.549',
-            description: 'Para grandes corporações.',
-            features: [
-                { name: 'WhatsApp API Oficial', included: true },
-                { name: '100.000 créditos inclusos', included: true },
-                { name: 'Integrações personalizadas', included: true },
-                { name: 'Suporte 24x7 dedicado', included: true },
-                { name: 'Acesso antecipado a recursos', included: true }
-            ],
-            cta: 'Falar com Vendas',
-            variant: 'outline' as const,
-            glow: 'blue' as const
-        }
-    ];
-
     return (
-        <SectionWrapper id="pricing" className="py-32">
-            <div className="text-center mb-16 space-y-4">
+        <SectionWrapper id="pricing" className="py-24">
+            <div className="mb-12 space-y-4 text-center">
                 <FadeIn>
-                    <h2 className="text-4xl md:text-5xl font-bold text-white">Planos simples para <span className="text-brand-green">escalar</span></h2>
-                    <p className="text-gray-400 mt-4">Escolha o plano ideal para o seu momento.</p>
+                    <h2 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+                        Precos claros para vender sem travar a decisao.
+                    </h2>
+                    <p className="mx-auto mt-4 max-w-2xl text-lg leading-8 text-slate-600">
+                        A Dialogy entra com usuarios ilimitados, limite por chats e teste gratis de 7 dias para acelerar a decisao.
+                    </p>
                 </FadeIn>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            <div className="mx-auto grid max-w-7xl gap-8 md:grid-cols-2 xl:grid-cols-4">
                 {plans.map((plan, i) => (
-                    <FadeIn key={plan.name} delay={i * 0.1} className="h-full">
-                        <GlassCard
-                            className={`h-full p-8 flex flex-col relative ${plan.popular ? 'border-brand-green/50 bg-brand-green/5' : 'bg-[#0B0B10]/40'}`}
-                            hoverEffect={plan.popular}
-                            intensity={plan.popular ? 'high' : 'low'}
-                        >
+                    <FadeIn key={plan.name} delay={i * 0.08} className="h-full">
+                        <div className={`relative flex h-full flex-col rounded-[32px] border p-8 shadow-[0_22px_70px_-48px_rgba(15,23,42,0.55)] ${plan.popular ? 'border-emerald-300 bg-emerald-50/70' : 'border-black/10 bg-white'}`}>
                             {plan.popular && (
-                                <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-brand-green text-black font-bold text-xs uppercase tracking-wider rounded-full shadow-lg shadow-brand-green/20">
-                                    Mais Popular
+                                <div className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-slate-950 px-4 py-1 text-xs font-bold uppercase tracking-wider text-white shadow-lg">
+                                    Mais escolhido
                                 </div>
                             )}
 
                             <div className="mb-8">
-                                <h3 className="text-xl font-medium text-white mb-2">{plan.name}</h3>
+                                <h3 className="mb-2 text-xl font-semibold text-slate-950">{plan.name}</h3>
                                 <div className="flex items-baseline gap-1">
-                                    <span className="text-4xl font-bold text-white">{plan.price}</span>
-                                    <span className="text-gray-500 text-sm">/mês</span>
+                                    <span className="text-4xl font-semibold text-slate-950">{plan.price}</span>
+                                    {plan.price !== 'Sob consulta' && <span className="text-sm text-slate-500">/mes</span>}
                                 </div>
-                                <p className="text-sm text-gray-400 mt-2">{plan.description}</p>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">{plan.description}</p>
                             </div>
 
-                            <ul className="space-y-4 mb-8 flex-1">
-                                {plan.features.map((feat, index) => (
-                                    <li key={index} className={`flex items-start gap-3 text-sm ${feat.included ? 'text-gray-300' : 'text-gray-600'}`}>
-                                        <Check className="w-5 h-5 text-brand-green shrink-0" />
-                                        {feat.name}
+                            <ul className="mb-8 flex-1 space-y-4">
+                                {plan.features.map((feature) => (
+                                    <li key={feature} className="flex items-start gap-3 text-sm text-slate-700">
+                                        <Check className="h-5 w-5 shrink-0 text-brand-green" />
+                                        {feature}
                                     </li>
                                 ))}
                             </ul>
 
-                            <a href="https://wa.me/551151994714" target="_blank" rel="noopener noreferrer" className="w-full">
-                                <NeonButton
-                                    variant={plan.variant}
-                                    glowColor={plan.glow || 'green'}
-                                    className="w-full"
+                            {plan.external ? (
+                                <a
+                                    href={plan.href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={`inline-flex w-full items-center justify-center rounded-full px-5 py-3 text-sm font-semibold transition-all ${plan.popular ? 'bg-slate-950 text-white hover:bg-slate-800' : 'border border-black/10 bg-white text-slate-950 hover:bg-slate-50'}`}
                                 >
                                     {plan.cta}
-                                </NeonButton>
-                            </a>
-                        </GlassCard>
+                                </a>
+                            ) : (
+                                <Link
+                                    href={plan.href}
+                                    className={`inline-flex w-full items-center justify-center rounded-full px-5 py-3 text-sm font-semibold transition-all ${plan.popular ? 'bg-slate-950 text-white hover:bg-slate-800' : 'border border-black/10 bg-white text-slate-950 hover:bg-slate-50'}`}
+                                >
+                                    {plan.cta}
+                                </Link>
+                            )}
+                        </div>
                     </FadeIn>
                 ))}
             </div>
 
-            <div className="text-center mt-12 text-sm text-gray-500">
-                * Custos de canais (Meta API) podem variar conforme volume.
+            <div className="mt-10 text-center text-sm text-slate-500">
+                Pacote extra de 500 chats por R$ 99/mes, canal extra por R$ 39/mes e IA Copilot por R$ 149 por workspace. Custos oficiais de WhatsApp seguem separados.
             </div>
         </SectionWrapper>
     );

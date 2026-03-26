@@ -1,9 +1,10 @@
 import { MetadataRoute } from 'next';
 
-export const dynamic = 'force-dynamic';
+import { getRobotsDisallowList } from '@/lib/seo/indexability';
+import { getSeoSiteContext } from '@/lib/seo/metadata';
 
-export default function robots(): MetadataRoute.Robots {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+export default async function robots(): Promise<MetadataRoute.Robots> {
+    const site = await getSeoSiteContext();
     const isProduction = process.env.NODE_ENV === 'production';
 
     if (!isProduction) {
@@ -12,16 +13,48 @@ export default function robots(): MetadataRoute.Robots {
                 userAgent: '*',
                 disallow: '/',
             },
-            sitemap: `${baseUrl}/sitemap.xml`,
+            sitemap: `${site.baseUrl}/sitemap.xml`,
+            host: site.baseUrl,
         };
     }
 
+    const aiDisallow = ['/superadmin/', '/api/', '/private/', '/inbox/', '/settings/', '/analytics/', '/crm/', '/campaigns/', '/automations/', '/team/'];
+    const aiAllow = ['/', '/pricing', '/about', '/developer/', '/privacy', '/terms', '/creators'];
+
     return {
-        rules: {
-            userAgent: '*',
-            allow: '/',
-            disallow: ['/superadmin/', '/api/', '/private/'],
-        },
-        sitemap: `${baseUrl}/sitemap.xml`,
+        rules: [
+            {
+                userAgent: '*',
+                allow: '/',
+                disallow: getRobotsDisallowList(),
+            },
+            {
+                userAgent: 'GPTBot',
+                allow: aiAllow,
+                disallow: aiDisallow,
+            },
+            {
+                userAgent: 'ChatGPT-User',
+                allow: aiAllow,
+                disallow: aiDisallow,
+            },
+            {
+                userAgent: 'Claude-Web',
+                allow: aiAllow,
+                disallow: aiDisallow,
+            },
+            {
+                userAgent: 'PerplexityBot',
+                allow: aiAllow,
+                disallow: aiDisallow,
+            },
+            {
+                userAgent: 'Googlebot',
+                allow: '/',
+                disallow: ['/superadmin/', '/api/', '/private/'],
+            },
+        ],
+        sitemap: `${site.baseUrl}/sitemap.xml`,
+        host: site.baseUrl,
     };
 }

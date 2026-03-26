@@ -1,13 +1,18 @@
-'use client';
-
 import Image from "next/image";
-import React from "react";
 import Link from "next/link";
-import { Book, ChevronRight, Code2, FileText, Key, Shield, Terminal, Zap } from "lucide-react";
+import { ChevronRight, Key, Shield, Terminal, Zap } from "lucide-react";
+
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
+import { buildPageMetadata } from '@/lib/seo/metadata';
+
+export async function generateMetadata() {
+    return buildPageMetadata({ pathname: '/developer/docs' });
+}
 
 export default function DocsPage() {
     return (
         <div className="min-h-screen bg-[#030712] text-white selection:bg-blue-500/30">
+            <StoredSeoJsonLd pathname="/developer/docs" />
             {/* Navbar */}
             <nav className="border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import {
@@ -85,15 +85,15 @@ function AddNoteForm({ contactId, onNoteAdded }: { contactId: string; onNoteAdde
     return (
         <form
             onSubmit={handleSubmit}
-            className="space-y-3 rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+            className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] dark:border-white/5 dark:bg-black/40 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
         >
             <div className="space-y-2">
-                <Label className="text-white/70">Nova anotacao</Label>
+                <Label className="text-slate-600 dark:text-zinc-400">Nova anotacao</Label>
                 <Textarea
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     placeholder="Escreva algo importante sobre este contato..."
-                    className="min-h-[92px] resize-none border-white/10 bg-black/30 text-white"
+                    className="min-h-[92px] resize-none border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-[#07080b] dark:text-zinc-100"
                 />
             </div>
             <div className="flex justify-end">
@@ -147,11 +147,11 @@ export function ContactStatisticsDialog({
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-            <DialogContent className="sm:max-w-4xl w-[min(1000px,96vw)] max-h-[90vh] flex flex-col gap-0 overflow-hidden border-white/15 bg-zinc-950 p-0 text-white shadow-[0_40px_100px_rgba(0,0,0,0.7)]">
-                <div className="pointer-events-none absolute -top-20 -left-20 h-56 w-56 rounded-full bg-blue-500/20 blur-[90px]" />
-                <div className="pointer-events-none absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-cyan-500/15 blur-[110px]" />
+            <DialogContent className="sm:max-w-4xl flex max-h-[90vh] w-[min(1000px,96vw)] flex-col gap-0 overflow-hidden border-slate-200 bg-white p-0 text-slate-950 shadow-[0_40px_100px_rgba(15,23,42,0.18)] dark:border-white/10 dark:bg-[#07080b] dark:text-zinc-100 dark:shadow-[0_40px_100px_rgba(0,0,0,0.8)]">
+                <div className="pointer-events-none absolute -top-20 -left-20 h-56 w-56 rounded-full bg-blue-500/20 blur-[90px] dark:bg-blue-500/10" />
+                <div className="pointer-events-none absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-cyan-500/15 blur-[110px] dark:bg-cyan-500/10" />
 
-                <DialogHeader className="relative border-b border-white/10 bg-gradient-to-r from-white/[0.06] via-white/[0.03] to-transparent p-6 pb-5">
+                <DialogHeader className="relative border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-transparent p-6 pb-5 dark:border-white/5 dark:from-white/5 dark:via-black dark:to-transparent">
                     <div className="flex items-start justify-between gap-4">
                         <div className="flex min-w-0 items-center gap-3">
                             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/25 to-cyan-500/20 text-blue-300 shadow-[0_0_40px_rgba(59,130,246,0.25)]">
@@ -159,12 +159,12 @@ export function ContactStatisticsDialog({
                             </div>
                             <div className="min-w-0">
                                 <DialogTitle className="truncate text-2xl font-bold tracking-tight">Estatisticas & Historico</DialogTitle>
-                                <DialogDescription className="truncate text-white/55">
+                                <DialogDescription className="truncate text-slate-500 dark:text-zinc-500">
                                     Analise detalhada de {contactName}
                                 </DialogDescription>
                             </div>
                         </div>
-                        <Badge className="border border-blue-400/35 bg-blue-500/10 text-blue-100">{selectedPeriodLabel}</Badge>
+                        <Badge className="border border-blue-500/20 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400">{selectedPeriodLabel}</Badge>
                     </div>
                 </DialogHeader>
 
@@ -176,14 +176,14 @@ export function ContactStatisticsDialog({
                     <div className="flex flex-1 flex-col overflow-hidden">
                         <Tabs defaultValue="overview" className="flex flex-1 flex-col overflow-hidden">
                             <div className="px-6 pt-4">
-                                <div className="mb-3 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                                <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:border-white/5 dark:bg-black/40 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                                     <div className="flex items-center justify-between gap-3 pb-2">
-                                        <div className="flex items-center gap-2 text-xs tracking-wide text-white/60">
+                                        <div className="flex items-center gap-2 text-xs tracking-wide text-slate-500 dark:text-zinc-500">
                                             <Clock3 className="h-3.5 w-3.5 text-blue-400" />
                                             Periodo dos dados
                                         </div>
                                         {loading && (
-                                            <div className="flex items-center gap-1.5 text-[11px] text-white/45">
+                                            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-zinc-500">
                                                 <Loader2 className="h-3 w-3 animate-spin" />
                                                 Atualizando...
                                             </div>
@@ -199,7 +199,7 @@ export function ContactStatisticsDialog({
                                                     'relative h-9 rounded-xl border text-[11px] font-semibold transition-all',
                                                     period === option.value
                                                         ? 'border-blue-400/45 bg-gradient-to-r from-blue-500/25 to-cyan-500/15 text-blue-100 shadow-[0_10px_30px_rgba(59,130,246,0.25)]'
-                                                        : 'border-white/10 bg-black/20 text-white/60 hover:bg-white/[0.06] hover:text-white'
+                                                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-[#07080b] dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-200'
                                                 )}
                                             >
                                                 {option.label}
@@ -208,11 +208,11 @@ export function ContactStatisticsDialog({
                                     </div>
                                 </div>
 
-                                <TabsList className="h-auto w-full justify-start border border-white/10 bg-white/[0.03] p-1">
-                                    <TabsTrigger value="overview" className="flex-1 py-2.5 data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                                <TabsList className="h-auto w-full justify-start border border-slate-200 bg-slate-50 p-1 dark:border-white/5 dark:bg-black/40">
+                                    <TabsTrigger value="overview" className="flex-1 py-2.5 data-[state=active]:bg-white data-[state=active]:text-slate-950 dark:data-[state=active]:bg-[#07080b] dark:data-[state=active]:text-zinc-100">
                                         Visao Geral
                                     </TabsTrigger>
-                                    <TabsTrigger value="notes" className="flex-1 py-2.5 data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                                    <TabsTrigger value="notes" className="flex-1 py-2.5 data-[state=active]:bg-white data-[state=active]:text-slate-950 dark:data-[state=active]:bg-[#07080b] dark:data-[state=active]:text-zinc-100">
                                         Anotacoes ({stats.totalNotes})
                                     </TabsTrigger>
                                 </TabsList>
@@ -257,30 +257,30 @@ export function ContactStatisticsDialog({
                                 </div>
 
                                 <div className="space-y-4">
-                                    <h4 className="flex items-center gap-2 font-semibold text-white">
+                                    <h4 className="flex items-center gap-2 font-semibold text-slate-950 dark:text-zinc-100">
                                         <PieChart className="h-4 w-4 text-purple-400" />
                                         Motivos de encerramento
-                                        <Badge className="border-white/10 bg-white/10 text-white/70">{totalClosed}</Badge>
+                                        <Badge className="border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">{totalClosed}</Badge>
                                     </h4>
 
-                                    <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-black/40">
                                         {stats.closeReasons.length > 0 ? (
                                             stats.closeReasons.map((reason, idx) => {
                                                 const intensityWidth = (reason.count / maxReasonCount) * 100;
                                                 const percent = totalClosed > 0 ? (reason.count / totalClosed) * 100 : 0;
 
                                                 return (
-                                                    <div key={`${reason.tag}-${idx}`} className="rounded-xl border border-white/10 bg-black/25 p-3">
+                                                    <div key={`${reason.tag}-${idx}`} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-[#07080b]">
                                                         <div className="mb-2 flex items-center justify-between text-sm">
                                                             <div className="flex min-w-0 items-center gap-2">
                                                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: reason.color }} />
-                                                                <span className="truncate font-medium text-white/85">{reason.tag}</span>
+                                                                <span className="truncate font-medium text-slate-900 dark:text-zinc-200">{reason.tag}</span>
                                                             </div>
-                                                            <span className="shrink-0 text-white/55">
+                                                            <span className="shrink-0 text-slate-500 dark:text-zinc-500">
                                                                 {reason.count} ({Math.round(percent)}%)
                                                             </span>
                                                         </div>
-                                                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-white/10">
+                                                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
                                                             <div
                                                                 className="h-full rounded-full transition-all duration-500"
                                                                 style={{
@@ -295,21 +295,21 @@ export function ContactStatisticsDialog({
                                             })
                                         ) : (
                                             <div className="py-8 text-center">
-                                                <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-white/5">
-                                                    <Sparkles className="h-5 w-5 text-white/30" />
+                                                <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 dark:bg-white/5">
+                                                    <Sparkles className="h-5 w-5 text-slate-400 dark:text-zinc-500" />
                                                 </div>
-                                                <p className="text-sm text-white/40">Sem encerramentos etiquetados neste periodo.</p>
+                                                <p className="text-sm text-slate-500 dark:text-zinc-500">Sem encerramentos etiquetados neste periodo.</p>
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-purple-500/10 via-blue-500/8 to-cyan-500/10 p-4">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                                        <TrendingUp className="h-4 w-4 text-cyan-300" />
+                                <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-purple-50 via-blue-50 to-cyan-50 p-4 dark:border-white/10 dark:from-purple-500/10 dark:via-blue-500/10 dark:to-cyan-500/10">
+                                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-zinc-100">
+                                        <TrendingUp className="h-4 w-4 text-cyan-500 dark:text-cyan-400" />
                                         Insight rapido
                                     </div>
-                                    <p className="mt-2 text-sm text-white/70">
+                                    <p className="mt-2 text-sm text-slate-600 dark:text-zinc-400">
                                         {stats.totalChats > 0
                                             ? `Voce teve ${stats.totalChats} atendimento(s) neste recorte e ${stats.totalNotes} anotacao(oes) registradas.`
                                             : 'Sem atendimentos no recorte atual. Tente trocar o periodo para ver mais historico.'}
@@ -323,28 +323,28 @@ export function ContactStatisticsDialog({
                                 </div>
 
                                 <ScrollArea className="flex-1 p-6">
-                                    <div className="relative ml-2 space-y-5 border-l border-white/10 pl-4">
+                                    <div className="relative ml-2 space-y-5 border-l border-slate-200 pl-4 dark:border-white/10">
                                         {stats.activities.length > 0 ? (
                                             stats.activities.map((activity: Activity) => (
                                                 <div key={activity.id} className="group relative pl-6">
-                                                    <div className="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-white/20 bg-zinc-800 transition-colors group-hover:border-blue-500 group-hover:bg-blue-900" />
+                                                    <div className="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-slate-200 bg-white transition-colors group-hover:border-blue-500 group-hover:bg-blue-50 dark:border-zinc-700 dark:bg-[#07080b] dark:group-hover:border-blue-400 dark:group-hover:bg-blue-500/20" />
 
                                                     <div className="flex flex-col gap-2">
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center gap-2">
-                                                                <Avatar className="h-6 w-6 border border-white/10">
+                                                                <Avatar className="h-6 w-6 border border-slate-200 dark:border-white/10">
                                                                     <AvatarImage src={(activity as any).user_avatar} />
-                                                                    <AvatarFallback className="bg-zinc-800 text-[10px] text-white">
+                                                                    <AvatarFallback className="bg-slate-100 text-[10px] text-slate-600 dark:bg-white/5 dark:text-zinc-400">
                                                                         {(activity as any).user_name?.charAt(0)}
                                                                     </AvatarFallback>
                                                                 </Avatar>
-                                                                <span className="text-sm font-medium text-white/90">{(activity as any).user_name}</span>
+                                                                <span className="text-sm font-medium text-slate-950 dark:text-zinc-200">{(activity as any).user_name}</span>
                                                             </div>
-                                                            <span className="text-xs text-white/40">
+                                                            <span className="text-xs text-slate-500 dark:text-zinc-500">
                                                                 {format(new Date(activity.date), 'dd/MM/yy HH:mm')}
                                                             </span>
                                                         </div>
-                                                        <div className="rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.03] p-3 text-sm leading-relaxed text-white/85">
+                                                        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300">
                                                             {activity.notes}
                                                         </div>
                                                     </div>
@@ -352,10 +352,10 @@ export function ContactStatisticsDialog({
                                             ))
                                         ) : (
                                             <div className="py-10 text-center">
-                                                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
-                                                    <StickyNote className="h-6 w-6 text-white/20" />
+                                                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-white/5">
+                                                    <StickyNote className="h-6 w-6 text-slate-400 dark:text-zinc-500" />
                                                 </div>
-                                                <p className="text-white/50">Nenhuma anotacao registrada no periodo.</p>
+                                                <p className="text-slate-500 dark:text-zinc-500">Nenhuma anotacao registrada no periodo.</p>
                                             </div>
                                         )}
                                     </div>
@@ -364,7 +364,7 @@ export function ContactStatisticsDialog({
                         </Tabs>
                     </div>
                 ) : (
-                    <div className="p-6 text-center text-white/50">Falha ao carregar dados.</div>
+                    <div className="p-6 text-center text-slate-500">Falha ao carregar dados.</div>
                 )}
             </DialogContent>
         </Dialog>

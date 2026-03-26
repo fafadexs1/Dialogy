@@ -1,11 +1,10 @@
 
-import React from 'react';
+import { AppRouteShell } from '@/components/layout/app-route-shell';
 
-// This layout ensures that any page within /campaigns has access to the main app layout.
-export default function CampaignsLayout({
+export default async function CampaignsLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return <AppRouteShell>{children}</AppRouteShell>;
 }

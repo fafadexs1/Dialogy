@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo -p 9002",
+    "dev": "node scripts/dev-with-stripe.cjs",
+    "dev:next": "next dev --turbo -p 9002",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
     "build": "next build --webpack",
@@ -91,6 +92,7 @@
     "react-icons": "^5.2.1",
     "react-virtuoso": "^4.18.0",
     "recharts": "^2.15.1",
+    "server-only": "^0.0.1",
     "sharp": "^0.34.5",
     "stripe": "^20.0.0",
     "tailwind-merge": "^3.0.1",

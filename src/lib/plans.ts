@@ -2,7 +2,7 @@ import 'server-only';
 
 import { db } from '@/lib/db';
 import { unstable_cache } from 'next/cache';
-import { PlanType, PlanLimits, PlanDetails, PLANS as DEFAULT_PLANS } from './plans-types';
+import { PlanType, PlanDetails, normalizePlanLimits } from './plans-types';
 
 export * from './plans-types'; // Re-export for server-side consumers if needed, but client should use plans-types directly
 
@@ -12,12 +12,13 @@ export const getPlan = unstable_cache(
         if (res.rowCount === 0) return null;
 
         const plan = res.rows[0];
+        const planType = plan.slug as PlanType;
         // Ensure limits match the interface structure
         return {
-            id: plan.slug as PlanType,
+            id: planType,
             label: plan.name,
             price: plan.price,
-            limits: plan.limits as any as PlanLimits,
+            limits: normalizePlanLimits(plan.limits as any, planType),
             stripePriceId: plan.stripe_price_id
         } as PlanDetails;
     },
@@ -32,7 +33,7 @@ export const getAllPlans = unstable_cache(
             id: plan.slug as PlanType,
             label: plan.name,
             price: plan.price,
-            limits: plan.limits as any as PlanLimits,
+            limits: normalizePlanLimits(plan.limits as any, plan.slug as PlanType),
             stripePriceId: plan.stripe_price_id
         })) as PlanDetails[];
     },

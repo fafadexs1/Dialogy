@@ -1,86 +1,85 @@
-import React from 'react';
+import { buildPageMetadata } from '@/lib/seo/metadata';
+import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
+import { JsonLd, getBreadcrumbSchema } from '@/lib/seo/schema';
+
+const updatedAtLabel = '20/03/2026';
+
+export async function generateMetadata() {
+    return buildPageMetadata({ pathname: '/privacy' });
+}
 
 export default function PrivacyPolicyPage() {
+    const breadcrumbSchema = getBreadcrumbSchema([
+        { name: 'Home', path: '/' },
+        { name: 'Politica de Privacidade', path: '/privacy' },
+    ]);
+
     return (
-        <div className="min-h-screen bg-background py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-4xl mx-auto bg-card p-8 rounded-lg shadow-sm border border-border">
-                <h1 className="text-3xl font-bold text-foreground mb-8">Política de Privacidade</h1>
+        <div className="min-h-screen bg-background px-4 py-12 sm:px-6 lg:px-8">
+            <JsonLd id="privacy-breadcrumb-schema" data={breadcrumbSchema} />
+            <StoredSeoJsonLd pathname="/privacy" />
+            <div className="mx-auto max-w-4xl rounded-lg border border-border bg-card p-8 shadow-sm">
+                <h1 className="mb-8 text-3xl font-bold text-foreground">Politica de Privacidade</h1>
 
-                <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none text-muted-foreground space-y-6">
-                    <p>
-                        Última atualização: {new Date().toLocaleDateString('pt-BR')}
-                    </p>
+                <div className="prose prose-sm max-w-none space-y-6 text-muted-foreground sm:prose-base dark:prose-invert">
+                    <p>Ultima atualizacao: {updatedAtLabel}</p>
 
                     <p>
-                        A sua privacidade é importante para nós. É política do Dialogy respeitar a sua privacidade em relação a qualquer informação sua que possamos coletar no site Dialogy, e outros sites que possuímos e operamos.
+                        A privacidade dos usuarios da Dialogy e importante. Esta politica explica como coletamos,
+                        usamos, armazenamos e protegemos informacoes relacionadas ao uso da plataforma.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">1. Informações que coletamos</h2>
-                    <p>
-                        Solicitamos informações pessoais apenas quando realmente precisamos delas para lhe fornecer um serviço. Fazemo-lo por meios justos e legais, com o seu conhecimento e consentimento. Também informamos por que estamos coletando e como será usado.
-                    </p>
-                    <p>
-                        Podemos coletar os seguintes tipos de informações:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li><strong>Informações da Conta:</strong> Nome, endereço de e-mail, número de telefone e senha criptografada.</li>
-                        <li><strong>Dados de Uso:</strong> Informações sobre como você usa nosso serviço, logs de acesso, e interações com a plataforma.</li>
-                        <li><strong>Dados de Mensagens:</strong> Para fornecer o serviço de chat, processamos e armazenamos mensagens, contatos e arquivos de mídia trafegados através da nossa plataforma.</li>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">1. Informacoes que coletamos</h2>
+                    <p>Podemos coletar dados necessarios para operar o servico, incluindo:</p>
+                    <ul className="list-disc space-y-2 pl-5">
+                        <li>Informacoes de conta, como nome, email, telefone e credenciais protegidas.</li>
+                        <li>Dados de uso, como acessos, logs e interacoes com a plataforma.</li>
+                        <li>Dados de mensagens, contatos e arquivos trafegados pelos canais integrados.</li>
                     </ul>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">2. Uso das Informações</h2>
-                    <p>
-                        Apenas retemos as informações coletadas pelo tempo necessário para fornecer o serviço solicitado. Quando armazenamos dados, protegemos dentro de meios comercialmente aceitáveis para evitar perdas e roubos, bem como acesso, divulgação, cópia, uso ou modificação não autorizados.
-                    </p>
-                    <p>
-                        Usamos suas informações para:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li>Fornecer, operar e manter nosso serviço;</li>
-                        <li>Melhorar, personalizar e expandir nosso serviço;</li>
-                        <li>Entender e analisar como você usa nosso serviço;</li>
-                        <li>Desenvolver novos produtos, serviços, recursos e funcionalidades;</li>
-                        <li>Comunicar com você, diretamente ou através de um dos nossos parceiros, inclusive para atendimento ao cliente, para fornecer atualizações e outras informações relacionadas ao serviço, e para fins de marketing e promoção.</li>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">2. Como usamos os dados</h2>
+                    <p>Usamos os dados para operar, manter, melhorar e proteger a plataforma, incluindo:</p>
+                    <ul className="list-disc space-y-2 pl-5">
+                        <li>entrega dos recursos contratados;</li>
+                        <li>suporte tecnico e atendimento ao cliente;</li>
+                        <li>seguranca, auditoria e prevencao de abuso;</li>
+                        <li>melhoria do produto, analytics e comunicacoes operacionais.</li>
                     </ul>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">3. Compartilhamento de Dados</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">3. Compartilhamento de dados</h2>
                     <p>
-                        Não compartilhamos informações de identificação pessoal publicamente ou com terceiros, exceto quando exigido por lei ou para a prestação do serviço (ex: integração com WhatsApp/Meta).
+                        A Dialogy nao vende dados pessoais. O compartilhamento ocorre apenas quando necessario para
+                        prestar o servico, cumprir obrigacoes legais ou operar integracoes com terceiros, como Meta
+                        e outros provedores de comunicacao.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">4. Seus Direitos (LGPD)</h2>
-                    <p>
-                        Você é livre para recusar a nossa solicitação de informações pessoais, entendendo que talvez não possamos fornecer alguns dos serviços desejados.
-                    </p>
-                    <p>
-                        De acordo com a Lei Geral de Proteção de Dados (LGPD), você tem direito a:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li>Acessar seus dados;</li>
-                        <li>Corrigir dados incompletos, inexatos ou desatualizados;</li>
-                        <li>Solicitar a anonimização, bloqueio ou eliminação de dados desnecessários;</li>
-                        <li>Solicitar a portabilidade dos dados;</li>
-                        <li>Revogar o consentimento a qualquer momento.</li>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">4. Direitos do titular</h2>
+                    <p>Em linha com a LGPD, o titular pode solicitar, quando aplicavel:</p>
+                    <ul className="list-disc space-y-2 pl-5">
+                        <li>confirmacao e acesso aos dados;</li>
+                        <li>correcao de dados incompletos ou desatualizados;</li>
+                        <li>anonimizacao, bloqueio ou eliminacao de dados desnecessarios;</li>
+                        <li>portabilidade, informacoes sobre compartilhamento e revogacao de consentimento.</li>
                     </ul>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">5. Segurança</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">5. Seguranca</h2>
                     <p>
-                        Valorizamos sua confiança em nos fornecer suas informações pessoais, portanto, estamos nos empenhando para usar meios comercialmente aceitáveis de protegê-las. Mas lembre-se que nenhum método de transmissão pela internet, ou método de armazenamento eletrônico é 100% seguro e confiável, e não podemos garantir sua segurança absoluta.
+                        Empregamos medidas tecnicas e organizacionais razoaveis para proteger as informacoes
+                        processadas. Ainda assim, nenhum metodo de transmissao ou armazenamento eletronico e
+                        completamente infalivel.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">6. Links para Outros Sites</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">6. Retencao e alteracoes</h2>
                     <p>
-                        Nosso serviço pode conter links para outros sites que não são operados por nós. Se você clicar em um link de terceiros, você será direcionado para o site desse terceiro. Aconselhamos fortemente que reveja a Política de Privacidade de cada site que visita.
+                        Os dados sao mantidos pelo tempo necessario para cumprir finalidades operacionais, contratuais
+                        e legais. Esta politica pode ser atualizada periodicamente, e a versao vigente sera publicada
+                        nesta pagina.
                     </p>
 
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">7. Alterações nesta Política de Privacidade</h2>
+                    <h2 className="mb-4 mt-6 text-xl font-semibold text-foreground">7. Contato</h2>
                     <p>
-                        Podemos atualizar nossa Política de Privacidade de tempos em tempos. Assim, aconselhamos que reveja esta página periodicamente para quaisquer alterações. Notificaremos sobre quaisquer alterações publicando a nova Política de Privacidade nesta página.
-                    </p>
-
-                    <h2 className="text-xl font-semibold text-foreground mt-6 mb-4">8. Contato</h2>
-                    <p>
-                        Se você tiver alguma dúvida ou sugestão sobre nossa Política de Privacidade, não hesite em nos contatar através do suporte na plataforma.
+                        Em caso de duvidas sobre esta politica ou sobre o tratamento de dados, entre em contato com a
+                        equipe responsavel pelos canais oficiais de suporte da Dialogy.
                     </p>
                 </div>
             </div>

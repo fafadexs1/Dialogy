@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import { createClient } from '@/lib/supabase/server';
 import type { Message } from '@/lib/types';
+import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 
 interface MarkAsReadPayload {
     chatId: string;
@@ -85,12 +86,13 @@ export async function POST(request: Request) {
 
             if ((chatInfoRes.rowCount ?? 0) > 0) {
                 const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
+                const workspaceId = chatAccessRes.rows[0].workspace_id as string;
                 const messagesToMarkForApi = unreadMessages
                     .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))
                     .filter(m => m.id);
 
                 if (instanceName && remoteJid && messagesToMarkForApi.length > 0) {
-                    sendReceiptToWhatsApp(instanceName, messagesToMarkForApi).catch(error => {
+                    sendReceiptToWhatsApp(instanceName, workspaceId, messagesToMarkForApi).catch(error => {
                         console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${instanceName}:`, error.message);
                     });
                 }
@@ -123,24 +125,14 @@ export async function POST(request: Request) {
  */
 async function sendReceiptToWhatsApp(
     instanceName: string,
+    workspaceId: string,
     messagesToMark: { remoteJid: string; fromMe: boolean; id: string | undefined }[]
 ): Promise<void> {
-
-    // Find the API config for the given instance
-    const instanceRes = await db.query(`
-        SELECT c.api_url, c.api_key 
-        FROM evolution_api_instances i
-        JOIN whatsapp_clusters c ON i.cluster_id = c.id
-        WHERE i.instance_name = $1
-    `, [instanceName]);
-
-    if (instanceRes.rowCount === 0) {
+    const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
+    if (!apiConfig) {
         console.warn(`[MARK_AS_READ_API] API config not found for instance ${instanceName}. Cannot send read receipt.`);
         return;
     }
-
-    const { api_url, api_key } = instanceRes.rows[0];
-    const apiConfig = { api_url, api_key };
 
     if (!apiConfig.api_url || !apiConfig.api_key) {
         console.warn(`[MARK_AS_READ_API] API config incomplete for instance ${instanceName}.`);

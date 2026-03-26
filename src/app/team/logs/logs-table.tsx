@@ -41,52 +41,52 @@ export function LogsTable({ data, currentPage, totalPages }: LogsTableProps) {
 
     return (
         <div className="space-y-4">
-            <div className="rounded-md border border-white/10 bg-zinc-950">
+            <div className="rounded-xl border border-slate-200/80 bg-white shadow-[0_18px_40px_-28px_rgba(15,23,42,0.14)]">
                 <Table>
-                    <TableHeader>
-                        <TableRow className="border-white/10 hover:bg-white/5">
-                            <TableHead className="text-zinc-400">Data/Hora</TableHead>
-                            <TableHead className="text-zinc-400">Ação</TableHead>
-                            <TableHead className="text-zinc-400">Usuário</TableHead>
-                            <TableHead className="text-zinc-400 text-right">Detalhes</TableHead>
+                    <TableHeader className="bg-slate-50">
+                        <TableRow className="border-slate-200 hover:bg-slate-50">
+                            <TableHead className="text-slate-500">Data/Hora</TableHead>
+                            <TableHead className="text-slate-500">Acao</TableHead>
+                            <TableHead className="text-slate-500">Usuario</TableHead>
+                            <TableHead className="text-right text-slate-500">Detalhes</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {data.map((log) => (
-                            <TableRow key={log.id} className="border-white/10 hover:bg-white/5">
-                                <TableCell className="font-medium text-zinc-300">
+                            <TableRow key={log.id} className="border-slate-200 hover:bg-slate-50">
+                                <TableCell className="font-medium text-slate-700">
                                     {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
                                 </TableCell>
-                                <TableCell className="text-zinc-300 font-mono text-sm">
+                                <TableCell className="font-mono text-sm text-slate-700">
                                     {log.action}
                                 </TableCell>
-                                <TableCell className="text-zinc-300">
+                                <TableCell className="text-slate-700">
                                     {log.user_name || log.user_email || 'Sistema'}
                                 </TableCell>
                                 <TableCell className="text-right">
                                     <Dialog>
                                         <DialogTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-white hover:bg-white/10">
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:bg-slate-100 hover:text-slate-950">
                                                 <Eye className="h-4 w-4" />
                                             </Button>
                                         </DialogTrigger>
-                                        <DialogContent className="bg-zinc-950 border-white/10 text-white max-w-2xl">
+                                        <DialogContent className="max-w-2xl border-slate-200 bg-white text-slate-950">
                                             <DialogHeader>
                                                 <DialogTitle>Detalhes do Log</DialogTitle>
                                             </DialogHeader>
                                             <div className="grid gap-4 py-4">
                                                 <div className="grid grid-cols-4 items-center gap-4">
-                                                    <span className="text-sm font-medium text-zinc-400">ID:</span>
+                                                    <span className="text-sm font-medium text-slate-500">ID:</span>
                                                     <span className="col-span-3 text-sm font-mono">{log.id}</span>
                                                 </div>
                                                 <div className="grid grid-cols-4 items-center gap-4">
-                                                    <span className="text-sm font-medium text-zinc-400">Ação:</span>
+                                                    <span className="text-sm font-medium text-slate-500">Acao:</span>
                                                     <span className="col-span-3 text-sm font-mono">{log.action}</span>
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <span className="text-sm font-medium text-zinc-400">Payload:</span>
-                                                    <ScrollArea className="h-[300px] w-full rounded-md border border-white/10 bg-black/50 p-4">
-                                                        <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap">
+                                                    <span className="text-sm font-medium text-slate-500">Payload:</span>
+                                                    <ScrollArea className="h-[300px] w-full rounded-md border border-slate-200 bg-slate-50 p-4">
+                                                        <pre className="whitespace-pre-wrap font-mono text-xs text-slate-700">
                                                             {JSON.stringify(log.payload, null, 2)}
                                                         </pre>
                                                     </ScrollArea>
@@ -99,7 +99,7 @@ export function LogsTable({ data, currentPage, totalPages }: LogsTableProps) {
                         ))}
                         {data.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={4} className="h-24 text-center text-zinc-500">
+                                <TableCell colSpan={4} className="h-24 text-center text-slate-500">
                                     Nenhum log encontrado.
                                 </TableCell>
                             </TableRow>
@@ -114,22 +114,22 @@ export function LogsTable({ data, currentPage, totalPages }: LogsTableProps) {
                     size="sm"
                     onClick={() => handlePageChange(currentPage - 1)}
                     disabled={currentPage <= 1}
-                    className="bg-transparent border-white/10 text-white hover:bg-white/10"
+                    className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 >
                     <ChevronLeft className="h-4 w-4" />
                     Anterior
                 </Button>
-                <div className="text-sm text-zinc-400">
-                    Página {currentPage} de {Math.max(1, totalPages)}
+                <div className="text-sm text-slate-500">
+                    Pagina {currentPage} de {Math.max(1, totalPages)}
                 </div>
                 <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handlePageChange(currentPage + 1)}
                     disabled={currentPage >= totalPages}
-                    className="bg-transparent border-white/10 text-white hover:bg-white/10"
+                    className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 >
-                    Próximo
+                    Proximo
                     <ChevronRight className="h-4 w-4" />
                 </Button>
             </div>

@@ -15,6 +15,11 @@ import { processAutopilotForChat } from '@/services/autopilot-service';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
 import { generateEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
+import {
+    AmbiguousEvolutionInstanceError,
+    getEvolutionApiConfig,
+    resolveEvolutionInstance,
+} from '@/lib/whatsapp/evolution-config';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -49,18 +54,11 @@ function resolveWhatsappJid(...candidates: Array<string | null | undefined>): st
     return preferred ?? sanitized[0];
 }
 
-async function getApiConfigForInstance(instanceName: string): Promise<{ api_url: string, api_key: string } | null> {
-    const instanceRes = await db.query(
-        `SELECT c.api_url, c.api_key 
-         FROM evolution_api_instances i
-         JOIN whatsapp_clusters c ON i.cluster_id = c.id
-         WHERE i.instance_name = $1`,
-        [instanceName]
-    );
-    if (instanceRes.rowCount === 0) {
-        return null;
-    }
-    return instanceRes.rows[0];
+async function getApiConfigForInstance(
+    instanceIdentifier: string,
+    workspaceId?: string | null
+): Promise<{ api_url: string, api_key: string } | null> {
+    return getEvolutionApiConfig(instanceIdentifier, { workspaceId });
 }
 
 const FAILED_DELIVERY_STATUSES = new Set(['FAILED', 'ERROR']);
@@ -322,9 +320,10 @@ type FailedMessageInspection = {
 async function inspectFailedMessageFromEvolution(
     instanceName: string,
     keyId: string,
-    remoteJid?: string | null
+    remoteJid?: string | null,
+    workspaceId?: string | null
 ): Promise<FailedMessageInspection | undefined> {
-    const apiConfig = await getApiConfigForInstance(instanceName);
+    const apiConfig = await getApiConfigForInstance(instanceName, workspaceId);
     if (!apiConfig) return undefined;
 
     const inspection: FailedMessageInspection = {};
@@ -412,6 +411,7 @@ async function buildFailedDeliveryDetails(
         data?.details?.providerMessage,
         data?.error?.error_user_msg
     );
+    const resolvedWorkspaceId = pickFirstNonEmptyString(payload?.__resolved_workspace_id);
     const code = pickFirstCode(
         data?.error?.code,
         data?.details?.code,
@@ -430,7 +430,7 @@ async function buildFailedDeliveryDetails(
         ? summaryParts.join(' | ')
         : `WhatsApp retornou status ${normalizedStatus} para esta mensagem.`;
 
-    const inspection = await inspectFailedMessageFromEvolution(instanceName, keyId, remoteJid);
+    const inspection = await inspectFailedMessageFromEvolution(instanceName, keyId, remoteJid, resolvedWorkspaceId);
     const messageUpdates = inspection?.messageUpdates;
     const providerPayload = {
         findMessages: inspection?.findMessagesPayload,
@@ -581,7 +581,7 @@ export async function POST(
     props: { params: Promise<{ instanceName: string }> }
 ) {
     const params = await props.params;
-    const instanceNameFromUrl = params.instanceName;
+    const instanceIdentifierFromUrl = params.instanceName;
     const requestId = randomUUID();
     const receivedAt = Date.now();
     let payload: any;
@@ -612,9 +612,65 @@ export async function POST(
 
     const { event, instance: instanceNameFromPayload } = payload || {};
     const payloadBytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    let workspaceId: string | null = null;
+    let resolvedInstanceName = instanceNameFromPayload || instanceIdentifierFromUrl;
 
-    if (instanceNameFromUrl !== instanceNameFromPayload) {
-        console.error(`[WEBHOOK] Conflito de nome de instancia. URL: ${instanceNameFromUrl}, Payload: ${instanceNameFromPayload}`);
+    try {
+        const resolvedInstance = await resolveEvolutionInstance(instanceIdentifierFromUrl, { allowLegacyInstanceName: true });
+        if (!resolvedInstance) {
+            await logAction({
+                action: 'webhook_processed_fail',
+                payload: {
+                    request_id: requestId,
+                    source: 'evolution',
+                    status_code: 404,
+                    error: 'instance_not_found',
+                    instance_identifier: instanceIdentifierFromUrl,
+                    instance_payload: instanceNameFromPayload,
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'evolution',
+                status: 'fail',
+                event: 'instance_not_found',
+                durationMs: Date.now() - receivedAt,
+            });
+            return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+        }
+
+        workspaceId = resolvedInstance.workspace_id;
+        resolvedInstanceName = resolvedInstance.instance_name;
+    } catch (error) {
+        if (error instanceof AmbiguousEvolutionInstanceError) {
+            console.error(`[WEBHOOK] Identificador de instancia ambiguo: ${instanceIdentifierFromUrl}`, error.matches);
+            await logAction({
+                action: 'webhook_processed_fail',
+                payload: {
+                    request_id: requestId,
+                    source: 'evolution',
+                    status_code: 409,
+                    error: 'ambiguous_instance_identifier',
+                    instance_identifier: instanceIdentifierFromUrl,
+                    instance_payload: instanceNameFromPayload,
+                    matches: error.matches,
+                    duration_ms: Date.now() - receivedAt,
+                },
+            });
+            recordWebhookMetrics({
+                source: 'evolution',
+                status: 'fail',
+                event: 'ambiguous_instance_identifier',
+                durationMs: Date.now() - receivedAt,
+            });
+            return NextResponse.json({ error: 'Ambiguous instance identifier' }, { status: 409 });
+        }
+
+        throw error;
+    }
+
+    if (resolvedInstanceName !== instanceNameFromPayload) {
+        console.error(`[WEBHOOK] Conflito de nome de instancia. URL: ${instanceIdentifierFromUrl}, Resolvida: ${resolvedInstanceName}, Payload: ${instanceNameFromPayload}`);
         await logAction({
             action: 'webhook_processed_fail',
             payload: {
@@ -622,7 +678,8 @@ export async function POST(
                 source: 'evolution',
                 status_code: 400,
                 error: 'instance_name_mismatch',
-                instance_url: instanceNameFromUrl,
+                instance_url: instanceIdentifierFromUrl,
+                instance_resolved: resolvedInstanceName,
                 instance_payload: instanceNameFromPayload,
                 duration_ms: Date.now() - receivedAt,
             },
@@ -645,7 +702,8 @@ export async function POST(
                 source: 'evolution',
                 status_code: 400,
                 error: 'event_missing',
-                instance: instanceNameFromUrl,
+                instance: resolvedInstanceName,
+                instance_identifier: instanceIdentifierFromUrl,
                 duration_ms: Date.now() - receivedAt,
             },
         });
@@ -658,17 +716,9 @@ export async function POST(
         return NextResponse.json({ error: 'Event not found' }, { status: 400 });
     }
 
-    // Resolve workspace_id for logging
-    let workspaceId: string | null = null;
-    try {
-        const instanceRes = await db.query(
-            'SELECT workspace_id FROM evolution_api_instances WHERE instance_name = $1',
-            [instanceNameFromUrl]
-        );
-        workspaceId = instanceRes.rows[0]?.workspace_id || null;
-    } catch (err) {
-        console.error('[WEBHOOK] Failed to resolve workspace_id for logging', err);
-    }
+    payload.__resolved_workspace_id = workspaceId;
+    payload.__resolved_instance_name = resolvedInstanceName;
+    payload.__instance_identifier = instanceIdentifierFromUrl;
 
     const statsBefore = evolutionWebhookQueue.stats;
     // Log the incoming webhook event
@@ -679,7 +729,8 @@ export async function POST(
             request_id: requestId,
             source: 'evolution',
             event,
-            instance: instanceNameFromUrl,
+            instance: resolvedInstanceName,
+            instance_identifier: instanceIdentifierFromUrl,
             payload_bytes: payloadBytes,
             data_present: Boolean(payload?.data),
             queue: statsBefore,
@@ -689,7 +740,7 @@ export async function POST(
     });
 
     const jobId = requestId;
-    console.log(`[WEBHOOK][${jobId}] Evento '${event}' recebido para ${instanceNameFromUrl}. Fila: ativos=${statsBefore.active}, pendentes=${statsBefore.pending}`);
+    console.log(`[WEBHOOK][${jobId}] Evento '${event}' recebido para ${resolvedInstanceName} (identifier=${instanceIdentifierFromUrl}). Fila: ativos=${statsBefore.active}, pendentes=${statsBefore.pending}`);
 
     const queuedAt = Date.now();
     const runWebhookProcessing = async (executionMode: 'queue' | 'overflow_fallback') => {
@@ -705,7 +756,8 @@ export async function POST(
                     request_id: requestId,
                     source: 'evolution',
                     event,
-                    instance: instanceNameFromUrl,
+                    instance: resolvedInstanceName,
+                    instance_identifier: instanceIdentifierFromUrl,
                     status_code: 200,
                     duration_ms: completedAt - receivedAt,
                     processing_ms: completedAt - processingStartedAt,
@@ -730,7 +782,8 @@ export async function POST(
                     request_id: requestId,
                     source: 'evolution',
                     event,
-                    instance: instanceNameFromUrl,
+                    instance: resolvedInstanceName,
+                    instance_identifier: instanceIdentifierFromUrl,
                     status_code: 500,
                     duration_ms: completedAt - receivedAt,
                     processing_ms: completedAt - processingStartedAt,
@@ -780,7 +833,8 @@ export async function POST(
                             request_id: requestId,
                             source: 'evolution',
                             event,
-                            instance: instanceNameFromUrl,
+                            instance: resolvedInstanceName,
+                            instance_identifier: instanceIdentifierFromUrl,
                             status_code: 500,
                             duration_ms: Date.now() - receivedAt,
                             error: error instanceof Error ? error.message : 'unknown_error',
@@ -1171,15 +1225,21 @@ async function handleMessagesUpsert(payload: any) {
     try {
         await client.query('BEGIN');
 
-        const instanceRes = await client.query(
-            `SELECT workspace_id
-             FROM evolution_api_instances
-             WHERE instance_name = $1`, [instanceName]
-        );
-        if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
+        const routedWorkspaceId = pickFirstNonEmptyString(payload?.__resolved_workspace_id);
+        if (routedWorkspaceId) {
+            workspaceId = routedWorkspaceId;
+        } else {
+            const instanceRes = await client.query(
+                `SELECT workspace_id
+                 FROM evolution_api_instances
+                 WHERE instance_name = $1
+                 LIMIT 1`, [instanceName]
+            );
+            if (instanceRes.rowCount === 0) throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
+            workspaceId = instanceRes.rows[0].workspace_id;
+        }
 
-        workspaceId = instanceRes.rows[0].workspace_id;
-        apiConfig = await getApiConfigForInstance(instanceName);
+        apiConfig = await getApiConfigForInstance(instanceName, workspaceId);
 
         let contactRes = await client.query(
             'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
@@ -1279,6 +1339,14 @@ async function handleMessagesUpsert(payload: any) {
             const chatId = randomUUID();
             const protocol = buildChatProtocol(chatId);
             console.log(`[WEBHOOK_MSG_UPSERT] Generated protocol for chat ${chatId}: ${protocol}`);
+            if (!workspaceId) {
+                throw new Error('Workspace nao encontrado para aplicar o limite mensal de chats.');
+            }
+            const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+            const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+            if (!chatLimitStatus.allowed) {
+                throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+            }
             const newChatRes = await client.query(
                 `INSERT INTO chats (id, workspace_id, contact_id, status, protocol) VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4) RETURNING *`,
                 [chatId, workspaceId, contactData.id, protocol]

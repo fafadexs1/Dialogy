@@ -12,7 +12,8 @@ import {
     Settings,
     LogOut,
     LayoutDashboard,
-    Globe
+    Globe,
+    Megaphone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ const mainNavItems = [
 ];
 
 const configNavItems = [
+    { href: '/superadmin/alerts', label: 'Comunicados globais', icon: Megaphone, exact: true },
     { href: '/superadmin/meta-webhooks', label: 'Webhooks Meta', icon: Activity, exact: false },
     { href: '/superadmin/billing/settings', label: 'Config. Faturamento', icon: Settings, exact: true },
     { href: '/superadmin/seo', label: 'SEO Manager', icon: Globe, exact: false },

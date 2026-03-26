@@ -47,6 +47,7 @@ import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { getDealsByContact } from '@/actions/deals';
 import { transferChatAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { getIntegrationConfig } from '@/actions/integrations';
 import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
@@ -119,7 +120,7 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
                 {trigger || (
-                    <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                    <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground">
                         <ArrowRightLeft className="h-3 w-3 text-blue-400" />
                         Transferir
                     </Button>
@@ -210,7 +211,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
     const [isOpen, setIsOpen] = useState(false);
     const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
     const [selectedInstance, setSelectedInstance] = useState('');
-    const [message, setMessage] = useState('Olá! Podemos retomar nossa conversa por aqui?');
+    const [message, setMessage] = useState('OlÃƒÆ’Ã‚Â¡! Podemos retomar nossa conversa por aqui?');
     const [phone, setPhone] = useState('');
     const [isLoadingInstances, setIsLoadingInstances] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -253,7 +254,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         getEvolutionApiInstances(currentUser.activeWorkspaceId)
             .then((res) => {
                 if (res.error) {
-                    toast({ title: 'Erro ao carregar instâncias', description: res.error, variant: 'destructive' });
+                    toast({ title: 'Erro ao carregar instÃƒÆ’Ã‚Â¢ncias', description: res.error, variant: 'destructive' });
                     setInstances([]);
                     setSelectedInstance('');
                     return;
@@ -264,8 +265,8 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                 setSelectedInstance((prev) => prev || fallbackInstance);
             })
             .catch((error) => {
-                console.error('[CONTACT_PANEL] Falha ao buscar instâncias', error);
-                toast({ title: 'Erro ao carregar instâncias', description: 'Não foi possível buscar as instâncias de WhatsApp.', variant: 'destructive' });
+                console.error('[CONTACT_PANEL] Falha ao buscar instÃƒÆ’Ã‚Â¢ncias', error);
+                toast({ title: 'Erro ao carregar instÃƒÆ’Ã‚Â¢ncias', description: 'NÃƒÆ’Ã‚Â£o foi possÃƒÆ’Ã‚Â­vel buscar as instÃƒÆ’Ã‚Â¢ncias de WhatsApp.', variant: 'destructive' });
                 setInstances([]);
                 setSelectedInstance('');
             })
@@ -304,11 +305,11 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
             return;
         }
         if (!phone) {
-            toast({ title: 'Contato sem número válido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
+            toast({ title: 'Contato sem nÃƒÆ’Ã‚Âºmero vÃƒÆ’Ã‚Â¡lido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
             return;
         }
         if (!selectedInstance) {
-            toast({ title: 'Escolha uma instância', description: 'Selecione a instância de envio para continuar.', variant: 'destructive' });
+            toast({ title: 'Escolha uma instÃƒÆ’Ã‚Â¢ncia', description: 'Selecione a instÃƒÆ’Ã‚Â¢ncia de envio para continuar.', variant: 'destructive' });
             return;
         }
 
@@ -348,7 +349,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         });
 
         if (result.success) {
-            toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerá na sua lista.' });
+            toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerÃƒÆ’Ã‚Â¡ na sua lista.' });
             setIsOpen(false);
             onSuccess();
             setTemplateVariables({});
@@ -363,7 +364,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
                 {trigger || (
-                    <Button variant="ghost" size="sm" className="h-7 px-2.5 bg-white/5 border border-white/5 text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/10 rounded-lg shrink-0 gap-1.5">
+                    <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground">
                         <MessageSquarePlus className="h-3 w-3 text-green-400" />
                         Reabrir
                     </Button>
@@ -373,15 +374,15 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                 <DialogHeader>
                     <DialogTitle>Reabrir atendimento</DialogTitle>
                     <DialogDescription className="text-muted-foreground">
-                        Inicie um novo tópico com este contato sem perder o histórico.
+                        Inicie um novo tÃƒÆ’Ã‚Â³pico com este contato sem perder o histÃƒÆ’Ã‚Â³rico.
                     </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                        <Label>Instância</Label>
+                        <Label>InstÃƒÆ’Ã‚Â¢ncia</Label>
                         <Select value={selectedInstance} onValueChange={setSelectedInstance} disabled={isLoadingInstances || instances.length === 0}>
                             <SelectTrigger className="bg-muted/50 border-input text-foreground">
-                                <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instância'} />
+                                <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instÃƒÆ’Ã‚Â¢ncia'} />
                             </SelectTrigger>
                             <SelectContent>
                                 {isLoadingInstances && <div className="p-3 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>}
@@ -405,7 +406,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
 
                     {isCloud ? (
                         <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-muted/30 p-2 rounded-r-md">
-                            <div className="space-y-2">
+                            <div className="space-y-2 [&_h4]:!text-muted-foreground">
                                 <Label className="text-muted-foreground">Selecionar Template (Cloud API)</Label>
                                 <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
                                     <SelectTrigger className="bg-muted/50 border-input text-foreground">
@@ -431,11 +432,11 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                             </div>
 
                             {variableKeys.length > 0 && (
-                                <div className="space-y-3">
-                                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
+                                <div className="space-y-3 [&_label]:!text-muted-foreground">
+                                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">VariÃƒÆ’Ã‚Â¡veis do Template</Label>
                                     {variableKeys.map((key) => (
                                         <div key={key} className="space-y-1">
-                                            <Label htmlFor={`var-${key}`} className="text-xs text-white/70">Variável {`{{${key}}}`}</Label>
+                                            <Label htmlFor={`var-${key}`} className="text-xs text-slate-600 dark:text-zinc-200">VariÃƒÆ’Ã‚Â¡vel {`{{${key}}}`}</Label>
                                             <Input
                                                 id={`var-${key}`}
                                                 className="bg-muted/50 border-input h-8 text-sm"
@@ -477,7 +478,7 @@ function CopyButton({ value, label }: { value: string, label?: string }) {
     const handleCopy = () => {
         navigator.clipboard.writeText(value);
         setCopied(true);
-        toast({ title: label ? `${label} copiado!` : "Copiado para a área de transferência" });
+        toast({ title: label ? `${label} copiado!` : "Copiado para a ÃƒÆ’Ã‚Â¡rea de transferÃƒÆ’Ã‚Âªncia" });
         setTimeout(() => setCopied(false), 2000);
     };
 
@@ -485,7 +486,7 @@ function CopyButton({ value, label }: { value: string, label?: string }) {
         <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 rounded-md hover:bg-white/10 text-white/40 hover:text-white transition-all"
+            className="h-6 w-6 rounded-md text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
             onClick={handleCopy}
         >
             {copied ? <CheckSquare className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
@@ -514,6 +515,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [protocolHistoryLoading, setProtocolHistoryLoading] = useState(false);
     const [protocolSelectorOpen, setProtocolSelectorOpen] = useState(false);
     const [switchingProtocol, setSwitchingProtocol] = useState<string | null>(null);
+    const [isSgpActive, setIsSgpActive] = useState(false);
 
     const handleContactSave = useCallback((updatedContact?: Contact | null) => {
         // If we received an updated contact, update it directly in the store
@@ -533,6 +535,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             });
             getCustomFieldDefinitions(currentUser.activeWorkspaceId).then(res => {
                 if (!res.error) setCustomFields(res.fields || []);
+            });
+            getIntegrationConfig(currentUser.activeWorkspaceId, 'sgp').then(res => {
+                setIsSgpActive(res.isActive);
             });
         }
     }, [currentUser?.activeWorkspaceId]);
@@ -609,9 +614,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 bg-background/30 backdrop-blur-xl border-l border-border/50 dark:bg-black dark:border-white/10">
+            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border/70 bg-background/80 backdrop-blur-xl">
                 <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
-                    <h3 className="font-semibold text-foreground">Informações do Contato</h3>
+                    <h3 className="font-semibold text-foreground">Informações de Contato</h3>
                 </div>
                 <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
                     <div className="h-20 w-20 bg-muted rounded-full flex items-center justify-center mb-4 ring-1 ring-border">
@@ -675,14 +680,14 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         <motion.div
             initial={{ x: 30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 border-l border-white/10 bg-[#050505]/80 backdrop-blur-[40px] h-full shadow-[-20px_0_80px_rgba(0,0,0,0.4)] z-10 relative overflow-x-hidden overflow-y-hidden"
+            className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200/80 bg-white/95 shadow-[-20px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-[40px] dark:border-white/5 dark:bg-black dark:shadow-[-20px_0_60px_rgba(0,0,0,0.8)] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
         >
             {/* Background Glows */}
-            <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-blue-600/5 blur-[120px] rounded-full -mr-20 -mt-20 pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-purple-600/5 blur-[100px] rounded-full -ml-20 -mb-20 pointer-events-none" />
+            <div className="pointer-events-none absolute right-0 top-0 h-[300px] w-[300px] -mr-20 -mt-20 rounded-full bg-blue-200/70 blur-[120px] dark:bg-transparent dark:opacity-0" />
+            <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[200px] -mb-20 -ml-20 rounded-full bg-emerald-100/70 blur-[100px] dark:bg-transparent dark:opacity-0" />
 
             {/* Header */}
-            <div className="sticky top-0 z-20 flex flex-col px-3 pt-3 pb-2 bg-black/20 backdrop-blur-md border-b border-white/5">
+            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200/80 bg-white/90 px-3 pb-2 pt-3 backdrop-blur-md dark:border-white/5 dark:bg-black">
                 {/* Quick Actions Bar - Icon only */}
                 <div className="flex items-center gap-1 justify-end">
                     <TooltipProvider>
@@ -691,13 +696,13 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 bg-white/5 border border-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg"
+                                    className="h-7 w-7 rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                                     onClick={() => setIsStatsOpen(true)}
                                 >
                                     <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent><p>Relatórios</p></TooltipContent>
+                            <TooltipContent><p>RelatÃƒÆ’Ã‚Â³rios</p></TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                     <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
@@ -711,7 +716,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-7 w-7 bg-white/5 border border-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg"
+                                        className="h-7 w-7 rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                                         onClick={() => {
                                             const protocol = chat.protocol || buildChatProtocol(chat.id);
                                             navigator.clipboard.writeText(protocol);
@@ -730,10 +735,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
             <ScrollArea className="flex-1 custom-scrollbar">
                 <div className="p-4 space-y-4 pb-24">
-                    {/* Profile Section — always visible above tabs */}
+                    {/* Profile Section ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â always visible above tabs */}
                     <div className="relative">
                         <div className={cn(
-                            "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700",
+                            "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700 dark:opacity-10",
                             platform === 'instagram' ? "bg-pink-500" :
                                 platform === 'messenger' ? "bg-blue-500" :
                                     (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud' || platform === 'whatsapp') ? "bg-green-500" : "bg-blue-400"
@@ -746,17 +751,17 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             className="flex flex-col items-center text-center relative"
                         >
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
-                                <div className="absolute -inset-2 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-                                <div className="p-1 rounded-full bg-gradient-to-b from-white/20 to-transparent border border-white/10 backdrop-blur-md">
-                                    <Avatar className="h-20 w-20 shrink-0 rounded-full border-2 border-black/50 shadow-2xl relative">
+                                <div className="absolute -inset-2 rounded-full bg-gradient-to-tr from-blue-100/80 to-transparent opacity-0 blur transition duration-500 group-hover:opacity-100 dark:from-transparent dark:group-hover:opacity-0"></div>
+                                <div className="rounded-full border border-slate-200/80 bg-white p-1 shadow-lg backdrop-blur-md dark:border-white/5 dark:bg-black">
+                                    <Avatar className="relative h-20 w-20 shrink-0 rounded-full border-2 border-slate-200/80 shadow-2xl dark:border-white/10">
                                         <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
-                                        <AvatarFallback className="text-2xl font-bold bg-gradient-to-br from-neutral-800 to-black text-white">
+                                        <AvatarFallback className="bg-slate-100 text-2xl font-bold text-slate-700 dark:bg-zinc-900 dark:text-zinc-300">
                                             {contact.name.charAt(0)}
                                         </AvatarFallback>
                                     </Avatar>
                                 </div>
 
-                                <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-xl bg-black border border-white/10 flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
+                                <div className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-lg transition-transform group-hover:scale-110 dark:border-white/5 dark:bg-black">
                                     {platform === 'instagram' ? (
                                         <Globe className="h-4 w-4 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
                                     ) : platform === 'messenger' ? (
@@ -769,7 +774,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                             <div className="mt-4 space-y-2">
                                 <div className="flex items-center justify-center gap-2">
-                                    <h2 className="font-black text-xl tracking-tight text-white/90">{contact.name}</h2>
+                                    <h2 className="font-black text-xl tracking-tight text-foreground">{contact.name}</h2>
                                     <LeadScoreBadge score={contact.lead_score} size="sm" />
                                 </div>
                                 <div className="flex flex-wrap items-center justify-center gap-1.5">
@@ -782,12 +787,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             {chat.tag}
                                         </div>
                                     )}
-                                    <div className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/5 text-white/40 text-[10px] font-bold uppercase tracking-wider">
+                                    <div className="rounded-full border border-border bg-background px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400">
                                         {instanceTypeDisplay}
                                     </div>
                                     <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
                                         <DialogTrigger asChild>
-                                            <button className="h-5 w-5 rounded-full bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 flex items-center justify-center transition-all">
+                                            <button className="flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white">
                                                 <Edit className="h-2.5 w-2.5" />
                                             </button>
                                         </DialogTrigger>
@@ -808,54 +813,59 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                     {/* ==== TABBED CONTENT ==== */}
                     <Tabs defaultValue="info" className="w-full">
-                        <TabsList className="grid w-full grid-cols-2 bg-white/[0.03] border border-white/5 rounded-xl h-8">
-                            <TabsTrigger value="info" className="text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-7">Info</TabsTrigger>
-                            <TabsTrigger value="crm" className="text-[11px] font-bold uppercase tracking-widest data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40 rounded-lg h-7">
+                        <TabsList className={cn("grid h-8 w-full rounded-xl border border-border bg-muted/40 dark:border-white/10 dark:bg-[#07080b]", isSgpActive ? "grid-cols-3" : "grid-cols-2")}>
+                            <TabsTrigger value="info" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">Info</TabsTrigger>
+                            <TabsTrigger value="crm" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
                                 CRM
                                 {openDeals.length > 0 && (
                                     <span className="ml-1.5 h-4 px-1.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded flex items-center">{openDeals.length}</span>
                                 )}
                             </TabsTrigger>
+                            {isSgpActive && (
+                                <TabsTrigger value="sgp" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
+                                    SGP
+                                </TabsTrigger>
+                            )}
                         </TabsList>
 
-                        {/* ── INFO TAB ── */}
+                        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ INFO TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
                         <TabsContent value="info" className="mt-4 space-y-5">
-                            {/* Contact Details — compact rows */}
+                            {/* Contact Details ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â compact rows */}
                             <div className="space-y-2">
                                 {/* Phone */}
-                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all group">
+                                <div className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
                                     <div className="h-7 w-7 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 shrink-0">
                                         <Smartphone className="h-3.5 w-3.5 text-green-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">WhatsApp</span>
-                                        <span className="text-[13px] font-bold text-white/80 tabular-nums truncate block">
-                                            {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
+                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">WhatsApp</span>
+                                        <span className="block truncate text-[13px] font-bold tabular-nums text-slate-900 dark:text-zinc-100">
+                                            {(contact.phone_number_jid || contact.phone || 'Sem nÃƒÆ’Ã‚Âºmero').replace(/@.*$/, '')}
                                         </span>
                                     </div>
                                     <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
                                 </div>
 
                                 {/* Email */}
-                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all group">
+                                <div className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
                                     <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
                                         <Mail className="h-3.5 w-3.5 text-blue-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">Email</span>
-                                        <span className="text-[13px] font-bold text-white/80 truncate block">{contact.email || 'Não informado'}</span>
+                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">Email</span>
+                                        <span className="block truncate text-[13px] font-bold text-slate-900 dark:text-zinc-100">{contact.email || 'Não informado'}</span>
                                     </div>
                                     {contact.email && <CopyButton value={contact.email} label="Email" />}
                                 </div>
 
                                 {/* Protocol */}
-                                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 border-dashed hover:bg-white/[0.06] transition-all group">
+                                <div className="group flex items-center gap-3 rounded-xl border border-dashed border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
                                     <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shrink-0">
                                         <Hash className="h-3.5 w-3.5 text-purple-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="text-[10px] font-black uppercase tracking-widest text-white/20 block">Protocolo</span>
-                                        <span className="text-[12px] font-mono font-bold text-purple-300 tracking-tighter truncate block" title={currentProtocol}>
+                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">Protocolo</span>
+                                        <span className="block truncate text-[12px] font-mono font-bold tracking-tighter text-purple-300" title={currentProtocol}>
                                             {currentProtocol}
                                         </span>
                                     </div>
@@ -865,23 +875,23 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                 variant="ghost"
                                                 size="icon"
                                                 type="button"
-                                                className="relative z-10 h-6 w-6 rounded-md bg-white/5 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                                                className="relative z-10 h-6 w-6 rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                                                 title="Ver todos os protocolos"
                                             >
                                                 <History className="h-3.5 w-3.5" />
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent align="end" className="w-[340px] p-2 border-white/10 bg-zinc-950">
+                                        <PopoverContent align="end" className="w-[340px] border-border bg-popover p-2 shadow-xl">
                                             <div className="px-2 py-1.5">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Protocolos do contato</p>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Protocolos do contato</p>
                                             </div>
                                             <div className="max-h-[260px] overflow-y-auto pr-1 space-y-1">
                                                 {protocolHistoryLoading ? (
-                                                    <div className="flex items-center justify-center py-6 text-white/40">
+                                                    <div className="flex items-center justify-center py-6 text-muted-foreground">
                                                         <Loader2 className="h-4 w-4 animate-spin" />
                                                     </div>
                                                 ) : protocolHistory.length === 0 ? (
-                                                    <p className="px-2 py-4 text-xs text-white/40">Nenhum protocolo encontrado.</p>
+                                                    <p className="px-2 py-4 text-xs text-muted-foreground">Nenhum protocolo encontrado.</p>
                                                 ) : (
                                                     protocolHistory.map((entry) => (
                                                         <button
@@ -893,21 +903,21 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                                 "w-full rounded-lg border px-2 py-2 text-left transition-colors",
                                                                 entry.protocol === currentProtocol
                                                                     ? "border-purple-500/40 bg-purple-500/10"
-                                                                    : "border-white/10 bg-white/[0.02] hover:bg-white/[0.06]"
+                                                                    : "border-border bg-background hover:bg-muted/50"
                                                             )}
                                                         >
                                                             <div className="flex items-center justify-between gap-2">
-                                                                <span className="truncate text-[11px] font-mono font-semibold text-purple-200">{entry.protocol}</span>
+                                                                <span className="truncate text-[11px] font-mono font-semibold text-purple-300">{entry.protocol}</span>
                                                                 {switchingProtocol === entry.protocol ? (
-                                                                    <Loader2 className="h-3 w-3 animate-spin text-white/40 shrink-0" />
+                                                                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
                                                                 ) : (
-                                                                    <span className="text-[10px] text-white/40 shrink-0">
+                                                                    <span className="shrink-0 text-[10px] text-muted-foreground">
                                                                         {new Date(entry.createdAt).toLocaleDateString('pt-BR')}
                                                                     </span>
                                                                 )}
                                                             </div>
                                                             {entry.lastMessageContent && (
-                                                                <p className="mt-1 line-clamp-1 text-[10px] text-white/45">
+                                                                <p className="mt-1 line-clamp-1 text-[10px] text-muted-foreground">
                                                                     {entry.lastMessageContent}
                                                                 </p>
                                                             )}
@@ -921,10 +931,97 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 </div>
                             </div>
 
-                            {/* Custom Fields */}
-                            {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id]) && (
+                            {/* Custom Fields Summary */}
+                            {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]') && (
                                 <div className="space-y-2">
-                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Campos Adicionais</h4>
+                                    <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Dados de Lead</h4>
+                                    <div className="flex items-center justify-between rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0">
+                                                <LayoutGrid className="h-4 w-4" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-[13px] font-bold text-foreground">Perfil enriquecido</p>
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    {customFields.filter(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]').length} campos preenchidos
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Agent */}
+                            <div className="space-y-2 [&_h4]:text-muted-foreground">
+                                <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Agente Responsável</h4>
+                                <div className="relative rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-white/5 dark:bg-[#07080b]">
+                                    {agent && agent.id !== 'unknown' ? (
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="relative shrink-0">
+                                                <Avatar className="h-8 w-8 rounded-lg border border-border shadow-lg">
+                                                    <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
+                                                    <AvatarFallback className="bg-zinc-900 text-zinc-300 font-black text-xs">{agent.name.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                                <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <p className="truncate text-sm font-bold text-foreground">{agent.name}</p>
+                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                                </div>
+                                                {chat.assigned_at && (
+                                                    <p className="mt-0.5 text-[11px] text-muted-foreground">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30">
+                                                <UserCheck className="h-4 w-4 text-muted-foreground/50" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-bold text-foreground">Sem agente</p>
+                                                <p className="text-[11px] text-muted-foreground">Fila de espera</p>
+                                            </div>
+                                            <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Quick Actions */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <Card
+                                    className="cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:border-blue-500/30 hover:bg-blue-500/5 [&_span]:!text-muted-foreground dark:border-white/5 dark:bg-[#07080b]"
+                                    onClick={() => setIsStatsOpen(true)}
+                                >
+                                    <CardContent className="p-3 flex items-center gap-2">
+                                        <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shrink-0">
+                                            <BarChart3 className="h-3.5 w-3.5" />
+                                        </div>
+                                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">Stats</span>
+                                    </CardContent>
+                                </Card>
+
+                                <Link href="/crm" className="block">
+                                    <Card className="h-full cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:border-purple-500/30 hover:bg-purple-500/5 [&_span]:!text-muted-foreground dark:border-white/5 dark:bg-[#07080b]">
+                                        <CardContent className="p-3 flex items-center gap-2">
+                                            <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
+                                                <LayoutGrid className="h-3.5 w-3.5" />
+                                            </div>
+                                            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">CRM</span>
+                                        </CardContent>
+                                    </Card>
+                                </Link>
+                            </div>
+                        </TabsContent>
+
+                        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ CRM TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+                        <TabsContent value="crm" className="mt-4 space-y-5">
+                            {/* Custom Fields */}
+                            {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]') && (
+                                <div className="space-y-2">
+                                    <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Campos Adicionais</h4>
                                     <div className="grid grid-cols-2 gap-2">
                                         {customFields.map(field => {
                                             const value = contact.custom_fields?.[field.id];
@@ -951,9 +1048,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             }
 
                                             return (
-                                                <div key={field.id} className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col gap-0.5">
-                                                    <span className="text-[10px] font-black uppercase tracking-widest text-white/20">{field.label}</span>
-                                                    <span className="text-[13px] font-bold text-white/70 truncate">{displayValue}</span>
+                                                <div key={field.id} className="flex flex-col gap-0.5 rounded-xl border border-slate-200/80 bg-white/90 p-2 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b]">
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">{field.label}</span>
+                                                    <span className="truncate text-[13px] font-bold text-slate-900 dark:text-zinc-200">{displayValue}</span>
                                                 </div>
                                             );
                                         })}
@@ -961,77 +1058,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 </div>
                             )}
 
-                            {/* Agent */}
-                            <div className="space-y-2">
-                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Agente Responsável</h4>
-                                <div className="relative bg-white/[0.03] border border-white/5 rounded-xl p-3">
-                                    {agent && agent.id !== 'unknown' ? (
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="relative shrink-0">
-                                                <Avatar className="h-8 w-8 rounded-lg border border-white/10 shadow-lg">
-                                                    <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
-                                                    <AvatarFallback className="bg-neutral-800 text-white/60 font-black text-xs">{agent.name.charAt(0)}</AvatarFallback>
-                                                </Avatar>
-                                                <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                    <p className="font-bold text-white/90 truncate text-sm">{agent.name}</p>
-                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
-                                                </div>
-                                                {chat.assigned_at && (
-                                                    <p className="text-[11px] text-white/40 mt-0.5">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-8 w-8 rounded-lg bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
-                                                <UserCheck className="h-4 w-4 text-white/10" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <p className="text-sm font-bold text-white/40">Sem agente</p>
-                                                <p className="text-[11px] text-white/20">Fila de espera</p>
-                                            </div>
-                                            <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Quick Actions */}
-                            <div className="grid grid-cols-2 gap-2">
-                                <Card
-                                    className="bg-white/[0.02] border-white/5 shadow-none hover:bg-blue-500/5 hover:border-blue-500/30 transition-all cursor-pointer group rounded-xl overflow-hidden"
-                                    onClick={() => setIsStatsOpen(true)}
-                                >
-                                    <CardContent className="p-3 flex items-center gap-2">
-                                        <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shrink-0">
-                                            <BarChart3 className="h-3.5 w-3.5" />
-                                        </div>
-                                        <span className="text-[11px] font-black uppercase tracking-wider text-white/50">Stats</span>
-                                    </CardContent>
-                                </Card>
-
-                                <Link href="/crm" className="block">
-                                    <Card className="bg-white/[0.02] border-white/5 shadow-none hover:bg-purple-500/5 hover:border-purple-500/30 transition-all cursor-pointer group rounded-xl overflow-hidden h-full">
-                                        <CardContent className="p-3 flex items-center gap-2">
-                                            <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
-                                                <LayoutGrid className="h-3.5 w-3.5" />
-                                            </div>
-                                            <span className="text-[11px] font-black uppercase tracking-wider text-white/50">CRM</span>
-                                        </CardContent>
-                                    </Card>
-                                </Link>
-                            </div>
-                        </TabsContent>
-
-                        {/* ── CRM TAB ── */}
-                        <TabsContent value="crm" className="mt-4 space-y-5">
                             {/* Deals */}
-                            <div className="space-y-2">
+                            <div className="space-y-2 [&_h4]:!text-muted-foreground [&_p]:!text-muted-foreground">
                                 <div className="flex items-center justify-between px-1">
-                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25">Negócios</h4>
+                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Negócios</h4>
                                     {totalOpenValue > 0 && (
                                         <span className="text-[12px] font-bold text-emerald-400 tabular-nums">{formatBRL(totalOpenValue)}</span>
                                     )}
@@ -1039,20 +1069,20 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                                 {dealsLoading ? (
                                     <div className="flex justify-center py-4">
-                                        <Loader2 className="h-4 w-4 animate-spin text-white/30" />
+                                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                                     </div>
                                 ) : openDeals.length > 0 ? (
                                     <div className="space-y-1.5">
                                         {openDeals.map(deal => (
-                                            <div key={deal.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] transition-all">
+                                            <div key={deal.id} className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
                                                 <div className="h-7 w-7 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
                                                     <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <span className="text-[13px] font-bold text-white/80 truncate block">{deal.title}</span>
+                                                    <span className="block truncate text-[13px] font-bold text-foreground">{deal.title}</span>
                                                     <div className="flex items-center gap-1.5 mt-0.5">
-                                                        <Badge className="h-4 px-1.5 bg-white/5 border-white/10 text-[10px] font-bold text-white/35">{deal.stage}</Badge>
-                                                        <span className="text-[10px] text-white/25">{deal.probability}%</span>
+                                                        <Badge className="h-4 border-border bg-muted px-1.5 text-[10px] font-bold text-muted-foreground">{deal.stage}</Badge>
+                                                        <span className="text-[10px] text-muted-foreground">{deal.probability}%</span>
                                                     </div>
                                                 </div>
                                                 <span className="text-[13px] font-black text-emerald-400 tabular-nums shrink-0">{formatBRL(deal.value)}</span>
@@ -1060,13 +1090,13 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-[12px] text-white/20 text-center py-3">Nenhum negócio em aberto.</p>
+                                    <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum negócio em aberto.</p>
                                 )}
 
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="w-full h-8 bg-white/[0.02] border-white/5 text-white/40 hover:text-emerald-400 hover:bg-emerald-500/5 hover:border-emerald-500/20 rounded-lg transition-all text-[11px] font-bold uppercase tracking-widest gap-1.5"
+                                    className="h-8 w-full gap-1.5 rounded-lg border border-slate-200/80 bg-white/90 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-all hover:border-emerald-500/20 hover:bg-emerald-500/5 hover:text-emerald-500 dark:border-white/5 dark:bg-[#07080b] dark:hover:text-emerald-400"
                                     onClick={() => setDealFormOpen(true)}
                                 >
                                     <DollarSign className="h-3 w-3" />
@@ -1075,13 +1105,13 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             </div>
 
                             {/* Timeline */}
-                            <div className="space-y-2">
-                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/25 px-1">Timeline</h4>
+                            <div className="space-y-2 [&_h4]:!text-muted-foreground">
+                                <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Timeline</h4>
                                 {!showTimeline ? (
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        className="w-full h-8 bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5 hover:border-white/20 rounded-lg transition-all text-[11px] font-bold uppercase tracking-widest"
+                                        className="h-8 w-full rounded-lg border border-slate-200/80 bg-white/90 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-all hover:bg-slate-100 hover:text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5"
                                         onClick={() => setShowTimeline(true)}
                                     >
                                         Carregar Timeline
@@ -1091,6 +1121,21 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 ) : null}
                             </div>
                         </TabsContent>
+
+                        {/* ▬▬ SGP TAB ▬▬ */}
+                        {isSgpActive && (
+                            <TabsContent value="sgp" className="mt-4 space-y-5">
+                                <div className="space-y-4 text-center py-6">
+                                    <div className="flex justify-center mb-2">
+                                        <div className="h-10 w-10 rounded-xl bg-orange-500/10 flex items-center justify-center border border-orange-500/20">
+                                            <Server className="h-5 w-5 text-orange-500" />
+                                        </div>
+                                    </div>
+                                    <h4 className="text-[13px] font-bold text-slate-700 dark:text-zinc-300">Integração SGP</h4>
+                                    <p className="text-[11px] text-muted-foreground">Contato vinculado com sucesso.</p>
+                                </div>
+                            </TabsContent>
+                        )}
                     </Tabs>
                 </div>
             </ScrollArea>

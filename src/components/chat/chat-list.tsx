@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown } from 'lucide-react';
+import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { Virtuoso } from 'react-virtuoso';
@@ -58,6 +58,8 @@ import { getTeams } from '@/actions/teams';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+
+const MAX_VISIBLE_ONLINE_AGENTS = 7;
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
@@ -235,10 +237,10 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border text-popover-foreground">
                   {isLoading ? (
-                    <div className="p-4 text-center text-sm text-white/50">Carregando...</div>
+                    <div className="p-4 text-center text-sm text-muted-foreground">Carregando...</div>
                   ) : (
                     instances.map((instance) => (
-                      <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-white/10 focus:text-white">
+                      <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-accent focus:text-accent-foreground">
                         {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'}
                       </SelectItem>
                     ))
@@ -257,7 +259,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50"
               />
-              <p className="text-xs text-white/40">
+              <p className="text-xs text-muted-foreground">
                 Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
               </p>
             </div>
@@ -290,7 +292,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                 </div>
 
                 {variableKeys.length > 0 && (
-                  <div className="space-y-3">
+                  <div className="space-y-3 [&_input]:!border-input [&_input]:!bg-background [&_input]:!text-sm [&_label]:!text-muted-foreground">
                     <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
                     {variableKeys.map((key) => (
                       <div key={key} className="space-y-1">
@@ -372,12 +374,62 @@ const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
 
 interface LastMessagePreviewProps {
   message: Message;
+  currentUser?: User | null;
+  showSender?: boolean;
 }
 
-const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
+const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, currentUser, showSender = false }) => {
   const { latitude, longitude, address, locationName } = message.metadata || {};
   const isLocation = typeof latitude === 'number' && typeof longitude === 'number' || message.type === 'location';
   const isMedia = message.metadata?.mediaUrl || message.metadata?.thumbnail;
+  const senderName = typeof message.sender?.name === 'string' ? message.sender.name.trim() : '';
+  const senderId = typeof message.sender?.id === 'string' ? message.sender.id : undefined;
+  const isFromCurrentUser = Boolean(
+    currentUser &&
+    (
+      (senderId && senderId === currentUser.id) ||
+      (senderName && senderName.toLowerCase() === currentUser.name.trim().toLowerCase())
+    )
+  );
+  const isOutgoing = Boolean(
+    message.from_me ||
+    message.direction === 'outgoing' ||
+    message.sender?.type === 'user' ||
+    message.sender?.type === 'system_agent'
+  );
+
+  const senderMeta = (() => {
+    if (message.type === 'system') {
+      return {
+        label: 'Sistema',
+        tone: 'text-slate-400',
+        icon: <MessageSquare className="h-3 w-3" />
+      };
+    }
+
+    if (message.sender?.type === 'system_agent') {
+      return {
+        label: 'Agente',
+        tone: 'text-violet-600',
+        icon: <MessageSquare className="h-3 w-3" />
+      };
+    }
+
+    if (isOutgoing) {
+      const shortName = senderName ? senderName.split(' ')[0] : '';
+      return {
+        label: isFromCurrentUser || !shortName ? 'Você' : shortName,
+        tone: 'text-blue-600',
+        icon: <UserCheck className="h-3 w-3" />
+      };
+    }
+
+    return {
+      label: 'Cliente',
+      tone: 'text-slate-500',
+      icon: <UserIcon className="h-3 w-3" />
+    };
+  })();
 
   const getIcon = () => {
     if (message.type === 'system') return null;
@@ -436,6 +488,12 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message }) => {
           getIcon()
         )}
       </div>
+      {showSender && (
+        <span className={cn("inline-flex items-center gap-1 flex-shrink-0 text-[11px] font-semibold", senderMeta.tone)}>
+          {senderMeta.icon}
+          {senderMeta.label}:
+        </span>
+      )}
       <p className="truncate">{getTextContent()}</p>
     </div>
   );
@@ -517,11 +575,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const isWaiting = chat.status === 'atendimentos' && !isSnoozed && lastMessage && !lastMessage.from_me;
   const waitingMinutes = isWaiting && lastMessage ? (Date.now() - new Date(lastMessage.createdAt).getTime()) / 60000 : 0;
 
-  const slaClasses = isWaiting && waitingMinutes > 30
-    ? 'border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.15)] dark:border-red-500/40' // Over SLA (High Priority)
+  const slaStatus = isWaiting && waitingMinutes > 30
+    ? 'danger'
     : isWaiting && waitingMinutes > 15
-      ? 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.15)] dark:border-yellow-400/40' // Warning SLA
-      : '';
+      ? 'warning'
+      : null;
+  const waitingMinutesRounded = Math.max(1, Math.floor(waitingMinutes));
 
   const handleSelect = (e?: React.MouseEvent) => {
     if (isBulkMode && onToggleBulkSelection) {
@@ -610,12 +669,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       transition={{ duration: 0.2, ease: "easeOut" }}
       className={cn(
         "relative flex items-start gap-2.5 md:gap-3 px-4 py-3 md:px-5 md:py-3 cursor-pointer group transition-all mx-2 my-1 rounded-xl border",
-        slaClasses || "border-transparent",
+        "border-transparent",
         "hover:bg-muted/30 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
         "min-h-[76px]", // Height adjustment
         isSelected && !isForwarding && !isBulkMode
           ? "bg-sidebar-accent shadow-sm dark:bg-white/5 dark:border-white/10"
-          : (!slaClasses && "dark:hover:bg-white/5"),
+          : "dark:hover:bg-white/5",
         (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
         isSnoozed ? "opacity-60 grayscale" : ""
       )}
@@ -844,6 +903,27 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 </Tooltip>
               </TooltipProvider>
             )}
+            {slaStatus && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className={cn(
+                        "flex h-5 w-5 items-center justify-center flex-shrink-0",
+                        slaStatus === 'danger' ? "text-red-500" : "text-amber-500"
+                      )}
+                      aria-label={slaStatus === 'danger' ? 'SLA estourado' : 'SLA em alerta'}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{slaStatus === 'danger' ? 'SLA estourado' : 'SLA em alerta'}</p>
+                    <p>Aguardando resposta ha {waitingMinutesRounded} min</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
             {lastMessage && (
               <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
                 {formatMessageTime(lastMessage.createdAt || lastMessage.timestamp, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
@@ -901,7 +981,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 <span className="font-bold">[Rascunho]:</span> {draftPreview}
               </p>
             ) : (
-              lastMessage ? <LastMessagePreview message={lastMessage} /> : <div className="h-[20px]" />
+              lastMessage ? <LastMessagePreview message={lastMessage} currentUser={currentUser} showSender={chat.status === 'atendimentos'} /> : <div className="h-[20px]" />
             )}
           </div>
           {(() => {
@@ -943,6 +1023,14 @@ interface ChatListProps {
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
+  const visibleOnlineAgents = useMemo(
+    () => onlineAgents.slice(0, MAX_VISIBLE_ONLINE_AGENTS),
+    [onlineAgents]
+  );
+  const hiddenOnlineAgents = useMemo(
+    () => onlineAgents.slice(MAX_VISIBLE_ONLINE_AGENTS),
+    [onlineAgents]
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
@@ -958,6 +1046,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [teamFilter, setTeamFilter] = useState<string[]>([]);
+  const [singleTeamMode, setSingleTeamMode] = useState(false);
   const [isTeamFilterOpen, setIsTeamFilterOpen] = useState(false);
   const [teamSearchTerm, setTeamSearchTerm] = useState('');
 
@@ -1019,13 +1108,33 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   };
 
+  const toggleSingleTeamMode = useCallback(() => {
+    setSingleTeamMode((prev) => {
+      const next = !prev;
+      if (next) {
+        if (ownershipFilter !== 'everyone') {
+          setOwnershipFilter('everyone');
+        }
+        setTeamFilter((current) => current.slice(0, 1));
+      }
+      return next;
+    });
+  }, [ownershipFilter]);
+
   const toggleTeamSelection = useCallback((teamId: string) => {
-    setTeamFilter((prev) =>
-      prev.includes(teamId)
+    if (ownershipFilter !== 'everyone') {
+      setOwnershipFilter('everyone');
+    }
+    setTeamFilter((prev) => {
+      if (singleTeamMode) {
+        return prev[0] === teamId ? [] : [teamId];
+      }
+
+      return prev.includes(teamId)
         ? prev.filter((id) => id !== teamId)
-        : [...prev, teamId]
-    );
-  }, []);
+        : [...prev, teamId];
+    });
+  }, [singleTeamMode, ownershipFilter]);
 
   const handleBulkSubmit = async () => {
     if (selectedBulkChats.size === 0) return;
@@ -1237,12 +1346,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   return (
     <div
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-border bg-white dark:bg-black dark:border-white/10 transition-none",
+        "flex h-full shrink-0 flex-col border-r border-border bg-background transition-none",
         "w-full md:w-[280px] lg:w-[320px] xl:w-[380px] 2xl:w-[420px] md:min-w-[240px] md:max-w-[420px]",
         className
       )}
     >
-      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border dark:border-white/10 space-y-4">
+      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
           <div className="flex items-center gap-2">
@@ -1265,84 +1374,90 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 {/* Ownership Section */}
                 {/* Ownership section removed; now handled by Quick Filter Chips */}
 
-                {/* Team Filter Section (Visible only for 'everyone') */}
-                {ownershipFilter === 'everyone' && (
-                  <div className="space-y-3 pt-2 border-t border-border/50">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
+                <div className="space-y-3 pt-2 border-t border-border/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-muted-foreground">1 equipe</span>
+                      <Switch
+                        checked={singleTeamMode}
+                        onCheckedChange={() => toggleSingleTeamMode()}
+                        className="h-5 w-9 data-[state=checked]:bg-indigo-600"
+                        aria-label="Ativar seleção de equipe única"
+                      />
                       {teamFilter.length > 0 && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-auto p-0 text-xs text-muted-foreground hover:text-primary"
+                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-primary"
                           onClick={() => setTeamFilter([])}
                         >
                           Limpar
                         </Button>
                       )}
                     </div>
-                    <Popover
-                      open={isTeamFilterOpen}
-                      onOpenChange={(open) => {
-                        setIsTeamFilterOpen(open);
-                        if (!open) setTeamSearchTerm('');
-                      }}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={isTeamFilterOpen}
-                          className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
-                        >
-                          {teamFilter.length > 0
-                            ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
-                            : "Todas as equipes"}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
-                        <div className="border-b border-border p-2">
-                          <Input
-                            value={teamSearchTerm}
-                            onChange={(event) => setTeamSearchTerm(event.target.value)}
-                            placeholder="Buscar equipe..."
-                            className="h-9"
-                          />
-                        </div>
-                        <ScrollArea className="max-h-[220px]">
-                          <div className="p-1">
-                            {isLoadingTeams ? (
-                              <div className="px-2 py-3 text-sm text-muted-foreground">Carregando equipes...</div>
-                            ) : filteredTeamsBySearch.length === 0 ? (
-                              <div className="px-2 py-3 text-sm text-muted-foreground">Nenhuma equipe encontrada.</div>
-                            ) : (
-                              filteredTeamsBySearch.map((team) => (
-                                <button
-                                  key={team.id}
-                                  type="button"
-                                  onClick={() => toggleTeamSelection(team.id)}
-                                  className={cn(
-                                    "w-full flex items-center rounded-sm px-2 py-1.5 text-sm transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                                    teamFilter.includes(team.id) && "bg-accent/70 text-accent-foreground"
-                                  )}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      teamFilter.includes(team.id) ? "opacity-100" : "opacity-0"
-                                    )}
-                                  />
-                                  <span className="truncate text-left">{team.name}</span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        </ScrollArea>
-                      </PopoverContent>
-                    </Popover>
                   </div>
-                )}
+                  <Popover
+                    open={isTeamFilterOpen}
+                    onOpenChange={(open) => {
+                      setIsTeamFilterOpen(open);
+                      if (!open) setTeamSearchTerm('');
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={isTeamFilterOpen}
+                        className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
+                      >
+                        {teamFilter.length > 0
+                          ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
+                          : "Todas as equipes"}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
+                      <div className="border-b border-border p-2">
+                        <Input
+                          value={teamSearchTerm}
+                          onChange={(event) => setTeamSearchTerm(event.target.value)}
+                          placeholder="Buscar equipe..."
+                          className="h-9"
+                        />
+                      </div>
+                      <ScrollArea className="max-h-[220px]">
+                        <div className="p-1">
+                          {isLoadingTeams ? (
+                            <div className="px-2 py-3 text-sm text-muted-foreground">Carregando equipes...</div>
+                          ) : filteredTeamsBySearch.length === 0 ? (
+                            <div className="px-2 py-3 text-sm text-muted-foreground">Nenhuma equipe encontrada.</div>
+                          ) : (
+                            filteredTeamsBySearch.map((team) => (
+                              <button
+                                key={team.id}
+                                type="button"
+                                onClick={() => toggleTeamSelection(team.id)}
+                                className={cn(
+                                  "w-full flex items-center rounded-sm px-2 py-1.5 text-sm transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                                  teamFilter.includes(team.id) && "bg-accent/70 text-accent-foreground"
+                                )}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    teamFilter.includes(team.id) ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate text-left">{team.name}</span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
@@ -1385,7 +1500,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     <Button
                       variant={isBulkMode ? "secondary" : "ghost"}
                       size="icon"
-                      className={cn("h-8 w-8 text-muted-foreground hover:text-white hover:bg-white/10", isBulkMode && "bg-blue-500/20 text-blue-400")}
+                      className={cn("h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground", isBulkMode && "bg-blue-500/20 text-blue-600 hover:bg-blue-500/15 hover:text-blue-700")}
                       onClick={toggleBulkMode}
                     >
                       <Check className="h-4 w-4" />
@@ -1417,7 +1532,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
             <Input
               placeholder="Pesquisar por nome, telefone ou mensagem..."
-              className="pl-9 bg-muted/50 border-transparent focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-xl text-foreground placeholder:text-muted-foreground dark:bg-white/5 dark:placeholder:text-white/50"
+              className="pl-9 rounded-xl border-transparent bg-muted/50 text-foreground transition-all placeholder:text-muted-foreground focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               aria-label="Pesquisar conversas"
@@ -1474,7 +1589,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onSelectChat={setSelectedChat}
       />
 
-      <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/30 dark:bg-black dark:border-white/10">
+      <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/20">
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
           Agentes Online ({onlineAgents.length})
           {isOffline && (
@@ -1483,8 +1598,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             </Badge>
           )}
         </h3>
-        <HoverCard openDelay={200}>
-          <div className={cn("flex flex-wrap items-center gap-2 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
+          <div className={cn("flex flex-nowrap items-center gap-1.5 overflow-x-hidden overflow-y-visible pl-1 py-1 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
             {onlineAgents.length === 0 ? (
               <div className="flex gap-2">
                 <Skeleton className="h-8 w-8 rounded-full" />
@@ -1492,18 +1606,18 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <Skeleton className="h-8 w-8 rounded-full" />
               </div>
             ) : (
-              onlineAgents.map((agent) => (
+              visibleOnlineAgents.map((agent) => (
                 <HoverCard key={agent.user.id}>
                   <HoverCardTrigger asChild>
                     <div
-                      className="relative cursor-pointer hover:scale-110 transition-transform duration-200"
+                      className="relative cursor-pointer transition-transform duration-200 shrink-0"
                       onClick={() => setSelectedAgent(agent.user)}
                     >
-                      <Avatar className="h-8 w-8 border-2 border-border ring-2 ring-[#0D4A23] shadow-[0_0_10px_rgba(13,74,35,0.3)]">
+                      <Avatar className="h-8 w-8 border border-emerald-500/70 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]">
                         <AvatarImage src={agent.user.avatar} className="object-cover" />
-                        <AvatarFallback className="bg-[#0D4A23] text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
+                        <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
-                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-[#22C05C] border-2 border-background animate-pulse shadow-[0_0_8px_rgba(34,192,92,0.8)]"></span>
+                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#22C05C] border border-background"></span>
                     </div>
                   </HoverCardTrigger>
                   <HoverCardContent className="w-80 p-0 border-border bg-popover text-popover-foreground shadow-2xl rounded-xl overflow-hidden">
@@ -1555,11 +1669,48 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </HoverCard>
               ))
             )}
+            {hiddenOnlineAgents.length > 0 && (
+              <HoverCard openDelay={120}>
+                <HoverCardTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-8 w-8 min-w-8 rounded-full border border-border bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
+                    aria-label={`Mostrar ${hiddenOnlineAgents.length} agentes online adicionais`}
+                  >
+                    +{hiddenOnlineAgents.length}
+                  </button>
+                </HoverCardTrigger>
+                <HoverCardContent align="end" className="w-64 border-border bg-popover text-popover-foreground">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Outros agentes online
+                  </p>
+                  <div className="mt-2 max-h-56 overflow-y-auto space-y-1">
+                    {hiddenOnlineAgents.map((agent) => (
+                      <button
+                        key={`extra-online-${agent.user.id}`}
+                        type="button"
+                        className="w-full rounded-md px-2 py-1.5 hover:bg-muted text-left flex items-center gap-2"
+                        onClick={() => setSelectedAgent(agent.user)}
+                      >
+                        <Avatar className="h-7 w-7 border border-border shrink-0">
+                          <AvatarImage src={agent.user.avatar} />
+                          <AvatarFallback className="text-[10px]">{agent.user.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{agent.user.name}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{agent.user.team || agent.user.role?.name || 'Agente'}</p>
+                        </div>
+                        <span className="h-2 w-2 rounded-full bg-[#22C05C] shadow-[0_0_8px_rgba(34,192,92,0.8)] shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            )}
             {onlineAgents.length === 0 && (
               <p className="text-xs text-muted-foreground italic sr-only">Nenhum agente online</p>
             )}
           </div>
-        </HoverCard>
       </div>
 
       <AgentProfileSheet
@@ -1569,8 +1720,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         isOnline={true}
       />
 
-      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-border dark:border-white/10">
-        <div className="flex items-center bg-muted/50 rounded-lg p-1 border border-border dark:bg-black/40 dark:border-white/5">
+      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-border">
+        <div className="flex items-center rounded-lg border border-border bg-muted/40 p-1">
           {TABS.map((tab) => {
             const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
             return (
@@ -1580,8 +1731,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 text-xs font-medium py-1.5 rounded-md transition-all duration-200',
                   activeTab === tab.id
-                    ? 'bg-white shadow-sm text-foreground dark:bg-white/10 dark:text-white'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/5'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
                 <span>{tab.label}</span>

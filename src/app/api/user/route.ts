@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { PLANS } from '@/lib/plans';
 import type { User, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
+import { normalizePlanKey } from '@/lib/plans';
+import { normalizeInterfaceTheme } from '@/lib/theme';
 
 export async function GET(request: Request) {
     const supabase = await createClient();
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
         const dbUser = userRes.rows[0];
+        const themePreference = normalizeInterfaceTheme(authUser.user_metadata?.theme_preference);
         console.log(`[API /user] Usuário encontrado: ${dbUser.full_name}`);
 
         console.log(`[API /user] Buscando workspaces para o usuário...`);
@@ -48,25 +50,7 @@ export async function GET(request: Request) {
         `, [userId]);
 
         const workspaces: Workspace[] = workspacesRes.rows.map((r: any) => {
-            const rawPlan = r.plan;
-            let planKey = 'starter';
-
-            if (rawPlan) {
-                // 1. Direct match (lowercase)
-                if (PLANS[rawPlan.toLowerCase() as keyof typeof PLANS]) {
-                    planKey = rawPlan.toLowerCase();
-                }
-                // 2. Case-insensitive search
-                else {
-                    const foundKey = Object.keys(PLANS).find(k => k.toLowerCase() === rawPlan.toLowerCase());
-                    if (foundKey) {
-                        planKey = foundKey;
-                    } else {
-                        // 3. Fallback to raw value (e.g. price_id) to show in UI for debugging
-                        planKey = rawPlan;
-                    }
-                }
-            }
+            const planKey = normalizePlanKey(r.plan);
 
             return {
                 id: r.id,
@@ -93,6 +77,7 @@ export async function GET(request: Request) {
             workspaces,
             activeWorkspaceId: dbUser.last_active_workspace_id || workspaces[0]?.id,
             is_superadmin: dbUser.is_superadmin,
+            themePreference,
         };
 
         console.log('[API /user] Retornando objeto de usuário completo:', user);

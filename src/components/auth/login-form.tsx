@@ -1,65 +1,38 @@
 'use client';
 
-import { useEffect, useState, useActionState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle, Loader2, Mail, Lock } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { login } from '@/actions/auth';
 import { useI18n } from '@/i18n/i18n-provider';
-import Link from 'next/link';
-import Image from 'next/image';
 
 function LoginButton() {
   const { t } = useI18n();
   const { pending } = useFormStatus();
+
   return (
-    <Button
+    <button
       type="submit"
-      className="w-full h-12 text-sm font-bold bg-white text-black hover:bg-gray-100 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all transform hover:-translate-y-0.5 active:scale-95"
+      className="h-12 w-full rounded-2xl bg-slate-950 text-sm font-semibold text-white shadow-[0_20px_40px_-24px_rgba(15,23,42,0.48)] transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
       disabled={pending}
     >
-      {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {pending && <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />}
       {pending ? t("Entrando...") : t("Entrar")}
-    </Button>
-  )
-}
-
-function SocialButton({ provider, icon, label, isIconOnly, children }: { provider: string, icon?: string, label: string, isIconOnly?: boolean, children?: React.ReactNode }) {
-  const { t } = useI18n();
-  return (
-    <Button
-      variant="outline"
-      className="flex-1 h-16 bg-white/5 border-white/10 rounded-2xl hover:bg-white/10 hover:border-white/20 transition-all group flex flex-col items-center justify-center p-2 gap-1"
-    >
-      {icon ? (
-        <Image
-          src={icon}
-          alt={provider}
-          width={20}
-          height={20}
-          className="opacity-70 group-hover:opacity-100 transition-opacity"
-        />
-      ) : (
-        <div className="opacity-70 group-hover:opacity-100 transition-opacity">
-          {children}
-        </div>
-      )}
-      {/* Label is usually omitted in the card style unless it's the primary one, but I'll follow the mockup's smaller grid */}
-    </Button>
-  )
+    </button>
+  );
 }
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const { t } = useI18n();
   const [state, formAction] = useActionState(login as any, { success: false, message: '' });
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const savedRemember = typeof window !== 'undefined' && localStorage.getItem('rememberMe') === 'true';
@@ -76,23 +49,23 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         localStorage.setItem('rememberMe', 'true');
         localStorage.setItem('rememberEmail', email);
       }
-    } else {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('rememberMe');
-        localStorage.removeItem('rememberEmail');
-      }
+    } else if (typeof window !== 'undefined') {
+      localStorage.removeItem('rememberMe');
+      localStorage.removeItem('rememberEmail');
     }
   };
 
   return (
-    <form action={formAction} onSubmit={handleRemember} className="space-y-4">
+    <form action={formAction} onSubmit={handleRemember} className="space-y-5">
       <input type="hidden" name="redirectTo" value={redirectTo || ''} />
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Email")}</Label>
-          <div className="relative group">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-600 group-focus-within:text-[#20E401] transition-colors" />
+          <Label htmlFor="email" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            {t("Email")}
+          </Label>
+          <div className="group relative">
+            <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#20E401]" />
             <Input
               id="email"
               name="email"
@@ -102,63 +75,68 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="h-12 bg-white/5 border-white/10 rounded-xl pl-12 pr-4 text-sm text-white placeholder:text-gray-700 focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all"
+              className="h-12 rounded-2xl border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 placeholder:text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] focus:border-[#20E401]/35 focus:ring-[#20E401]/10"
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">{t("Senha")}</Label>
-          <div className="relative group">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-600 group-focus-within:text-[#20E401] transition-colors" />
+          <Label htmlFor="password" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            {t("Senha")}
+          </Label>
+          <div className="group relative">
+            <Lock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#20E401]" />
             <Input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               placeholder="************"
               required
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="h-12 bg-white/5 border-white/10 rounded-xl pl-12 pr-12 text-sm text-white placeholder:text-gray-700 focus:border-[#20E401]/50 focus:ring-[#20E401]/10 transition-all"
+              className="h-12 rounded-2xl border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-950 placeholder:text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] focus:border-[#20E401]/35 focus:ring-[#20E401]/10"
             />
-            <button type="button" className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? t("Ocultar senha") : t("Mostrar senha")}
+              aria-pressed={showPassword}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between px-1">
-        <label className="flex items-center gap-2 cursor-pointer group">
+      <div className="flex items-center justify-between px-1 pt-1">
+        <label className="group flex cursor-pointer items-center gap-2">
           <input
             id="remember-me"
             name="remember-me"
             type="checkbox"
-            className="h-4 w-4 rounded border-white/10 bg-white/5 text-[#20E401] focus:ring-2 focus:ring-[#20E401]/20 cursor-pointer"
+            className="h-4 w-4 cursor-pointer rounded border-black/10 bg-white text-[#20E401] focus:ring-2 focus:ring-[#20E401]/20"
             checked={rememberMe}
             onChange={(e) => setRememberMe(e.target.checked)}
           />
-          <span className="text-xs text-gray-500 group-hover:text-gray-400 transition-colors leading-none">{t("Lembrar de mim")}</span>
+          <span className="text-[13px] leading-none text-slate-500 transition-colors group-hover:text-slate-700">{t("Lembrar de mim")}</span>
         </label>
-        <Link href="/forgot-password" className="text-xs font-bold text-brand-blue hover:text-[#20E401] transition-colors">
+        <Link href="/forgot-password" className="text-[13px] font-medium text-slate-600 transition-colors hover:text-slate-950">
           {t("Esqueceu a senha?")}
         </Link>
       </div>
 
       {state?.message && (
-        <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-400 py-3">
+        <Alert className="rounded-2xl border-red-200 bg-red-50 py-3 text-red-700">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="text-xs font-medium">{state.message}</AlertDescription>
+          <AlertDescription className="text-sm font-medium">{state.message}</AlertDescription>
         </Alert>
       )}
 
-      <div className='pt-2'>
+      <div className="pt-2">
         <LoginButton />
       </div>
-
-
-
     </form>
   );
 }

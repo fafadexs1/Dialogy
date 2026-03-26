@@ -1,19 +1,16 @@
 'use client';
 
-import Image from 'next/image';
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
+import { useActionState } from 'react';
 import { register } from '@/actions/auth';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle } from 'lucide-react';
 import { RegisterForm } from '@/components/auth/register-form';
 import { RegisterShowcase } from '@/components/auth/register-showcase';
-import { useActionState } from 'react';
+import { BrandMark } from '@/components/landing/BrandMark';
 import { useI18n } from '@/i18n/i18n-provider';
-import { StarsBackground } from '@/components/landing/ui/StarsBackground';
-import { ShootingStars } from '@/components/landing/ui/ShootingStars';
-import Particles from '@/components/landing/ui/Particles';
+import { REFERRAL_COOKIE_NAME, normalizeReferralCode } from '@/lib/referrals';
 
 export default function RegisterPage() {
     const { t } = useI18n();
@@ -21,6 +18,7 @@ export default function RegisterPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const redirectTo = searchParams.get('next');
+    const referralCode = normalizeReferralCode(searchParams.get('ref'));
 
     useEffect(() => {
         if (registerState.success) {
@@ -28,67 +26,69 @@ export default function RegisterPage() {
         }
     }, [registerState.success, router, redirectTo]);
 
+    useEffect(() => {
+        if (!referralCode) {
+            return;
+        }
+
+        document.cookie = `${REFERRAL_COOKIE_NAME}=${referralCode}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
+    }, [referralCode]);
+
     return (
-        <div className="h-screen bg-[#050507] text-gray-100 font-body selection:bg-brand-green/30 selection:text-white relative overflow-hidden flex items-center justify-center p-4 md:p-6">
-            {/* Background Effects */}
-            <div className="fixed inset-0 z-0 pointer-events-none">
-                <StarsBackground />
-                <ShootingStars />
-                <Particles
-                    className="absolute inset-0"
-                    quantity={80}
-                    ease={80}
-                    color="#20E401"
-                    refresh
-                />
+        <div className="relative min-h-screen overflow-y-auto overflow-x-hidden bg-[#f4f1e8] px-4 py-6 font-body text-slate-900 selection:bg-brand-green/20 selection:text-slate-950 md:px-6 md:py-8">
+            <div className="pointer-events-none fixed inset-0 z-0">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(25,245,178,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(58,169,255,0.08),transparent_30%),linear-gradient(180deg,#ffffff_0%,#f4f1e8_68%,#ece7db_100%)]" />
+                <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:36px_36px] opacity-20" />
+                <div className="absolute left-[10%] top-[18%] h-56 w-56 rounded-full bg-emerald-200/35 blur-[110px]" />
+                <div className="absolute bottom-[12%] right-[12%] h-64 w-64 rounded-full bg-sky-200/30 blur-[120px]" />
             </div>
 
-            {/* Main Container - Split Screen */}
-            <div className="w-full max-w-4xl max-h-[80vh] grid grid-cols-1 lg:grid-cols-2 bg-[#0B0B10]/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-2xl relative z-10 overflow-hidden">
-
-                {/* Left Side: Register Form */}
-                <div className="flex flex-col items-center justify-center p-6 md:p-8 lg:p-10 relative overflow-y-auto">
-                    <div className="w-full max-w-sm">
-                        <div className="text-center mb-6">
-                            <Link href="/" className="inline-flex items-center gap-2 mb-4 group transition-transform hover:scale-105">
-                                <img src="/logo.png" alt="Dialogy" className="h-7 md:h-8 w-auto object-contain" />
+            <div className="relative z-10 mx-auto grid w-full max-w-[1120px] grid-cols-1 overflow-hidden rounded-[2rem] border border-black/10 bg-white/80 shadow-[0_50px_140px_-70px_rgba(15,23,42,0.55)] backdrop-blur-2xl lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <div className="relative border-b border-black/5 bg-white/55 p-6 md:p-10 lg:border-b-0 lg:border-r lg:border-black/5 lg:p-12">
+                    <div className="mx-auto w-full max-w-sm py-2">
+                        <div className="mb-8 flex items-center justify-between">
+                            <Link href="/" className="transition-transform hover:scale-[1.02]">
+                                <BrandMark />
                             </Link>
+                            <Link
+                                href="/"
+                                className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                                Voltar
+                            </Link>
+                        </div>
 
-                            {/* Decorative icon box */}
-                            <div className="flex justify-center mb-4">
-                                <div className="w-12 h-12 rounded-xl bg-[#20E401]/10 border border-[#20E401]/20 flex items-center justify-center shadow-[0_0_30px_rgba(32,228,1,0.1)]">
-                                    <div className="w-6 h-6 text-[#20E401]">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></svg>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <h1 className="text-2xl md:text-3xl font-bold mb-2 tracking-tight text-white leading-tight">
-                                {t("Crie sua conta")}
+                        <div className="mb-8 text-left">
+                            <h1 className="mb-3 text-3xl font-semibold leading-tight tracking-tight text-slate-950 md:text-[2rem]">
+                                {t('Crie sua conta')}
                             </h1>
-                            <p className="text-gray-400 text-xs md:text-sm leading-relaxed">
-                                {t("Comece a automatizar suas conversas hoje mesmo.")}
+                            <p className="max-w-[28rem] text-sm leading-7 text-slate-500">
+                                {t('Comece a automatizar suas conversas hoje mesmo.')}
                             </p>
                         </div>
 
                         {registerState.message && (
-                            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-center font-medium animate-in fade-in slide-in-from-top-2">
+                            <div className="mb-6 animate-in rounded-2xl border border-red-200 bg-red-50/80 p-4 text-sm font-medium text-red-700 fade-in slide-in-from-top-2">
                                 {registerState.message}
                             </div>
                         )}
 
-                        <RegisterForm onRegister={registerAction} pending={isRegisterPending} />
+                        <RegisterForm
+                            onRegister={registerAction}
+                            pending={isRegisterPending}
+                            referralCode={referralCode}
+                        />
 
-                        <p className="text-center mt-6 text-xs text-gray-500">
-                            {t("Já tem uma conta?")} {' '}
-                            <Link href="/login" className="text-[#20E401] hover:text-white font-semibold transition-colors decoration-[#20E401]/30 underline-offset-4 hover:underline">
-                                {t("Entre agora")}
+                        <p className="mt-8 text-sm text-slate-500">
+                            {t('Já tem uma conta?')} {' '}
+                            <Link href="/login" className="font-semibold text-slate-950 transition-colors hover:text-[#20E401] hover:underline hover:underline-offset-4">
+                                {t('Entre agora')}
                             </Link>
                         </p>
                     </div>
                 </div>
 
-                {/* Right Side: Showcase */}
                 <RegisterShowcase />
             </div>
         </div>

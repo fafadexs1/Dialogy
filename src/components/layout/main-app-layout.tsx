@@ -9,11 +9,15 @@ import type { User } from '@/lib/types';
 import React from 'react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { useAuth } from '@/providers/auth-provider';
+import { useTheme } from 'next-themes';
 
 export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const user = useCurrentUser();
   const { user: authUser, isLoading: authLoading } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const isInboxRoute = pathname === '/inbox' || pathname.startsWith('/inbox/');
+  const [mounted, setMounted] = React.useState(false);
 
   const noSidebarPrefixes = [
     '/login',
@@ -35,12 +39,42 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   // 1. We have a user (either full profile or raw auth) AND it's a sidebar-compatible route
   // 2. OR if we are still loading authentication
   const shouldShowSidebar = (user || authUser || authLoading) && !isRoot && !isNoSidebarRoute;
+  const initialTheme = user?.themePreference === 'light' || user?.themePreference === 'dark'
+    ? user.themePreference
+    : 'dark';
+  const effectiveTheme = mounted ? resolvedTheme ?? initialTheme : initialTheme;
+  const isLightTheme = effectiveTheme === 'light';
+  const shellThemeClass = shouldShowSidebar
+    ? isInboxRoute
+      ? (isLightTheme ? 'inbox-light' : 'inbox-dark')
+      : (isLightTheme ? 'app-shell-light' : '')
+    : '';
   const transitionKey = pathname.split('?')[0];
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+
+    root.classList.remove('app-shell-light', 'inbox-light', 'inbox-dark');
+
+    if (shellThemeClass) {
+      root.classList.add(shellThemeClass);
+    }
+
+    return () => {
+      root.classList.remove('app-shell-light', 'inbox-light', 'inbox-dark');
+    };
+  }, [shellThemeClass]);
 
   return (
     <div
       className={cn(
-        'h-dvh w-full bg-muted/30',
+        'h-dvh w-full',
+        shellThemeClass,
+        shouldShowSidebar ? 'bg-background' : 'bg-muted/30',
         shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'flex'
       )}
     >

@@ -4,11 +4,13 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import type { OnlineAgent, User } from '@/lib/types';
+import type { InterfaceTheme, OnlineAgent, User } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { cache } from 'react';
 import { getPresenceTtlSeconds } from '@/lib/presence';
 import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
+import { normalizePlanKey } from '@/lib/plans';
+import { normalizeInterfaceTheme } from '@/lib/theme';
 
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 
@@ -324,6 +326,36 @@ export async function updateUserProfile(prevState: any, formData: FormData): Pro
     return { success: true, error: null };
 }
 
+export async function updateUserThemePreference(themePreference: InterfaceTheme): Promise<{ success: boolean; error?: string | null }> {
+    const normalizedTheme = normalizeInterfaceTheme(themePreference);
+    if (!normalizedTheme) {
+        return { success: false, error: 'Tema inválido.' };
+    }
+
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuário não autenticado.' };
+    }
+
+    const { error } = await supabase.auth.updateUser({
+        data: {
+            theme_preference: normalizedTheme,
+        }
+    });
+
+    if (error) {
+        console.error('[UPDATE_USER_THEME_PREFERENCE] Erro:', error);
+        return { success: false, error: 'Falha ao atualizar a preferência de tema.' };
+    }
+
+    revalidatePath('/settings/profile');
+    revalidatePath('/', 'layout');
+
+    return { success: true, error: null };
+}
+
 export const getCurrentUser = cache(async function getCurrentUser(): Promise<User | null> {
     const supabase = await createClient();
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -339,6 +371,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             return null;
         }
         const dbUser = userRes.rows[0];
+        const themePreference = normalizeInterfaceTheme(authUser.user_metadata?.theme_preference);
 
         const workspacesRes = await db.query(`
             SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, 
@@ -355,17 +388,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const workspaces = workspacesRes.rows.map((r: any) => {
             const normalizedWorkspaceAvatar = normalizeSupabaseStorageUrl(r.avatar_url);
             // Normalize plan key (same logic as /api/user/route.ts)
-            const rawPlan = r.plan;
-            let planKey = 'starter';
-            if (rawPlan) {
-                const normalizedPlan = rawPlan.toLowerCase();
-                // Check known plan keys
-                if (['starter', 'growth', 'pro', 'enterprise'].includes(normalizedPlan)) {
-                    planKey = normalizedPlan;
-                } else {
-                    planKey = rawPlan; // Keep original for debugging
-                }
-            }
+            const planKey = normalizePlanKey(r.plan);
 
             return {
                 id: r.id,
@@ -400,6 +423,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             workspaces,
             activeWorkspaceId,
             activeWorkspaceTimezone,
+            themePreference,
         };
 
     } catch (error) {
