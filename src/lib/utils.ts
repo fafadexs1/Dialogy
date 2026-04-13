@@ -89,11 +89,17 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
 
 export function sanitizeUrl(url: string | null | undefined): string | null | undefined {
   if (!url) return url;
+
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return null;
+
   try {
-    const parsed = new URL(url);
-    parsed.search = '';
+    const parsed = new URL(trimmedUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
     return parsed.toString();
   } catch (e) {
-    return url;
+    return trimmedUrl;
   }
 }

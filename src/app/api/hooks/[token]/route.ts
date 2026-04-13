@@ -4,6 +4,7 @@ import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentTemplate
 import { isSGPPayload, adaptSGPPayload, normalizeAgentListPayload, AgentSendPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
+import { findOrCreateWhatsappContact } from '@/lib/whatsapp/contact-identity';
 
 interface MediaFilePayload {
     base64: string;
@@ -20,24 +21,12 @@ interface MediaFilePayload {
 async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: string): Promise<string> {
     const client = await db.connect();
     try {
-        const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
-        const rawDigits = phoneNumber.replace(/\D/g, '') || phoneNumber;
-
-        // 1. Find or create the contact
-        let contactRes = await client.query(
-            'SELECT id FROM contacts WHERE phone_number_jid = $1 AND workspace_id = $2',
-            [fullJid, workspaceId]
-        );
-
-        if (contactRes.rowCount === 0) {
-            contactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-                [workspaceId, rawDigits, rawDigits, fullJid]
-            );
-        }
-        const contactId = contactRes.rows[0].id;
+        const resolvedContact = await findOrCreateWhatsappContact(client, {
+            workspaceId,
+            phoneOrJid: phoneNumber,
+            fallbackName: phoneNumber,
+        });
+        const contactId = resolvedContact.contact.id;
 
         // 2. Look for an existing active chat
         const chatRes = await client.query(

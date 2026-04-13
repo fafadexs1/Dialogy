@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Menu, X } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import Link from 'next/link';
 import { BrandMark } from '../BrandMark';
 
@@ -14,8 +15,14 @@ const sectionLinks = [
 export function Navbar() {
     const [scrolled, setScrolled] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const isMobile = useIsMobile();
 
     useEffect(() => {
+        if (isMobile) {
+            setScrolled(false);
+            return;
+        }
+
         const handleScroll = () => {
             const scrollPos = window.scrollY || document.documentElement.scrollTop;
             setScrolled(scrollPos > 12);
@@ -25,12 +32,12 @@ export function Navbar() {
         handleScroll();
 
         return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+    }, [isMobile]);
 
     return (
         <header className={`fixed inset-x-0 top-0 z-[100] transition-all duration-300 ${scrolled ? 'py-2 md:py-3' : 'py-3 md:py-5'}`}>
             <div className="mx-auto max-w-7xl px-3 md:px-8">
-                <div className={`rounded-full border bg-white/95 px-4 py-2.5 shadow-[0_14px_32px_-24px_rgba(15,23,42,0.28)] transition-all duration-300 md:bg-white/90 md:backdrop-blur md:shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)] ${scrolled ? 'border-black/10' : 'border-black/5'}`}>
+                <div className={`rounded-full border bg-white px-4 py-2.5 shadow-[0_14px_32px_-24px_rgba(15,23,42,0.22)] transition-all duration-300 md:bg-white/90 md:backdrop-blur md:shadow-[0_22px_60px_-42px_rgba(15,23,42,0.45)] ${scrolled ? 'border-black/10' : 'border-black/5'}`}>
                     <div className="flex items-center justify-between gap-4">
                         <Link href="/" className="shrink-0">
                             <BrandMark

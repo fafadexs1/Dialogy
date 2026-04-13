@@ -52,7 +52,7 @@ describe('dispatchMessageToWebhooks', () => {
     globalThis.fetch = originalFetch;
   });
 
-  function mockDatabase(instanceType: 'wa_cloud' | 'baileys') {
+  function mockDatabase(instanceType: 'wa_cloud' | 'baileys' | 'telegram') {
     queryMock.mockImplementation(async (sql: string) => {
       const text = String(sql);
 
@@ -94,7 +94,7 @@ describe('dispatchMessageToWebhooks', () => {
         };
       }
 
-      if (text.includes('FROM evolution_api_instances')) {
+      if (text.includes('FROM evolution_api_instances') || text.includes('FROM telegram_bot_instances')) {
         return {
           rows: [{ type: instanceType }],
           rowCount: 1,
@@ -142,5 +142,18 @@ describe('dispatchMessageToWebhooks', () => {
     const body = JSON.parse(options.body);
 
     expect(body.conversation.instance_type).toBe('baileys');
+  });
+
+  it('includes telegram as the conversation channel and instance type', async () => {
+    mockDatabase('telegram');
+
+    await dispatchMessageToWebhooks(baseChat, baseMessage, 'tg1');
+
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    const [, options] = (globalThis.fetch as any).mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.conversation.channel).toBe('Telegram');
+    expect(body.conversation.instance_type).toBe('telegram');
   });
 });

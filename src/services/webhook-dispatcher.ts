@@ -5,7 +5,7 @@ import type { Message, Chat, Contact } from '@/lib/types';
 
 const WEBHOOK_TIMEOUT_MS = Number(process.env.WEBHOOK_TIMEOUT_MS ?? 8000);
 const FAILED_MESSAGE_STATUSES = new Set(['FAILED', 'ERROR']);
-type WebhookWhatsappInstanceType = 'cloud' | 'baileys';
+type WebhookInstanceType = 'cloud' | 'baileys' | 'telegram';
 
 interface WebhookPayload {
     event: 'message.created';
@@ -18,7 +18,7 @@ interface WebhookPayload {
         status: Chat['status'];
         channel: string; // e.g., 'WhatsApp'
         instance_name: string;
-        instance_type?: WebhookWhatsappInstanceType;
+        instance_type?: WebhookInstanceType;
         assigned_agent: {
             id: string | undefined;
             name: string | undefined;
@@ -103,23 +103,26 @@ function toIsoDate(value: string | Date): string {
     return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
 
-function normalizeWhatsappInstanceType(
+function normalizeInstanceType(
     instanceType: string | null | undefined
-): WebhookWhatsappInstanceType | undefined {
+): WebhookInstanceType | undefined {
     if (instanceType === 'wa_cloud') {
         return 'cloud';
     }
     if (instanceType === 'baileys') {
         return 'baileys';
     }
+    if (instanceType === 'telegram') {
+        return 'telegram';
+    }
     return undefined;
 }
 
-async function resolveWhatsappInstanceType(
+async function resolveInstanceType(
     instanceName: string | undefined,
     knownInstanceType?: Chat['instance_type'] | null
-): Promise<WebhookWhatsappInstanceType | undefined> {
-    const normalizedKnownType = normalizeWhatsappInstanceType(knownInstanceType);
+): Promise<WebhookInstanceType | undefined> {
+    const normalizedKnownType = normalizeInstanceType(knownInstanceType);
     if (normalizedKnownType) {
         return normalizedKnownType;
     }
@@ -130,14 +133,23 @@ async function resolveWhatsappInstanceType(
     }
 
     const res = await db.query(
-        `SELECT type
-         FROM evolution_api_instances
-         WHERE instance_name = $1
-         LIMIT 1`,
+        `
+         SELECT type
+         FROM (
+           SELECT type
+           FROM evolution_api_instances
+           WHERE instance_name = $1
+           UNION ALL
+           SELECT 'telegram'::text AS type
+           FROM telegram_bot_instances
+           WHERE instance_name = $1
+         ) instances
+         LIMIT 1
+        `,
         [trimmedInstanceName]
     );
 
-    return normalizeWhatsappInstanceType(res.rows[0]?.type);
+    return normalizeInstanceType(res.rows[0]?.type);
 }
 
 export async function dispatchMessageToWebhooksById(
@@ -289,7 +301,7 @@ export async function dispatchMessageToWebhooks(
         const [workspaceName, contactWithDetails, instanceType] = await Promise.all([
             getWorkspaceName(chat.workspace_id),
             getContactWithCustomFields(chat.contact.id),
-            resolveWhatsappInstanceType(instanceName || message.instance_name, chat.instance_type),
+            resolveInstanceType(instanceName || message.instance_name, chat.instance_type),
         ]);
 
         if (!contactWithDetails) {
@@ -306,7 +318,7 @@ export async function dispatchMessageToWebhooks(
             conversation: {
                 id: chat.id,
                 status: chat.status,
-                channel: 'WhatsApp', // Placeholder
+                channel: instanceType === 'telegram' ? 'Telegram' : 'WhatsApp',
                 instance_name: instanceName || 'N/A',
                 ...(instanceType ? { instance_type: instanceType } : {}),
                 assigned_agent: {

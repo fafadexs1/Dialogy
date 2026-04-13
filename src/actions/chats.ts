@@ -16,9 +16,23 @@ import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
 import { reportServerError } from '@/lib/observability/errors';
 import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-config';
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
+import { touchUserPresenceActivity } from '@/lib/presence-server';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(errorMessage));
+        }, timeoutMs);
+
+        promise
+            .then(resolve)
+            .catch(reject)
+            .finally(() => clearTimeout(timer));
+    });
+}
 
 // Helper function to check for permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -77,6 +91,7 @@ export const assignChatToSelfAction = withDebug(
                 [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, currentAgentId]
             );
 
+            await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'assign_chat');
             console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
 
             // Fetch updated chat with full details (tags, colors) to return to frontend
@@ -188,6 +203,8 @@ export const transferChatAction = withDebug(
                 console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
                 console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
                 const presenceTtlSeconds = getPresenceTtlSeconds();
+                const recentActivitySeconds = getPresenceRecentActivitySeconds();
+                const availabilitySql = buildPresenceAvailabilitySql('uwp', '$3', '$4');
                 const query = `
                 SELECT
                     u.id as "agentId",
@@ -202,15 +219,14 @@ export const transferChatAction = withDebug(
                     AND uwp.workspace_id = t.workspace_id
                 LEFT JOIN chats c ON u.id = c.agent_id
                 WHERE tm.team_id = $1
-                  AND uwp.is_online = TRUE
-                  AND uwp.last_seen > NOW() - ($3 * interval '1 second')
+                  AND ${availabilitySql}
                   AND u.id <> $2
                 GROUP BY u.id, t.name
                 ORDER BY "lastAssigned" ASC NULLS FIRST, random()
                 LIMIT 1
             `;
 
-                const agentRes = await client.query(query, [teamId, currentAgentId, presenceTtlSeconds]);
+                const agentRes = await client.query(query, [teamId, currentAgentId, presenceTtlSeconds, recentActivitySeconds]);
 
                 if (agentRes.rows.length === 0) {
                     await client.query('ROLLBACK');
@@ -268,6 +284,9 @@ export const transferChatAction = withDebug(
             ]);
 
             await client.query('COMMIT');
+            if (!isSystemAgent) {
+                await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'transfer_chat');
+            }
             console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
             if (isActualTransfer) {
                 // Run template notice asynchronously so transfer UX stays snappy.
@@ -734,7 +753,7 @@ async function fetchChats({
     let beforeClause = '';
     if (before) {
         params.push(before);
-        beforeClause = `AND GREATEST(lmd.created_at, fc.closed_at, fc.assigned_at, fc.created_at) < $${queryIndex}`;
+        beforeClause = `AND cca.chat_activity_at < $${queryIndex}`;
         queryIndex++;
     }
 
@@ -757,8 +776,8 @@ async function fetchChats({
     if (includeChatId) {
         params.push(includeChatId);
         includeChatClause = `
-        , target_chat AS (
-            SELECT *
+        , target_chat_ids AS (
+            SELECT id
             FROM chats
             WHERE workspace_id = $1 AND id = $${queryIndex}
         )`;
@@ -774,42 +793,36 @@ async function fetchChats({
               ${statusClause}
               ${ownershipClause}
         ),
-        last_message_details AS (
-            SELECT DISTINCT ON (m.chat_id)
-                m.id,
-                m.chat_id,
-                m.content,
-                m.type,
-                m.metadata,
-                m.transcription,
-                m.created_at,
-                m.from_me,
-                m.sender_user_id,
-                m.sender_system_agent_id,
-                m.instance_name,
-                m.source_from_api,
-                m.platform,
-                m.message_id_from_api,
-                m.api_message_status,
-                m.is_read,
-                m.sent_by_tab
-            FROM messages m
-            WHERE m.chat_id IN (SELECT id FROM filtered_chats)
-            ORDER BY m.chat_id, m.created_at DESC
-        ),
-        sorted_chats AS (
-            SELECT fc.*
+        candidate_chat_activity AS (
+            SELECT
+                fc.id,
+                GREATEST(lm.created_at, fc.closed_at, fc.assigned_at, fc.created_at) AS chat_activity_at
             FROM filtered_chats fc
-            LEFT JOIN last_message_details lmd ON lmd.chat_id = fc.id
+            LEFT JOIN LATERAL (
+                SELECT m.created_at
+                FROM messages m
+                WHERE m.chat_id = fc.id
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 1
+            ) lm ON TRUE
+        ),
+        sorted_chat_ids AS (
+            SELECT cca.id
+            FROM candidate_chat_activity cca
             WHERE 1=1
               ${beforeClause}
-            ORDER BY GREATEST(lmd.created_at, fc.closed_at, fc.assigned_at, fc.created_at) DESC
+            ORDER BY cca.chat_activity_at DESC
             LIMIT $2
         )
         ${includeChatClause}
-        , merged_chats AS (
-            SELECT * FROM sorted_chats
-            ${includeChatId ? 'UNION SELECT * FROM target_chat' : ''}
+        , merged_chat_ids AS (
+            SELECT id FROM sorted_chat_ids
+            ${includeChatId ? 'UNION SELECT id FROM target_chat_ids' : ''}
+        ),
+        merged_chats AS (
+            SELECT c.*
+            FROM chats c
+            JOIN merged_chat_ids mci ON mci.id = c.id
         ),
         unread_counts AS (
             SELECT
@@ -857,7 +870,7 @@ async function fetchChats({
             t.id AS team_id,
             t.name AS team_name,
             t.color AS team_color,
-            eai.type AS instance_type,
+            channel_instance.type AS instance_type,
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
@@ -884,7 +897,30 @@ async function fetchChats({
             COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
             COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
         FROM merged_chats c
-        LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN LATERAL (
+            SELECT
+                m.id,
+                m.chat_id,
+                m.content,
+                m.type,
+                m.metadata,
+                m.transcription,
+                m.created_at,
+                m.from_me,
+                m.sender_user_id,
+                m.sender_system_agent_id,
+                m.instance_name,
+                m.source_from_api,
+                m.platform,
+                m.message_id_from_api,
+                m.api_message_status,
+                m.is_read,
+                m.sent_by_tab
+            FROM messages m
+            WHERE m.chat_id = c.id
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT 1
+        ) lmd ON TRUE
         LEFT JOIN unread_counts uc ON uc.chat_id = c.id
         LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
@@ -900,8 +936,21 @@ async function fetchChats({
         ) mct_stable ON true
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
-        LEFT JOIN evolution_api_instances eai ON eai.instance_name = lmd.instance_name
-            AND eai.workspace_id = c.workspace_id
+        LEFT JOIN LATERAL (
+            SELECT type
+            FROM (
+                SELECT eai.type
+                FROM evolution_api_instances eai
+                WHERE eai.instance_name = lmd.instance_name
+                  AND eai.workspace_id = c.workspace_id
+                UNION ALL
+                SELECT 'telegram'::text AS type
+                FROM telegram_bot_instances tbi
+                WHERE tbi.instance_name = lmd.instance_name
+                  AND tbi.workspace_id = c.workspace_id
+            ) instances
+            LIMIT 1
+        ) channel_instance ON true
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
         params
@@ -967,33 +1016,37 @@ export const getInitialChatsData = withDebug(
             const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
 
             const activeChatsLimit = 200; // Paginated; more loaded on scroll
-            const activeChatsPromise = fetchChats({
-                workspaceId,
-                userId,
-                limit: activeChatsLimit,
-                includeChatId: selectedChatId,
-                ownership,
-                statuses: ['gerais', 'atendimentos']
-            });
-
-            const closedChatsLimit = 20;
-            const closedChatsPromise = fetchChats({
-                workspaceId,
-                userId,
-                limit: closedChatsLimit,
-                includeChatId: null,
-                ownership,
-                statuses: ['encerrados']
-            });
-
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout ao buscar chats')), 10000)
+            const activeChatRows = await withTimeout(
+                fetchChats({
+                    workspaceId,
+                    userId,
+                    limit: activeChatsLimit,
+                    includeChatId: selectedChatId,
+                    ownership,
+                    statuses: ['gerais', 'atendimentos']
+                }),
+                10000,
+                'Timeout ao buscar chats ativos'
             );
 
-            const [activeChatRows, closedChatRows] = await Promise.race([
-                Promise.all([activeChatsPromise, closedChatsPromise]),
-                timeoutPromise
-            ]) as [ChatRow[], ChatRow[]];
+            const closedChatsLimit = ownership === 'everyone' ? 10 : 20;
+            let closedChatsDegraded = false;
+            const closedChatRows = await withTimeout(
+                fetchChats({
+                    workspaceId,
+                    userId,
+                    limit: closedChatsLimit,
+                    includeChatId: null,
+                    ownership,
+                    statuses: ['encerrados']
+                }),
+                4000,
+                'Timeout ao buscar chats encerrados'
+            ).catch((error) => {
+                closedChatsDegraded = true;
+                console.warn('[GET_INITIAL_CHATS] Closed chats load degraded:', error);
+                return [] as ChatRow[];
+            });
 
             const allChatRows = [...activeChatRows, ...closedChatRows];
 
@@ -1007,7 +1060,7 @@ export const getInitialChatsData = withDebug(
 
             const { chats, lastSyncChats } = await hydrateChats(uniqueChatRows, timezone);
 
-            const hasMoreChats = closedChatRows.length === closedChatsLimit;
+            const hasMoreChats = closedChatsDegraded || closedChatRows.length === closedChatsLimit;
 
             const messages: Message[] = [];
             const lastSyncMessageForSelected: string | null = null;
@@ -1800,7 +1853,7 @@ async function fetchChatsDelta({
             COALESCE(uc.unread_count, 0) AS unread_count,
             t.name AS team_name,
             t.id AS team_id,
-            eai.type AS instance_type,
+            channel_instance.type AS instance_type,
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
@@ -1831,7 +1884,21 @@ async function fetchChatsDelta({
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         LEFT JOIN team_members tm ON c.agent_id = tm.user_id
         LEFT JOIN teams t ON tm.team_id = t.id
-        LEFT JOIN evolution_api_instances eai ON lmd.instance_name = eai.instance_name AND eai.workspace_id = c.workspace_id
+        LEFT JOIN LATERAL (
+            SELECT type
+            FROM (
+                SELECT eai.type
+                FROM evolution_api_instances eai
+                WHERE eai.instance_name = lmd.instance_name
+                  AND eai.workspace_id = c.workspace_id
+                UNION ALL
+                SELECT 'telegram'::text AS type
+                FROM telegram_bot_instances tbi
+                WHERE tbi.instance_name = lmd.instance_name
+                  AND tbi.workspace_id = c.workspace_id
+            ) instances
+            LIMIT 1
+        ) channel_instance ON true
         WHERE GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,

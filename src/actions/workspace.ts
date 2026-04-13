@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
-import { updateUserOnlineStatus } from '@/actions/user';
+import { updateUserOnlineStatus } from '@/lib/presence-server';
 
 export async function createWorkspaceAction(
   prevState: any,
@@ -228,7 +228,7 @@ export async function switchWorkspaceAction(workspaceId: string) {
 
     if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
       // 2. Mark as offline in the OLD workspace (clear all sessions)
-      await updateUserOnlineStatus(userId, oldWorkspaceId, false, undefined, true);
+      await updateUserOnlineStatus(userId, oldWorkspaceId, false, undefined, true, 'workspace_switch');
       console.log(`[SWITCH_WORKSPACE] User ${userId} marked offline in old workspace ${oldWorkspaceId}`);
     }
 
@@ -236,7 +236,7 @@ export async function switchWorkspaceAction(workspaceId: string) {
     await db.query('UPDATE users SET last_active_workspace_id = $1 WHERE id = $2', [workspaceId, userId]);
 
     // 4. Force online in NEW workspace immediately
-    await updateUserOnlineStatus(userId, workspaceId, true);
+    await updateUserOnlineStatus(userId, workspaceId, true, undefined, false, 'workspace_switch_bootstrap');
 
     console.log(`[SWITCH_WORKSPACE] Usuário ${userId} trocou para o workspace ${workspaceId}.`);
   } catch (error) {

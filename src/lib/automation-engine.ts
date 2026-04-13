@@ -1,5 +1,10 @@
 import { db } from '@/lib/db';
 import type { AutomationAction, CrmAutomation } from '@/actions/automations';
+import {
+    ensurePipelineTagSchema,
+    getDefaultPipelineStageValueForWorkspace,
+} from '@/lib/crm-pipeline-server';
+import { PIPELINE_STAGE_CATEGORY } from '@/lib/crm-pipeline';
 
 // ─── Event Types ────────────────────────────────────────────────────────────
 
@@ -401,6 +406,7 @@ async function executeActions(actions: AutomationAction[], event: AutomationEven
 async function executeMoveTo(event: AutomationEvent, config: Record<string, any>): Promise<void> {
     const targetStage = config.stage;
     if (!targetStage) return;
+    await ensurePipelineTagSchema();
 
     // Find the tag for the target stage
     const tagRes = await db.query(
@@ -414,9 +420,9 @@ async function executeMoveTo(event: AutomationEvent, config: Record<string, any>
     // Remove any existing stage tags and add the new one
     await db.query(
         `DELETE FROM contact_tags WHERE contact_id = $1 AND tag_id IN (
-            SELECT id FROM tags WHERE workspace_id = $2 AND value IN ('novo', 'qualificado', 'proposta', 'negociacao', 'fechamento')
+            SELECT id FROM tags WHERE workspace_id = $2 AND category = $3
         )`,
-        [event.contactId, event.workspaceId]
+        [event.contactId, event.workspaceId, PIPELINE_STAGE_CATEGORY]
     );
 
     await db.query(
@@ -445,7 +451,7 @@ async function executeAssignOwner(event: AutomationEvent, config: Record<string,
 async function executeCreateDeal(event: AutomationEvent, config: Record<string, any>): Promise<void> {
     const title = config.title || 'Deal Automático';
     const value = config.value || 0;
-    const stage = config.stage || 'novo';
+    const stage = config.stage || await getDefaultPipelineStageValueForWorkspace(event.workspaceId);
 
     await db.query(
         `INSERT INTO deals (workspace_id, contact_id, title, value, stage)

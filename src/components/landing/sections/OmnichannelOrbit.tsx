@@ -10,6 +10,7 @@ import {
     Sparkles,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 import { FacebookIcon, InstagramIcon, MercadoLivreIcon, WhatsAppIcon } from './ui/Icons';
 
@@ -28,6 +29,26 @@ const channelCards = [
 ];
 
 export const OmnichannelOrbit = () => {
+    const isMobile = useIsMobile();
+    const introMotionProps = {
+        initial: { opacity: 0, y: 30 },
+        whileInView: { opacity: 1, y: 0 },
+        viewport: { once: true, margin: "-100px" },
+        transition: { duration: 0.7, ease: "easeOut" },
+    };
+    const panelMotionProps = {
+        initial: { opacity: 0, y: 40 },
+        whileInView: { opacity: 1, y: 0 },
+        viewport: { once: true, margin: "-100px" },
+        transition: { duration: 0.8, delay: 0.2, ease: "easeOut" },
+    };
+    const channelMotionProps = (index: number) => ({
+        initial: { opacity: 0, scale: 0.8 },
+        whileInView: { opacity: 1, scale: 1 },
+        viewport: { once: true },
+        transition: { duration: 0.4, delay: 0.3 + index * 0.05 },
+    });
+
     return (
         <section
             id="omnichannel"
@@ -35,19 +56,16 @@ export const OmnichannelOrbit = () => {
         >
             <div className="pointer-events-none absolute inset-0">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(25,245,178,0.08),transparent_34%),linear-gradient(180deg,#f9fafb_0%,#f5f7fb_100%)]" />
-                <div className="absolute left-[5%] top-10 h-80 w-80 rounded-full bg-blue-100/40 blur-[120px]" />
-                <div className="absolute bottom-0 right-[5%] h-96 w-96 rounded-full bg-sky-200/25 blur-[140px]" />
+                <div className="absolute left-[5%] top-10 hidden h-80 w-80 rounded-full bg-blue-100/40 blur-[120px] md:block" />
+                <div className="absolute bottom-0 right-[5%] hidden h-96 w-96 rounded-full bg-sky-200/25 blur-[140px] md:block" />
             </div>
 
             <div className="relative z-10 mx-auto max-w-[1400px]">
                 <motion.div 
-                    initial={{ opacity: 0, y: 30 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, margin: "-100px" }}
-                    transition={{ duration: 0.7, ease: "easeOut" }}
+                    {...introMotionProps}
                     className="mx-auto max-w-4xl px-4 text-center sm:px-6"
                 >
-                    <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-zinc-200/60 bg-white/80 px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-zinc-600 shadow-sm backdrop-blur-md">
+                    <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-zinc-200/60 bg-white/95 px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-zinc-600 shadow-sm md:bg-white/80 md:backdrop-blur-md">
                         Plataforma Omnichannel
                     </div>
 
@@ -62,11 +80,8 @@ export const OmnichannelOrbit = () => {
                 </motion.div>
 
                 <motion.div 
-                    initial={{ opacity: 0, y: 40 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, margin: "-100px" }}
-                    transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
-                    className="relative mx-auto mt-16 max-w-6xl rounded-[32px] border border-black/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(250,250,252,0.98)_100%)] p-6 shadow-[0_40px_100px_-20px_rgba(15,23,42,0.15)] ring-1 ring-zinc-900/5 backdrop-blur-3xl md:mt-24 md:rounded-[48px] md:p-12 lg:p-16"
+                    {...panelMotionProps}
+                    className="relative mx-auto mt-16 max-w-6xl rounded-[32px] border border-black/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.99)_0%,rgba(250,250,252,0.99)_100%)] p-6 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.14)] ring-1 ring-zinc-900/5 md:mt-24 md:rounded-[48px] md:p-12 md:shadow-[0_40px_100px_-20px_rgba(15,23,42,0.15)] md:backdrop-blur-3xl lg:p-16"
                 >
                     <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.02)_1px,transparent_1px)] bg-[size:40px_40px] opacity-30" />
                     
@@ -75,13 +90,10 @@ export const OmnichannelOrbit = () => {
                             {channelCards.map((item, index) => (
                                 <motion.div
                                     key={item.label}
-                                    initial={{ opacity: 0, scale: 0.8 }}
-                                    whileInView={{ opacity: 1, scale: 1 }}
-                                    viewport={{ once: true }}
-                                    transition={{ duration: 0.4, delay: 0.3 + index * 0.05 }}
-                                    className="group flex cursor-default items-center gap-3 rounded-2xl border border-zinc-200/50 bg-white px-4 py-3 text-left shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all hover:bg-zinc-50 hover:shadow-[0_16px_30px_-10px_rgba(15,23,42,0.15)]"
+                                    {...channelMotionProps(index)}
+                                    className="group flex cursor-default items-center gap-3 rounded-2xl border border-zinc-200/50 bg-white px-4 py-3 text-left shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-colors md:transition-all md:hover:bg-zinc-50 md:hover:shadow-[0_16px_30px_-10px_rgba(15,23,42,0.15)]"
                                 >
-                                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-black/5 transition-transform group-hover:scale-110 ${item.className}`}>
+                                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-black/5 md:transition-transform md:group-hover:scale-110 ${item.className}`}>
                                         {item.icon}
                                     </div>
                                     <span className="text-sm font-bold text-zinc-700">{item.label}</span>

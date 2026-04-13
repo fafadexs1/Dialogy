@@ -45,6 +45,7 @@ import {
 } from '@/actions/crm';
 import { getTeams } from '@/actions/teams';
 import { toast } from '@/hooks/use-toast';
+import { PIPELINE_STAGE_CATEGORY } from '@/lib/crm-pipeline';
 
 // A generic manager for lists of selectable options (like lead sources, job titles, etc.)
 function OptionsManager({
@@ -331,7 +332,9 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
             getWorkspaceConversionFieldConfig(user.activeWorkspaceId),
         ]);
 
-        if (!tagsResult.error) setTags(tagsResult.tags || []);
+        if (!tagsResult.error) {
+            setTags((tagsResult.tags || []).filter(tag => tag.category !== PIPELINE_STAGE_CATEGORY));
+        }
         const loadedFields = fieldsResult.fields || [];
         if (!fieldsResult.error) setFields(loadedFields);
         if (!teamsResult.error) setTeams(teamsResult.teams || []);

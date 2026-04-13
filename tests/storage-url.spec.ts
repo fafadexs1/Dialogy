@@ -39,3 +39,43 @@ describe('normalizeSupabaseStorageUrl', () => {
     expect(output).toBe(input);
   });
 });
+
+describe('resolveClientMediaUrl', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('proxies external media urls through the internal media route', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dialogy.klyraai.com.br');
+    const { resolveClientMediaUrl } = await import('../src/lib/storage-url');
+
+    const input =
+      'https://pps.whatsapp.net/v/t61.24694-24/example.jpg?oh=token&oe=expires';
+
+    expect(resolveClientMediaUrl(input, { kind: 'image' })).toBe(
+      `/api/media?url=${encodeURIComponent(input)}&kind=image`
+    );
+  });
+
+  it('keeps same-origin absolute urls unchanged', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dialogy.klyraai.com.br');
+    const { resolveClientMediaUrl } = await import('../src/lib/storage-url');
+
+    const input = 'https://dialogy.klyraai.com.br/uploads/avatar.png';
+
+    expect(resolveClientMediaUrl(input, { kind: 'image' })).toBe(input);
+  });
+
+  it('builds an absolute app url from a relative proxy path', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dialogy.klyraai.com.br');
+    const { toAbsoluteAppUrl } = await import('../src/lib/storage-url');
+
+    const input = '/api/media?url=https%3A%2F%2Fcdn.example.com%2Ffile.png&kind=image';
+
+    expect(toAbsoluteAppUrl(input)).toBe(`https://dialogy.klyraai.com.br${input}`);
+  });
+});

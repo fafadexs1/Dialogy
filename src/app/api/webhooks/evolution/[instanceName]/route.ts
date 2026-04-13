@@ -20,6 +20,7 @@ import {
     getEvolutionApiConfig,
     resolveEvolutionInstance,
 } from '@/lib/whatsapp/evolution-config';
+import { findOrCreateWhatsappContact } from '@/lib/whatsapp/contact-identity';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -1219,8 +1220,6 @@ async function handleMessagesUpsert(payload: any) {
         };
     }
 
-    const contactPhone = contactJid.split('@')[0];
-
     const client = await db.connect();
     try {
         await client.query('BEGIN');
@@ -1240,23 +1239,20 @@ async function handleMessagesUpsert(payload: any) {
         }
 
         apiConfig = await getApiConfigForInstance(instanceName, workspaceId);
-
-        let contactRes = await client.query(
-            'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2', [workspaceId, contactJid]
-        );
-
-        if ((contactRes.rowCount ?? 0) === 0) {
-            console.log(`[WEBHOOK_MSG_UPSERT] Contato com JID ${contactJid} nao encontrado no workspace ${workspaceId}. Criando novo contato...`);
-            contactRes = await client.query(
-                `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url) VALUES ($1, $2, $3, $4, $5)
-                 RETURNING *`,
-                [workspaceId, pushName || contactPhone, contactPhone, contactJid, null]
-            );
-            isNewContact = true;
+        if (!workspaceId) {
+            throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
         }
 
-        if ((contactRes.rowCount ?? 0) === 0) throw new Error(`Falha ao encontrar ou criar o contato com JID ${contactJid}`);
-        contactData = contactRes.rows[0];
+        const resolvedContact = await findOrCreateWhatsappContact(client, {
+            workspaceId,
+            phoneOrJid: contactJid,
+            fallbackName: pushName || contactJid.split('@')[0],
+            fallbackPhone: contactJid.split('@')[0],
+            avatarUrl: null,
+        });
+
+        contactData = resolvedContact.contact;
+        isNewContact = resolvedContact.created;
 
         // contactData is guaranteed to be non-null here because of the check above
         if (!contactData) throw new Error("Contact data is null despite rowCount > 0");

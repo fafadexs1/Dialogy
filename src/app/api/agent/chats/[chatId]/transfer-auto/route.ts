@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 
 /**
  * Find any online agent in the workspace who is a member of at least one team.
@@ -13,6 +13,8 @@ import { getPresenceTtlSeconds } from '@/lib/presence';
 async function findAvailableAgent(workspaceId: string): Promise<{ userId: string; userName: string } | null> {
     try {
         const ttlSeconds = getPresenceTtlSeconds();
+        const recentActivitySeconds = getPresenceRecentActivitySeconds();
+        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$2', '$3');
 
         // Find all online users who are members of at least one team in this workspace
         const result = await db.query(
@@ -25,12 +27,11 @@ async function findAvailableAgent(workspaceId: string): Promise<{ userId: string
                 ON uwp.user_id = u.id 
                 AND uwp.workspace_id = $1
             WHERE t.workspace_id = $1
-              AND uwp.is_online = TRUE
-              AND uwp.last_seen > NOW() - ($2 * interval '1 second')
+              AND ${availabilitySql}
             ORDER BY RANDOM()
             LIMIT 1;
             `,
-            [workspaceId, ttlSeconds]
+            [workspaceId, ttlSeconds, recentActivitySeconds]
         );
 
         if (result.rowCount === 0) {

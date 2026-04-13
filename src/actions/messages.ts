@@ -29,6 +29,12 @@ import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import { enqueueJob, shouldEnqueueJob } from '@/lib/queue';
+import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
+import { buildTelegramChatJid, parseTelegramChatId, sendTelegramTextMessage } from '@/services/telegram/bot-api';
+import {
+    findOrCreateWhatsappContact,
+    normalizeWhatsappPhoneNumber as normalizeWhatsappPhoneIdentity,
+} from '@/lib/whatsapp/contact-identity';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -101,7 +107,7 @@ async function getMarketingAutoCloseMs(workspaceId: string): Promise<number> {
 
 async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
     if (!autoCloseMs || autoCloseMs <= 0) return;
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
         const client = await db.connect();
         try {
             await client.query('BEGIN');
@@ -165,7 +171,8 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
         } finally {
             client.release();
         }
-    }, autoCloseMs).unref?.();
+    }, autoCloseMs);
+    (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
 }
 
 async function cleanupTempMedia(file: MediaFilePayload) {
@@ -226,7 +233,40 @@ function serializeErrorPayload(error: unknown): unknown {
 }
 
 function normalizeWhatsappPhoneNumber(value: string): string {
-    return value.replace(/@.*$/, '').replace(/\D/g, '') || value;
+    return (normalizeWhatsappPhoneIdentity(value) ?? value.replace(/@.*$/, '').replace(/\D/g, '')) || value;
+}
+
+function normalizeTelegramRecipient(value: string): string {
+    const trimmed = value.trim();
+    return trimmed.startsWith('telegram:') ? trimmed : buildTelegramChatJid(trimmed);
+}
+
+async function getTelegramInstanceCredentials(
+    instanceName: string | null | undefined,
+    workspaceId: string
+): Promise<{ botToken: string; instanceName: string } | null> {
+    if (!instanceName) return null;
+
+    const res = await db.query(
+        `SELECT
+            instance_name,
+            bot_token
+         FROM telegram_bot_instances
+         WHERE instance_name = $1
+           AND workspace_id = $2
+         LIMIT 1`,
+        [instanceName, workspaceId]
+    );
+
+    const row = res.rows[0];
+    if (!row || !row.bot_token) {
+        return null;
+    }
+
+    return {
+        botToken: row.bot_token,
+        instanceName: row.instance_name,
+    };
 }
 
 function buildInteractiveListPreview(list: InteractiveListPayload): string {
@@ -376,9 +416,25 @@ async function internalSendMessage(
 
         const chatInfo = chatInfoRes.rows[0];
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
+        const normalizedSource = (source || '').toString().toLowerCase();
+        const normalizedMetaPlatform = (meta_platform || '').toString().toLowerCase();
+        const isTelegramSource =
+            normalizedSource === 'telegram' ||
+            remoteJid?.startsWith('telegram:') ||
+            /^tg\d+$/i.test((instanceNameParam || lastInstanceName || '').toString());
+        const outboundSourceFromApi =
+            normalizedMetaPlatform === 'instagram' || normalizedSource === 'instagram'
+                ? 'instagram'
+                : normalizedMetaPlatform === 'messenger' || normalizedSource === 'messenger'
+                    ? 'messenger'
+                    : isTelegramSource
+                        ? 'telegram'
+                        : normalizedSource === 'wa_cloud'
+                            ? 'wa_cloud'
+                            : null;
 
         // Emulate source property for downstream logic
-        chatInfo.source = source;
+        chatInfo.source = outboundSourceFromApi || source;
 
         // Se for humano e não tiver agente (independente do status), atribui o agente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
@@ -422,13 +478,14 @@ async function internalSendMessage(
         insertRes = await client.query(
             `INSERT INTO messages (
                 id, workspace_id, chat_id, type, content, from_me, 
-                message_id_from_api, api_message_status, instance_name, 
+                message_id_from_api, api_message_status, instance_name, source_from_api,
                 metadata, is_read, ${senderColumn}, sent_by_tab
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *`,
             [
                 messageIdToUse, workspaceId, chatId, 'text', dbContent, true,
                 null, 'PENDING', instanceName, // Salva instanceName mesmo que null por enquanto, mas valida depois
+                outboundSourceFromApi,
                 dbMetadata, true, senderId, tabId
             ]
         );
@@ -494,6 +551,8 @@ async function internalSendMessage(
             const source = (chatInfo.source || '').toString().toLowerCase();
             const metaPlatform = (chatInfo.meta_platform || '').toString().toLowerCase();
             const isMetaSource = source === 'instagram' || source === 'messenger' || metaPlatform === 'instagram' || metaPlatform === 'messenger';
+            const telegramCredentials = await getTelegramInstanceCredentials(instanceName, chatInfo.workspace_id);
+            const isTelegramSource = source === 'telegram' || remoteJid?.startsWith('telegram:') || Boolean(telegramCredentials);
 
             // 1. Lógica Específica por Canal
             let apiResponse: any;
@@ -566,6 +625,21 @@ async function internalSendMessage(
                     // Se não é meta e não tem instanceName, falhou
                     throw new Error('Canal de envio não identificado (sem instância WA e sem contexto Meta).');
                 }
+            }
+
+            // -- Telegram Bot --
+            else if (isTelegramSource) {
+                if (!remoteJid || !instanceName) {
+                    throw new Error('Destino ou instancia nao definidos para envio Telegram.');
+                }
+
+                const credentials = telegramCredentials || await getTelegramInstanceCredentials(instanceName, chatInfo.workspace_id);
+                if (!credentials) {
+                    throw new Error(`Credenciais Telegram nao encontradas para a instancia ${instanceName}.`);
+                }
+
+                apiResponse = await sendTelegramTextMessage(credentials.botToken, parseTelegramChatId(remoteJid), apiContent);
+                externalId = apiResponse?.message_id ? `telegram:${apiResponse.message_id}` : null;
             }
 
             // -- WhatsApp (Evolution API) --
@@ -694,6 +768,11 @@ async function internalSendMedia(
         const instanceName = instanceNameParam || lastInstanceName;
 
         if (!remoteJid || !instanceName) throw new Error('Não foi possível encontrar o número de destino ou a instância para este chat.');
+
+        const telegramCredentials = await getTelegramInstanceCredentials(instanceName, workspaceId);
+        if (telegramCredentials || remoteJid.startsWith('telegram:')) {
+            throw new Error('Envio de midia para Telegram ainda nao esta disponivel. Envie uma mensagem de texto.');
+        }
 
         const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
         if (!apiConfig) throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
@@ -903,6 +982,8 @@ export const sendAgentMessageAction = withDebug(
             return { success: false, error: 'Usuário não autenticado.' };
         }
 
+        await touchUserPresenceFromChat(user.id, chatId, tabId, 'agent_message');
+
         // Fetch user name for signature
         let contentWithSignature = content;
         try {
@@ -954,6 +1035,7 @@ export const sendInternalNoteAction = withDebug(
             }
 
             const { workspace_id: workspaceId } = chatInfoRes.rows[0];
+            await touchUserPresenceActivity(user.id, workspaceId, tabId, 'internal_note');
 
             const insertRes = await client.query(
                 `INSERT INTO messages (
@@ -1102,6 +1184,8 @@ export const retryMessageAction = withDebug(
         if ((membershipRes.rowCount ?? 0) === 0) {
             return { success: false, error: 'Sem permissao para reenviar mensagem.' };
         }
+
+        await touchUserPresenceActivity(user.id, messageRow.workspace_id, null, 'retry_message');
 
         const instanceName = messageRow.instance_name || messageRow.last_instance_name;
         if (!instanceName) {
@@ -1306,6 +1390,8 @@ export const sendMediaAction = withDebug(
             return { success: false, error: 'Usuario nao autenticado.' };
         }
 
+        await touchUserPresenceFromChat(user.id, chatId, tabId, 'activity');
+
         // Meta first
         const client = await db.connect();
         try {
@@ -1489,23 +1575,15 @@ export const sendAgentTemplateAction = withDebug(
         try {
             await client.query('BEGIN');
 
-            const fullJid = numberid.includes('@') ? numberid : `${numberid}@s.whatsapp.net`;
+            const whatsappContact = await findOrCreateWhatsappContact(client, {
+                workspaceId,
+                phoneOrJid: numberid,
+                fallbackName: numberid,
+                fallbackPhone: normalizeWhatsappPhoneNumber(numberid),
+            });
 
-            // 1. Find or create the contact
-            let contactRes = await client.query(
-                'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-                [workspaceId, fullJid]
-            );
-            let contactId;
-            if (contactRes.rowCount === 0) {
-                const newContactRes = await client.query(
-                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
-                    [workspaceId, numberid, fullJid]
-                );
-                contactId = newContactRes.rows[0].id;
-            } else {
-                contactId = contactRes.rows[0].id;
-            }
+            const fullJid = whatsappContact.normalizedJid;
+            const contactId = whatsappContact.contact.id;
 
             // 2. Find or create the chat
             let chatRes = await client.query(
@@ -1648,26 +1726,15 @@ export const sendAgentListAction = withDebug(
                     throw new Error('Chat nao possui contato WhatsApp valido.');
                 }
             } else {
-                const normalizedNumber = normalizeWhatsappPhoneNumber(numberid!);
-                fullJid = `${normalizedNumber}@s.whatsapp.net`;
+                const whatsappContact = await findOrCreateWhatsappContact(client, {
+                    workspaceId,
+                    phoneOrJid: numberid!,
+                    fallbackName: normalizeWhatsappPhoneNumber(numberid!),
+                    fallbackPhone: normalizeWhatsappPhoneNumber(numberid!),
+                });
 
-                let contactRes = await client.query(
-                    'SELECT id FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-                    [workspaceId, fullJid]
-                );
-
-                let contactId;
-                if ((contactRes.rowCount ?? 0) === 0) {
-                    const newContactRes = await client.query(
-                        `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid)
-                         VALUES ($1, $2, $3, $4)
-                         RETURNING id`,
-                        [workspaceId, normalizedNumber, normalizedNumber, fullJid]
-                    );
-                    contactId = newContactRes.rows[0].id;
-                } else {
-                    contactId = contactRes.rows[0].id;
-                }
+                const contactId = whatsappContact.contact.id;
+                fullJid = whatsappContact.normalizedJid;
 
                 const chatRes = await client.query(
                     `SELECT id
@@ -1818,22 +1885,34 @@ export const startNewConversation = withDebug(
         try {
             await client.query('BEGIN');
 
-            const fullJid = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+            const telegramCredentials = await getTelegramInstanceCredentials(instanceName, workspaceId);
+            let contactId: string;
 
-            // 1. Find or create the contact
-            let contactRes = await client.query(
-                'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
-                [workspaceId, fullJid]
-            );
-            let contactId;
-            if (contactRes.rowCount === 0) {
-                const newContactRes = await client.query(
-                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
-                    [workspaceId, phoneNumber, fullJid]
+            if (telegramCredentials) {
+                const fullJid = normalizeTelegramRecipient(phoneNumber);
+                const contactRes = await client.query(
+                    'SELECT * FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2',
+                    [workspaceId, fullJid]
                 );
-                contactId = newContactRes.rows[0].id;
+
+                if (contactRes.rowCount === 0) {
+                    const newContactRes = await client.query(
+                        `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
+                        [workspaceId, parseTelegramChatId(fullJid), fullJid]
+                    );
+                    contactId = newContactRes.rows[0].id;
+                } else {
+                    contactId = contactRes.rows[0].id;
+                }
             } else {
-                contactId = contactRes.rows[0].id;
+                const whatsappContact = await findOrCreateWhatsappContact(client, {
+                    workspaceId,
+                    phoneOrJid: phoneNumber,
+                    fallbackName: normalizeWhatsappPhoneNumber(phoneNumber),
+                    fallbackPhone: normalizeWhatsappPhoneNumber(phoneNumber),
+                });
+
+                contactId = whatsappContact.contact.id;
             }
 
             // 2. Find or create the chat
@@ -1929,6 +2008,8 @@ export const forwardMessageAction = withDebug(
         // Determine content and type based on original message
         let content = originalMessage.content;
         const metadata = originalMessage.metadata || {};
+
+        await touchUserPresenceFromChat(user.id, targetChatId, tabId, 'forward_message');
 
         // If it's a media message, we need to ensure we have the URL
         if (originalMessage.type !== 'text' && originalMessage.type !== 'system' && originalMessage.type !== 'location') {

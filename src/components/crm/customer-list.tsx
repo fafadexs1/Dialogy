@@ -214,10 +214,10 @@ export default function CustomerList({ user }: { user: User }) {
     return (
         <div className="flex-1 flex overflow-hidden h-full">
             {/* Sidebar / Segments List (Visible on Desktop) */}
-            <div className="hidden lg:flex flex-col w-64 border-r border-slate-200/80 bg-white/90 backdrop-blur-xl p-4 space-y-4">
+            <div className="hidden lg:flex flex-col w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl p-4 space-y-4">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Listas</h2>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:text-slate-950" onClick={() => setIsSegmentBuilderOpen(true)}>
+                    <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Listas</h2>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setIsSegmentBuilderOpen(true)}>
                         <Plus className="h-4 w-4" />
                     </Button>
                 </div>
@@ -225,7 +225,7 @@ export default function CustomerList({ user }: { user: User }) {
                 <div className="space-y-1">
                     <Button
                         variant={selectedSegmentId === null ? 'secondary' : 'ghost'}
-                        className={`w-full justify-start ${selectedSegmentId === null ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                        className={`w-full justify-start ${selectedSegmentId === null ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-950 dark:hover:text-slate-50'}`}
                         onClick={() => setSelectedSegmentId(null)}
                     >
                         <Users className="w-4 h-4 mr-2" /> Todos Contatos
@@ -234,7 +234,7 @@ export default function CustomerList({ user }: { user: User }) {
                         <div key={seg.id} className="group relative flex items-center">
                             <Button
                                 variant={selectedSegmentId === seg.id ? 'secondary' : 'ghost'}
-                                className={`w-full justify-start pr-10 ${selectedSegmentId === seg.id ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                                className={`w-full justify-start pr-10 ${selectedSegmentId === seg.id ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-950 dark:hover:text-slate-50'}`}
                                 onClick={() => setSelectedSegmentId(seg.id)}
                             >
                                 <ListFilter className="w-4 h-4 mr-2" /> {seg.name}
@@ -242,7 +242,7 @@ export default function CustomerList({ user }: { user: User }) {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="absolute right-1 h-7 w-7 opacity-0 transition-opacity text-slate-400 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                                className="absolute right-1 h-7 w-7 opacity-0 transition-opacity text-slate-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 dark:hover:text-red-400 group-hover:opacity-100"
                                 onClick={(e) => handleDeleteSegment(e, seg.id)}
                             >
                                 <Trash2 className="h-3 w-3" />
@@ -254,14 +254,14 @@ export default function CustomerList({ user }: { user: User }) {
 
             <div className="flex-1 flex flex-col overflow-hidden h-full">
                 {/* Header Actions */}
-                <div className="flex-shrink-0 p-4 border-b border-slate-200/80 bg-white/92 backdrop-blur-xl flex flex-wrap justify-between items-center gap-3">
+                <div className="flex-shrink-0 p-4 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/92 dark:bg-slate-900/92 backdrop-blur-xl flex flex-wrap justify-between items-center gap-3">
                     <div className="flex items-center space-x-3 w-full md:w-auto">
                         <div className="relative flex-1 md:w-auto">
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                             <Input
                                 type="text"
                                 placeholder="Buscar contatos..."
-                                className="text-xs w-full md:w-64 h-9 pl-8 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-emerald-500/20"
+                                className="text-xs w-full md:w-64 h-9 pl-8 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus-visible:ring-emerald-500/20"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
@@ -269,10 +269,10 @@ export default function CustomerList({ user }: { user: User }) {
                         {/* Mobile Segment Trigger */}
                         <div className="lg:hidden">
                             <Select value={selectedSegmentId || 'all'} onValueChange={(val) => setSelectedSegmentId(val === 'all' ? null : val)}>
-                                <SelectTrigger className="w-[150px] bg-white border-slate-200 text-slate-900 h-9">
+                                <SelectTrigger className="w-[150px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50 h-9">
                                     <SelectValue placeholder="Listas" />
                                 </SelectTrigger>
-                                <SelectContent className="bg-white border-slate-200 text-slate-900">
+                                <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50">
                                     <SelectItem value="all">Todos Contatos</SelectItem>
                                     {segments.map(seg => <SelectItem key={seg.id} value={seg.id}>{seg.name}</SelectItem>)}
                                 </SelectContent>
@@ -280,12 +280,12 @@ export default function CustomerList({ user }: { user: User }) {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="hidden lg:flex h-9 bg-white border-slate-200 text-slate-700 hover:bg-slate-50" onClick={() => setIsSegmentBuilderOpen(true)}>
+                        <Button variant="outline" size="sm" className="hidden lg:flex h-9 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => setIsSegmentBuilderOpen(true)}>
                             <Filter className="w-4 h-4 mr-2" /> Nova Lista Inteligente
                         </Button>
 
                         <CrmSettings user={user}>
-                            <Button variant="outline" size="icon" title="Configurações do CRM" className="h-9 w-9 border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950">
+                            <Button variant="outline" size="icon" title="Configurações do CRM" className="h-9 w-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50">
                                 <Settings className="h-4 w-4" />
                             </Button>
                         </CrmSettings>
@@ -296,53 +296,53 @@ export default function CustomerList({ user }: { user: User }) {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-transparent">
-                    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-[0_24px_60px_-40px_rgba(15,23,42,0.18)]">
+                    <section className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.18)] dark:shadow-[0_24px_60px_-40px_rgba(0,0,0,0.5)]">
                         <div className="overflow-x-auto">
                             <Table>
-                                <TableHeader className="bg-slate-50/90">
-                                    <TableRow className="border-slate-200/80 hover:bg-slate-50">
-                                        <TableHead className="w-12 text-slate-500"><Checkbox className="border-slate-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableHead>
-                                        <TableHead className="text-slate-500">Nome</TableHead>
-                                        <TableHead className="text-slate-500">JID do WhatsApp</TableHead>
-                                        <TableHead className="text-slate-500">Vendedor</TableHead>
-                                        <TableHead className="text-slate-500">Tags</TableHead>
-                                        <TableHead className="text-center text-slate-500">Última Atividade</TableHead>
-                                        <TableHead className="text-center text-slate-500">Ações</TableHead>
+                                <TableHeader className="bg-slate-50/90 dark:bg-slate-800/90">
+                                    <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                        <TableHead className="w-12 text-slate-500 dark:text-slate-400"><Checkbox className="border-slate-300 dark:border-slate-700 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableHead>
+                                        <TableHead className="text-slate-500 dark:text-slate-400">Nome</TableHead>
+                                        <TableHead className="text-slate-500 dark:text-slate-400">JID do WhatsApp</TableHead>
+                                        <TableHead className="text-slate-500 dark:text-slate-400">Vendedor</TableHead>
+                                        <TableHead className="text-slate-500 dark:text-slate-400">Tags</TableHead>
+                                        <TableHead className="text-center text-slate-500 dark:text-slate-400">Última Atividade</TableHead>
+                                        <TableHead className="text-center text-slate-500 dark:text-slate-400">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {loading ? (
-                                        <TableRow className="border-slate-200/80 hover:bg-slate-50">
+                                        <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                             <TableCell colSpan={7} className="h-24 text-center">
                                                 <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-500" />
                                             </TableCell>
                                         </TableRow>
                                     ) : customers.length === 0 ? (
-                                        <TableRow className="border-slate-200/80 hover:bg-slate-50">
-                                            <TableCell colSpan={7} className="h-24 text-center text-slate-500">
+                                        <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                            <TableCell colSpan={7} className="h-24 text-center text-slate-500 dark:text-slate-400">
                                                 Nenhum contato encontrado.
                                             </TableCell>
                                         </TableRow>
                                     ) : customers.map(customer => (
                                         <TableRow
                                             key={customer.id}
-                                            className="border-slate-200/80 transition-colors hover:bg-slate-50/80"
+                                            className="border-slate-200/80 dark:border-slate-800/80 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/50"
                                         >
-                                            <TableCell><Checkbox className="border-slate-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableCell>
+                                            <TableCell><Checkbox className="border-slate-300 dark:border-slate-700 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-8 w-8 border border-slate-200">
+                                                    <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
                                                         <AvatarImage src={customer.avatar_url || undefined} alt={customer.name} />
-                                                        <AvatarFallback className="bg-slate-100 text-slate-700">{customer.name.charAt(0)}</AvatarFallback>
+                                                        <AvatarFallback className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{customer.name.charAt(0)}</AvatarFallback>
                                                     </Avatar>
                                                     <div>
-                                                        <p className="text-sm font-medium text-slate-950">{customer.name}</p>
-                                                        <p className="text-xs text-slate-500">{customer.email}</p>
+                                                        <p className="text-sm font-medium text-slate-950 dark:text-slate-50">{customer.name}</p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-400">{customer.email}</p>
                                                     </div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-xs text-slate-600">{customer.phone_number_jid}</TableCell>
-                                            <TableCell className="text-xs text-slate-600">{customer.owner?.name || 'N/A'}</TableCell>
+                                            <TableCell className="text-xs text-slate-600 dark:text-slate-300">{customer.phone_number_jid}</TableCell>
+                                            <TableCell className="text-xs text-slate-600 dark:text-slate-300">{customer.owner?.name || 'N/A'}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-wrap gap-1">
                                                     {customer.tags?.map(tag => (
@@ -350,7 +350,7 @@ export default function CustomerList({ user }: { user: User }) {
                                                     ))}
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-center text-xs text-slate-600">
+                                            <TableCell className="text-center text-xs text-slate-600 dark:text-slate-300">
                                                 {customer.last_activity ? format(new Date(customer.last_activity), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}
                                             </TableCell>
                                             <TableCell className="text-center">
@@ -361,16 +361,16 @@ export default function CustomerList({ user }: { user: User }) {
                                 </TableBody>
                             </Table>
                         </div>
-                        <div className="flex items-center justify-between border-t border-slate-200/80 p-4 text-sm text-slate-500">
+                        <div className="flex items-center justify-between border-t border-slate-200/80 dark:border-slate-800/80 p-4 text-sm text-slate-500 dark:text-slate-400">
                             <span>{`Mostrando ${startItem}-${endItem} de ${totalItems} contatos`}</span>
                             <div className="flex items-center gap-2">
                                 <div className='flex items-center gap-1'>
                                     <span>Linhas por página:</span>
                                     <Select value={String(itemsPerPage)} onValueChange={(v) => setItemsPerPage(Number(v))}>
-                                        <SelectTrigger className="h-8 w-20 border-slate-200 bg-white text-slate-700">
+                                        <SelectTrigger className="h-8 w-20 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300">
                                             <SelectValue placeholder={itemsPerPage} />
                                         </SelectTrigger>
-                                        <SelectContent className="border-slate-200 bg-white text-slate-900">
+                                        <SelectContent className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50">
                                             <SelectItem value="10">10</SelectItem>
                                             <SelectItem value="25">25</SelectItem>
                                             <SelectItem value="50">50</SelectItem>
@@ -378,14 +378,14 @@ export default function CustomerList({ user }: { user: User }) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <span className="mx-2 h-6 w-[1px] bg-slate-200"></span>
-                                <span className='font-medium text-slate-950'>
+                                <span className="mx-2 h-6 w-[1px] bg-slate-200 dark:bg-slate-800"></span>
+                                <span className='font-medium text-slate-950 dark:text-slate-50'>
                                     Página {currentPage} de {totalPages || 1}
                                 </span>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:bg-slate-100 hover:text-slate-950" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
                                     <ChevronLeft className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:bg-slate-100 hover:text-slate-950" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages || totalPages === 0}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages || totalPages === 0}>
                                     <ChevronRight className="h-4 w-4" />
                                 </Button>
                             </div>

@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import type { Role, WorkspaceMember } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -27,6 +27,8 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
 
     try {
         const ttlSeconds = getPresenceTtlSeconds();
+        const recentActivitySeconds = getPresenceRecentActivitySeconds();
+        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$2', '$3');
         const res = await db.query(`
             SELECT
                 u.id,
@@ -38,7 +40,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
                 uwr.created_at,
                 t.name as team_name,
                 CASE
-                    WHEN uwp.is_online = TRUE AND uwp.last_seen > NOW() - ($2 * interval '1 second') THEN TRUE
+                    WHEN ${availabilitySql} THEN TRUE
                     ELSE FALSE
                 END as is_online
             FROM users u
@@ -49,7 +51,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
             LEFT JOIN teams t ON tm.team_id = t.id AND t.workspace_id = uwr.workspace_id
             WHERE uwr.workspace_id = $1
             ORDER BY u.full_name
-        `, [workspaceId, ttlSeconds]);
+        `, [workspaceId, ttlSeconds, recentActivitySeconds]);
 
         const members: WorkspaceMember[] = res.rows.map(row => ({
             id: row.id,

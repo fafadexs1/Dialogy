@@ -1,30 +1,41 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Contact, Tag, User, Deal } from '@/lib/types';
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
+import { Contact, User, Deal } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Loader2, Plus, DollarSign, Zap } from 'lucide-react';
+import { Loader2, Plus, DollarSign, Zap, Columns3, MoreHorizontal, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getContacts, getTags, saveContactAction } from '@/actions/crm';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { getContacts, getPipelineStages, createPipelineStage, deletePipelineStage, saveContactAction } from '@/actions/crm';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getDeals, logStageChange } from '@/actions/deals';
 import { toast } from '@/hooks/use-toast';
-import DealForm from './deal-form';
 import LeadScoreBadge from './lead-score-badge';
 import { recalculateWorkspaceScores } from '@/actions/lead-scoring';
-
-const DEFAULT_STAGES = [
-    { id: 'novo', label: 'Novo', color: '#3b82f6' },
-    { id: 'qualificado', label: 'Qualificado', color: '#eab308' },
-    { id: 'proposta', label: 'Proposta', color: '#a855f7' },
-    { id: 'negociacao', label: 'Negociação', color: '#f97316' },
-    { id: 'ganho', label: 'Ganho', color: '#22c55e' },
-    { id: 'perdido', label: 'Perdido', color: '#ef4444' }
-];
+import {
+    type PipelineStage,
+    getDefaultPipelineStageValue,
+    sortPipelineStages,
+} from '@/lib/crm-pipeline';
 
 interface KanbanColumn {
     id: string;
@@ -44,55 +55,59 @@ function formatBRL(value: number): string {
 
 export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
     const [columns, setColumns] = useState<Record<string, KanbanColumn>>({});
+    const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
     const [loading, setLoading] = useState(true);
-    const [tags, setTags] = useState<Tag[]>([]);
     const [deals, setDeals] = useState<Deal[]>([]);
-    const [dealFormOpen, setDealFormOpen] = useState(false);
-    const [dealFormContact, setDealFormContact] = useState<{ id: string; name: string } | null>(null);
+    const [stageDialogOpen, setStageDialogOpen] = useState(false);
+    const [newStageLabel, setNewStageLabel] = useState('');
+    const [newStageColor, setNewStageColor] = useState('#3b82f6');
+    const [creatingStage, setCreatingStage] = useState(false);
+
+    const orderedStages = useMemo(() => sortPipelineStages(pipelineStages), [pipelineStages]);
+    const stageValueSet = useMemo(() => new Set(orderedStages.map((stage) => stage.value)), [orderedStages]);
 
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
         try {
-            const [contactsRes, tagsRes, dealsRes] = await Promise.all([
+            const [contactsRes, stagesRes, dealsRes] = await Promise.all([
                 getContacts(user.activeWorkspaceId),
-                getTags(user.activeWorkspaceId),
+                getPipelineStages(user.activeWorkspaceId),
                 getDeals(user.activeWorkspaceId),
             ]);
 
             if (contactsRes.error) throw new Error(contactsRes.error);
-            if (tagsRes.error) throw new Error(tagsRes.error);
+            if (stagesRes.error) throw new Error(stagesRes.error);
+            if (dealsRes.error) throw new Error(dealsRes.error);
 
-            const fetchedTags = tagsRes.tags || [];
-            setTags(fetchedTags);
-            setDeals(dealsRes.deals || []);
-
+            const fetchedStages = sortPipelineStages(stagesRes.stages || []);
             const initialColumns: Record<string, KanbanColumn> = {};
 
-            DEFAULT_STAGES.forEach(stage => {
-                initialColumns[stage.id] = {
-                    id: stage.id,
+            fetchedStages.forEach((stage) => {
+                initialColumns[stage.value] = {
+                    id: stage.value,
                     title: stage.label,
                     color: stage.color,
-                    items: []
+                    items: [],
                 };
             });
 
-            (contactsRes.contacts || []).forEach(contact => {
-                const stageTag = contact.tags?.find(t => initialColumns[t.value]);
-                const stageId = stageTag ? stageTag.value : 'novo';
+            const fallbackStageValue = getDefaultPipelineStageValue(fetchedStages);
 
-                if (initialColumns[stageId]) {
-                    initialColumns[stageId].items.push(contact);
-                } else {
-                    initialColumns['novo'].items.push(contact);
+            (contactsRes.contacts || []).forEach((contact) => {
+                const stageTag = contact.tags?.find((tag) => initialColumns[tag.value]);
+                const stageValue = stageTag?.value || fallbackStageValue;
+
+                if (initialColumns[stageValue]) {
+                    initialColumns[stageValue].items.push(contact);
                 }
             });
 
+            setPipelineStages(fetchedStages);
+            setDeals(dealsRes.deals || []);
             setColumns(initialColumns);
-
         } catch (error: any) {
-            toast({ title: "Erro ao carregar Kanban", description: error.message, variant: 'destructive' });
+            toast({ title: 'Erro ao carregar Kanban', description: error.message, variant: 'destructive' });
         } finally {
             setLoading(false);
         }
@@ -102,24 +117,21 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
         fetchData();
     }, [fetchData]);
 
-    // Compute deal totals per stage
     const dealTotalsByStage = useMemo(() => {
         const totals: Record<string, number> = {};
-        for (const stage of DEFAULT_STAGES) {
-            totals[stage.id] = 0;
+        for (const stage of orderedStages) {
+            totals[stage.value] = 0;
         }
         for (const deal of deals) {
             if (deal.won === null || deal.won === undefined) {
-                // Only count open deals
                 if (totals[deal.stage] !== undefined) {
                     totals[deal.stage] += deal.value;
                 }
             }
         }
         return totals;
-    }, [deals]);
+    }, [deals, orderedStages]);
 
-    // Map contactId to highest-value open deal
     const topDealByContact = useMemo(() => {
         const map: Record<string, Deal> = {};
         for (const deal of deals) {
@@ -130,6 +142,52 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
         }
         return map;
     }, [deals]);
+
+    const handleCreateStage = async () => {
+        if (!user?.activeWorkspaceId) return;
+        if (!newStageLabel.trim()) {
+            toast({ title: 'Nome obrigatorio', description: 'Informe o nome da nova etapa.', variant: 'destructive' });
+            return;
+        }
+
+        setCreatingStage(true);
+        try {
+            const result = await createPipelineStage(user.activeWorkspaceId, newStageLabel, newStageColor);
+            if (!result.success) {
+                throw new Error(result.error || 'Falha ao criar etapa.');
+            }
+
+            toast({ title: 'Etapa criada', description: 'A nova etapa ja esta disponivel no funil.' });
+            setStageDialogOpen(false);
+            setNewStageLabel('');
+            setNewStageColor('#3b82f6');
+            await fetchData();
+        } catch (error: any) {
+            toast({ title: 'Erro ao criar etapa', description: error.message, variant: 'destructive' });
+        } finally {
+            setCreatingStage(false);
+        }
+    };
+
+    const handleDeleteStage = async (stageId: string, stageLabel: string) => {
+        if (!user?.activeWorkspaceId) return;
+        
+        if (!confirm(`Tem certeza que deseja apagar o funil "${stageLabel}"? Todos os contatos voltarão a primeira etapa do CRM automaticamente.`)) {
+            return;
+        }
+
+        try {
+            const result = await deletePipelineStage(user.activeWorkspaceId, stageId);
+            if (!result.success) {
+                throw new Error(result.error || 'Falha ao excluir etapa.');
+            }
+
+            toast({ title: 'Etapa excluída', description: 'O funil foi removido com sucesso.' });
+            await fetchData();
+        } catch (error: any) {
+            toast({ title: 'Erro ao excluir etapa', description: error.message, variant: 'destructive' });
+        }
+    };
 
     const onDragEnd = async (result: DropResult) => {
         if (!result.destination) return;
@@ -146,78 +204,72 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                 ...columns,
                 [source.droppableId]: {
                     ...column,
-                    items: newItems
-                }
-            });
-        } else {
-            const sourceColumn = columns[source.droppableId];
-            const destColumn = columns[destination.droppableId];
-            const sourceItems = Array.from(sourceColumn.items);
-            const destItems = Array.from(destColumn.items);
-            const [removed] = sourceItems.splice(source.index, 1);
-
-            destItems.splice(destination.index, 0, removed);
-
-            setColumns({
-                ...columns,
-                [source.droppableId]: {
-                    ...sourceColumn,
-                    items: sourceItems
+                    items: newItems,
                 },
-                [destination.droppableId]: {
-                    ...destColumn,
-                    items: destItems
-                }
             });
+            return;
+        }
 
-            try {
-                const contact = removed;
-                const newStageId = destination.droppableId;
-                const oldStageId = source.droppableId;
+        const sourceColumn = columns[source.droppableId];
+        const destinationColumn = columns[destination.droppableId];
+        const sourceItems = Array.from(sourceColumn.items);
+        const destinationItems = Array.from(destinationColumn.items);
+        const [removed] = sourceItems.splice(source.index, 1);
 
-                const currentTags = contact.tags?.map(t => t.id) || [];
-                const oldTag = tags.find(t => t.value === oldStageId);
-                const newTag = tags.find(t => t.value === newStageId);
+        destinationItems.splice(destination.index, 0, removed);
 
-                let newTagIds = currentTags;
+        setColumns({
+            ...columns,
+            [source.droppableId]: {
+                ...sourceColumn,
+                items: sourceItems,
+            },
+            [destination.droppableId]: {
+                ...destinationColumn,
+                items: destinationItems,
+            },
+        });
 
-                if (oldTag) {
-                    newTagIds = newTagIds.filter(id => id !== oldTag.id);
-                }
+        try {
+            const currentTags = removed.tags?.map((tag) => tag.id) || [];
+            const stageTagIdsToRemove = (removed.tags || [])
+                .filter((tag) => stageValueSet.has(tag.value))
+                .map((tag) => tag.id);
+            const newStageTag = orderedStages.find((stage) => stage.value === destination.droppableId);
 
-                if (newTag) {
-                    newTagIds.push(newTag.id);
-                } else {
-                    toast({ title: "Aviso", description: `Tag para fase '${destColumn.title}' não encontrada.`, variant: "destructive" });
-                    return;
-                }
-
-                const formData = new FormData();
-                formData.append('workspaceId', user.activeWorkspaceId!);
-                formData.append('id', contact.id);
-                formData.append('name', contact.name);
-                if (contact.email) formData.append('email', contact.email);
-                if (contact.phone_number_jid) formData.append('phone_number_jid', contact.phone_number_jid);
-                if (contact.owner_id) formData.append('owner_id', contact.owner_id);
-
-                newTagIds.forEach(id => formData.append('tags', id));
-
-                const saveResult = await saveContactAction(null, formData);
-                if (!saveResult.success) {
-                    throw new Error(saveResult.error || "Falha ao salvar");
-                }
-
-                // Log stage change
-                await logStageChange(contact.id, oldStageId, newStageId, user.id, user.activeWorkspaceId);
-
-                const updatedTags = contact.tags?.filter(t => t.value !== oldStageId) || [];
-                if (newTag) updatedTags.push(newTag);
-                removed.tags = updatedTags;
-
-            } catch (error: any) {
-                toast({ title: "Erro ao mover contato", description: error.message, variant: 'destructive' });
-                fetchData();
+            if (!newStageTag) {
+                throw new Error('Etapa de destino nao encontrada.');
             }
+
+            const nextTagIds = currentTags
+                .filter((tagId) => !stageTagIdsToRemove.includes(tagId))
+                .concat(newStageTag.id);
+
+            const formData = new FormData();
+            formData.append('workspaceId', user.activeWorkspaceId!);
+            formData.append('id', removed.id);
+            formData.append('name', removed.name);
+            if (removed.email) formData.append('email', removed.email);
+            if (removed.phone_number_jid) formData.append('phone_number_jid', removed.phone_number_jid);
+            if (removed.owner_id) formData.append('owner_id', removed.owner_id);
+
+            nextTagIds.forEach((tagId) => formData.append('tags', tagId));
+
+            const saveResult = await saveContactAction(null, formData);
+            if (!saveResult.success) {
+                throw new Error(saveResult.error || 'Falha ao salvar contato.');
+            }
+
+            await logStageChange(
+                removed.id,
+                source.droppableId,
+                destination.droppableId,
+                user.id,
+                user.activeWorkspaceId
+            );
+        } catch (error: any) {
+            toast({ title: 'Erro ao mover contato', description: error.message, variant: 'destructive' });
+            fetchData();
         }
     };
 
@@ -231,38 +283,55 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
 
     return (
         <>
-            <div className="h-full overflow-x-auto bg-muted/30 p-6">
-                <div className="flex items-center justify-end mb-4 gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs gap-1.5"
-                        onClick={async () => {
-                            if (!user?.activeWorkspaceId) return;
-                            toast({ title: 'Recalculando scores...' });
-                            const res = await recalculateWorkspaceScores(user.activeWorkspaceId);
-                            if (res.error) {
-                                toast({ title: 'Erro', description: res.error, variant: 'destructive' });
-                            } else {
-                                toast({ title: 'Scores atualizados', description: `${res.updated} contatos recalculados.` });
-                                fetchData();
-                            }
-                        }}
-                    >
-                        <Zap className="h-3.5 w-3.5" />
-                        Recalcular Scores
-                    </Button>
+            <div className="flex flex-col h-full w-full bg-transparent p-4 md:p-6 lg:p-8">
+                <div className="shrink-0 mb-4 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Columns3 className="h-4 w-4" />
+                        <span>{orderedStages.length} etapas no funil</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs gap-1.5"
+                            onClick={() => setStageDialogOpen(true)}
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                            Nova etapa
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs gap-1.5"
+                            onClick={async () => {
+                                if (!user?.activeWorkspaceId) return;
+                                toast({ title: 'Recalculando scores...' });
+                                const res = await recalculateWorkspaceScores(user.activeWorkspaceId);
+                                if (res.error) {
+                                    toast({ title: 'Erro', description: res.error, variant: 'destructive' });
+                                } else {
+                                    toast({ title: 'Scores atualizados', description: `${res.updated} contatos recalculados.` });
+                                    fetchData();
+                                }
+                            }}
+                        >
+                            <Zap className="h-3.5 w-3.5" />
+                            Recalcular Scores
+                        </Button>
+                    </div>
                 </div>
-                <DragDropContext onDragEnd={onDragEnd}>
-                    <div className="flex h-full gap-4 min-w-max">
-                        {DEFAULT_STAGES.map(stage => {
-                            const column = columns[stage.id];
+
+                <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+                    <DragDropContext onDragEnd={onDragEnd}>
+                        <div className="flex h-full gap-4 min-w-max pb-2">
+                            {orderedStages.map((stage) => {
+                            const column = columns[stage.value];
                             if (!column) return null;
-                            const stageTotal = dealTotalsByStage[stage.id] || 0;
+                            const stageTotal = dealTotalsByStage[stage.value] || 0;
 
                             return (
-                                <div key={stage.id} className="flex flex-col w-80 h-full rounded-lg bg-muted/50 border border-border/50">
-                                    <div className="p-3 flex flex-col gap-1 border-b border-border/50 bg-card/50 rounded-t-lg backdrop-blur-sm sticky top-0 z-10">
+                                <div key={stage.value} className="flex flex-col w-80 h-full rounded-lg bg-muted/50 border border-border/50">
+                                    <div className="sticky top-0 z-10 flex flex-col gap-1 rounded-t-lg border-b border-border/50 bg-card/50 p-3 backdrop-blur-sm">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -271,69 +340,89 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                                     {column.items.length}
                                                 </Badge>
                                             </div>
-                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-                                                <Plus className="h-3 w-3" />
-                                            </Button>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:bg-muted">
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem 
+                                                        className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                                        onClick={() => handleDeleteStage(stage.id, stage.label)}
+                                                    >
+                                                        <Trash2 className="mr-2 h-4 w-4" />
+                                                        Excluir Etapa
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
                                         </div>
                                         {stageTotal > 0 && (
-                                            <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground pl-5">
+                                            <div className="flex items-center gap-1 pl-5 text-xs font-medium text-muted-foreground">
                                                 <DollarSign className="h-3 w-3" />
                                                 <span>{formatBRL(stageTotal)}</span>
                                             </div>
                                         )}
                                     </div>
 
-                                    <Droppable droppableId={stage.id}>
+                                    <Droppable droppableId={stage.value}>
                                         {(provided, snapshot) => (
                                             <div
                                                 {...provided.droppableProps}
                                                 ref={provided.innerRef}
-                                                className={`flex-1 p-2 overflow-y-auto transition-colors ${snapshot.isDraggingOver ? 'bg-accent/20' : ''}`}
+                                                className={`flex-1 overflow-y-auto p-2 transition-colors ${snapshot.isDraggingOver ? 'bg-accent/20' : ''}`}
                                             >
                                                 <div className="flex flex-col gap-2">
                                                     {column.items.map((contact, index) => {
                                                         const topDeal = topDealByContact[contact.id];
                                                         return (
                                                             <Draggable key={contact.id} draggableId={contact.id} index={index}>
-                                                                {(provided, snapshot) => (
+                                                                {(dragProvided, dragSnapshot) => (
                                                                     <Card
-                                                                        ref={provided.innerRef}
-                                                                        {...provided.draggableProps}
-                                                                        {...provided.dragHandleProps}
+                                                                        ref={dragProvided.innerRef}
+                                                                        {...dragProvided.draggableProps}
+                                                                        {...dragProvided.dragHandleProps}
                                                                         onClick={() => onContactClick(contact)}
-                                                                        className={`cursor-pointer hover:shadow-md transition-all border-border/60 bg-card ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20 rotate-1' : ''}`}
+                                                                        className={`cursor-pointer border-border/60 bg-card transition-all hover:shadow-md ${dragSnapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20 rotate-1' : ''}`}
                                                                     >
-                                                                        <CardContent className="p-3 space-y-2">
+                                                                        <CardContent className="space-y-2 p-3">
                                                                             <div className="flex items-start justify-between gap-2">
                                                                                 <div className="flex items-center gap-2 overflow-hidden">
                                                                                     <Avatar className="h-6 w-6 shrink-0">
                                                                                         <AvatarImage src={contact.avatar_url || undefined} />
                                                                                         <AvatarFallback className="text-[10px]">{contact.name.charAt(0)}</AvatarFallback>
                                                                                     </Avatar>
-                                                                                    <span className="font-medium text-sm truncate">{contact.name}</span>
-                                                                                    {contact.lead_score != null && contact.lead_score > 0 && <LeadScoreBadge score={contact.lead_score} size="sm" />}
+                                                                                    <span className="truncate text-sm font-medium">{contact.name}</span>
+                                                                                    {contact.lead_score != null && contact.lead_score > 0 ? (
+                                                                                        <LeadScoreBadge score={contact.lead_score} size="sm" />
+                                                                                    ) : null}
                                                                                 </div>
-                                                                                {topDeal && (
-                                                                                    <Badge variant="outline" className="text-[10px] shrink-0 font-semibold text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800">
+                                                                                {topDeal ? (
+                                                                                    <Badge variant="outline" className="shrink-0 border-emerald-300 bg-emerald-50 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400">
                                                                                         {formatBRL(topDeal.value)}
                                                                                     </Badge>
-                                                                                )}
+                                                                                ) : null}
                                                                             </div>
 
-                                                                            {topDeal && (
-                                                                                <p className="text-[10px] text-muted-foreground truncate pl-8">{topDeal.title}</p>
-                                                                            )}
+                                                                            {topDeal ? (
+                                                                                <p className="truncate pl-8 text-[10px] text-muted-foreground">{topDeal.title}</p>
+                                                                            ) : null}
 
-                                                                            {/* Tags (excluding stage tags) */}
                                                                             <div className="flex flex-wrap gap-1">
-                                                                                {contact.tags?.filter(t => !DEFAULT_STAGES.some(s => s.id === t.value)).slice(0, 3).map(tag => (
-                                                                                    <span key={tag.id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                                                                                        {tag.label}
-                                                                                    </span>
-                                                                                ))}
+                                                                                {contact.tags
+                                                                                    ?.filter((tag) => !stageValueSet.has(tag.value))
+                                                                                    .slice(0, 3)
+                                                                                    .map((tag) => (
+                                                                                        <span
+                                                                                            key={tag.id}
+                                                                                            className="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                                                                        >
+                                                                                            {tag.label}
+                                                                                        </span>
+                                                                                    ))}
                                                                             </div>
 
-                                                                            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/50">
+                                                                            <div className="flex items-center justify-between border-t border-border/50 pt-1 text-xs text-muted-foreground">
                                                                                 <span>{contact.owner?.name || 'Sem dono'}</span>
                                                                                 <span>{contact.last_activity ? format(new Date(contact.last_activity), 'dd/MM', { locale: ptBR }) : '-'}</span>
                                                                             </div>
@@ -352,20 +441,51 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                             );
                         })}
                     </div>
-                </DragDropContext>
+                    </DragDropContext>
+                </div>
             </div>
+            <Dialog open={stageDialogOpen} onOpenChange={setStageDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Nova etapa do funil</DialogTitle>
+                        <DialogDescription>
+                            Crie uma nova coluna no kanban para refletir o seu processo comercial.
+                        </DialogDescription>
+                    </DialogHeader>
 
-            {/* Deal Form */}
-            {dealFormContact && (
-                <DealForm
-                    isOpen={dealFormOpen}
-                    setIsOpen={setDealFormOpen}
-                    workspaceId={user.activeWorkspaceId!}
-                    contactId={dealFormContact.id}
-                    contactName={dealFormContact.name}
-                    onSaved={() => fetchData()}
-                />
-            )}
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="pipeline-stage-name">Nome da etapa</Label>
+                            <Input
+                                id="pipeline-stage-name"
+                                value={newStageLabel}
+                                onChange={(event) => setNewStageLabel(event.target.value)}
+                                placeholder="Ex: Reuniao agendada"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="pipeline-stage-color">Cor</Label>
+                            <input
+                                id="pipeline-stage-color"
+                                type="color"
+                                value={newStageColor}
+                                onChange={(event) => setNewStageColor(event.target.value)}
+                                className="h-10 w-full cursor-pointer rounded-md border border-input bg-background px-2"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setStageDialogOpen(false)} disabled={creatingStage}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleCreateStage} disabled={creatingStage}>
+                            {creatingStage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Criar etapa
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

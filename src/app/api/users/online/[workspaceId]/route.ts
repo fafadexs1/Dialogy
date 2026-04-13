@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getOnlineAgents } from '@/actions/user';
+import { getOnlineAgents } from '@/lib/presence-server';
 
 export async function GET(
   request: Request,

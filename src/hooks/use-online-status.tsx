@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/auth-provider';
 import { WORKSPACE_CHANGED_EVENT } from '@/components/layout/workspace-switcher';
 import { runCacheCleanup, scheduleCacheCleanupOnIdle } from '@/lib/cache';
+import { getPresenceHeartbeatIntervalMs } from '@/lib/presence';
 
 const PresenceContext = createContext<{
   onlineAgents: OnlineAgent[],
@@ -110,6 +111,10 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
   const bootstrappedUserRef = useRef<string | null>(null);
   const fetchingUserRef = useRef(false);
+  const presenceFailureCountRef = useRef(0);
+  const presenceBackoffUntilRef = useRef(0);
+  const lastPresenceErrorKeyRef = useRef<string | null>(null);
+  const lastPresenceErrorLoggedAtRef = useRef(0);
 
   // ✅ Sync localUser when authUser becomes available but localUser is null
   // This handles the case where server renders with initialUser=null (session not synced yet)
@@ -189,31 +194,6 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     previousWorkspaceIdRef.current = currentWorkspaceId;
   }, [localUser?.activeWorkspaceId]);
 
-  // Monitor online/offline status - Enhanced with forced reconnection
-  useEffect(() => {
-    // Initial check
-    setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
-
-    const handleOnline = () => {
-      setIsOffline(false);
-      console.log('[PresenceProvider] Browser online, Supabase will auto-reconnect...');
-      setConnectionStatus('reconnecting');
-    };
-
-    const handleOffline = () => {
-      setIsOffline(true);
-      setConnectionStatus('offline');
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [supabase]);
-
   useEffect(() => {
     const currentUserKey = localUser ? `${localUser.id}-${localUser.activeWorkspaceId}` : 'null';
 
@@ -237,42 +217,119 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     setPresenceBootstrapDone(true);
   }, [localUser?.id, localUser?.activeWorkspaceId, isAuthLoading]);
 
+  const logPresenceFailure = useCallback((message: string, details: unknown, errorKey: string) => {
+    const now = Date.now();
+    if (
+      lastPresenceErrorKeyRef.current === errorKey &&
+      now - lastPresenceErrorLoggedAtRef.current < 30000
+    ) {
+      return;
+    }
+
+    lastPresenceErrorKeyRef.current = errorKey;
+    lastPresenceErrorLoggedAtRef.current = now;
+    console.error(message, details);
+  }, []);
+
   const persistPresenceViaApi = useCallback(
-    async (isOnline: boolean, workspaceId: string) => {
+    async (isOnline: boolean, workspaceId: string, source: string) => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
+      const now = Date.now();
+      if (presenceBackoffUntilRef.current > now) {
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
         const response = await fetch('/api/users/online-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          keepalive: true,
-          body: JSON.stringify({ workspaceId, isOnline, tabId: tabIdRef.current }),
+          cache: 'no-store',
+          signal: controller.signal,
+          body: JSON.stringify({ workspaceId, isOnline, tabId: tabIdRef.current, source }),
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const reason = await response.text().catch(() => response.statusText);
-          console.error('PresenceProvider: Presence API call failed.', reason);
+          presenceFailureCountRef.current += 1;
+          presenceBackoffUntilRef.current =
+            Date.now() + Math.min(getPresenceHeartbeatIntervalMs(), 5000 * presenceFailureCountRef.current);
+          logPresenceFailure(
+            'PresenceProvider: Presence API call failed.',
+            { status: response.status, reason, source },
+            `http:${response.status}:${source}`
+          );
+          return;
         }
+
+        presenceFailureCountRef.current = 0;
+        presenceBackoffUntilRef.current = 0;
+        lastPresenceErrorKeyRef.current = null;
       } catch (apiError) {
-        console.error('PresenceProvider: Failed to persist presence via API.', apiError);
+        clearTimeout(timeoutId);
+        presenceFailureCountRef.current += 1;
+        presenceBackoffUntilRef.current =
+          Date.now() + Math.min(getPresenceHeartbeatIntervalMs(), 5000 * presenceFailureCountRef.current);
+
+        const isAbortError = apiError instanceof DOMException && apiError.name === 'AbortError';
+        logPresenceFailure(
+          isAbortError
+            ? 'PresenceProvider: Presence API request timed out.'
+            : 'PresenceProvider: Failed to persist presence via API.',
+          apiError,
+          `${isAbortError ? 'timeout' : 'fetch'}:${source}`
+        );
       }
     },
-    []
+    [logPresenceFailure]
   );
 
   const updateServerPresence = useCallback(
-    async (isOnline: boolean) => {
+    async (isOnline: boolean, source: string = 'activity') => {
       if (isAuthLoading) return;
       if (!localUser?.activeWorkspaceId || !localUser.id) return;
       if (!presenceBootstrapDone) return;
 
       const workspaceId = localUser.activeWorkspaceId;
-      await persistPresenceViaApi(isOnline, workspaceId);
+      await persistPresenceViaApi(isOnline, workspaceId, source);
     },
     [localUser?.activeWorkspaceId, localUser?.id, persistPresenceViaApi, presenceBootstrapDone, isAuthLoading]
   );
 
+  // Monitor online/offline status - Enhanced with forced reconnection
+  useEffect(() => {
+    setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      console.log('[PresenceProvider] Browser online, Supabase will auto-reconnect...');
+      setConnectionStatus('reconnecting');
+      void updateServerPresence(true, 'browser_online');
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      setConnectionStatus('offline');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [supabase, updateServerPresence]);
+
   // Debounce ref for refreshOnlineAgents
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshOnlineAgents = useCallback(async () => {
     const workspaceId = localUser?.activeWorkspaceId;
@@ -284,9 +341,19 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     refreshTimeoutRef.current = setTimeout(async () => {
       try {
-        const { getOnlineAgents } = await import('@/actions/user');
-        const agents = await getOnlineAgents(workspaceId);
-        setOnlineAgents(agents);
+        const response = await fetch(`/api/users/online/${workspaceId}`, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to refresh online agents: ${response.status}`);
+        }
+
+        const agents = await response.json();
+        setOnlineAgents(Array.isArray(agents) ? agents : []);
       } catch (error) {
         console.error("PresenceProvider: Failed to refresh online agents.", error);
       }
@@ -301,7 +368,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     // Realtime subscription handles instant updates, polling is just for sync
     if (isAuthLoading || !localUser?.activeWorkspaceId || isPublicPage) return;
 
-    let intervalId: NodeJS.Timeout;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
     const isDeveloper = pathname.startsWith('/developer');
     // HARDENING: Optimize polling. If connected, relax to 60s. If resetting/offline, aggressive 10s.
     const pollInterval = (connectionStatus === 'connected' && !isDeveloper) ? 60000 : 10000;
@@ -327,32 +394,39 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     refreshOnlineAgents();
 
     // Set self as online in parallel
-    updateServerPresence(true);
+    updateServerPresence(true, 'bootstrap');
 
-    // HEARTBEAT: Ensure user stays online (30 seconds - balance between responsiveness and requests)
+    const heartbeatMs = getPresenceHeartbeatIntervalMs();
     const heartbeatInterval = setInterval(() => {
-      updateServerPresence(true);
-    }, 30000); // 30 seconds
+      updateServerPresence(true, 'heartbeat');
+    }, heartbeatMs);
 
-    const handleActivity = () => {
+    const handleVisibleActivity = (source: string) => {
       if (document.visibilityState === 'visible') {
-        updateServerPresence(true);
+        updateServerPresence(true, source);
       }
     };
 
     let lastActivity = 0;
-    const throttledActivity = () => {
+    const throttledActivity = (source: string) => {
       const now = Date.now();
-      if (now - lastActivity > 30000) { // 30 seconds throttle (was 5s)
+      if (now - lastActivity > heartbeatMs) {
         lastActivity = now;
-        handleActivity();
+        handleVisibleActivity(source);
       }
     };
 
-    window.addEventListener('visibilitychange', handleActivity);
-    window.addEventListener('focus', throttledActivity);
-    window.addEventListener('click', throttledActivity);
-    window.addEventListener('keydown', throttledActivity);
+    const handleVisibility = () => handleVisibleActivity('visibility');
+    const handleFocus = () => throttledActivity('focus');
+    const handleClick = () => throttledActivity('activity');
+    const handleKeydown = () => throttledActivity('activity');
+    const handlePageShow = () => updateServerPresence(true, 'manual_recovery');
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('click', handleClick);
+    window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('pageshow', handlePageShow);
 
     // Only subscribe if channel not already set up or if workspace changed
     if (channelRef.current) {
@@ -414,20 +488,18 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
 
     return () => {
       clearInterval(heartbeatInterval);
-      window.removeEventListener('visibilitychange', handleActivity);
-      window.removeEventListener('focus', throttledActivity);
-      window.removeEventListener('click', throttledActivity);
-      window.removeEventListener('keydown', throttledActivity);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('click', handleClick);
+      window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('pageshow', handlePageShow);
 
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-      // REMOVED: void updateServerPresence(false); 
-      // We do NOT want to set offline on component re-render or internal navigation.
-      // We rely on the `beforeunload` beacon for tab close, and 
-      // `last_seen` timestamp timeout on the server (if implemented) or just 
-      // letting the next heartbeat pick it up if it was a refresh.
+      // Presence is not forced offline on cleanup because BFCache and internal navigation
+      // may tear down effects without meaning the operator actually went away.
     };
   }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone, supabase, isAuthLoading]);
 
@@ -440,7 +512,8 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
         const payload = {
           workspaceId: localUser.activeWorkspaceId,
           isOnline: false,
-          tabId: tabIdRef.current
+          tabId: tabIdRef.current,
+          source: 'beforeunload'
         };
         const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
         // Use the correct endpoint
@@ -451,11 +524,9 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
     };
   }, [localUser?.id, localUser?.activeWorkspaceId]);
 

@@ -30,11 +30,18 @@ export default function IntegrationsPage() {
         try {
             const integrationsRes = await getIntegrations();
             if (integrationsRes.integrations) {
-                const enriched = integrationsRes.integrations.map(i => ({
-                    ...i,
-                    category: i.name.toLowerCase().includes('messenger') || i.name.toLowerCase().includes('instagram') || i.name.toLowerCase().includes('whatsapp') ? 'messaging' :
-                        i.name.toLowerCase().includes('crm') ? 'crm' : 'utilities'
-                }));
+                const enriched = integrationsRes.integrations.map(i => {
+                    const searchableText = `${i.name} ${i.description} ${i.id}`.toLowerCase();
+                    return {
+                        ...i,
+                        category: searchableText.includes('messenger') ||
+                            searchableText.includes('instagram') ||
+                            searchableText.includes('whatsapp') ||
+                            searchableText.includes('telegram')
+                            ? 'messaging'
+                            : i.name.toLowerCase().includes('crm') ? 'crm' : 'utilities'
+                    };
+                });
                 setIntegrations(enriched as Integration[]);
             } else {
                 toast({ title: 'Erro de Rede', description: 'Nao foi possivel carregar as configuracoes.', variant: 'destructive' });
@@ -158,7 +165,7 @@ export default function IntegrationsPage() {
                             <Search className="h-4 w-4 text-slate-400" />
                         </div>
                         <Input
-                            placeholder="Buscar integracao (ex: Instagram, Messenger)..."
+                            placeholder="Buscar integracao (ex: Telegram, Instagram)..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500/20 focus-visible:ring-emerald-500/20"

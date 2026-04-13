@@ -1,192 +1,269 @@
 'use server';
 
-import { db } from '@/lib/db';
-import { getCurrentUser } from './user';
 import { revalidatePath, revalidateTag } from 'next/cache';
 
+import { db } from '@/lib/db';
+import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
+import { getCurrentUser } from './user';
+
 export type IntegrationConfig<T = any> = {
-    provider: string;
-    config: T;
-    is_active: boolean;
-    updated_at: string;
+  provider: string;
+  config: T;
+  is_active: boolean;
+  updated_at: string;
 };
 
 export async function saveIntegrationConfig(
-    workspaceId: string,
-    provider: string,
-    config: any,
-    isActive: boolean = true
+  workspaceId: string,
+  provider: string,
+  config: any,
+  isActive: boolean = true
 ): Promise<{ success: boolean; error?: string }> {
-    const user = await getCurrentUser();
+  const user = await getCurrentUser();
 
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
-    }
+  if (!user) {
+    return { success: false, error: 'Usuario nao autenticado.' };
+  }
 
-    // Verify workspace access (simple check: must be active workspace)
-    if (user.activeWorkspaceId !== workspaceId) {
-        // More robust check could query user_workspace_roles
-        return { success: false, error: 'Acesso negado ao workspace.' };
-    }
+  if (user.activeWorkspaceId !== workspaceId) {
+    return { success: false, error: 'Acesso negado ao workspace.' };
+  }
 
-    try {
-        await db.query(`
-            INSERT INTO workspace_integrations (workspace_id, provider, config, is_active, updated_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            ON CONFLICT (workspace_id, provider)
-            DO UPDATE SET 
-                config = $3,
-                is_active = $4,
-                updated_at = NOW();
-        `, [workspaceId, provider, JSON.stringify(config), isActive]);
+  try {
+    await ensureWorkspaceIntegrationsTable();
 
-        revalidatePath('/integrations');
-        return { success: true };
-    } catch (error) {
-        console.error('[SAVE_INTEGRATION] Error:', error);
-        return { success: false, error: 'Falha ao salvar configuração da integração.' };
-    }
+    await db.query(
+      `
+        INSERT INTO workspace_integrations (workspace_id, provider, config, is_active, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (workspace_id, provider)
+        DO UPDATE SET
+          config = $3,
+          is_active = $4,
+          updated_at = NOW()
+      `,
+      [workspaceId, provider, JSON.stringify(config), isActive]
+    );
+
+    revalidatePath('/integrations');
+    return { success: true };
+  } catch (error) {
+    console.error('[SAVE_INTEGRATION] Error:', error);
+    return { success: false, error: 'Falha ao salvar configuracao da integracao.' };
+  }
 }
 
 export async function getIntegrationConfig(
-    workspaceId: string,
-    provider: string
+  workspaceId: string,
+  provider: string
 ): Promise<{ config: any | null; isActive: boolean }> {
-    const user = await getCurrentUser();
-    if (!user) return { config: null, isActive: false };
+  const user = await getCurrentUser();
+  if (!user) {
+    return { config: null, isActive: false };
+  }
 
-    try {
-        const res = await db.query(`
-            SELECT config, is_active 
-            FROM workspace_integrations 
-            WHERE workspace_id = $1 AND provider = $2
-        `, [workspaceId, provider]);
+  try {
+    await ensureWorkspaceIntegrationsTable();
 
-        if (res.rows.length === 0) {
-            return { config: null, isActive: false };
-        }
+    const res = await db.query(
+      `
+        SELECT config, is_active
+        FROM workspace_integrations
+        WHERE workspace_id = $1
+          AND provider = $2
+      `,
+      [workspaceId, provider]
+    );
 
-        return {
-            config: res.rows[0].config,
-            isActive: res.rows[0].is_active
-        };
-    } catch (error) {
-        return { config: null, isActive: false };
+    if (res.rows.length === 0) {
+      return { config: null, isActive: false };
     }
+
+    return {
+      config: res.rows[0].config,
+      isActive: res.rows[0].is_active,
+    };
+  } catch (error) {
+    console.error('[GET_INTEGRATION_CONFIG] Error:', error);
+    return { config: null, isActive: false };
+  }
 }
 
 export async function getIntegrations(): Promise<{ integrations: any[]; error?: string }> {
-    const user = await getCurrentUser();
-    if (!user?.activeWorkspaceId) {
-        return { integrations: [] };
-    }
+  const user = await getCurrentUser();
+  if (!user?.activeWorkspaceId) {
+    return { integrations: [] };
+  }
 
-    const workspaceId = user.activeWorkspaceId;
+  const workspaceId = user.activeWorkspaceId;
 
-    try {
-        // Fetch integration statuses from the new table
-        const statusesRes = await db.query(`
-            SELECT provider, is_active 
-            FROM workspace_integrations 
-            WHERE workspace_id = $1
-        `, [workspaceId]);
+  try {
+    await ensureWorkspaceIntegrationsTable();
 
-        const activeProviders = new Set(statusesRes.rows.filter(r => r.is_active).map(r => r.provider));
+    const statusesRes = await db.query(
+      `
+        SELECT provider, is_active
+        FROM workspace_integrations
+        WHERE workspace_id = $1
+      `,
+      [workspaceId]
+    );
 
-        // Get limits for specific integrations
-        const { checkLimit } = await import('@/lib/billing-logic');
+    const activeProviders = new Set(
+      statusesRes.rows.filter((row) => row.is_active).map((row) => row.provider)
+    );
 
-        // Evolution API (WhatsApp) Limit Check
-        const evoCountRes = await db.query(
-            'SELECT COUNT(*) as count FROM evolution_api_instances WHERE workspace_id = $1',
-            [workspaceId]
-        );
-        const evoCurrentCount = parseInt(evoCountRes.rows[0].count, 10);
-        const evoLimitCheck = await checkLimit(workspaceId, 'whatsapp', evoCurrentCount);
+    const { checkLimit } = await import('@/lib/billing-logic');
 
-        const availableIntegrations = [
-            {
-                id: 'gemini',
-                name: 'Google Gemini',
-                description: 'Assistente de IA para resumos e respostas inteligentes.',
-                icon_url: '/icons/gemini.svg',
-                href: '/integrations/gemini',
-                is_active: activeProviders.has('gemini'),
-                provider: 'gemini'
-            },
-            {
-                id: 'evolution-api',
-                name: 'Evolution API (WhatsApp)',
-                description: 'Conecte seus números de WhatsApp via Evolution API.',
-                icon_url: '/icons/whatsapp.svg',
-                href: '/integrations/evolution-api',
-                is_active: activeProviders.has('evolution-api'),
-                provider: 'evolution-api',
-                limitStatus: {
-                    reached: !evoLimitCheck.allowed,
-                    current: evoCurrentCount,
-                    max: evoLimitCheck.limit,
-                    plan: evoLimitCheck.plan
-                }
-            },
-            {
-                id: 'meta-messenger',
-                name: 'Meta Messenger',
-                description: 'Gerencie mensagens do Facebook Messenger.',
-                icon_url: '/icons/messenger.svg',
-                href: '/integrations/meta-messenger',
-                is_active: activeProviders.has('meta-messenger'),
-                provider: 'meta-messenger'
-            },
-            {
-                id: 'meta-instagram',
-                name: 'Instagram Direct',
-                description: 'Responda DMs do Instagram diretamente.',
-                icon_url: '/icons/instagram.svg',
-                href: '/integrations/meta-instagram',
-                is_active: activeProviders.has('meta-instagram'),
-                provider: 'meta-instagram'
-            },
-            {
-                id: 'mercadolivre',
-                name: 'Mercado Livre',
-                description: 'Responda perguntas e gerencie vendas do Mercado Livre.',
-                icon_url: '/icons/mercadolivre.png',
-                href: '/integrations/mercadolivre',
-                is_active: activeProviders.has('mercadolivre'),
-                provider: 'mercadolivre'
-            },
-            {
-                id: 'nexusflow',
-                name: 'NexusFlow',
-                description: 'Automação de fluxos e chatbots avançados.',
-                icon_url: '/icons/nexusflow.svg',
-                href: '/integrations/nexusflow',
-                is_active: activeProviders.has('nexusflow'),
-                provider: 'nexusflow'
-            },
-            {
-                id: 'sgp',
-                name: 'SGP',
-                description: 'Plugin de integração com o sistema SGP.',
-                icon_url: 'https://raichu-uploads.s3.amazonaws.com/logo_tsmx_G0fUrW.png',
-                href: '/integrations/sgp',
-                is_active: activeProviders.has('sgp'),
-                provider: 'sgp'
-            }
-        ];
+    const [evoCountRes, telegramCountRes] = await Promise.all([
+      db.query(
+        `
+          SELECT COUNT(*) as count
+          FROM evolution_api_instances
+          WHERE workspace_id = $1
+        `,
+        [workspaceId]
+      ),
+      db.query(
+        `
+          SELECT COUNT(*) as count
+          FROM telegram_bot_instances
+          WHERE workspace_id = $1
+        `,
+        [workspaceId]
+      ),
+    ]);
+    const evoCurrentCount = parseInt(evoCountRes.rows[0].count, 10);
+    const whatsappCurrentCount = evoCurrentCount;
+    const telegramCurrentCount = parseInt(telegramCountRes.rows[0].count, 10);
+    const evoLimitCheck = await checkLimit(workspaceId, 'whatsapp', evoCurrentCount);
 
-        return { integrations: availableIntegrations };
-    } catch (error) {
-        console.error('[GET_INTEGRATIONS_ACTION]', error);
-        return { integrations: [], error: 'Falha ao carregar integrações.' };
-    }
+    const availableIntegrations = [
+      {
+        id: 'gemini',
+        name: 'Google Gemini',
+        description: 'Assistente de IA para resumos e respostas inteligentes.',
+        icon_url: '/icons/gemini.svg',
+        tag: 'IA',
+        tag_type: 'primary',
+        href: '/integrations/gemini',
+        status: 'active',
+        provider: 'gemini',
+        is_active: activeProviders.has('gemini'),
+      },
+      {
+        id: 'evolution-api',
+        name: 'Evolution API',
+        description: 'Conecte WhatsApp com QR Code ou Cloud API pela Evolution API.',
+        icon_url: '/icons/whatsapp.svg',
+        tag: 'WhatsApp',
+        tag_type: 'primary',
+        href: '/integrations/evolution-api',
+        status: 'active',
+        provider: 'evolution-api',
+        is_active: activeProviders.has('evolution-api') || whatsappCurrentCount > 0,
+        limitStatus: {
+          reached: !evoLimitCheck.allowed,
+          current: evoCurrentCount,
+          max: evoLimitCheck.limit,
+          plan: evoLimitCheck.plan,
+        },
+      },
+      {
+        id: 'telegram',
+        name: 'Telegram Bot',
+        description: 'Conecte bots do Telegram com webhook automatico e inbox dedicado.',
+        icon_url: '/icons/telegram.svg',
+        tag: 'Telegram',
+        tag_type: 'primary',
+        href: '/integrations/telegram',
+        status: 'active',
+        provider: 'telegram',
+        is_active: activeProviders.has('telegram') || telegramCurrentCount > 0,
+      },
+      {
+        id: 'meta-messenger',
+        name: 'Meta Messenger',
+        description: 'Gerencie mensagens do Facebook Messenger.',
+        icon_url: '/icons/messenger.svg',
+        tag: 'Messenger',
+        tag_type: 'primary',
+        href: '/integrations/meta-messenger',
+        status: 'active',
+        provider: 'meta-messenger',
+        is_active: activeProviders.has('meta-messenger'),
+      },
+      {
+        id: 'meta-instagram',
+        name: 'Instagram Direct',
+        description: 'Responda DMs do Instagram diretamente.',
+        icon_url: '/icons/instagram.svg',
+        tag: 'Instagram',
+        tag_type: 'primary',
+        href: '/integrations/meta-instagram',
+        status: 'active',
+        provider: 'meta-instagram',
+        is_active: activeProviders.has('meta-instagram'),
+      },
+      {
+        id: 'mercadolivre',
+        name: 'Mercado Livre',
+        description: 'Responda perguntas e gerencie vendas do Mercado Livre.',
+        icon_url: '/icons/mercadolivre.png',
+        tag: 'Marketplace',
+        tag_type: 'secondary',
+        href: '/integrations/mercadolivre',
+        status: 'active',
+        provider: 'mercadolivre',
+        is_active: activeProviders.has('mercadolivre'),
+      },
+      {
+        id: 'nexusflow',
+        name: 'NexusFlow',
+        description: 'Automacao de fluxos e chatbots avancados.',
+        icon_url: '/icons/nexusflow.svg',
+        tag: 'Automacao',
+        tag_type: 'secondary',
+        href: '/integrations/nexusflow',
+        status: 'active',
+        provider: 'nexusflow',
+        is_active: activeProviders.has('nexusflow'),
+      },
+      {
+        id: 'sgp',
+        name: 'SGP',
+        description: 'Plugin de integracao com o sistema SGP.',
+        icon_url: 'https://raichu-uploads.s3.amazonaws.com/logo_tsmx_G0fUrW.png',
+        tag: 'Plugin',
+        tag_type: 'beta',
+        href: '/integrations/sgp',
+        status: 'active',
+        provider: 'sgp',
+        is_active: activeProviders.has('sgp'),
+      },
+      {
+        id: 'delivery-hub',
+        name: 'Delivery Hub',
+        description: 'Monte uma vitrine com varios negocios, cardapios e link publico compartilhavel.',
+        icon_url: '/icons/delivery-hub.svg',
+        tag: activeProviders.has('delivery-hub') ? 'Publicado' : 'Catalogo',
+        tag_type: activeProviders.has('delivery-hub') ? 'primary' : 'secondary',
+        href: '/integrations/delivery-hub',
+        status: 'active',
+        provider: 'delivery-hub',
+        is_active: activeProviders.has('delivery-hub'),
+      },
+    ];
+
+    return { integrations: availableIntegrations };
+  } catch (error) {
+    console.error('[GET_INTEGRATIONS_ACTION]', error);
+    return { integrations: [], error: 'Falha ao carregar integracoes.' };
+  }
 }
 
 export async function updateIntegration(data: any): Promise<{ success: boolean; error?: string }> {
-    // Stub for now, as we don't have a table for Integration Definitions yet.
-    // In a real scenario, this would update an 'integrations_catalog' table.
-    console.log('[UPDATE_INTEGRATION] Stub called with:', data);
-    revalidateTag('integration-catalog', 'default');
-    return { success: true };
+  console.log('[UPDATE_INTEGRATION] Stub called with:', data);
+  revalidateTag('integration-catalog', 'default');
+  return { success: true };
 }

@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 
 interface TransferPayload {
     teamId?: string;
@@ -15,6 +15,8 @@ interface TransferPayload {
 async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promise<boolean> {
     try {
         const ttlSeconds = getPresenceTtlSeconds();
+        const recentActivitySeconds = getPresenceRecentActivitySeconds();
+        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$3', '$4');
         const onlineAgentRes = await db.query(
             `
             SELECT 1
@@ -25,11 +27,10 @@ async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promis
                 AND uwp.workspace_id = t.workspace_id
             WHERE tm.team_id = $1
               AND t.workspace_id = $2
-              AND uwp.is_online = TRUE
-              AND uwp.last_seen > NOW() - ($3 * interval '1 second')
+              AND ${availabilitySql}
             LIMIT 1;
             `,
-            [teamId, workspaceId, ttlSeconds]
+            [teamId, workspaceId, ttlSeconds, recentActivitySeconds]
         );
 
         return (onlineAgentRes.rowCount ?? 0) > 0;

@@ -1,6 +1,11 @@
 'use server';
 
 import { db } from '@/lib/db';
+import {
+    getAnalyticsChannelColor,
+    normalizeAnalyticsChannel,
+    type AnalyticsChannelName,
+} from '@/lib/analytics-channels';
 import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import type { ConversionCounterMode, ConversionMetrics, ConversionSettings } from '@/lib/types';
@@ -200,40 +205,65 @@ export async function getAnalyticsData(
         const conversationsByHour = conversationsByHourRes.rows.map(r => ({ hour: `${r.hour}h`, count: parseInt(r.count, 10) }));
 
         // Channels Distribution
-        // We use a direct query here to ensure we capture ALL incoming traffic by channel,
-        // including unassigned chats that might be filtered out by Team/Agent filters.
-        const channelsQuery = `SELECT
-                CASE 
-                    WHEN mc.platform = 'instagram' THEN 'Instagram'
-                    WHEN mc.platform = 'messenger' THEN 'Messenger'
-                    WHEN ct.phone_number_jid LIKE '%@s.whatsapp.net' OR ct.phone_number_jid LIKE '%@g.us' THEN 'WhatsApp'
-                    ELSE 'Instagram' -- Fallback for likely Meta contacts without JID
-                END as channel,
+        // Keep this aligned with the inbox platform heuristics so the chart matches
+        // what the operator sees in the chat list.
+        const [channelsQuery, channelsParams] = addFilters(
+            `SELECT
+                COALESCE(
+                    LOWER(NULLIF(mc.platform::text, '')),
+                    last_platform.platform_signal,
+                    meta_contact_platform.platform_signal,
+                    CASE
+                        WHEN ct.phone_number_jid ILIKE '%@s.whatsapp.net'
+                          OR ct.phone_number_jid ILIKE '%@g.us'
+                          OR ct.phone_number_jid ILIKE '%@lid'
+                        THEN 'whatsapp'
+                        ELSE NULL
+                    END,
+                    'unknown'
+                ) as channel_signal,
                 COUNT(*) as count
              FROM chats c
-             LEFT JOIN meta_conversations mc ON c.id = mc.chat_id
              LEFT JOIN contacts ct ON c.contact_id = ct.id
+             LEFT JOIN meta_conversations mc ON c.id = mc.chat_id
+             LEFT JOIN LATERAL (
+                SELECT LOWER(COALESCE(m.source_from_api, m.platform::text)) AS platform_signal
+                FROM messages m
+                WHERE m.chat_id = c.id
+                  AND COALESCE(m.source_from_api, m.platform::text) IS NOT NULL
+                ORDER BY m.created_at DESC
+                LIMIT 1
+             ) last_platform ON TRUE
+             LEFT JOIN LATERAL (
+                SELECT LOWER(mch.type::text) AS platform_signal
+                FROM meta_contacts mct
+                JOIN meta_channels mch ON mch.id = mct.channel_id
+                WHERE mct.contact_id = c.contact_id
+                ORDER BY mct.created_at DESC
+                LIMIT 1
+             ) meta_contact_platform ON TRUE
              WHERE c.workspace_id = $1 AND c.created_at BETWEEN $2 AND $3
              GROUP BY 1
-             ORDER BY count DESC`;
-
-        const channelsParams = baseParams;
-
+             ORDER BY count DESC`,
+            baseParams,
+            filters
+        );
         const channelsRes = await db.query(channelsQuery, channelsParams);
 
-        const channelColors: Record<string, string> = {
-            'WhatsApp': '#25D366',
-            'instagram': '#E1306C',
-            'messenger': '#0084FF',
-            'Instagram': '#E1306C',
-            'Messenger': '#0084FF'
-        };
+        const channelTotals = channelsRes.rows.reduce<Map<AnalyticsChannelName, number>>((acc, row) => {
+                const name = normalizeAnalyticsChannel(row.channel_signal);
+                const current = acc.get(name) || 0;
+                acc.set(name, current + parseInt(row.count, 10));
+                return acc;
+            }, new Map<AnalyticsChannelName, number>());
 
-        const conversationsByChannel = channelsRes.rows.map(r => ({
-            name: r.channel === 'instagram' ? 'Instagram' : r.channel === 'messenger' ? 'Messenger' : r.channel,
-            value: parseInt(r.count, 10),
-            color: channelColors[r.channel] || channelColors[r.channel === 'instagram' ? 'Instagram' : r.channel === 'messenger' ? 'Messenger' : r.channel] || '#8884d8'
-        }));
+        const conversationsByChannel: AnalyticsData['conversationsByChannel'] = [...channelTotals.entries()]
+            .map(([name, value]) => ({
+                name,
+                value,
+                color: getAnalyticsChannelColor(name)
+            }))
+            .sort((a, b) => b.value - a.value);
 
         console.log('[GET_ANALYTICS_DATA] Channels Result:', conversationsByChannel);
 

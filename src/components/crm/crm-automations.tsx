@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -527,11 +527,11 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
             <ScrollArea className="flex-1 px-6 pb-6">
                 {automations.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center">
-                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
+                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
                             <Zap className="h-8 w-8 text-slate-400" />
                         </div>
-                        <h3 className="mb-1 text-base font-medium text-slate-700">Nenhuma automacao criada</h3>
-                        <p className="max-w-xs text-sm text-slate-500">Crie regras para automatizar acoes quando contatos mudarem de estagio, deals forem criados, e mais.</p>
+                        <h3 className="mb-1 text-base font-medium text-slate-700 dark:text-slate-300">Nenhuma automacao criada</h3>
+                        <p className="max-w-xs text-sm text-slate-500 dark:text-slate-400">Crie regras para automatizar acoes quando contatos mudarem de estagio, deals forem criados, e mais.</p>
                     </div>
                 ) : (
                     <div className="grid gap-3">
@@ -540,7 +540,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                             return (
                                 <Card
                                     key={auto.id}
-                                    className={`border-slate-200 bg-white transition-all hover:bg-slate-50 ${!auto.is_active ? 'opacity-50' : ''}`}
+                                    className={`border-slate-200 bg-white transition-all hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900/50 ${!auto.is_active ? 'opacity-50' : ''}`}
                                 >
                                     <CardContent className="p-4">
                                         <div className="flex items-start justify-between gap-3">
@@ -550,24 +550,24 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <span className="truncate text-sm font-medium text-slate-950">{auto.name}</span>
-                                                        <Badge variant="outline" className={`shrink-0 text-[10px] ${auto.is_active ? 'border-emerald-500/30 text-emerald-500' : 'border-slate-300 text-slate-500'}`}>
+                                                        <span className="truncate text-sm font-medium text-slate-950 dark:text-slate-50">{auto.name}</span>
+                                                        <Badge variant="outline" className={`shrink-0 text-[10px] ${auto.is_active ? 'border-emerald-500/30 text-emerald-500' : 'border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400'}`}>
                                                             {auto.is_active ? 'Ativa' : 'Inativa'}
                                                         </Badge>
                                                     </div>
-                                                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                                                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                                                         <span className="text-blue-400 font-medium">{getTriggerLabel(auto.trigger_type)}</span>
                                                         {describeTrigger(auto) && (
                                                             <>
-                                                                <span className="text-slate-300">|</span>
+                                                                <span className="text-slate-300 dark:text-slate-600">|</span>
                                                                 <span>{describeTrigger(auto)}</span>
                                                             </>
                                                         )}
-                                                        <ArrowRight className="mx-0.5 h-3 w-3 text-slate-300" />
+                                                        <ArrowRight className="mx-0.5 h-3 w-3 text-slate-300 dark:text-slate-600" />
                                                         {auto.actions.map((action, i) => (
                                                             <span key={i} className="text-amber-400">
                                                                 {getActionLabel(action.type)}{' '}
-                                                                <span className="text-slate-500">{describeAction(action)}</span>
+                                                                <span className="text-slate-500 dark:text-slate-400">{describeAction(action)}</span>
                                                                 {i < auto.actions.length - 1 && ', '}
                                                             </span>
                                                         ))}
@@ -580,10 +580,10 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                     onCheckedChange={() => handleToggle(auto.id)}
                                                     className="scale-90"
                                                 />
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:bg-slate-100 hover:text-slate-950" onClick={() => openEdit(auto)}>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:bg-slate-100 hover:text-slate-950 dark:hover:bg-slate-800 dark:hover:text-slate-50" onClick={() => openEdit(auto)}>
                                                     <Zap className="h-3.5 w-3.5" />
                                                 </Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:bg-red-50 hover:text-red-500" onClick={() => handleDelete(auto.id)}>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400" onClick={() => handleDelete(auto.id)}>
                                                     <Trash2 className="h-3.5 w-3.5" />
                                                 </Button>
                                             </div>
@@ -598,10 +598,10 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
             {/* Create/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="max-h-[92vh] w-[96vw] max-w-[1200px] overflow-hidden border-slate-200 bg-white sm:max-w-[1200px]">
+                <DialogContent className="max-h-[92vh] w-[96vw] max-w-[1200px] overflow-hidden border-slate-200 bg-white sm:max-w-[1200px] dark:border-slate-800 dark:bg-slate-950">
                     <DialogHeader>
-                        <DialogTitle className="text-slate-950">{editingId ? 'Editar' : 'Nova'} Automacao</DialogTitle>
-                        <DialogDescription className="text-slate-500">
+                        <DialogTitle className="text-slate-950 dark:text-slate-50">{editingId ? 'Editar' : 'Nova'} Automacao</DialogTitle>
+                        <DialogDescription className="text-slate-500 dark:text-slate-400">
                             Configure quando a automacao deve disparar e quais acoes executar.
                         </DialogDescription>
                     </DialogHeader>
@@ -609,23 +609,23 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                     <div className="max-h-[68vh] overflow-y-auto pr-1 space-y-4 py-2">
                         {/* Name */}
                         <div className="space-y-1.5">
-                            <Label className="text-xs text-slate-600">Nome</Label>
+                            <Label className="text-xs text-slate-600 dark:text-slate-300">Nome</Label>
                             <Input
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 placeholder="Ex: Qualificado -> Atribuir Vendedor"
-                                className="border-slate-200 bg-white text-slate-900"
+                                className="border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
                             />
                         </div>
 
                         <div className="grid gap-4 lg:grid-cols-2 items-start">
                             {/* Trigger */}
-                            <div className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                            <Label className="flex items-center gap-1.5 text-xs text-slate-600">
+                            <div className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                            <Label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
                                 <Zap className="h-3 w-3 text-blue-400" /> Quando...
                             </Label>
                             <Select value={triggerType} onValueChange={v => { setTriggerType(v); setTriggerConfig({}); }}>
-                                <SelectTrigger className="border-slate-200 bg-white text-slate-900">
+                                <SelectTrigger className="border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -639,9 +639,9 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                             {triggerType === 'stage_changed' && (
                                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                     <div className="space-y-1">
-                                        <Label className="text-slate-500 text-[10px]">De (opcional)</Label>
+                                        <Label className="text-slate-500 text-[10px] dark:text-slate-400">De (opcional)</Label>
                                         <Select value={triggerConfig.from_stage || '_any'} onValueChange={v => setTriggerConfig({ ...triggerConfig, from_stage: v === '_any' ? undefined : v })}>
-                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -651,9 +651,9 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                         </Select>
                                     </div>
                                     <div className="space-y-1">
-                                        <Label className="text-slate-500 text-[10px]">Para (opcional)</Label>
+                                        <Label className="text-slate-500 text-[10px] dark:text-slate-400">Para (opcional)</Label>
                                         <Select value={triggerConfig.to_stage || '_any'} onValueChange={v => setTriggerConfig({ ...triggerConfig, to_stage: v === '_any' ? undefined : v })}>
-                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -667,28 +667,28 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
                             {triggerType === 'lead_score_above' && (
                                 <div className="space-y-1">
-                                    <Label className="text-slate-500 text-[10px]">Score minimo</Label>
+                                    <Label className="text-slate-500 text-[10px] dark:text-slate-400">Score minimo</Label>
                                     <Input
                                         type="number"
                                         min={0} max={100}
                                         value={triggerConfig.threshold || ''}
                                         onChange={e => setTriggerConfig({ ...triggerConfig, threshold: parseInt(e.target.value) || 0 })}
-                                        className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                        className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
                                         placeholder="Ex: 60"
                                     />
                                 </div>
                             )}
 
                             {triggerType === 'custom_field_changed' && (
-                                <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+                                <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-900/50">
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between">
-                                            <Label className="text-slate-600 text-[10px]">Contato fizer (todas com E)</Label>
+                                            <Label className="text-slate-600 text-[10px] dark:text-slate-400">Contato fizer (todas com E)</Label>
                                             <Button
                                                 type="button"
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-6 text-[10px] text-slate-500 hover:text-slate-950"
+                                                className="h-6 text-[10px] text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50"
                                                 onClick={() => addTriggerCondition('changed_conditions')}
                                             >
                                                 <Plus className="h-3 w-3 mr-1" /> E
@@ -702,7 +702,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         value={condition.field_id || ''}
                                                         onValueChange={v => updateTriggerCondition('changed_conditions', index, { field_id: v, field_value: '' })}
                                                     >
-                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                             <SelectValue placeholder="Campo" />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -721,7 +721,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                         field_value: v === ANY_VALUE_SENTINEL ? '' : v,
                                                                     })}
                                                                 >
-                                                                    <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                                    <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                                         <SelectValue placeholder="Qualquer valor" />
                                                                     </SelectTrigger>
                                                                     <SelectContent>
@@ -740,7 +740,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             <Input
                                                                 value={condition.field_value || ''}
                                                                 onChange={e => updateTriggerCondition('changed_conditions', index, { field_value: e.target.value })}
-                                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                                 placeholder="Igual a (opcional)"
                                                             />
                                                         );
@@ -750,7 +750,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         type="button"
                                                         variant="ghost"
                                                         size="icon"
-                                                        className="h-8 w-8 text-slate-400 hover:text-red-400"
+                                                        className="h-8 w-8 text-slate-400 hover:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                                                         onClick={() => removeTriggerCondition('changed_conditions', index)}
                                                     >
                                                         <Trash2 className="h-3.5 w-3.5" />
@@ -767,12 +767,12 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
 
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between">
-                                            <Label className="text-slate-600 text-[10px]">E contato estiver (todas com E)</Label>
+                                            <Label className="text-slate-600 text-[10px] dark:text-slate-400">E contato estiver (todas com E)</Label>
                                             <Button
                                                 type="button"
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-6 text-[10px] text-slate-500 hover:text-slate-950"
+                                                className="h-6 text-[10px] text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50"
                                                 onClick={() => addTriggerCondition('state_conditions')}
                                             >
                                                 <Plus className="h-3 w-3 mr-1" /> E
@@ -790,7 +790,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         value={condition.field_id || ''}
                                                         onValueChange={v => updateTriggerCondition('state_conditions', index, { field_id: v, field_value: '' })}
                                                     >
-                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                             <SelectValue placeholder="Campo" />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -809,7 +809,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                         field_value: v === ANY_VALUE_SENTINEL ? '' : v,
                                                                     })}
                                                                 >
-                                                                    <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                                    <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50">
                                                                         <SelectValue placeholder="Qualquer valor" />
                                                                     </SelectTrigger>
                                                                     <SelectContent>
@@ -828,7 +828,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             <Input
                                                                 value={condition.field_value || ''}
                                                                 onChange={e => updateTriggerCondition('state_conditions', index, { field_value: e.target.value })}
-                                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                                 placeholder="Igual a (opcional)"
                                                             />
                                                         );
@@ -838,7 +838,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         type="button"
                                                         variant="ghost"
                                                         size="icon"
-                                                        className="h-8 w-8 text-slate-400 hover:text-red-400"
+                                                        className="h-8 w-8 text-slate-400 hover:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                                                         onClick={() => removeTriggerCondition('state_conditions', index)}
                                                     >
                                                         <Trash2 className="h-3.5 w-3.5" />
@@ -855,12 +855,12 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                         </div>
 
                             {/* Actions */}
-                            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 min-w-0">
+                            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 min-w-0 dark:border-slate-800 dark:bg-slate-900/50">
                             <div className="flex items-center justify-between">
-                                <Label className="text-slate-600 text-xs flex items-center gap-1.5">
+                                <Label className="text-slate-600 text-xs flex items-center gap-1.5 dark:text-slate-400">
                                     <ArrowRight className="h-3 w-3 text-amber-400" /> Entao faca...
                                 </Label>
-                                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950" onClick={addAction}>
+                                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50" onClick={addAction}>
                                     <Plus className="h-3 w-3 mr-1" /> Acao
                                 </Button>
                             </div>
@@ -870,10 +870,10 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                             )}
 
                             {actions.map((action, i) => (
-                                <div key={i} className="p-3 rounded-lg bg-white border border-slate-200 space-y-2">
+                                <div key={i} className="p-3 rounded-lg bg-white border border-slate-200 space-y-2 dark:bg-slate-950 dark:border-slate-800">
                                     <div className="flex items-center gap-2">
                                         <Select value={action.type} onValueChange={v => updateAction(i, 'type', v)}>
-                                            <SelectTrigger className="h-8 min-w-0 flex-1 border-slate-200 bg-white text-xs text-slate-900">
+                                            <SelectTrigger className="h-8 min-w-0 flex-1 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -882,7 +882,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                 ))}
                                             </SelectContent>
                                         </Select>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0" onClick={() => removeAction(i)}>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0 dark:hover:bg-red-500/10 dark:hover:text-red-400" onClick={() => removeAction(i)}>
                                             <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
@@ -890,18 +890,18 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                     {/* Action config */}
                                     {action.type === 'move_to_stage' && (
                                         <Select value={action.config.stage || ''} onValueChange={v => updateAction(i, 'stage', v)}>
-                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                 <SelectValue placeholder="Selecione o estagio" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {STAGES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                                                {orderedStages.map(s => <SelectItem key={s.id} value={s.value}>{s.label}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     )}
 
                                     {action.type === 'assign_owner' && (
                                         <Select value={action.config.owner_id || ''} onValueChange={v => updateAction(i, 'owner_id', v)}>
-                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                 <SelectValue placeholder="Selecione o responsavel" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -916,14 +916,14 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                 value={action.config.title || ''}
                                                 onChange={e => updateAction(i, 'title', e.target.value)}
                                                 placeholder="Titulo do deal"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                             />
                                             <Input
                                                 type="number"
                                                 value={action.config.value || ''}
                                                 onChange={e => updateAction(i, 'value', parseFloat(e.target.value) || 0)}
                                                 placeholder="Valor (R$)"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                             />
                                         </div>
                                     )}
@@ -933,7 +933,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                             value={action.config.message || ''}
                                             onChange={e => updateAction(i, 'message', e.target.value)}
                                             placeholder="Mensagem da notificacao"
-                                            className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                            className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                         />
                                     )}
 
@@ -950,7 +950,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                     setActions(updated);
                                                 }}
                                             >
-                                                <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                     <SelectValue placeholder="Selecione o campo" />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -967,7 +967,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             value={action.config.field_value || CLEAR_VALUE_SENTINEL}
                                                             onValueChange={v => updateAction(i, 'field_value', v === CLEAR_VALUE_SENTINEL ? '' : v)}
                                                         >
-                                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                                 <SelectValue placeholder="Novo valor" />
                                                             </SelectTrigger>
                                                             <SelectContent>
@@ -987,7 +987,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         value={action.config.field_value || ''}
                                                         onChange={e => updateAction(i, 'field_value', e.target.value)}
                                                         placeholder="Novo valor"
-                                                        className="h-8 border-slate-200 bg-white text-xs text-slate-900"
+                                                        className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                     />
                                                 );
                                             })()}
@@ -999,7 +999,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                             <div className="grid grid-cols-1 gap-2 md:grid-cols-[100px_minmax(0,1fr)_auto]">
                                                 <div className="w-[100px]">
                                                     <Select value={action.config.method || 'GET'} onValueChange={v => updateAction(i, 'method', v)}>
-                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900">
+                                                        <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1023,7 +1023,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             rememberVariableFieldSelection(`action-${i}-url`, e.currentTarget);
                                                         }}
                                                         placeholder="URL do Webhook (ex: https://api.exemplo.com/webhook)"
-                                                        className="h-8 min-w-0 flex-1 border-slate-200 bg-white text-xs text-slate-900"
+                                                        className="h-8 min-w-0 flex-1 border-slate-200 bg-white text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                     />
                                                     <VariableSelector
                                                         customFields={customFields}
@@ -1038,10 +1038,10 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                             </div>
 
                                             {/* Headers */}
-                                            <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+                                            <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">
                                                 <div className="flex items-center justify-between">
-                                                    <Label className="text-slate-600 font-medium">Headers</Label>
-                                                    <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950" onClick={() => addActionHeader(i)}>
+                                                    <Label className="text-slate-600 font-medium dark:text-slate-400">Headers</Label>
+                                                    <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50" onClick={() => addActionHeader(i)}>
                                                         <Plus className="h-3 w-3 mr-1" /> Adicionar Header
                                                     </Button>
                                                 </div>
@@ -1051,7 +1051,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                             value={header.key}
                                                             onChange={e => updateActionHeader(i, hIndex, 'key', e.target.value)}
                                                             placeholder="Key (ex: Authorization)"
-                                                            className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900"
+                                                            className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                         />
                                                         <div className="flex min-w-0 flex-1 gap-1">
                                                             <Input
@@ -1066,7 +1066,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                     rememberVariableFieldSelection(`action-${i}-header-${hIndex}-value`, e.currentTarget);
                                                                 }}
                                                                 placeholder="Value (ex: Bearer token...)"
-                                                                className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900"
+                                                                className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                             />
                                                             <div className="scale-[0.875] origin-right">
                                                                 <VariableSelector
@@ -1080,21 +1080,21 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                 />
                                                             </div>
                                                         </div>
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0" onClick={() => removeActionHeader(i, hIndex)}>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0 dark:hover:bg-red-500/10 dark:hover:text-red-400" onClick={() => removeActionHeader(i, hIndex)}>
                                                             <Trash2 className="h-3.5 w-3.5" />
                                                         </Button>
                                                     </div>
                                                 ))}
-                                                {!(action.config.headers?.length > 0) && <p className="text-[10px] text-slate-400">Nenhum header configurado.</p>}
+                                                {!(action.config.headers?.length > 0) && <p className="text-[10px] text-slate-400 dark:text-slate-500">Nenhum header configurado.</p>}
                                             </div>
 
                                             {/* Body Configuration */}
                                             {action.config.method !== 'GET' && (
-                                                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+                                                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">
                                                     <div className="flex items-center justify-between mb-2">
-                                                        <Label className="text-slate-600 font-medium">Body (Payload)</Label>
+                                                        <Label className="text-slate-600 font-medium dark:text-slate-400">Body (Payload)</Label>
                                                         <Select value={action.config.bodyType || 'json'} onValueChange={v => updateAction(i, 'bodyType', v)}>
-                                                            <SelectTrigger className="w-[180px] h-6 border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-900">
+                                                            <SelectTrigger className="w-[180px] h-6 border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50">
                                                                 <SelectValue placeholder="Tipo de Envio" />
                                                             </SelectTrigger>
                                                             <SelectContent>
@@ -1120,7 +1120,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                     rememberVariableFieldSelection(`action-${i}-payload`, e.currentTarget);
                                                                 }}
                                                                 placeholder='Payload JSON (Opcional). Ex: { "id": "{{contact.id}}" }'
-                                                                className="min-h-[60px] resize-y border-slate-200 bg-slate-50 pr-10 text-xs text-slate-900"
+                                                                className="min-h-[60px] resize-y border-slate-200 bg-slate-50 pr-10 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                             />
                                                             <div className="absolute top-1 right-1">
                                                                 <VariableSelector
@@ -1140,7 +1140,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                     {action.config.bodyType === 'form-data' && (
                                                         <div className="space-y-2">
                                                             <div className="flex justify-end">
-                                                                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950" onClick={() => addActionFormData(i)}>
+                                                                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50" onClick={() => addActionFormData(i)}>
                                                                     <Plus className="h-3 w-3 mr-1" /> Adicionar Parametro
                                                                 </Button>
                                                             </div>
@@ -1150,7 +1150,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                         value={data.key}
                                                                         onChange={e => updateActionFormData(i, dIndex, 'key', e.target.value)}
                                                                         placeholder="Key (ex: email)"
-                                                                        className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900"
+                                                                        className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                                     />
                                                                     <div className="flex min-w-0 flex-1 gap-1">
                                                                         <Input
@@ -1165,7 +1165,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                                 rememberVariableFieldSelection(`action-${i}-formdata-${dIndex}-value`, e.currentTarget);
                                                                             }}
                                                                             placeholder="Value (ex: {{contact.email}})"
-                                                                            className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900"
+                                                                            className="h-7 min-w-0 flex-1 border-slate-200 bg-slate-50 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                                                                         />
                                                                         <div className="scale-[0.875] origin-right">
                                                                             <VariableSelector
@@ -1179,12 +1179,12 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                                             />
                                                                         </div>
                                                                     </div>
-                                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0" onClick={() => removeActionFormData(i, dIndex)}>
+                                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-400 shrink-0 dark:hover:bg-red-500/10 dark:hover:text-red-400" onClick={() => removeActionFormData(i, dIndex)}>
                                                                         <Trash2 className="h-3.5 w-3.5" />
                                                                     </Button>
                                                                 </div>
                                                             ))}
-                                                            {!(action.config.formData?.length > 0) && <p className="text-[10px] text-slate-400 mt-1">Nenhum parametro configurado.</p>}
+                                                            {!(action.config.formData?.length > 0) && <p className="text-[10px] text-slate-400 mt-1 dark:text-slate-500">Nenhum parametro configurado.</p>}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1198,7 +1198,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDialogOpen(false)} className="border-slate-200 text-slate-500">
+                        <Button variant="outline" onClick={() => setDialogOpen(false)} className="border-slate-200 text-slate-500 dark:border-slate-800 dark:bg-transparent dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50">
                             Cancelar
                         </Button>
                         <Button onClick={handleSave} className="gap-1.5">

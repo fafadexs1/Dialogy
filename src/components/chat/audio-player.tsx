@@ -8,6 +8,7 @@ import { transcribeAudio } from '@/ai/flows/transcribe-audio';
 import { useToast } from '@/hooks/use-toast';
 import { saveTranscriptionAction } from '@/actions/messages';
 import type { Message } from '@/lib/types';
+import { toAbsoluteAppUrl } from '@/lib/storage-url';
 
 interface AudioPlayerProps {
     src: string;
@@ -105,13 +106,15 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
     };
 
     const handleTranscribe = async () => {
-        if (!src) {
+        const audioUrl = toAbsoluteAppUrl(src);
+
+        if (!audioUrl) {
             toast({ title: "Erro", description: "URL do áudio não encontrada.", variant: "destructive" });
             return;
         }
         setIsTranscribing(true);
         try {
-            const result = await transcribeAudio({ audioUrl: src, workspaceId });
+            const result = await transcribeAudio({ audioUrl, workspaceId });
             if (result.transcription) {
                 setTranscription(result.transcription);
                 // Save to DB in the background if messageId exists

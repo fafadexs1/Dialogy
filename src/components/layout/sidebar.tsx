@@ -37,13 +37,16 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const mainNavItems: NavItem[] = [
   { href: "/inbox", icon: MessageSquare, labelKey: "nav.chat", exact: false },
-  { href: "/crm", icon: Users, labelKey: "nav.crm", exact: false },
-  { href: "/campaigns", icon: Send, labelKey: "nav.campaigns", exact: false },
-  { href: "/analytics", icon: BarChart2, labelKey: "nav.analytics", exact: false },
   { href: "/referrals", icon: Gift, labelKey: "nav.referrals", exact: false, attention: true },
   { href: "/integrations", icon: Puzzle, labelKey: "nav.integrations", exact: false },
   { href: "/support", icon: HelpCircle, labelKey: "nav.support", exact: false },
   { href: "/nexus", icon: Sparkles, labelKey: "nav.nexus", exact: false },
+];
+
+const crmNavItems: FlyoutItemConfig[] = [
+  { href: "/crm", icon: Users, labelKey: "nav.crm" },
+  { href: "/campaigns", icon: Send, labelKey: "nav.campaigns" },
+  { href: "/analytics", icon: BarChart2, labelKey: "nav.analytics" },
 ];
 
 const teamNavItems: FlyoutItemConfig[] = [
@@ -430,7 +433,7 @@ export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const { t } = useI18n();
   const { resolvedTheme } = useTheme();
-  const [openMenu, setOpenMenu] = useState<"team" | "automation" | "account" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"crm" | "team" | "automation" | "account" | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [mounted, setMounted] = useState(false);
   const initialTheme = user.themePreference === "light" || user.themePreference === "dark"
@@ -438,6 +441,7 @@ export function Sidebar({ user }: SidebarProps) {
     : "dark";
   const isLightSidebar = (mounted ? resolvedTheme ?? initialTheme : initialTheme) === "light";
 
+  const crmRef = useRef<HTMLDivElement>(null);
   const teamRef = useRef<HTMLDivElement>(null);
   const automationRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -447,6 +451,17 @@ export function Sidebar({ user }: SidebarProps) {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const crmItems = useMemo(
+    () =>
+      crmNavItems.map((item) => ({
+        href: item.href,
+        icon: item.icon,
+        label: t(item.labelKey),
+        description: item.descriptionKey ? t(item.descriptionKey) : undefined,
+      })),
+    [t]
+  );
 
   const teamItems = useMemo(
     () =>
@@ -474,7 +489,9 @@ export function Sidebar({ user }: SidebarProps) {
     const handleClickOutside = (event: MouseEvent) => {
       if (!openMenu) return;
       const ref =
-        openMenu === "team"
+        openMenu === "crm"
+          ? crmRef.current
+          : openMenu === "team"
           ? teamRef.current
           : openMenu === "automation"
             ? automationRef.current
@@ -510,6 +527,10 @@ export function Sidebar({ user }: SidebarProps) {
     () => pathname.startsWith("/team"),
     [pathname]
   );
+  const crmActive = useMemo(
+    () => pathname.startsWith("/crm") || pathname.startsWith("/campaigns") || pathname.startsWith("/analytics"),
+    [pathname]
+  );
   const automationActive = useMemo(
     () => pathname.startsWith("/automations") || pathname.startsWith("/autopilot"),
     [pathname]
@@ -524,7 +545,7 @@ export function Sidebar({ user }: SidebarProps) {
           await fetch("/api/users/online-status", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspaceId: user.activeWorkspaceId, isOnline: false, forceOffline: true }),
+            body: JSON.stringify({ workspaceId: user.activeWorkspaceId, isOnline: false, forceOffline: true, source: 'logout' }),
           });
         } catch (error) {
           console.error("Error setting offline status:", error);
@@ -565,7 +586,29 @@ export function Sidebar({ user }: SidebarProps) {
 
       <div className="flex-1 flex flex-col items-center justify-center w-full gap-1 overflow-visible">
         <nav className="flex flex-col items-center gap-1 w-full overflow-visible">
-          {filteredNavItems.map((item) => (
+          {filteredNavItems.slice(0, 1).map((item) => (
+            <SidebarIconLink
+              key={item.href}
+              item={item}
+              label={t(item.labelKey)}
+              isActive={isActive(item)}
+              light={isLightSidebar}
+            />
+          ))}
+
+          <FlyoutMenu
+            label={t("nav.crm")}
+            icon={Users}
+            items={crmItems}
+            isActive={crmActive}
+            isOpen={openMenu === "crm"}
+            onToggle={() => setOpenMenu(openMenu === "crm" ? null : "crm")}
+            containerRef={crmRef}
+            onClose={() => setOpenMenu(null)}
+            light={isLightSidebar}
+          />
+
+          {filteredNavItems.slice(1).map((item) => (
             <SidebarIconLink
               key={item.href}
               item={item}

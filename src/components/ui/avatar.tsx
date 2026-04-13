@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { resolveClientMediaUrl } from "@/lib/storage-url"
 import { cn } from "@/lib/utils"
 
 type AvatarProps = React.ComponentPropsWithoutRef<"div">
@@ -29,12 +30,20 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
       if (typeof src !== 'string') return undefined;
       const trimmedSrc = src.trim();
       if (!trimmedSrc) return undefined;
-      return trimmedSrc;
+      const resolvedSrc = resolveClientMediaUrl(trimmedSrc, { kind: 'image' });
+      return resolvedSrc || undefined;
     }, [src]);
+    const safeFallbackSrc = React.useMemo(() => {
+      if (typeof fallbackSrc !== 'string') return fallbackSrc;
+      const trimmedFallbackSrc = fallbackSrc.trim();
+      if (!trimmedFallbackSrc) return undefined;
+      const resolvedFallbackSrc = resolveClientMediaUrl(trimmedFallbackSrc, { kind: 'image' });
+      return resolvedFallbackSrc || undefined;
+    }, [fallbackSrc]);
     const internalRef = React.useRef<HTMLImageElement | null>(null);
 
     const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
-      safeSrc || fallbackSrc
+      safeSrc || safeFallbackSrc
     )
 
     const setRefs = React.useCallback((node: HTMLImageElement | null) => {
@@ -47,9 +56,9 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
     }, [ref]);
 
     React.useEffect(() => {
-      setCurrentSrc(safeSrc || fallbackSrc)
+      setCurrentSrc(safeSrc || safeFallbackSrc)
       setStatus('loading')
-    }, [safeSrc, fallbackSrc])
+    }, [safeSrc, safeFallbackSrc])
 
     // Catch images that loaded before React hydrated (race condition fix)
     React.useEffect(() => {
@@ -84,8 +93,8 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
           onLoad?.(e)
         }}
         onError={(e) => {
-          if (fallbackSrc && currentSrc !== fallbackSrc) {
-            setCurrentSrc(fallbackSrc)
+          if (safeFallbackSrc && currentSrc !== safeFallbackSrc) {
+            setCurrentSrc(safeFallbackSrc)
             setStatus('loading')
             return
           }

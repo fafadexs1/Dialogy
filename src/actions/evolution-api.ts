@@ -8,6 +8,14 @@ import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
 import { buildEvolutionWebhookUrl, getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
+import {
+    buildTelegramWebhookUrl,
+    deleteTelegramWebhook,
+    getTelegramWebhookInfo,
+    normalizeTelegramBotToken,
+    setTelegramWebhook,
+    validateTelegramBotToken,
+} from '@/services/telegram/bot-api';
 
 function parseEnvInt(value: string | undefined, fallback: number): number {
     if (!value) return fallback;
@@ -32,6 +40,36 @@ function extractEvolutionInstanceNames(payload: any): string[] {
         .filter((name: unknown): name is string => typeof name === 'string' && name.trim().length > 0);
 }
 
+function getInstanceNamePrefix(payload: EvolutionInstanceCreationPayload): 'zap' | 'tg' {
+    return 'zap';
+}
+
+async function getTelegramInstanceRecord(
+    instanceName: string
+): Promise<{
+    instance_name: string;
+    workspace_id: string;
+    webhook_key: string | null;
+    telegram_bot_token: string | null;
+    telegram_webhook_url: string | null;
+} | null> {
+    const res = await db.query(
+        `SELECT
+            instance_name,
+            workspace_id,
+            to_jsonb(evolution_api_instances)->>'webhook_key' AS webhook_key,
+            to_jsonb(evolution_api_instances)->>'telegram_bot_token' AS telegram_bot_token,
+            to_jsonb(evolution_api_instances)->>'telegram_webhook_url' AS telegram_webhook_url
+         FROM evolution_api_instances
+         WHERE instance_name = $1
+           AND type = 'telegram'
+         LIMIT 1`,
+        [instanceName]
+    );
+
+    return res.rows[0] || null;
+}
+
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
@@ -49,9 +87,14 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
                 to_jsonb(evolution_api_instances)->>'display_phone_number' as display_phone_number,
                 to_jsonb(evolution_api_instances)->>'verified_name' as verified_name,
                 to_jsonb(evolution_api_instances)->>'waba_id' as waba_id,
-                to_jsonb(evolution_api_instances)->>'phone_number_id' as phone_number_id
+                to_jsonb(evolution_api_instances)->>'phone_number_id' as phone_number_id,
+                to_jsonb(evolution_api_instances)->>'telegram_bot_id' as telegram_bot_id,
+                to_jsonb(evolution_api_instances)->>'telegram_bot_username' as telegram_bot_username,
+                to_jsonb(evolution_api_instances)->>'telegram_bot_name' as telegram_bot_name,
+                to_jsonb(evolution_api_instances)->>'telegram_webhook_url' as telegram_webhook_url
              FROM evolution_api_instances
-             WHERE workspace_id = $1`,
+             WHERE workspace_id = $1
+               AND type <> 'telegram'`,
             [workspaceId]
         );
 
@@ -71,7 +114,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
         return { instances: res.rows, limitStatus };
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
-        return { instances: null, error: 'Falha ao buscar inst\u00e2ncias do WhatsApp.' };
+        return { instances: null, error: 'Falha ao buscar instancias da Evolution API.' };
     }
 }
 
@@ -127,6 +170,13 @@ export async function createEvolutionApiInstance(
         return { success: false, error: 'O apelido da instância é obrigatório.' }
     }
 
+    if (payload.channel === 'telegram' || payload.telegramBotToken) {
+        return {
+            success: false,
+            error: 'Telegram agora possui integracao propria. Use o card "Telegram Bot" para conectar o webhook nativo.',
+        };
+    }
+
     // --- BILLING: Check Channel Limits ---
     const { checkLimit } = await import('@/lib/billing-logic');
     // Count active instances
@@ -145,11 +195,27 @@ export async function createEvolutionApiInstance(
     }
     // -------------------------------------
 
-    const isBaileys = payload.integration === 'WHATSAPP-BAILEYS';
-    if (!isBaileys && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
+    const isTelegram = payload.channel === 'telegram';
+    const isCloudApi = payload.integration === 'WHATSAPP-BUSINESS';
+    const telegramBotToken = normalizeTelegramBotToken(payload.telegramBotToken);
+    let telegramBot: Awaited<ReturnType<typeof validateTelegramBotToken>> | null = null;
+
+    if (isTelegram) {
+        if (!telegramBotToken) {
+            return { success: false, error: 'Informe o token do bot Telegram gerado no BotFather.' };
+        }
+
+        try {
+            telegramBot = await validateTelegramBotToken(telegramBotToken);
+        } catch (error: any) {
+            return { success: false, error: error?.message || 'Token do bot Telegram invalido.' };
+        }
+    }
+
+    if (isCloudApi && (!payload.number?.trim() || !payload.businessId?.trim() || !payload.token?.trim())) {
         return { success: false, error: 'Para a Cloud API, todos os campos da Meta Business são obrigatórios.' };
     }
-    if (EVOLUTION_LIMITS.instanceTokenMax > 0 && payload.token && payload.token.length > EVOLUTION_LIMITS.instanceTokenMax) {
+    if (!isTelegram && EVOLUTION_LIMITS.instanceTokenMax > 0 && payload.token && payload.token.length > EVOLUTION_LIMITS.instanceTokenMax) {
         return {
             success: false,
             error: `Token muito longo para a Evolution v2.3.7 (${payload.token.length} caracteres). O limite do campo token é ${EVOLUTION_LIMITS.instanceTokenMax}. Gere/use um token menor ou ajuste o schema da Evolution.`,
@@ -177,7 +243,7 @@ export async function createEvolutionApiInstance(
             'SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC'
         );
         if (clusterRes.rowCount === 0) {
-            throw new Error('Nenhum servidor (cluster) de WhatsApp ativo foi encontrado.');
+            throw new Error('Nenhum servidor (cluster) Evolution API ativo foi encontrado.');
         }
         const clusters = clusterRes.rows;
         const cluster = clusters[0];
@@ -188,11 +254,13 @@ export async function createEvolutionApiInstance(
         // então o nome precisa ser único em toda a plataforma.
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('dialogy_evolution_instance_name_generation'))`);
 
+        const instancePrefix = getInstanceNamePrefix(payload);
         const reservedNames = new Set<string>();
         const dbInstancesRes = await client.query(
             `SELECT instance_name
              FROM evolution_api_instances
-             WHERE instance_name LIKE 'zap%'`
+             WHERE instance_name LIKE $1`,
+            [`${instancePrefix}%`]
         );
 
         for (const row of dbInstancesRes.rows) {
@@ -217,20 +285,29 @@ export async function createEvolutionApiInstance(
             }
 
             for (const name of extractEvolutionInstanceNames(result.value)) {
-                if (name.startsWith('zap')) {
+                if (name.startsWith(instancePrefix)) {
                     reservedNames.add(name);
                 }
             }
         }
 
         let newInstanceNumber = 1;
-        while (reservedNames.has(`zap${newInstanceNumber}`)) {
+        while (reservedNames.has(`${instancePrefix}${newInstanceNumber}`)) {
             newInstanceNumber++;
         }
 
-        const instanceName = `zap${newInstanceNumber}`;
+        const instanceName = `${instancePrefix}${newInstanceNumber}`;
         const webhookKey = randomUUID();
         payload.instanceName = instanceName;
+        let telegramWebhookUrl: string | null = null;
+
+        if (isTelegram && telegramBot) {
+            telegramWebhookUrl = buildTelegramWebhookUrl(webhookKey);
+            payload.number = String(telegramBot.id);
+            payload.qrcode = false;
+            payload.token = payload.token || webhookKey;
+            payload.displayName = payload.displayName?.trim() || `Telegram ${telegramBot.username ? `@${telegramBot.username}` : telegramBot.first_name}`;
+        }
 
         // 3. Preparar o payload para a API da Evolution
         // 3. Preparar o payload para a API da Evolution
@@ -293,10 +370,12 @@ export async function createEvolutionApiInstance(
         // displayName and metaInfo are internal to Dialogy
         // evolutionPayload contains ONLY what Evolution API expects
         const { displayName, metaInfo, ...evolutionPayload } = payload;
+        delete (evolutionPayload as Partial<EvolutionInstanceCreationPayload>).channel;
+        delete (evolutionPayload as Partial<EvolutionInstanceCreationPayload>).telegramBotToken;
 
         console.log("═══════════════════════════════════════════════════════════════");
         console.log("[EVO_ACTION] 1. PAYLOAD RECEBIDO DO FRONTEND:");
-        console.log(JSON.stringify(payload, null, 2));
+        console.log(JSON.stringify({ ...payload, telegramBotToken: payload.telegramBotToken ? '[redacted]' : undefined }, null, 2));
         console.log("───────────────────────────────────────────────────────────────");
         console.log("[EVO_ACTION] 2. INSTANCE NAME GERADO:", payload.instanceName);
         console.log("[EVO_ACTION] 3. DISPLAY NAME (interno Dialogy):", displayName);
@@ -312,7 +391,7 @@ export async function createEvolutionApiInstance(
         });
 
         // 5. Se a criação na API for bem-sucedida, salvar no DB local
-        const instanceType = payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
+        const instanceType = isTelegram ? 'telegram' : payload.integration === 'WHATSAPP-BUSINESS' ? 'wa_cloud' : 'baileys';
 
         // Extract meta info if available
         const meta = payload.metaInfo || {};
@@ -320,8 +399,9 @@ export async function createEvolutionApiInstance(
         await client.query(
             `INSERT INTO evolution_api_instances (
                 workspace_id, cluster_id, instance_name, webhook_key, display_name, type, webhook_url,
-                business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+                business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id,
+                telegram_bot_id, telegram_bot_username, telegram_bot_name, telegram_bot_token, telegram_webhook_url
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
             [
                 workspaceId,
                 cluster.id,
@@ -335,9 +415,18 @@ export async function createEvolutionApiInstance(
                 meta.displayPhoneNumber || null,
                 meta.verifiedName || null,
                 payload.businessId || null,
-                payload.number || null
+                payload.number || null,
+                telegramBot ? String(telegramBot.id) : null,
+                telegramBot?.username || null,
+                telegramBot?.first_name || null,
+                isTelegram ? telegramBotToken : null,
+                telegramWebhookUrl
             ]
         );
+
+        if (isTelegram && telegramWebhookUrl) {
+            await setTelegramWebhook(telegramBotToken, telegramWebhookUrl, webhookKey);
+        }
 
         // 6. Fetch QR Code immediately
         let qrCode;
@@ -371,7 +460,12 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
     try {
         // Obter detalhes da instância e do cluster associado
         const instanceRes = await db.query(
-            `SELECT i.instance_name, c.api_url, c.api_key 
+            `SELECT
+                i.instance_name,
+                i.type,
+                to_jsonb(i)->>'telegram_bot_token' AS telegram_bot_token,
+                c.api_url,
+                c.api_key
            FROM evolution_api_instances i
            JOIN whatsapp_clusters c ON i.cluster_id = c.id
            WHERE i.id = $1`,
@@ -380,8 +474,14 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
         if (instanceRes.rows.length === 0) {
             return { error: 'Instância ou cluster associado não encontrado.' };
         }
-        const { instance_name: instanceName, api_url, api_key } = instanceRes.rows[0];
+        const { instance_name: instanceName, api_url, api_key, type, telegram_bot_token: telegramBotToken } = instanceRes.rows[0];
         const apiConfig = { api_url, api_key };
+
+        if (type === 'telegram' && telegramBotToken) {
+            await deleteTelegramWebhook(telegramBotToken).catch((error) => {
+                console.error('[EVO_ACTION_DELETE_INSTANCE] Falha ao remover webhook Telegram:', error);
+            });
+        }
 
         // Chamar a API para deletar
         await fetchEvolutionAPI(`/instance/delete/${instanceName}`, apiConfig, { method: 'DELETE' });
@@ -410,6 +510,17 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
 
 export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
+        const telegramInstance = await getTelegramInstanceRecord(instanceName);
+        if (telegramInstance) {
+            if (!telegramInstance.telegram_bot_token) {
+                return { status: 'disconnected' };
+            }
+
+            await validateTelegramBotToken(telegramInstance.telegram_bot_token);
+            const webhookInfo = await getTelegramWebhookInfo(telegramInstance.telegram_bot_token);
+            return { status: webhookInfo?.url ? 'connected' : 'pending' };
+        }
+
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
 
@@ -435,6 +546,17 @@ export async function checkInstanceStatus(instanceName: string): Promise<{ statu
 
 export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
+        const telegramInstance = await getTelegramInstanceRecord(instanceName);
+        if (telegramInstance) {
+            if (!telegramInstance.telegram_bot_token || !telegramInstance.webhook_key) {
+                return { status: 'disconnected' };
+            }
+
+            const webhookUrl = telegramInstance.telegram_webhook_url || buildTelegramWebhookUrl(telegramInstance.webhook_key);
+            await setTelegramWebhook(telegramInstance.telegram_bot_token, webhookUrl, telegramInstance.webhook_key);
+            return { status: 'connected' };
+        }
+
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
 
@@ -455,6 +577,12 @@ export async function connectInstance(instanceName: string): Promise<{ status: E
 
 export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'] }> {
     try {
+        const telegramInstance = await getTelegramInstanceRecord(instanceName);
+        if (telegramInstance?.telegram_bot_token) {
+            await deleteTelegramWebhook(telegramInstance.telegram_bot_token);
+            return { status: 'disconnected' };
+        }
+
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         await fetchEvolutionAPI(`/instance/logout/${instanceName}`, apiConfig, { method: 'DELETE' });
@@ -467,6 +595,17 @@ export async function disconnectInstance(instanceName: string): Promise<{ status
 
 export async function restartInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
     try {
+        const telegramInstance = await getTelegramInstanceRecord(instanceName);
+        if (telegramInstance) {
+            if (!telegramInstance.telegram_bot_token || !telegramInstance.webhook_key) {
+                throw new Error('Credenciais Telegram ausentes para esta instancia.');
+            }
+
+            const webhookUrl = telegramInstance.telegram_webhook_url || buildTelegramWebhookUrl(telegramInstance.webhook_key);
+            await setTelegramWebhook(telegramInstance.telegram_bot_token, webhookUrl, telegramInstance.webhook_key);
+            return { success: true };
+        }
+
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         await fetchEvolutionAPI(`/instance/restart/${instanceName}`, apiConfig, { method: 'PUT' });

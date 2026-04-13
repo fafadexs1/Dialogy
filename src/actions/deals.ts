@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import type { Deal, DealMetrics } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { getDefaultPipelineStageValueForWorkspace } from '@/lib/crm-pipeline-server';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -143,6 +144,7 @@ export async function createDeal(data: {
     if (!user) return { deal: null, error: 'Não autenticado.' };
 
     try {
+        const defaultStage = data.stage || await getDefaultPipelineStageValueForWorkspace(data.workspace_id);
         const res = await db.query(
             `INSERT INTO deals (workspace_id, contact_id, title, value, currency, stage, probability, expected_close_date, owner_id, notes)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -153,7 +155,7 @@ export async function createDeal(data: {
                 data.title,
                 data.value,
                 data.currency || 'BRL',
-                data.stage || 'novo',
+                defaultStage,
                 data.probability ?? 50,
                 data.expected_close_date || null,
                 data.owner_id || user.id,

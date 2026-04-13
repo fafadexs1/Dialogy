@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, CustomFieldDefinition } from '@/lib/types';
+import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, type TelegramBotInstance, CustomFieldDefinition } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -31,7 +31,17 @@ import {
     Target,
     Check,
     DollarSign,
-    History
+    History,
+    AlertTriangle,
+    Download,
+    Upload,
+    Receipt,
+    Clock,
+    Router,
+    ChevronDown,
+    ChevronUp,
+    Wrench,
+    FileText
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -47,6 +57,7 @@ import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { getDealsByContact } from '@/actions/deals';
 import { transferChatAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { getTelegramInstances } from '@/actions/telegram';
 import { getIntegrationConfig } from '@/actions/integrations';
 import { startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
@@ -66,6 +77,7 @@ import DealForm from '../crm/deal-form';
 import LeadScoreBadge from '../crm/lead-score-badge';
 import { CopyProtocolButton } from './copy-protocol-button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { getChatContactDisplayValue, getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -209,7 +221,10 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
 
 export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger }: { chat: Chat, currentUser: User | null, onSuccess: () => void, trigger?: React.ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
-    const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+    const [instances, setInstances] = useState<Array<
+        Omit<EvolutionInstance, 'status' | 'qrCode'> |
+        Omit<TelegramBotInstance, 'status'>
+    >>([]);
     const [selectedInstance, setSelectedInstance] = useState('');
     const [message, setMessage] = useState('OlÃƒÆ’Ã‚Â¡! Podemos retomar nossa conversa por aqui?');
     const [phone, setPhone] = useState('');
@@ -222,6 +237,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
     const [loadingTemplates, setLoadingTemplates] = useState(false);
 
     const isCloud = useMemo(() => instances.find(i => i.instance_name === selectedInstance)?.type === 'wa_cloud', [instances, selectedInstance]);
+    const isTelegram = useMemo(() => instances.find(i => i.instance_name === selectedInstance)?.type === 'telegram', [instances, selectedInstance]);
     const selectedTemplate = useMemo(() => templates.find(t => t.name === selectedTemplateName), [templates, selectedTemplateName]);
 
     const variableKeys = useMemo(() => {
@@ -251,22 +267,31 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         const initialPhone = derivePhone();
         if (initialPhone) setPhone(initialPhone);
         setIsLoadingInstances(true);
-        getEvolutionApiInstances(currentUser.activeWorkspaceId)
-            .then((res) => {
-                if (res.error) {
-                    toast({ title: 'Erro ao carregar instÃƒÆ’Ã‚Â¢ncias', description: res.error, variant: 'destructive' });
+        Promise.all([
+            getEvolutionApiInstances(currentUser.activeWorkspaceId),
+            getTelegramInstances(currentUser.activeWorkspaceId),
+        ])
+            .then(([whatsappRes, telegramRes]) => {
+                if (whatsappRes.error) {
+                    toast({ title: 'Erro ao carregar instancias', description: whatsappRes.error, variant: 'destructive' });
                     setInstances([]);
                     setSelectedInstance('');
                     return;
                 }
-                const loaded = res.instances || [];
+                if (telegramRes.error) {
+                    toast({ title: 'Erro ao carregar bots', description: telegramRes.error, variant: 'destructive' });
+                    setInstances([]);
+                    setSelectedInstance('');
+                    return;
+                }
+                const loaded = [...(whatsappRes.instances || []), ...(telegramRes.instances || [])];
                 setInstances(loaded);
                 const fallbackInstance = chat.instance_name || loaded[0]?.instance_name || '';
                 setSelectedInstance((prev) => prev || fallbackInstance);
             })
             .catch((error) => {
-                console.error('[CONTACT_PANEL] Falha ao buscar instÃƒÆ’Ã‚Â¢ncias', error);
-                toast({ title: 'Erro ao carregar instÃƒÆ’Ã‚Â¢ncias', description: 'NÃƒÆ’Ã‚Â£o foi possÃƒÆ’Ã‚Â­vel buscar as instÃƒÆ’Ã‚Â¢ncias de WhatsApp.', variant: 'destructive' });
+                console.error('[CONTACT_PANEL] Falha ao buscar instancias', error);
+                toast({ title: 'Erro ao carregar instancias', description: 'Nao foi possivel buscar as instancias de mensageria.', variant: 'destructive' });
                 setInstances([]);
                 setSelectedInstance('');
             })
@@ -388,18 +413,18 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                                 {isLoadingInstances && <div className="p-3 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>}
                                 {!isLoadingInstances && instances.map((instance) => (
                                     <SelectItem key={instance.id} value={instance.instance_name}>
-                                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'}
+                                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'} {instance.type === 'telegram' && '(Telegram)'}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
                     <div className="space-y-2">
-                        <Label>Telefone</Label>
+                        <Label>{isTelegram ? 'Chat ID do Telegram' : 'Telefone'}</Label>
                         <Input
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
-                            placeholder="5511999999999"
+                            placeholder={isTelegram ? 'telegram:123456789' : '5511999999999'}
                             className="bg-muted/50 border-input text-foreground"
                         />
                     </div>
@@ -516,6 +541,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [protocolSelectorOpen, setProtocolSelectorOpen] = useState(false);
     const [switchingProtocol, setSwitchingProtocol] = useState<string | null>(null);
     const [isSgpActive, setIsSgpActive] = useState(false);
+    const [expandedContractId, setExpandedContractId] = useState<string | null>('1');
 
     const handleContactSave = useCallback((updatedContact?: Contact | null) => {
         // If we received an updated contact, update it directly in the store
@@ -634,40 +660,21 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const { contact, agent } = chat;
     const currentProtocol = chat.protocol || buildChatProtocol(chat.id);
 
-    const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
-
-    // Check for Meta contact signals
-    const hasMetaContact = !!(chat.metaContactExternalId || chat.metaContactUsername);
-    const isMetaUser = chat.contact?.name?.startsWith('Meta User');
-
-    let platform = (
-        // Priority: message-level platform sources first, then chat-level
-        lastMessage?.platform ||
-        lastMessage?.source_from_api ||
-        chat.source ||
-        chat.instance_type ||
-        ''
-    ).toString().toLowerCase();
-
-    // Force platform to instagram/messenger if we have reliable Meta signals and current platform is vague/missing
-    if (chat.metaPlatform) {
-        platform = chat.metaPlatform;
-    } else if (hasMetaContact && !platform.includes('messenger') && !platform.includes('facebook')) {
-        platform = 'instagram';
-    } else if (isMetaUser && !platform.includes('instagram')) {
-        platform = 'messenger';
-    }
-    const instanceTypeDisplay =
-        platform === 'instagram'
-            ? 'Instagram'
-            : platform === 'messenger'
-                ? 'Messenger'
-                : (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud')
-                    ? 'Cloud API'
-                    : 'Baileys';
+    const resolvedPlatform = resolveChatPlatform(chat);
+    const instanceTypeDisplay = getChatPlatformLabel(resolvedPlatform);
+    const contactChannelLabel =
+        resolvedPlatform === 'telegram'
+            ? 'Telegram'
+            : resolvedPlatform === 'instagram'
+                ? 'Instagram'
+                : resolvedPlatform === 'messenger'
+                    ? 'Messenger'
+                    : 'WhatsApp';
+    const contactDisplayValue = getChatContactDisplayValue(contact, resolvedPlatform) || 'Sem numero';
 
     // For Meta chats (Instagram/Messenger), use the external_id from meta_contacts
     // For other platforms, fall back to the message's external_sender_id
+    const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
     const externalId = chat.metaContactExternalId
         || lastMessage?.externalSenderId
         || lastMessage?.external_sender_id
@@ -739,9 +746,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     <div className="relative">
                         <div className={cn(
                             "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700 dark:opacity-10",
-                            platform === 'instagram' ? "bg-pink-500" :
-                                platform === 'messenger' ? "bg-blue-500" :
-                                    (chat.instance_type === 'wa_cloud' || platform === 'wa_cloud' || platform === 'whatsapp') ? "bg-green-500" : "bg-blue-400"
+                            resolvedPlatform === 'instagram' ? "bg-pink-500" :
+                                resolvedPlatform === 'messenger' ? "bg-blue-500" :
+                                    resolvedPlatform === 'telegram' ? "bg-sky-500" :
+                                        "bg-green-500"
                         )} />
 
                         <motion.div
@@ -762,12 +770,17 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 </div>
 
                                 <div className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-lg transition-transform group-hover:scale-110 dark:border-white/5 dark:bg-black">
-                                    {platform === 'instagram' ? (
+                                    {resolvedPlatform === 'instagram' ? (
                                         <Globe className="h-4 w-4 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
-                                    ) : platform === 'messenger' ? (
+                                    ) : resolvedPlatform === 'messenger' ? (
                                         <Globe className="h-4 w-4 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
                                     ) : (
-                                        <Smartphone className="h-4 w-4 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                                        <Smartphone className={cn(
+                                            "h-4 w-4",
+                                            resolvedPlatform === 'telegram'
+                                                ? "text-sky-500 drop-shadow-[0_0_8px_rgba(14,165,233,0.5)]"
+                                                : "text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+                                        )} />
                                     )}
                                 </div>
                             </div>
@@ -834,11 +847,29 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             <div className="space-y-2">
                                 {/* Phone */}
                                 <div className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                    <div className="h-7 w-7 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 shrink-0">
-                                        <Smartphone className="h-3.5 w-3.5 text-green-400" />
+                                    <div className={cn(
+                                        "h-7 w-7 rounded-lg flex items-center justify-center shrink-0",
+                                        resolvedPlatform === 'telegram'
+                                            ? "bg-sky-500/10 border border-sky-500/20"
+                                            : resolvedPlatform === 'instagram'
+                                                ? "bg-pink-500/10 border border-pink-500/20"
+                                                : resolvedPlatform === 'messenger'
+                                                    ? "bg-blue-500/10 border border-blue-500/20"
+                                                    : "bg-green-500/10 border border-green-500/20"
+                                    )}>
+                                        <Smartphone className={cn(
+                                            "h-3.5 w-3.5",
+                                            resolvedPlatform === 'telegram'
+                                                ? "text-sky-400"
+                                                : resolvedPlatform === 'instagram'
+                                                    ? "text-pink-400"
+                                                    : resolvedPlatform === 'messenger'
+                                                        ? "text-blue-400"
+                                                        : "text-green-400"
+                                        )} />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">WhatsApp</span>
+                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">{contactChannelLabel}</span>
                                         <span className="block truncate text-[13px] font-bold tabular-nums text-slate-900 dark:text-zinc-100">
                                             {(contact.phone_number_jid || contact.phone || 'Sem nÃƒÆ’Ã‚Âºmero').replace(/@.*$/, '')}
                                         </span>
@@ -929,6 +960,34 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     </Popover>
                                     <CopyProtocolButton protocol={currentProtocol} />
                                 </div>
+
+                                {/* SGP Quick Summary */}
+                                {isSgpActive && (
+                                    <div className="group flex cursor-pointer items-center justify-between rounded-xl border border-red-500/30 bg-red-500/5 p-2.5 transition-all hover:bg-red-500/10 dark:border-red-500/20" onClick={() => {
+                                        const tabsList = document.querySelector('[role="tablist"]');
+                                        if (tabsList) {
+                                            const sgpTab = tabsList.querySelector('[value="sgp"]');
+                                            if (sgpTab) (sgpTab as HTMLElement).click();
+                                        }
+                                    }}>
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/20 text-red-500 border border-red-500/30 shrink-0">
+                                                <AlertTriangle className="h-3.5 w-3.5" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="block text-[10px] font-black uppercase tracking-widest text-red-500/80">
+                                                    SGP • Inadimplente
+                                                </span>
+                                                <span className="block truncate text-[12px] font-bold text-red-600 dark:text-red-400">
+                                                    1 online, 1 fatura vencida
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="flex h-5 w-5 items-center justify-center rounded-md bg-red-500/10 text-red-500 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-red-500/20 shrink-0">
+                                            <ArrowRightLeft className="h-3 w-3" />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Custom Fields Summary */}
@@ -1124,15 +1183,189 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                         {/* ▬▬ SGP TAB ▬▬ */}
                         {isSgpActive && (
-                            <TabsContent value="sgp" className="mt-4 space-y-5">
-                                <div className="space-y-4 text-center py-6">
-                                    <div className="flex justify-center mb-2">
-                                        <div className="h-10 w-10 rounded-xl bg-orange-500/10 flex items-center justify-center border border-orange-500/20">
-                                            <Server className="h-5 w-5 text-orange-500" />
+                            <TabsContent value="sgp" className="mt-4 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                {/* OVERALL STATUS */}
+                                <div className="flex items-center justify-between p-3 rounded-xl border border-red-500/30 bg-red-500/10 dark:bg-red-500/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/20 text-red-500 shrink-0">
+                                            <AlertTriangle className="h-4 w-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-[13px] font-bold text-red-600 dark:text-red-400">Cliente Inadimplente</h4>
+                                            <p className="text-[11px] font-medium text-red-500/80">O cliente possui faturas em atraso.</p>
                                         </div>
                                     </div>
-                                    <h4 className="text-[13px] font-bold text-slate-700 dark:text-zinc-300">Integração SGP</h4>
-                                    <p className="text-[11px] text-muted-foreground">Contato vinculado com sucesso.</p>
+                                </div>
+
+                                {/* CONTRACTS */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between px-1">
+                                        <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Contratos (2)</h4>
+                                    </div>
+                                    
+                                    {/* Contract 1 (Online) */}
+                                    <div 
+                                        className={cn(
+                                            "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
+                                            expandedContractId === '1' ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/20" : "hover:border-emerald-500/30 hover:bg-emerald-500/5 cursor-pointer"
+                                        )}
+                                    >
+                                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/50" />
+                                        <div 
+                                            className={cn("flex justify-between items-start p-3")}
+                                            onClick={() => setExpandedContractId(expandedContractId === '1' ? null : '1')}
+                                        >
+                                            <div className="flex gap-2 w-full">
+                                                <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                                                    <Router className="h-4 w-4 text-emerald-500" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <h5 className="text-[13px] font-bold text-slate-800 dark:text-slate-200">Fibra 500MB Residencial</h5>
+                                                        <span className="flex shrink-0 h-4 items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 text-[9px] font-bold uppercase text-emerald-500">
+                                                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                            Online
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate border-none outline-none">IP: 177.100.22.45 • MAC: 00:1A:2B:3C:4D:5E</p>
+                                                    <div className="flex items-start gap-1 text-[9.5px] text-muted-foreground/80 mt-1 leading-tight">
+                                                        <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                                                        <span className="line-clamp-2">Av. Paulista, 1500, Apt 42 - Bela Vista, São Paulo - SP</span>
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 pt-1 text-slate-400">
+                                                    {expandedContractId === '1' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        {expandedContractId === '1' && (
+                                            <div className="px-3 pb-3 animate-in slide-in-from-top-1 duration-200">
+                                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/50 dark:border-white/10">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                            <Download className="h-3 w-3" /> Download
+                                                        </span>
+                                                        <span className="text-[12px] font-bold text-slate-700 dark:text-slate-300">452 GB</span>
+                                                    </div>
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                            <Upload className="h-3 w-3" /> Upload
+                                                        </span>
+                                                        <span className="text-[12px] font-bold text-slate-700 dark:text-slate-300">120 GB</span>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-2 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                                    <Clock className="h-3 w-3 text-emerald-500/70" /> Conectado há 14 dias
+                                                </div>
+                                                <div className="mt-3 flex gap-2">
+                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+                                                        Desconectar
+                                                    </Button>
+                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Abrir Chamado Técnico" onClick={(e) => e.stopPropagation()}>
+                                                        <Wrench className="h-3 w-3 mr-1.5 text-emerald-500" /> Abrir Chamado
+                                                    </Button>
+                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Ler Chamados" onClick={(e) => e.stopPropagation()}>
+                                                        <FileText className="h-3 w-3 mr-1.5" /> Histórico
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Contract 2 (Offline) */}
+                                    <div 
+                                        className={cn(
+                                            "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
+                                            expandedContractId === '2' ? "border-slate-300 bg-slate-50 ring-1 ring-slate-200 dark:border-white/10 dark:bg-white/5/50 opacity-100" : "hover:bg-slate-50 dark:hover:bg-white/5 opacity-70 cursor-pointer"
+                                        )}
+                                    >
+                                        <div className="absolute top-0 left-0 w-1 h-full bg-slate-300 dark:bg-slate-700" />
+                                        <div 
+                                            className={cn("flex justify-between items-start p-3")}
+                                            onClick={() => setExpandedContractId(expandedContractId === '2' ? null : '2')}
+                                        >
+                                            <div className="flex gap-2 w-full">
+                                                <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-zinc-800 flex items-center justify-center border border-slate-200 dark:border-zinc-700 shrink-0">
+                                                    <Router className="h-4 w-4 text-slate-400" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <h5 className="text-[13px] font-bold text-slate-800 dark:text-slate-200">Rádio 50MB Backup</h5>
+                                                        <span className="flex shrink-0 h-4 items-center gap-1 rounded-full border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800 px-1.5 text-[9px] font-bold uppercase text-slate-500">
+                                                            <div className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                                            Offline
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">PPPoE: cliente_bkp</p>
+                                                    <div className="flex items-start gap-1 text-[9.5px] text-muted-foreground/80 mt-1 leading-tight">
+                                                        <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                                                        <span className="line-clamp-2">Av. Paulista, 1500, Apt 42 - Bela Vista, São Paulo - SP</span>
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 pt-1 text-slate-400">
+                                                    {expandedContractId === '2' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {expandedContractId === '2' && (
+                                            <div className="px-3 pb-3 animate-in slide-in-from-top-1 duration-200">
+                                                <div className="mt-1 flex gap-2 pt-2 border-t border-slate-200/50 dark:border-white/10">
+                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Abrir Chamado Técnico" onClick={(e) => e.stopPropagation()}>
+                                                        <Wrench className="h-3 w-3 mr-1.5 text-emerald-500" /> Abrir Chamado
+                                                    </Button>
+                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Ler Chamados" onClick={(e) => e.stopPropagation()}>
+                                                        <FileText className="h-3 w-3 mr-1.5" /> Histórico
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* INVOICES */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between px-1">
+                                        <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Faturas</h4>
+                                        <span className="text-[12px] font-bold text-red-500 tabular-nums">1 vencida</span>
+                                    </div>
+
+                                    {/* Overdue Invoice */}
+                                    <div className="group flex flex-col rounded-xl border border-red-500/30 bg-red-500/5 p-2 transition-all hover:bg-red-500/10 dark:border-red-500/20">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-8 w-8 rounded-lg bg-white dark:bg-black/50 shadow-sm flex items-center justify-center border border-red-200 dark:border-red-900/50 shrink-0">
+                                                    <Receipt className="h-4 w-4 text-red-500" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="block text-[13px] font-bold text-red-600 dark:text-red-400">R$ 149,90</span>
+                                                    <span className="block text-[10px] uppercase tracking-widest text-red-500/80 font-semibold">Venc.: 10/11/2023</span>
+                                                </div>
+                                            </div>
+                                            <Button variant="ghost" size="sm" className="h-7 bg-white dark:bg-black border border-red-200 dark:border-red-900/40 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/60 text-[10px] font-bold uppercase tracking-wider">
+                                                Pix
+                                            </Button>
+                                        </div>
+                                    </div>
+
+                                    {/* Open Invoice */}
+                                    <div className="group flex flex-col rounded-xl border border-slate-200/80 bg-white/90 p-2 transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-zinc-800 shadow-sm flex items-center justify-center border border-slate-200 dark:border-zinc-700 shrink-0">
+                                                    <Receipt className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="block text-[13px] font-bold text-slate-800 dark:text-slate-200">R$ 149,90</span>
+                                                    <span className="block text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Venc.: 10/12/2023</span>
+                                                </div>
+                                            </div>
+                                            <Button variant="outline" size="sm" className="h-7 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100">
+                                                Pix
+                                            </Button>
+                                        </div>
+                                    </div>
                                 </div>
                             </TabsContent>
                         )}

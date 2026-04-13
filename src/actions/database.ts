@@ -408,6 +408,7 @@ create table if not exists public.evolution_api_instances (
   workspace_id uuid not null,
   cluster_id uuid,
   instance_name text not null,
+  webhook_key text,
   display_name text,
   type text,
   webhook_url text,
@@ -417,20 +418,74 @@ create table if not exists public.evolution_api_instances (
   verified_name text,
   waba_id text,
   phone_number_id text,
+  telegram_bot_id text,
+  telegram_bot_username text,
+  telegram_bot_name text,
+  telegram_bot_token text,
+  telegram_webhook_url text,
   created_at timestamptz not null default timezone('utc', now()),
   constraint evolution_api_instances_workspace_id_fkey
     foreign key (workspace_id) references public.workspaces(id) on delete cascade,
   constraint evolution_api_instances_cluster_id_fkey
     foreign key (cluster_id) references public.whatsapp_clusters(id) on delete set null
 );
+alter table if exists public.evolution_api_instances add column if not exists webhook_key text;
 alter table if exists public.evolution_api_instances add column if not exists business_name text;
 alter table if exists public.evolution_api_instances add column if not exists waba_name text;
 alter table if exists public.evolution_api_instances add column if not exists display_phone_number text;
 alter table if exists public.evolution_api_instances add column if not exists verified_name text;
 alter table if exists public.evolution_api_instances add column if not exists waba_id text;
 alter table if exists public.evolution_api_instances add column if not exists phone_number_id text;
+alter table if exists public.evolution_api_instances add column if not exists telegram_bot_id text;
+alter table if exists public.evolution_api_instances add column if not exists telegram_bot_username text;
+alter table if exists public.evolution_api_instances add column if not exists telegram_bot_name text;
+alter table if exists public.evolution_api_instances add column if not exists telegram_bot_token text;
+alter table if exists public.evolution_api_instances add column if not exists telegram_webhook_url text;
 create unique index if not exists uq_evo_instances_workspace_name on public.evolution_api_instances(workspace_id, instance_name);
 create index if not exists idx_evo_instances_cluster on public.evolution_api_instances(cluster_id);
+create index if not exists idx_evo_instances_webhook_key on public.evolution_api_instances(webhook_key);
+
+-- Bots Telegram
+create table if not exists public.telegram_bot_instances (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  instance_name text not null,
+  webhook_key text not null,
+  display_name text,
+  webhook_url text,
+  bot_token text not null,
+  bot_id text,
+  bot_username text,
+  bot_name text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint telegram_bot_instances_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade
+);
+create unique index if not exists uq_telegram_instances_workspace_name on public.telegram_bot_instances(workspace_id, instance_name);
+create unique index if not exists uq_telegram_instances_instance_name on public.telegram_bot_instances(instance_name);
+create unique index if not exists uq_telegram_instances_webhook_key on public.telegram_bot_instances(webhook_key);
+
+-- Eventos de webhook do Telegram
+create table if not exists public.telegram_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  instance_id uuid not null,
+  workspace_id uuid not null,
+  update_id bigint not null,
+  event_type text,
+  telegram_message_id bigint,
+  telegram_chat_id text,
+  telegram_from_id text,
+  payload jsonb,
+  processed_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  constraint telegram_webhook_events_instance_id_fkey
+    foreign key (instance_id) references public.telegram_bot_instances(id) on delete cascade,
+  constraint telegram_webhook_events_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade
+);
+create unique index if not exists uq_telegram_webhook_events_instance_update on public.telegram_webhook_events(instance_id, update_id);
+create index if not exists idx_telegram_webhook_events_workspace on public.telegram_webhook_events(workspace_id, created_at desc);
 
 -- Campanhas
 create table if not exists public.campaigns (
@@ -962,7 +1017,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Verificando e populando a tabela de integrações...');
     await client.query(`
         INSERT INTO app_integrations (id, name, description, icon_url, tag, tag_type, href, status) VALUES
-        ('evolution-api', 'Evolution API', 'Gerencie as inst?ncias de WhatsApp (n?o-oficial) para conectar seus n?meros.', 'https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
+        ('evolution-api', 'Evolution API', 'Gerencie instancias de WhatsApp com QR Code ou Cloud API.', '/icons/whatsapp.svg', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
+        ('telegram', 'Telegram Bot', 'Gerencie bots do Telegram com webhook proprio e eventos separados.', '/icons/telegram.svg', 'Telegram', 'primary', '/integrations/telegram', 'active'),
         ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avan?ados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),
         ('stripe', 'Stripe', 'Integre pagamentos e cobran?as diretamente nas suas conversas.', 'https://stripe.com/img/v3/home/twitter.png', 'Pagamentos', 'beta', '#', 'coming_soon'),
         ('meta-instagram', 'Instagram Direct (Oficial)', 'Receba e envie mensagens do Instagram Direct com a API oficial do Meta.', 'https://static-00.iconduck.com/assets.00/instagram-icon-256x256-gxth2yqu.png', 'Instagram', 'primary', '/integrations/meta-instagram', 'active'),

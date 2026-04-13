@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowRight, Bot, CheckCircle2, Inbox, MessageSquare, Repeat, Target, Zap, Sparkles } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const steps = [
     {
@@ -30,6 +31,8 @@ const steps = [
 ];
 
 export const AutomagicShowcase = () => {
+    const isMobile = useIsMobile();
+
     return (
         <section id="journey" className="relative overflow-hidden bg-[#f8f9fa] py-24 md:py-32">
             <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8">
@@ -58,8 +61,8 @@ export const AutomagicShowcase = () => {
                                 const Icon = step.icon;
                                 return (
                                     <div key={step.id} className="group relative flex items-start gap-6">
-                                        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white border border-slate-200 shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-brand-green group-hover:shadow-md">
-                                            <Icon className="h-6 w-6 text-slate-600 transition-colors duration-300 group-hover:text-brand-green" />
+                                        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white border border-slate-200 shadow-sm transition-all duration-300 md:group-hover:scale-110 md:group-hover:border-brand-green md:group-hover:shadow-md">
+                                            <Icon className="h-6 w-6 text-slate-600 transition-colors duration-300 md:group-hover:text-brand-green" />
                                         </div>
                                         <div className="pt-1.5">
                                             <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-brand-green">
@@ -76,10 +79,12 @@ export const AutomagicShowcase = () => {
 
                     {/* Right side Showcase UI */}
                     <div className="relative">
-                        <div className="absolute -inset-1 rounded-[34px] bg-gradient-to-br from-brand-green/20 to-emerald-400/10 opacity-70 blur-2xl"></div>
+                        {!isMobile ? (
+                            <div className="absolute -inset-1 rounded-[34px] bg-gradient-to-br from-brand-green/20 to-emerald-400/10 opacity-70 blur-2xl"></div>
+                        ) : null}
                         <div className="relative rounded-[32px] border border-slate-800 bg-[#0A0F17] p-6 md:p-8 shadow-2xl overflow-hidden ring-1 ring-white/10">
                             {/* Decorative background effects */}
-                            <div className="absolute -right-32 -top-32 h-64 w-64 rounded-full bg-brand-green/20 blur-[100px]"></div>
+                            <div className="absolute -right-32 -top-32 hidden h-64 w-64 rounded-full bg-brand-green/20 blur-[100px] md:block"></div>
                             
                             <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800/80 pb-6 gap-4">
                                 <div>
@@ -88,7 +93,7 @@ export const AutomagicShowcase = () => {
                                 </div>
                                 <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 ring-1 ring-inset ring-brand-green/30 w-fit">
                                     <span className="relative flex h-2 w-2">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="absolute hidden h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75 md:inline-flex"></span>
                                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                                     </span>
                                     IA Ativa
@@ -97,7 +102,7 @@ export const AutomagicShowcase = () => {
 
                             <div className="space-y-6">
                                 {/* Chat Mockup */}
-                                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 px-5 py-6 backdrop-blur-sm">
+                                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/70 px-5 py-6 md:bg-slate-900/50 md:backdrop-blur-sm">
                                     <div className="mb-6 flex items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                                         <div className="flex items-center gap-2">
                                             <MessageSquare className="h-4 w-4" />
@@ -131,7 +136,7 @@ export const AutomagicShowcase = () => {
 
                                 {/* Features grid inside UI */}
                                 <div className="grid gap-4 sm:grid-cols-2">
-                                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 transition-colors hover:bg-slate-800/60">
+                                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 transition-colors md:hover:bg-slate-800/60">
                                         <div className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-green/10 text-brand-green ring-1 ring-brand-green/20">
                                             <Zap className="h-4 w-4" />
                                         </div>
@@ -140,7 +145,7 @@ export const AutomagicShowcase = () => {
                                             Campanhas, reativação e lembretes saem no momento certo sem intervenção manual.
                                         </p>
                                     </div>
-                                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 transition-colors hover:bg-slate-800/60">
+                                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 transition-colors md:hover:bg-slate-800/60">
                                         <div className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20">
                                             <ArrowRight className="h-4 w-4" />
                                         </div>

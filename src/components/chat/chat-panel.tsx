@@ -114,8 +114,9 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { motion } from 'framer-motion';
 import { useTheme } from 'next-themes';
 
-import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
+import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
+import { getChatContactDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
 
 
 
@@ -1120,34 +1121,12 @@ export default function ChatPanel({
 
     const generateOptimisticId = () => uuidv4();
 
-    const lastPlatformMessage = chat?.messages?.length
-        ? chat.messages[chat.messages.length - 1]
-        : undefined;
-    // Check for Meta contact signals
-    const hasMetaContact = !!(chat?.metaContactExternalId || chat?.metaContactUsername);
-    const isMetaUser = chat?.contact?.name?.startsWith('Meta User');
-
-    let resolvedPlatform = (
-        // Priority: message-level platform sources first, then chat-level
-        lastPlatformMessage?.platform ||
-        lastPlatformMessage?.source_from_api ||
-        chat?.source ||
-        chat?.instance_type ||
-        ''
-    ).toString().toLowerCase();
-
-    // Force platform to instagram/messenger if we have reliable Meta signals and current platform is vague/missing
-    if (chat?.metaPlatform) {
-        resolvedPlatform = chat.metaPlatform;
-    } else if (hasMetaContact && !resolvedPlatform.includes('messenger') && !resolvedPlatform.includes('facebook')) {
-        resolvedPlatform = 'instagram';
-    } else if (isMetaUser && !resolvedPlatform.includes('instagram')) {
-        resolvedPlatform = 'messenger';
-    }
+    const resolvedPlatform = resolveChatPlatform(chat);
+    const contactDisplayValue = getChatContactDisplayValue(chat?.contact, resolvedPlatform);
 
     const optimisticPlatform =
-        resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger'
-            ? (resolvedPlatform as 'instagram' | 'messenger')
+        resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger' || resolvedPlatform === 'telegram'
+            ? resolvedPlatform
             : undefined;
 
     const headerPlatformIcon =
@@ -1155,7 +1134,9 @@ export default function ChatPanel({
             ? <FaInstagram className="h-3 w-3 text-pink-500" />
             : resolvedPlatform === 'messenger'
                 ? <FaFacebookMessenger className="h-3 w-3 text-blue-500" />
-                : <FaWhatsapp className="h-3 w-3 text-green-500" />;
+                : resolvedPlatform === 'telegram'
+                    ? <FaTelegram className="h-3 w-3 text-sky-500" />
+                    : <FaWhatsapp className="h-3 w-3 text-green-500" />;
 
     const processTextSendQueue = useCallback(async () => {
         if (textSendProcessingRef.current) return;
@@ -1836,7 +1817,7 @@ export default function ChatPanel({
                                 </span>
                             )}
                             <span className="hidden lg:inline mx-1">•</span>
-                            <span className="truncate text-slate-600 dark:text-zinc-400">{chat.contact.phone}</span>
+                            <span className="truncate text-slate-600 dark:text-zinc-400">{contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid}</span>
                             <span className="hidden sm:inline-flex items-center shrink-0">
                                 <span className="mx-1">•</span>
                                 <span className="text-xs whitespace-nowrap text-slate-400 dark:text-zinc-600">ID: {chat.id}</span>

@@ -2,7 +2,8 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { updateUserOnlineStatus } from '@/actions/user';
+import type { PresenceEventSource } from '@/lib/presence';
+import { updateUserOnlineStatus } from '@/lib/presence-server';
 
 export async function POST(request: Request) {
     const supabase = await createClient();
@@ -15,13 +16,20 @@ export async function POST(request: Request) {
     }
 
     try {
-        const { workspaceId, isOnline, tabId, forceOffline } = await request.json();
+        const { workspaceId, isOnline, tabId, forceOffline, source } = await request.json();
 
         if (!workspaceId || typeof isOnline !== 'boolean') {
             return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
         }
 
-        await updateUserOnlineStatus(user.id, workspaceId, isOnline, tabId, Boolean(forceOffline));
+        await updateUserOnlineStatus(
+            user.id,
+            workspaceId,
+            isOnline,
+            tabId,
+            Boolean(forceOffline),
+            (source as PresenceEventSource | undefined) ?? 'api'
+        );
 
         return NextResponse.json({ success: true });
     } catch (error) {

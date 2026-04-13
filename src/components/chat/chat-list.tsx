@@ -12,12 +12,12 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type Team } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type TelegramBotInstance, type Team } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
-import { FaWhatsapp, FaInstagram, FaFacebookMessenger } from 'react-icons/fa6';
+import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
 import { TagSelectionDialog } from './tag-selection-dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
@@ -50,11 +50,13 @@ import { closeMultipleChatsAction } from '@/actions/chats';
 import { guardedAssignChat, guardedCloseChat } from '@/actions/chat-guards';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { getTelegramInstances } from '@/actions/telegram';
 import { buildChatProtocol } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { getTeams } from '@/actions/teams';
+import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -64,7 +66,10 @@ const MAX_VISIBLE_ONLINE_AGENTS = 7;
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+  const [instances, setInstances] = useState<Array<
+    Omit<EvolutionInstance, 'status' | 'qrCode'> |
+    Omit<TelegramBotInstance, 'status'>
+  >>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('55');
@@ -78,6 +83,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   // Helper to find selected instance object
   const selectedInstance = useMemo(() => instances.find(i => i.instance_name === selectedInstanceName), [instances, selectedInstanceName]);
   const isCloud = selectedInstance?.type === 'wa_cloud';
+  const isTelegram = selectedInstance?.type === 'telegram';
 
   // Helper to find selected template object
   const selectedTemplate = useMemo(() => templates.find(t => t.name === selectedTemplateName), [templates, selectedTemplateName]);
@@ -100,18 +106,26 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   useEffect(() => {
     if (isOpen && workspaceId) {
       setIsLoading(true);
-      getEvolutionApiInstances(workspaceId)
-        .then((res) => {
-          if (res.error) {
-            toast({ title: 'Erro ao carregar instâncias', description: res.error, variant: 'destructive' });
+      Promise.all([
+        getEvolutionApiInstances(workspaceId),
+        getTelegramInstances(workspaceId),
+      ])
+        .then(([whatsappRes, telegramRes]) => {
+          if (whatsappRes.error) {
+            toast({ title: 'Erro ao carregar instâncias', description: whatsappRes.error, variant: 'destructive' });
             setInstances([]);
             return;
           }
-          setInstances(res.instances || []);
+          if (telegramRes.error) {
+            toast({ title: 'Erro ao carregar bots', description: telegramRes.error, variant: 'destructive' });
+            setInstances([]);
+            return;
+          }
+          setInstances([...(whatsappRes.instances || []), ...(telegramRes.instances || [])]);
         })
         .catch((error) => {
           console.error('[CHAT_LIST] Falha ao buscar instâncias', error);
-          toast({ title: 'Erro ao carregar instâncias', description: 'Não foi possível buscar as instâncias de WhatsApp.', variant: 'destructive' });
+          toast({ title: 'Erro ao carregar instâncias', description: 'Não foi possível buscar as instâncias de mensageria.', variant: 'destructive' });
           setInstances([]);
         })
         .finally(() => setIsLoading(false));
@@ -144,6 +158,14 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
       setTemplateVariables({});
     }
   }, [isCloud, selectedInstanceName]);
+
+  useEffect(() => {
+    if (isTelegram && phoneNumber === '55') {
+      setPhoneNumber('');
+    } else if (!isTelegram && phoneNumber === '') {
+      setPhoneNumber('55');
+    }
+  }, [isTelegram, phoneNumber]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -241,7 +263,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                   ) : (
                     instances.map((instance) => (
                       <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-accent focus:text-accent-foreground">
-                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'}
+                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'} {instance.type === 'telegram' && '(Telegram)'}
                       </SelectItem>
                     ))
                   )}
@@ -249,18 +271,18 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-muted-foreground">Número do WhatsApp (JID)</Label>
+              <Label htmlFor="phoneNumber" className="text-muted-foreground">{isTelegram ? 'Chat ID do Telegram' : 'Numero do WhatsApp (JID)'}</Label>
               <Input
                 id="phoneNumber"
                 name="phoneNumber"
-                placeholder="5511999998888"
+                placeholder={isTelegram ? 'telegram:123456789' : '5511999998888'}
                 required
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50"
               />
               <p className="text-xs text-muted-foreground">
-                Inclua o código do país e o DDD. Não use máscaras ou caracteres especiais.
+                {isTelegram ? 'Use o ID do chat que ja conversou com o bot. Bots do Telegram nao iniciam conversa com usuarios desconhecidos.' : 'Inclua o codigo do pais e o DDD. Nao use mascaras ou caracteres especiais.'}
               </p>
             </div>
 
@@ -643,7 +665,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     }
   };
 
-  const prefetchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const prefetchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMouseEnter = () => {
     if (!onPrefetch) return;
@@ -729,52 +751,21 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           <AvatarFallback className="bg-muted text-muted-foreground">{(chat.contact?.name || '?').charAt(0)}</AvatarFallback>
         </Avatar>
         {(() => {
-          const lastMessage = chat.messages?.[chat.messages.length - 1] as any;
-          const platformSources = [
-            // Priority: message-level platform sources first
-            lastMessage?.platform,
-            lastMessage?.source_from_api,
-            // Then chat-level sources
-            chat.source,
-            chat.instance_type,
-          ].filter(Boolean).map(s => s.toLowerCase());
-
-          const isInstagram = platformSources.some(s => s.includes('instagram'));
-          const isMessenger = platformSources.some(s => s.includes('messenger') || s.includes('facebook'));
-          const isWhatsapp = platformSources.some(s => s.includes('whatsapp') || s.includes('baileys') || s.includes('wa_cloud'));
-
-          // Additional Meta signals: if contact has meta external ID or username, it's likely Instagram/Messenger
-          const hasMetaContact = !!(chat.metaContactExternalId || chat.metaContactUsername);
-
-          // Heuristic: "Meta User" usually implies Messenger/Facebook if not explicitly Instagram
-          const isMetaUser = chat.contact?.name?.startsWith('Meta User');
+          const platform = resolveChatPlatform(chat);
 
           let icon = <FaWhatsapp size={10} />;
           let bg = 'bg-green-500';
-          let label = 'WhatsApp';
+          let label = getChatPlatformLabel(platform);
 
-          // Logic:
-          // 1. Precise Meta Platform (from meta_conversations table via actions)
-          // 2. Explicit Instagram signal
-          // 3. Explicit Messenger signal
-          // 4. Fallback: Has Meta Contact data -> Assume Instagram (common) or Messenger
-
-          if (chat.metaPlatform === 'instagram') {
+          if (platform === 'instagram') {
             icon = <FaInstagram size={10} />;
             bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
-            label = 'Instagram';
-          } else if (chat.metaPlatform === 'messenger') {
+          } else if (platform === 'messenger') {
             icon = <FaFacebookMessenger size={10} />;
             bg = 'bg-blue-500';
-            label = 'Messenger';
-          } else if (isInstagram || (hasMetaContact && !isMessenger)) {
-            icon = <FaInstagram size={10} />;
-            bg = 'bg-gradient-to-tr from-purple-500 via-pink-500 to-yellow-500';
-            label = 'Instagram';
-          } else if (isMessenger || isMetaUser || hasMetaContact) {
-            icon = <FaFacebookMessenger size={10} />;
-            bg = 'bg-blue-500';
-            label = 'Messenger';
+          } else if (platform === 'telegram') {
+            icon = <FaTelegram size={10} />;
+            bg = 'bg-sky-500';
           }
 
           return (
@@ -1057,6 +1048,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
 
   const isFirstRun = React.useRef(true);
+  const ownershipRequestSeqRef = React.useRef(0);
 
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [selectedBulkChats, setSelectedBulkChats] = useState<Set<string>>(new Set());
@@ -1215,6 +1207,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
     const fetchFilteredChats = async () => {
       if (!currentUser.activeWorkspaceId) return;
+      const requestSeq = ++ownershipRequestSeqRef.current;
       setIsFiltering(true);
       try {
         const data = await getInitialChatsData({
@@ -1223,16 +1216,25 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           ownership: ownershipFilter
         });
 
+        if (requestSeq !== ownershipRequestSeqRef.current) {
+          return;
+        }
+
         if (data.error) {
           toast({ title: 'Erro ao filtrar', description: data.error, variant: 'destructive' });
         } else {
           setInitialData(data);
         }
       } catch (err) {
+        if (requestSeq !== ownershipRequestSeqRef.current) {
+          return;
+        }
         console.error(err);
         toast({ title: 'Erro ao filtrar', description: 'Falha ao buscar conversas.', variant: 'destructive' });
       } finally {
-        setIsFiltering(false);
+        if (requestSeq === ownershipRequestSeqRef.current) {
+          setIsFiltering(false);
+        }
       }
     };
 
@@ -1550,15 +1552,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
               className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'mine' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
-              onClick={() => setOwnershipFilter('mine')}
+              onClick={() => {
+                if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
+              }}
             >
+              {isFiltering && ownershipFilter === 'mine' && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
               Minhas
             </Badge>
             <Badge
               variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
               className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'everyone' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
-              onClick={() => setOwnershipFilter('everyone')}
+              onClick={() => {
+                if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
+              }}
             >
+              {isFiltering && ownershipFilter === 'everyone' && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
               Todos
             </Badge>
             <div className="w-[1px] h-4 bg-border mx-1" />

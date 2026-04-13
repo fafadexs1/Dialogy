@@ -256,6 +256,16 @@ export type MessageMetadata = {
     mentionsEveryOne?: boolean;
     mentioned?: string[];
   };
+  telegram?: {
+    updateId?: number;
+    eventType?: 'message' | 'edited_message';
+    chatId?: string;
+    chatType?: string;
+    chatTitle?: string;
+    username?: string;
+    fromId?: string;
+    isEdited?: boolean;
+  };
 }
 
 export type Message = {
@@ -302,7 +312,7 @@ export type Chat = {
   source?: string;
   team_id?: string;
   instance_name?: string;
-  instance_type?: 'baileys' | 'wa_cloud';
+  instance_type?: 'baileys' | 'wa_cloud' | 'telegram';
   unreadCount?: number;
   teamName?: string;
   teamColor?: string;
@@ -356,6 +366,8 @@ export interface Tag {
   color: string;
   is_close_reason: boolean;
   team_ids?: string[];
+  category?: string;
+  sort_order?: number | null;
 }
 
 
@@ -531,7 +543,7 @@ export interface EvolutionInstance {
   webhook_key?: string | null;
   display_name: string;
   status: 'connected' | 'disconnected' | 'pending';
-  type: 'baileys' | 'wa_cloud' | 'mercadolivre';
+  type: 'baileys' | 'wa_cloud' | 'telegram' | 'mercadolivre';
   cluster_id: string;
   qrCode?: string;
   webhook_url?: string;
@@ -541,6 +553,39 @@ export interface EvolutionInstance {
   verified_name?: string | null;
   waba_id?: string | null;
   phone_number_id?: string | null;
+  telegram_bot_id?: string | null;
+  telegram_bot_username?: string | null;
+  telegram_bot_name?: string | null;
+  telegram_webhook_url?: string | null;
+}
+
+export interface TelegramBotInstance {
+  id: string;
+  workspace_id: string;
+  instance_name: string;
+  webhook_key?: string | null;
+  display_name: string;
+  status: 'connected' | 'disconnected' | 'pending';
+  type: 'telegram';
+  webhook_url?: string | null;
+  telegram_bot_id?: string | null;
+  telegram_bot_username?: string | null;
+  telegram_bot_name?: string | null;
+  telegram_webhook_url?: string | null;
+}
+
+export interface TelegramBotProfileSettings {
+  instance_id: string;
+  instance_name: string;
+  dialogy_display_name: string;
+  bot_id?: string | null;
+  username?: string | null;
+  default_name: string;
+  name: string;
+  description: string;
+  short_description: string;
+  photo_data_url?: string | null;
+  has_photo: boolean;
 }
 
 export type EvolutionInstanceSettings = {
@@ -568,7 +613,9 @@ export interface EvolutionInstanceCreationPayload {
   displayName?: string;
   number?: string;
   token?: string; // Can be for Baileys instance or Cloud API
-  integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS';
+  integration?: 'WHATSAPP-BAILEYS' | 'WHATSAPP-BUSINESS' | 'EVOLUTION';
+  channel?: 'telegram';
+  telegramBotToken?: string;
 
   // Baileys Specific
   qrcode?: boolean;
@@ -718,7 +765,7 @@ export interface CampaignRecipient {
 }
 
 export interface InstanceCost {
-  type: 'baileys' | 'wa_cloud';
+  type: 'baileys' | 'wa_cloud' | 'telegram';
   cost: number;
 }
 

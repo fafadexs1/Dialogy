@@ -2,6 +2,7 @@
 
 import { MessageSquare, Route, ShoppingCart, Sparkles, Users, Workflow } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const features = [
     {
@@ -71,16 +72,28 @@ const itemVariants = {
 };
 
 export const AsymmetricFeatures = () => {
+    const isMobile = useIsMobile();
+    const headerMotionProps = {
+        initial: { opacity: 0, y: 20 },
+        whileInView: { opacity: 1, y: 0 },
+        viewport: { once: true, margin: "-100px" },
+        transition: { duration: 0.7 },
+    };
+    const gridMotionProps = {
+        variants: containerVariants,
+        initial: 'hidden' as const,
+        whileInView: 'visible' as const,
+        viewport: { once: true, margin: "-50px" },
+    };
+    const itemMotionProps = { variants: itemVariants };
+
     return (
-        <section className="relative overflow-hidden border-b border-zinc-200/50 bg-[#FAFAFA] py-32">
-            <div className="pointer-events-none absolute left-1/2 top-0 h-[600px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-50/60 blur-[120px]" />
+        <section id="features" className="relative overflow-hidden border-b border-zinc-200/50 bg-[#FAFAFA] py-32">
+            <div className="pointer-events-none absolute left-1/2 top-0 hidden h-[600px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-50/60 blur-[120px] md:block" />
 
             <div className="relative z-10 mx-auto max-w-7xl px-6">
                 <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, margin: "-100px" }}
-                    transition={{ duration: 0.7 }}
+                    {...headerMotionProps}
                     className="mx-auto mb-20 max-w-3xl text-center"
                 >
                     <h2 className="mb-6 text-4xl font-extrabold leading-tight tracking-tight text-zinc-900 md:text-5xl lg:text-6xl">
@@ -94,21 +107,18 @@ export const AsymmetricFeatures = () => {
                 </motion.div>
 
                 <motion.div 
-                    variants={containerVariants}
-                    initial="hidden"
-                    whileInView="visible"
-                    viewport={{ once: true, margin: "-50px" }}
+                    {...gridMotionProps}
                     className="grid grid-cols-1 gap-6 md:grid-cols-3"
                 >
-                    {features.map((feature, i) => (
+                    {features.map((feature) => (
                         <motion.div
-                            variants={itemVariants}
+                            {...itemMotionProps}
                             key={feature.title}
-                            className={`group relative flex cursor-default flex-col items-start overflow-hidden rounded-[2rem] border border-zinc-200/60 bg-white p-8 transition-all duration-500 ease-out hover:-translate-y-1 hover:border-zinc-300 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] ${feature.span}`}
+                            className={`group relative flex cursor-default flex-col items-start overflow-hidden rounded-[2rem] border border-zinc-200/60 bg-white p-8 transition-colors duration-500 ease-out md:transition-all md:hover:-translate-y-1 md:hover:border-zinc-300 md:hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] ${feature.span}`}
                         >
-                            <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100 dark:opacity-20 bg-current mix-blend-multiply" />
+                            <div className="absolute -right-12 -top-12 hidden h-32 w-32 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100 dark:opacity-20 bg-current mix-blend-multiply md:block" />
                             
-                            <div className={`mb-8 flex h-14 w-14 items-center justify-center rounded-2xl border transition-transform duration-500 group-hover:scale-110 group-hover:shadow-md ${feature.bg} ${feature.border}`}>
+                            <div className={`mb-8 flex h-14 w-14 items-center justify-center rounded-2xl border md:transition-transform md:duration-500 md:group-hover:scale-110 md:group-hover:shadow-md ${feature.bg} ${feature.border}`}>
                                 {feature.icon}
                             </div>
 

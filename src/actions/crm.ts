@@ -6,6 +6,16 @@ import type { Contact, Tag, User, Activity, CustomFieldDefinition, SelectableOpt
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { withDebug } from '@/lib/observability/logger';
+import {
+    ensurePipelineTagSchema,
+    getPipelineStagesForWorkspace,
+} from '@/lib/crm-pipeline-server';
+import {
+    PIPELINE_STAGE_CATEGORY,
+    normalizePipelineStageValue,
+    type PipelineStage,
+} from '@/lib/crm-pipeline';
+import { normalizeWhatsappJid as normalizeWhatsappContactJid } from '@/lib/whatsapp/contact-identity';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -18,20 +28,8 @@ async function hasPermission(userId: string, workspaceId: string, permission: st
 import { buildCountQuery, buildSegmentQuery, CriteriaGroup } from '@/lib/crm-query-builder';
 import { Segment } from '@/lib/types';
 
-const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
-
 function normalizeWhatsappJid(value?: string | null): string | null {
-    if (!value) return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-
-    const localPart = trimmed
-        .replace(/@s\.whatsapp\.net$/i, '')
-        .split('@')[0]
-        .replace(/\D/g, '');
-
-    if (!localPart) return null;
-    return `${localPart}${WHATSAPP_JID_SUFFIX}`;
+    return normalizeWhatsappContactJid(value);
 }
 
 function normalizeComparableValue(value: unknown): string {
@@ -466,13 +464,162 @@ export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null
     if (!user) return { tags: null, error: "Usuário não autenticado." };
 
     try {
-        const res = await db.query('SELECT id, label, value, color, is_close_reason, team_ids FROM tags WHERE workspace_id = $1 ORDER BY label', [workspaceId]);
+        await ensurePipelineTagSchema();
+        const res = await db.query(
+            `SELECT id, label, value, color, is_close_reason, team_ids, category, sort_order
+             FROM tags
+             WHERE workspace_id = $1
+             ORDER BY COALESCE(sort_order, 2147483647), label`,
+            [workspaceId]
+        );
         return { tags: res.rows };
     } catch (error) {
         console.error("[GET_TAGS] Error:", error);
         return { tags: null, error: "Falha ao buscar as etiquetas." };
     }
 }
+
+export async function getPipelineStages(workspaceId: string): Promise<{ stages: PipelineStage[] | null, error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { stages: null, error: "UsuÃ¡rio nÃ£o autenticado." };
+
+    try {
+        if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
+            return { stages: null, error: "Acesso nÃ£o autorizado." };
+        }
+
+        const stages = await getPipelineStagesForWorkspace(workspaceId);
+        return { stages };
+    } catch (error) {
+        console.error("[GET_PIPELINE_STAGES] Error:", error);
+        return { stages: null, error: "Falha ao buscar etapas do funil." };
+    }
+}
+
+export const createPipelineStage = withDebug(
+    'create_pipeline_stage',
+    async function createPipelineStage(
+        workspaceId: string,
+        label: string,
+        color: string
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para editar o funil." };
+        }
+
+        const normalizedLabel = label.trim();
+        if (!normalizedLabel) {
+            return { success: false, error: "Nome da etapa Ã© obrigatÃ³rio." };
+        }
+
+        const value = normalizePipelineStageValue(normalizedLabel);
+        if (!value) {
+            return { success: false, error: "Nome da etapa invÃ¡lido." };
+        }
+
+        try {
+            await ensurePipelineTagSchema();
+
+            const orderRes = await db.query(
+                `
+                    SELECT COALESCE(MAX(sort_order), 0) + 100 AS next_order
+                    FROM tags
+                    WHERE workspace_id = $1
+                      AND category = $2
+                `,
+                [workspaceId, PIPELINE_STAGE_CATEGORY]
+            );
+
+            const nextOrder = Number(orderRes.rows[0]?.next_order || 100);
+
+            await db.query(
+                `
+                    INSERT INTO tags (workspace_id, label, value, color, is_close_reason, team_ids, category, sort_order)
+                    VALUES ($1, $2, $3, $4, false, $5, $6, $7)
+                `,
+                [workspaceId, normalizedLabel, value, color, [], PIPELINE_STAGE_CATEGORY, nextOrder]
+            );
+
+            revalidatePath('/crm');
+            revalidatePath('/analytics');
+            return { success: true };
+        } catch (error: any) {
+            console.error("[CREATE_PIPELINE_STAGE] Error:", error);
+            if (error?.code === '23505') {
+                return { success: false, error: "JÃ¡ existe uma etapa com esse nome neste workspace." };
+            }
+            return { success: false, error: "Falha ao criar etapa do funil." };
+        }
+    },
+    {
+        contextResolver: (workspaceId, label) => ({ payload: { workspaceId, label } })
+    }
+);
+
+export const deletePipelineStage = withDebug(
+    'delete_pipeline_stage',
+    async function deletePipelineStage(
+        workspaceId: string,
+        stageId: string
+    ): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
+
+        if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
+            return { success: false, error: "Você não tem permissão para editar o funil." };
+        }
+
+        try {
+            await ensurePipelineTagSchema();
+
+            // Check if stage exists and belongs to workspace and is a pipeline stage
+            const stageRes = await db.query(
+                `SELECT category FROM tags WHERE id = $1 AND workspace_id = $2`,
+                [stageId, workspaceId]
+            );
+
+            if (stageRes.rowCount === 0) {
+                return { success: false, error: "Etapa não encontrada." };
+            }
+
+            if (stageRes.rows[0].category !== PIPELINE_STAGE_CATEGORY) {
+                return { success: false, error: "Esta etiqueta não é uma etapa de funil." };
+            }
+
+            // Ensure there is at least one other stage remaining
+            const countRes = await db.query(
+                `SELECT COUNT(*) as total FROM tags WHERE workspace_id = $1 AND category = $2`,
+                [workspaceId, PIPELINE_STAGE_CATEGORY]
+            );
+
+            if (Number(countRes.rows[0].total) <= 1) {
+                return { success: false, error: "Não é possível excluir a última etapa do funil." };
+            }
+
+            // Delete the contact tags references explicitly (or let ON DELETE CASCADE handle it if present, but explicit is safe)
+            await db.query(`DELETE FROM contact_tags WHERE tag_id = $1`, [stageId]);
+            
+            // Delete the stage
+            await db.query(`DELETE FROM tags WHERE id = $1`, [stageId]);
+
+            revalidatePath('/crm');
+            revalidatePath('/analytics');
+            return { success: true };
+        } catch (error: any) {
+            console.error("[DELETE_PIPELINE_STAGE] Error:", error);
+            return { success: false, error: "Falha ao excluir etapa do funil." };
+        }
+    },
+    {
+        contextResolver: (workspaceId, stageId) => ({ payload: { workspaceId, stageId } })
+    }
+);
 
 export const createTag = withDebug(
     'create_tag',
@@ -526,9 +673,11 @@ export const updateTag = withDebug(
         if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
-            const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
+            await ensurePipelineTagSchema();
+            const tagRes = await db.query('SELECT workspace_id, category FROM tags WHERE id = $1', [tagId]);
             if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
             const workspaceId = tagRes.rows[0].workspace_id;
+            const category = tagRes.rows[0].category;
 
             if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
                 return { success: false, error: "Você não tem permissão para editar etiquetas." };
@@ -536,10 +685,17 @@ export const updateTag = withDebug(
 
             const value = label.trim().toLowerCase().replace(/\s+/g, '_');
 
-            await db.query(
-                'UPDATE tags SET label = $1, value = $2, color = $3, is_close_reason = $4, team_ids = $5 WHERE id = $6',
-                [label, value, color, isCloseReason, teamIds, tagId]
-            );
+            if (category === PIPELINE_STAGE_CATEGORY) {
+                await db.query(
+                    'UPDATE tags SET label = $1, color = $2, is_close_reason = $3, team_ids = $4 WHERE id = $5',
+                    [label, color, isCloseReason, teamIds, tagId]
+                );
+            } else {
+                await db.query(
+                    'UPDATE tags SET label = $1, value = $2, color = $3, is_close_reason = $4, team_ids = $5 WHERE id = $6',
+                    [label, value, color, isCloseReason, teamIds, tagId]
+                );
+            }
             revalidatePath('/crm');
             return { success: true };
         } catch (error) {
@@ -561,12 +717,18 @@ export const deleteTag = withDebug(
         if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
-            const tagRes = await db.query('SELECT workspace_id FROM tags WHERE id = $1', [tagId]);
+            await ensurePipelineTagSchema();
+            const tagRes = await db.query('SELECT workspace_id, category FROM tags WHERE id = $1', [tagId]);
             if (tagRes.rowCount === 0) return { success: false, error: "Etiqueta não encontrada." };
             const workspaceId = tagRes.rows[0].workspace_id;
+            const category = tagRes.rows[0].category;
 
             if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
                 return { success: false, error: "Você não tem permissão para apagar etiquetas." };
+            }
+
+            if (category === PIPELINE_STAGE_CATEGORY) {
+                return { success: false, error: "Etapas do funil devem ser gerenciadas pelo kanban." };
             }
 
             await db.query('DELETE FROM tags WHERE id = $1', [tagId]);

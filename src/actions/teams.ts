@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 
 // Helper function to check for admin permissions
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
@@ -315,6 +315,8 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
 
     try {
         const ttlSeconds = getPresenceTtlSeconds();
+        const recentActivitySeconds = getPresenceRecentActivitySeconds();
+        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$2', '$3');
         const res = await db.query(`
             SELECT 
                 t.id, 
@@ -329,14 +331,13 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
                         ON tm.user_id = uwp.user_id
                         AND uwp.workspace_id = t.workspace_id
                     WHERE tm.team_id = t.id
-                      AND uwp.is_online = TRUE
-                      AND uwp.last_seen > NOW() - ($2 * interval '1 second')
+                      AND ${availabilitySql}
                 ), 0) as "membersCount"
             FROM teams t
             WHERE t.workspace_id = $1
             GROUP BY t.id
             ORDER BY t.name;
-        `, [workspaceId, ttlSeconds]);
+        `, [workspaceId, ttlSeconds, recentActivitySeconds]);
 
         const teams = res.rows.map(row => ({
             id: row.id,

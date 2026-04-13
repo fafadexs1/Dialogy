@@ -96,12 +96,70 @@ const withPWA = require('@ducanh2912/next-pwa').default({
   disable: process.env.NODE_ENV === 'development',
   register: true,
   skipWaiting: true,
-  cacheOnFrontEndNav: true,
-  aggressiveFrontEndNavCaching: true,
+  cacheStartUrl: false,
+  cacheOnFrontEndNav: false,
+  aggressiveFrontEndNavCaching: false,
   reloadOnOnline: true,
   swcMinify: true,
+  extendDefaultRuntimeCaching: true,
   workboxOptions: {
     disableDevLogs: true,
+    runtimeCaching: [
+      {
+        urlPattern: /\/_next\/image\?url=.+$/i,
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'next-image',
+        },
+      },
+      {
+        urlPattern: /\/_next\/data\/.+\/.+\.json$/i,
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'next-data',
+        },
+      },
+      {
+        urlPattern: ({ request, url, sameOrigin }) =>
+          request.mode === 'navigate' &&
+          sameOrigin &&
+          !url.pathname.startsWith('/api/'),
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'pages',
+        },
+      },
+      {
+        urlPattern: ({ request, url, sameOrigin }) =>
+          request.headers.get('RSC') === '1' &&
+          request.headers.get('Next-Router-Prefetch') === '1' &&
+          sameOrigin &&
+          !url.pathname.startsWith('/api/'),
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'pages-rsc-prefetch',
+        },
+      },
+      {
+        urlPattern: ({ request, url, sameOrigin }) =>
+          request.headers.get('RSC') === '1' &&
+          sameOrigin &&
+          !url.pathname.startsWith('/api/'),
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'pages-rsc',
+        },
+      },
+      {
+        urlPattern: ({ url, sameOrigin }) =>
+          sameOrigin &&
+          url.pathname.startsWith('/api/'),
+        handler: 'NetworkOnly',
+        options: {
+          cacheName: 'apis',
+        },
+      },
+    ],
   },
 });
 

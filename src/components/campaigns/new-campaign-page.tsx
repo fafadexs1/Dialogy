@@ -219,7 +219,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
           setInstances([]);
           return;
         }
-        setInstances(res.instances || []);
+        setInstances((res.instances || []).filter(instance => instance.type !== 'telegram'));
       })
       .catch((error) => {
         console.error('[NEW_CAMPAIGN] Falha ao buscar inst\u00e2ncias', error);

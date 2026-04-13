@@ -8,6 +8,10 @@ import { sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
+import {
+    findOrCreateWhatsappContact,
+    normalizeWhatsappJid,
+} from '@/lib/whatsapp/contact-identity';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -114,21 +118,16 @@ export async function createCampaign(
         for (const csvContact of csvContactsData) {
             if (!csvContact.phone_number_jid) continue; // Skip if no number
 
-            let contactId;
-            const existingContactRes = await client.query(
-                `SELECT id FROM contacts WHERE workspace_id = $1 AND phone_number_jid = $2`,
-                [workspaceId, csvContact.phone_number_jid]
-            );
+            const normalizedJid = normalizeWhatsappJid(csvContact.phone_number_jid);
+            if (!normalizedJid) continue;
 
-            if ((existingContactRes.rowCount ?? 0) > 0) {
-                contactId = existingContactRes.rows[0].id;
-            } else {
-                const newContactRes = await client.query(
-                    `INSERT INTO contacts (workspace_id, name, phone_number_jid) VALUES ($1, $2, $3) RETURNING id`,
-                    [workspaceId, csvContact.name, csvContact.phone_number_jid]
-                );
-                contactId = newContactRes.rows[0].id;
-            }
+            const resolvedContact = await findOrCreateWhatsappContact(client, {
+                workspaceId,
+                phoneOrJid: normalizedJid,
+                fallbackName: csvContact.name,
+            });
+            const contactId = resolvedContact.contact.id;
+
             allContactIdsForCampaign.push(contactId);
         }
 

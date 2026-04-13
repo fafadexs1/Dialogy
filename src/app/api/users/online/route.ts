@@ -1,7 +1,9 @@
 'use server';
 
 import { NextResponse } from 'next/server';
-import { updateUserOnlineStatus } from '@/actions/user';
+import { createClient } from '@/lib/supabase/server';
+import type { PresenceEventSource } from '@/lib/presence';
+import { updateUserOnlineStatus } from '@/lib/presence-server';
 
 /**
  * Endpoint para ser chamado via navigator.sendBeacon()
@@ -9,6 +11,8 @@ import { updateUserOnlineStatus } from '@/actions/user';
  */
 export async function POST(request: Request) {
     try {
+        const supabase = await createClient();
+        const { data: { user: authUser } } = await supabase.auth.getUser();
         const contentType = request.headers.get('content-type') || '';
         let payload: { userId?: string; workspaceId?: string } = {};
 
@@ -25,13 +29,27 @@ export async function POST(request: Request) {
             }
         }
 
-        const { userId, workspaceId, tabId, forceOffline } = payload as { userId?: string; workspaceId?: string; tabId?: string; forceOffline?: boolean };
+        const { userId, workspaceId, tabId, forceOffline, source } = payload as {
+            userId?: string;
+            workspaceId?: string;
+            tabId?: string;
+            forceOffline?: boolean;
+            source?: PresenceEventSource;
+        };
+        const effectiveUserId = authUser?.id ?? userId;
 
-        if (!userId || !workspaceId) {
+        if (!effectiveUserId || !workspaceId) {
             return NextResponse.json({ error: 'User ID and workspaceId are required' }, { status: 400 });
         }
 
-        await updateUserOnlineStatus(userId, workspaceId, false, tabId, Boolean(forceOffline));
+        await updateUserOnlineStatus(
+            effectiveUserId,
+            workspaceId,
+            false,
+            tabId,
+            Boolean(forceOffline),
+            source ?? 'legacy_beacon'
+        );
 
         // Retorna uma resposta 204 No Content, que é apropriada para sendBeacon.
         return new Response(null, { status: 204 });

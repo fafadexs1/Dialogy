@@ -3,7 +3,6 @@
 import React, { memo } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import Image from 'next/image';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +46,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { AudioPlayer } from './audio-player';
 import { MediaViewer } from './media-viewer';
 import { useToast } from '@/hooks/use-toast';
+import { resolveClientMediaUrl } from '@/lib/storage-url';
 
 function formatDuration(seconds: number): string {
     if (!seconds) return '0:00';
@@ -143,7 +143,10 @@ function resolveReplyPreview(message: Message, quotedMessage?: Message): {
 
 function LocationMessage({ message }: { message: Message }) {
     const { latitude, longitude, address, locationName, mapUrl, thumbnail, locationDescription } = message.metadata || {};
-    const thumbnailSrc = typeof thumbnail === 'string' && thumbnail.length > 0 ? thumbnail : undefined;
+    const thumbnailSrc = resolveClientMediaUrl(
+        typeof thumbnail === 'string' && thumbnail.length > 0 ? thumbnail : undefined,
+        { kind: 'image' }
+    );
     const hasCoords = typeof latitude === 'number' && typeof longitude === 'number';
     const resolvedMapUrl = mapUrl || (hasCoords ? `https://www.google.com/maps?q=${latitude},${longitude}` : undefined);
     const hasLink = Boolean(resolvedMapUrl);
@@ -156,12 +159,14 @@ function LocationMessage({ message }: { message: Message }) {
             <div className="overflow-hidden rounded-2xl border border-border bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-all max-w-[85vw] md:max-w-[320px] shadow-sm dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/40 dark:shadow-lg dark:shadow-black/20">
                 {thumbnailSrc ? (
                     <div className="relative">
-                        <Image
+                        <img
                             src={thumbnailSrc}
                             alt={title}
                             width={320}
                             height={180}
                             className="w-full h-auto object-cover"
+                            loading="lazy"
+                            draggable={false}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
                         <div className="absolute bottom-3 left-3 flex items-center gap-2 text-white text-xs font-semibold">
@@ -297,8 +302,13 @@ function SharedContactMessage({ message }: { message: Message }) {
 
 function SafeMediaImage({ src, alt, className, width, height, onClick }: { src: string, alt: string, className?: string, width: number, height: number, onClick?: () => void }) {
     const [hasError, setHasError] = React.useState(false);
+    const resolvedSrc = React.useMemo(() => resolveClientMediaUrl(src, { kind: 'image' }), [src]);
 
-    if (hasError) {
+    React.useEffect(() => {
+        setHasError(false);
+    }, [resolvedSrc]);
+
+    if (hasError || !resolvedSrc) {
         return (
             <div
                 className={cn("flex flex-col items-center justify-center bg-muted/30 border border-border rounded-lg p-4 text-muted-foreground", className)}
@@ -315,14 +325,16 @@ function SafeMediaImage({ src, alt, className, width, height, onClick }: { src: 
     }
 
     return (
-        <Image
-            src={src}
+        <img
+            src={resolvedSrc}
             alt={alt}
             width={width}
             height={height}
             className={className}
             onError={() => setHasError(true)}
             onClick={onClick}
+            loading="lazy"
+            draggable={false}
         />
     );
 }
@@ -338,10 +350,16 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     }
 
     const validUrl = (url: any) => typeof url === 'string' && url.length > 0 ? url : undefined;
-    const urlToUse = validUrl(mediaUrl) || validUrl(thumbnail);
-    const safeThumbnail = validUrl(thumbnail);
+    const rawMediaUrl = validUrl(mediaUrl);
+    const rawThumbnail = validUrl(thumbnail);
+    const mediaAssetUrl = resolveClientMediaUrl(rawMediaUrl || rawThumbnail, { kind: 'media' });
+    const imageAssetUrl = resolveClientMediaUrl(rawMediaUrl || rawThumbnail, { kind: 'image' });
+    const safeThumbnail = resolveClientMediaUrl(rawThumbnail || rawMediaUrl, { kind: 'image' });
+    const urlToUse = effectiveMimeType.startsWith('image/')
+        ? (imageAssetUrl || mediaAssetUrl)
+        : mediaAssetUrl;
 
-    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const isLongPressRef = React.useRef(false);
 
     const startPress = React.useCallback(() => {
@@ -420,7 +438,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
         if (effectiveMimeType.startsWith('audio/')) {
             return <AudioPlayer
-                src={urlToUse}
+                src={mediaAssetUrl}
                 messageId={message.id}
                 initialTranscription={message.transcription}
                 duration={duration}
@@ -433,7 +451,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
         return (
             <a
-                href={urlToUse}
+                href={mediaAssetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[80vw] md:max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"

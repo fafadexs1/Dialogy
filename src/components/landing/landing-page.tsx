@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import { Navbar } from './sections/Navbar';
 import { NewHero } from './sections/NewHero';
 import { ChatVolumePricingSection } from '@/components/pricing/chat-volume-pricing-section';
@@ -10,11 +9,6 @@ import { HomeSeoContent } from './sections/HomeSeoContent';
 import { MinimalFooter } from './sections/MinimalFooter';
 
 export default function LandingPage() {
-    const deferredSectionStyle: CSSProperties = {
-        contentVisibility: 'auto',
-        containIntrinsicSize: '900px',
-    };
-
     return (
         <div className="relative isolate min-h-screen overflow-x-hidden bg-[#f8f9fa] font-sans text-black selection:bg-brand-green selection:text-black">
             <div className="relative z-50">
@@ -24,24 +18,24 @@ export default function LandingPage() {
             <main className="relative z-10 flex flex-col">
                 <NewHero />
                 <ChatVolumePricingSection variant="landing" />
-                <div style={deferredSectionStyle}>
+                <div>
                     <OmnichannelOrbit />
                 </div>
-                <div style={deferredSectionStyle}>
+                <div>
                     <AutomagicShowcase />
                 </div>
-                <div style={deferredSectionStyle}>
+                <div>
                     <AsymmetricFeatures />
                 </div>
-                <div style={deferredSectionStyle}>
+                <div>
                     <BrutalistSocialProof />
                 </div>
-                <div style={deferredSectionStyle}>
+                <div>
                     <HomeSeoContent />
                 </div>
             </main>
 
-            <div style={deferredSectionStyle}>
+            <div>
                 <MinimalFooter />
             </div>
         </div>
