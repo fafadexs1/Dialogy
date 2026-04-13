@@ -10,6 +10,7 @@ type BooleanRecord = Record<string, boolean>;
 type InboxState = {
   chats: Chat[];
   messagesByChat: MessagesRecord;
+  messageThreadOrder: string[];
   selectedChatId: string | null;
   lastSyncChats: string | null;
   lastSyncMessages: TimestampRecord;
@@ -52,6 +53,7 @@ type InboxState = {
 const baseState = {
   chats: [] as Chat[],
   messagesByChat: {} as MessagesRecord,
+  messageThreadOrder: [] as string[],
   selectedChatId: null as string | null,
   lastSyncChats: null as string | null,
   lastSyncMessages: {} as TimestampRecord,
@@ -73,6 +75,71 @@ const getChatSortValue = (chat: Chat): number => {
   return 0;
 };
 
+const MAX_IN_MEMORY_MESSAGE_THREADS = 12;
+
+type MessageThreadState = Pick<
+  InboxState,
+  'messagesByChat' | 'messageThreadOrder' | 'lastSyncMessages' | 'oldestMessageDateByChat' | 'oldestMessageIdByChat' | 'hasMoreHistoryByChat' | 'selectedChatId'
+>;
+
+function touchMessageThread(order: string[], chatId: string | null | undefined): string[] {
+  if (!chatId) return order;
+  const next = order.filter((id) => id !== chatId);
+  next.push(chatId);
+  return next;
+}
+
+function pruneMessageThreads(state: MessageThreadState): Pick<
+  InboxState,
+  'messagesByChat' | 'messageThreadOrder' | 'lastSyncMessages' | 'oldestMessageDateByChat' | 'oldestMessageIdByChat' | 'hasMoreHistoryByChat'
+> {
+  const retainedIds = new Set<string>();
+
+  if (state.selectedChatId) {
+    retainedIds.add(state.selectedChatId);
+  }
+
+  for (let index = state.messageThreadOrder.length - 1; index >= 0; index -= 1) {
+    const chatId = state.messageThreadOrder[index];
+    if (!state.messagesByChat[chatId]) continue;
+    retainedIds.add(chatId);
+    if (retainedIds.size >= MAX_IN_MEMORY_MESSAGE_THREADS) break;
+  }
+
+  const nextMessagesByChat: MessagesRecord = {};
+  const nextLastSyncMessages: TimestampRecord = {};
+  const nextOldestMessageDateByChat: TimestampRecord = {};
+  const nextOldestMessageIdByChat: IdRecord = {};
+  const nextHasMoreHistoryByChat: BooleanRecord = {};
+
+  retainedIds.forEach((chatId) => {
+    if (state.messagesByChat[chatId]) {
+      nextMessagesByChat[chatId] = state.messagesByChat[chatId];
+    }
+    if (chatId in state.lastSyncMessages) {
+      nextLastSyncMessages[chatId] = state.lastSyncMessages[chatId];
+    }
+    if (chatId in state.oldestMessageDateByChat) {
+      nextOldestMessageDateByChat[chatId] = state.oldestMessageDateByChat[chatId];
+    }
+    if (chatId in state.oldestMessageIdByChat) {
+      nextOldestMessageIdByChat[chatId] = state.oldestMessageIdByChat[chatId];
+    }
+    if (chatId in state.hasMoreHistoryByChat) {
+      nextHasMoreHistoryByChat[chatId] = state.hasMoreHistoryByChat[chatId];
+    }
+  });
+
+  return {
+    messagesByChat: nextMessagesByChat,
+    messageThreadOrder: state.messageThreadOrder.filter((chatId) => retainedIds.has(chatId)),
+    lastSyncMessages: nextLastSyncMessages,
+    oldestMessageDateByChat: nextOldestMessageDateByChat,
+    oldestMessageIdByChat: nextOldestMessageIdByChat,
+    hasMoreHistoryByChat: nextHasMoreHistoryByChat,
+  };
+}
+
 export const useInboxStore = create<InboxState>((set, get) => ({
   ...baseState,
   setInitialData: ({
@@ -90,43 +157,54 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const hasSelection = !!selectedChatId;
       const existingMessages = hasSelection ? state.messagesByChat[selectedChatId!] || [] : [];
       const shouldPreserveMessages = hasSelection && messages.length === 0 && existingMessages.length > 0;
+      const nextMessagesByChat = hasSelection
+        ? {
+          ...state.messagesByChat,
+          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: messages }),
+        }
+        : state.messagesByChat;
+      const nextLastSyncMessages = hasSelection
+        ? {
+          ...state.lastSyncMessages,
+          ...(shouldPreserveMessages && lastSyncMessageForSelected == null
+            ? {}
+            : { [selectedChatId!]: lastSyncMessageForSelected ?? null }),
+        }
+        : state.lastSyncMessages;
+      const nextOldestMessageDateByChat = hasSelection
+        ? {
+          ...state.oldestMessageDateByChat,
+          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageDate ?? null }),
+        }
+        : state.oldestMessageDateByChat;
+      const nextOldestMessageIdByChat = hasSelection
+        ? {
+          ...state.oldestMessageIdByChat,
+          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageId ?? null }),
+        }
+        : state.oldestMessageIdByChat;
+      const nextHasMoreHistoryByChat = hasSelection
+        ? {
+          ...state.hasMoreHistoryByChat,
+          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: hasMoreHistory }),
+        }
+        : state.hasMoreHistoryByChat;
+      const nextMessageThreadOrder = touchMessageThread(state.messageThreadOrder, selectedChatId);
+      const prunedState = pruneMessageThreads({
+        messagesByChat: nextMessagesByChat,
+        messageThreadOrder: nextMessageThreadOrder,
+        lastSyncMessages: nextLastSyncMessages,
+        oldestMessageDateByChat: nextOldestMessageDateByChat,
+        oldestMessageIdByChat: nextOldestMessageIdByChat,
+        hasMoreHistoryByChat: nextHasMoreHistoryByChat,
+        selectedChatId,
+      });
 
       return {
         chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
         selectedChatId,
-        messagesByChat: hasSelection
-          ? {
-            ...state.messagesByChat,
-            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: messages }),
-          }
-          : state.messagesByChat,
+        ...prunedState,
         lastSyncChats,
-        lastSyncMessages: hasSelection
-          ? {
-            ...state.lastSyncMessages,
-            ...(shouldPreserveMessages && lastSyncMessageForSelected == null
-              ? {}
-              : { [selectedChatId!]: lastSyncMessageForSelected ?? null }),
-          }
-          : state.lastSyncMessages,
-        oldestMessageDateByChat: hasSelection
-          ? {
-            ...state.oldestMessageDateByChat,
-            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageDate ?? null }),
-          }
-          : state.oldestMessageDateByChat,
-        oldestMessageIdByChat: hasSelection
-          ? {
-            ...state.oldestMessageIdByChat,
-            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: oldestMessageId ?? null }),
-          }
-          : state.oldestMessageIdByChat,
-        hasMoreHistoryByChat: hasSelection
-          ? {
-            ...state.hasMoreHistoryByChat,
-            ...(shouldPreserveMessages ? {} : { [selectedChatId!]: hasMoreHistory }),
-          }
-          : state.hasMoreHistoryByChat,
         hasMoreChats,
       };
     });
@@ -140,7 +218,21 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       }
     }
   },
-  setSelectedChatId: (chatId) => set({ selectedChatId: chatId }),
+  setSelectedChatId: (chatId) => set((state) => {
+    const nextMessageThreadOrder = touchMessageThread(state.messageThreadOrder, chatId);
+    return {
+      selectedChatId: chatId,
+      ...pruneMessageThreads({
+        messagesByChat: state.messagesByChat,
+        messageThreadOrder: nextMessageThreadOrder,
+        lastSyncMessages: state.lastSyncMessages,
+        oldestMessageDateByChat: state.oldestMessageDateByChat,
+        oldestMessageIdByChat: state.oldestMessageIdByChat,
+        hasMoreHistoryByChat: state.hasMoreHistoryByChat,
+        selectedChatId: chatId,
+      }),
+    };
+  }),
   upsertChats: (incomingChats, lastSyncChats) => {
     if (!incomingChats.length) {
       if (lastSyncChats) {
@@ -209,24 +301,34 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     set((state) => {
       const current = state.messagesByChat[chatId] || [];
       const merged = replace ? dedupeMessages(messages) : dedupeMessages([...current, ...messages]);
+      const nextMessagesByChat = { ...state.messagesByChat, [chatId]: merged };
+      const nextLastSyncMessages =
+        typeof lastSync !== 'undefined'
+          ? { ...state.lastSyncMessages, [chatId]: lastSync }
+          : state.lastSyncMessages;
+      const nextOldestMessageDateByChat =
+        typeof oldestDate !== 'undefined'
+          ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
+          : state.oldestMessageDateByChat;
+      const nextOldestMessageIdByChat =
+        typeof oldestId !== 'undefined'
+          ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
+          : state.oldestMessageIdByChat;
+      const nextHasMoreHistoryByChat =
+        typeof hasMoreHistory !== 'undefined'
+          ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
+          : state.hasMoreHistoryByChat;
+      const prunedState = pruneMessageThreads({
+        messagesByChat: nextMessagesByChat,
+        messageThreadOrder: touchMessageThread(state.messageThreadOrder, chatId),
+        lastSyncMessages: nextLastSyncMessages,
+        oldestMessageDateByChat: nextOldestMessageDateByChat,
+        oldestMessageIdByChat: nextOldestMessageIdByChat,
+        hasMoreHistoryByChat: nextHasMoreHistoryByChat,
+        selectedChatId: state.selectedChatId,
+      });
       return {
-        messagesByChat: { ...state.messagesByChat, [chatId]: merged },
-        lastSyncMessages:
-          typeof lastSync !== 'undefined'
-            ? { ...state.lastSyncMessages, [chatId]: lastSync }
-            : state.lastSyncMessages,
-        oldestMessageDateByChat:
-          typeof oldestDate !== 'undefined'
-            ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
-            : state.oldestMessageDateByChat,
-        oldestMessageIdByChat:
-          typeof oldestId !== 'undefined'
-            ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
-            : state.oldestMessageIdByChat,
-        hasMoreHistoryByChat:
-          typeof hasMoreHistory !== 'undefined'
-            ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
-            : state.hasMoreHistoryByChat,
+        ...prunedState,
       };
     });
   },
@@ -279,12 +381,22 @@ export const useInboxStore = create<InboxState>((set, get) => ({
           }
           : chat
       );
+      const nextMessagesByChat = { ...state.messagesByChat, [chatId]: merged };
+      const nextLastSyncMessages = lastSync
+        ? { ...state.lastSyncMessages, [chatId]: lastSync }
+        : state.lastSyncMessages;
+      const prunedState = pruneMessageThreads({
+        messagesByChat: nextMessagesByChat,
+        messageThreadOrder: touchMessageThread(state.messageThreadOrder, chatId),
+        lastSyncMessages: nextLastSyncMessages,
+        oldestMessageDateByChat: state.oldestMessageDateByChat,
+        oldestMessageIdByChat: state.oldestMessageIdByChat,
+        hasMoreHistoryByChat: state.hasMoreHistoryByChat,
+        selectedChatId: state.selectedChatId,
+      });
       return {
-        messagesByChat: { ...state.messagesByChat, [chatId]: merged },
+        ...prunedState,
         chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
-        lastSyncMessages: lastSync
-          ? { ...state.lastSyncMessages, [chatId]: lastSync }
-          : state.lastSyncMessages,
       };
     });
 
@@ -303,22 +415,32 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const current = state.messagesByChat[chatId] || [];
       const merged = messages.length ? dedupeMessages([...messages, ...current]) : current;
       const shouldUpdateCursor = messages.length > 0;
+      const nextMessagesByChat = messages.length
+        ? { ...state.messagesByChat, [chatId]: merged }
+        : state.messagesByChat;
+      const nextOldestMessageDateByChat =
+        shouldUpdateCursor && typeof oldestDate !== 'undefined'
+          ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
+          : state.oldestMessageDateByChat;
+      const nextOldestMessageIdByChat =
+        shouldUpdateCursor && typeof oldestId !== 'undefined'
+          ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
+          : state.oldestMessageIdByChat;
+      const nextHasMoreHistoryByChat =
+        typeof hasMoreHistory !== 'undefined'
+          ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
+          : state.hasMoreHistoryByChat;
+      const prunedState = pruneMessageThreads({
+        messagesByChat: nextMessagesByChat,
+        messageThreadOrder: touchMessageThread(state.messageThreadOrder, chatId),
+        lastSyncMessages: state.lastSyncMessages,
+        oldestMessageDateByChat: nextOldestMessageDateByChat,
+        oldestMessageIdByChat: nextOldestMessageIdByChat,
+        hasMoreHistoryByChat: nextHasMoreHistoryByChat,
+        selectedChatId: state.selectedChatId,
+      });
       return {
-        messagesByChat: messages.length
-          ? { ...state.messagesByChat, [chatId]: merged }
-          : state.messagesByChat,
-        oldestMessageDateByChat:
-          shouldUpdateCursor && typeof oldestDate !== 'undefined'
-            ? { ...state.oldestMessageDateByChat, [chatId]: oldestDate }
-            : state.oldestMessageDateByChat,
-        oldestMessageIdByChat:
-          shouldUpdateCursor && typeof oldestId !== 'undefined'
-            ? { ...state.oldestMessageIdByChat, [chatId]: oldestId }
-            : state.oldestMessageIdByChat,
-        hasMoreHistoryByChat:
-          typeof hasMoreHistory !== 'undefined'
-            ? { ...state.hasMoreHistoryByChat, [chatId]: hasMoreHistory }
-            : state.hasMoreHistoryByChat,
+        ...prunedState,
       };
     });
   },
@@ -420,9 +542,27 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     }));
   },
   removeChat: (chatId) => {
-    set((state) => ({
-      chats: state.chats.filter((chat) => chat.id !== chatId),
-    }));
+    set((state) => {
+      const { [chatId]: _removedMessages, ...remainingMessagesByChat } = state.messagesByChat;
+      const { [chatId]: _removedSync, ...remainingLastSyncMessages } = state.lastSyncMessages;
+      const { [chatId]: _removedOldestDate, ...remainingOldestMessageDates } = state.oldestMessageDateByChat;
+      const { [chatId]: _removedOldestId, ...remainingOldestMessageIds } = state.oldestMessageIdByChat;
+      const { [chatId]: _removedHasMore, ...remainingHasMoreHistory } = state.hasMoreHistoryByChat;
+
+      return {
+        chats: state.chats.filter((chat) => chat.id !== chatId),
+        selectedChatId: state.selectedChatId === chatId ? null : state.selectedChatId,
+        ...pruneMessageThreads({
+          messagesByChat: remainingMessagesByChat,
+          messageThreadOrder: state.messageThreadOrder.filter((id) => id !== chatId),
+          lastSyncMessages: remainingLastSyncMessages,
+          oldestMessageDateByChat: remainingOldestMessageDates,
+          oldestMessageIdByChat: remainingOldestMessageIds,
+          hasMoreHistoryByChat: remainingHasMoreHistory,
+          selectedChatId: state.selectedChatId === chatId ? null : state.selectedChatId,
+        }),
+      };
+    });
   },
   setDraft: (chatId, text) => {
     const normalizedText = normalizeDraftForStorage(text);

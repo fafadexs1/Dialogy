@@ -691,6 +691,12 @@ export default function ChatPanel({
     }, [chat?.contact?.id]);
 
     useEffect(() => {
+        if (!showFullHistory && allContactMessages.length > 0) {
+            setAllContactMessages([]);
+        }
+    }, [showFullHistory, allContactMessages.length]);
+
+    useEffect(() => {
         // messageHeightsRef.current.clear(); // Removed
         // setScrollTop(0); // Removed
         userScrolledUpRef.current = false;

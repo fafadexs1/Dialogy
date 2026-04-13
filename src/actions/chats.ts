@@ -1981,7 +1981,8 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
                 timezone,
                 contact,
                 agentsMap,
-                systemAgentsMap
+                systemAgentsMap,
+                'preview'
             )
             : undefined;
 
@@ -2259,11 +2260,12 @@ function mapMessageFromRow(
     timezone: string,
     contact: Contact | undefined,
     agentsMap: Map<string, AgentRow>,
-    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>
+    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>,
+    metadataShape: 'full' | 'preview' = 'full'
 ): Message {
     const createdAt = new Date(row.created_at);
     const zonedDate = toZonedTime(createdAt, timezone);
-    const metadata = parseMetadata(row.metadata);
+    const metadata = parseMetadata(row.metadata, metadataShape);
     const sender = resolveSender(row, contact, agentsMap, systemAgentsMap);
 
     return {
@@ -2317,11 +2319,75 @@ function resolveSender(
     }
     return undefined;
 }
-function parseMetadata(metadata: any): MessageMetadata | undefined {
+
+function stripBulkyErrorPayloads(details: MessageMetadata['send_error_details']): MessageMetadata['send_error_details'] {
+    if (!details) return details;
+
+    const {
+        raw_data: _rawData,
+        raw_payload: _rawPayload,
+        provider_payload: _providerPayload,
+        message_updates: _messageUpdates,
+        ...rest
+    } = details;
+
+    return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+function compactSharedContactsForPreview(sharedContacts: MessageMetadata['sharedContacts']): MessageMetadata['sharedContacts'] {
+    if (!Array.isArray(sharedContacts) || sharedContacts.length === 0) return undefined;
+
+    return sharedContacts.slice(0, 1).map((contact) => ({
+        displayName: contact.displayName,
+        fullName: contact.fullName,
+        organization: contact.organization,
+        phones: Array.isArray(contact.phones) ? contact.phones.slice(0, 3) : undefined,
+        vcard: undefined,
+    }));
+}
+
+function compactMessageMetadata(
+    metadata: MessageMetadata,
+    shape: 'full' | 'preview'
+): MessageMetadata | undefined {
+    const sanitized: MessageMetadata = {
+        ...metadata,
+        send_error_details: stripBulkyErrorPayloads(metadata.send_error_details),
+    };
+
+    if (shape === 'full') {
+        return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+    }
+
+    const preview: MessageMetadata = {};
+
+    if (sanitized.mediaUrl) preview.mediaUrl = sanitized.mediaUrl;
+    if (sanitized.mimetype) preview.mimetype = sanitized.mimetype;
+    if (sanitized.fileName) preview.fileName = sanitized.fileName;
+    if (typeof sanitized.latitude === 'number') preview.latitude = sanitized.latitude;
+    if (typeof sanitized.longitude === 'number') preview.longitude = sanitized.longitude;
+    if (sanitized.address) preview.address = sanitized.address;
+    if (sanitized.locationName) preview.locationName = sanitized.locationName;
+    if (sanitized.locationDescription) preview.locationDescription = sanitized.locationDescription;
+    if (sanitized.mapUrl) preview.mapUrl = sanitized.mapUrl;
+    if (sanitized.isInternalNote) preview.isInternalNote = sanitized.isInternalNote;
+    if (sanitized.isMarketing) preview.isMarketing = sanitized.isMarketing;
+    if (sanitized.event) preview.event = sanitized.event;
+    if (sanitized.sharedContactName) preview.sharedContactName = sanitized.sharedContactName;
+    if (Array.isArray(sanitized.sharedContactPhones) && sanitized.sharedContactPhones.length > 0) {
+        preview.sharedContactPhones = sanitized.sharedContactPhones.slice(0, 3);
+    }
+    const compactSharedContacts = compactSharedContactsForPreview(sanitized.sharedContacts);
+    if (compactSharedContacts) preview.sharedContacts = compactSharedContacts;
+
+    return Object.keys(preview).length > 0 ? preview : undefined;
+}
+
+function parseMetadata(metadata: any, shape: 'full' | 'preview' = 'full'): MessageMetadata | undefined {
     if (!metadata) return undefined;
-    if (typeof metadata === 'object') return metadata as MessageMetadata;
+    if (typeof metadata === 'object') return compactMessageMetadata(metadata as MessageMetadata, shape);
     try {
-        return JSON.parse(metadata) as MessageMetadata;
+        return compactMessageMetadata(JSON.parse(metadata) as MessageMetadata, shape);
     } catch {
         return undefined;
     }

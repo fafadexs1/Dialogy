@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { guardedSendAgentMessage, guardedAssignChat } from '@/actions/chat-guards';
 
+vi.mock('@/lib/cache', () => ({
+  cacheService: {
+    setChats: vi.fn(async () => {}),
+    setMessages: vi.fn(async () => {}),
+    appendMessages: vi.fn(async () => {}),
+  },
+}));
+
 vi.mock('@/actions/messages', () => ({
   sendAgentMessageAction: vi.fn(async () => ({ success: true })),
 }));
