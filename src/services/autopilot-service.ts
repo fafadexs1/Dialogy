@@ -6,6 +6,7 @@ import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
 import { generateEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
+import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
 
 export async function getAutopilotConfigService(workspaceId: string, agentId?: string): Promise<{
     config: AutopilotConfig | null,
@@ -75,6 +76,20 @@ export async function processAutopilotForChat(
     lastMessageContent: string,
     instanceName: string
 ) {
+    const resolvedChatId =
+        (await resolveCanonicalWhatsappChatIdByIdentity(db, {
+            workspaceId,
+            phoneOrJid: chat.contact?.phone_number_jid,
+            currentChatId: chat.id,
+        })) || chat.id;
+
+    if (resolvedChatId !== chat.id) {
+        chat = {
+            ...chat,
+            id: resolvedChatId,
+        };
+    }
+
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
 
     // Force fetch copilot_mode to ensure we have the latest value

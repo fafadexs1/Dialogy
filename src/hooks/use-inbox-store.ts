@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Chat, Contact, Message } from '@/lib/types';
 import { cacheService } from '@/lib/cache';
+import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
 
 type MessagesRecord = Record<string, Message[]>;
 type TimestampRecord = Record<string, string | null>;
@@ -74,6 +75,15 @@ const getChatSortValue = (chat: Chat): number => {
   }
   return 0;
 };
+
+const dedupeChats = (chats: Chat[], preserveChatId?: string | null) =>
+  dedupeActiveWhatsappChatsByIdentity({
+    chats,
+    getId: (chat) => chat.id,
+    getStatus: (chat) => chat.status,
+    getPhoneOrJid: (chat) => chat.contact?.phone_number_jid,
+    preserveChatId,
+  });
 
 const MAX_IN_MEMORY_MESSAGE_THREADS = 12;
 
@@ -201,7 +211,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       });
 
       return {
-        chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
+        chats: dedupeChats(
+          chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
+          selectedChatId
+        ),
         selectedChatId,
         ...prunedState,
         lastSyncChats,
@@ -210,9 +223,10 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     });
 
     // Persist to IndexedDB (fire-and-forget)
-    if (chats.length > 0 && chats[0]?.workspace_id) {
-      const workspaceId = chats[0].workspace_id;
-      cacheService.setChats(workspaceId, chats).catch(() => { });
+    const persistedChats = get().chats;
+    if (persistedChats.length > 0 && persistedChats[0]?.workspace_id) {
+      const workspaceId = persistedChats[0].workspace_id;
+      cacheService.setChats(workspaceId, persistedChats).catch(() => { });
       if (selectedChatId && messages.length > 0) {
         cacheService.setMessages(selectedChatId, workspaceId, messages).catch(() => { });
       }
@@ -261,7 +275,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         (a, b) => getChatSortValue(b) - getChatSortValue(a)
       );
       return {
-        chats: nextChats,
+        chats: dedupeChats(nextChats, state.selectedChatId),
         lastSyncChats: lastSyncChats ?? state.lastSyncChats,
       };
     });
@@ -286,7 +300,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       const nextChats = Array.from(chatMap.values()).sort(
         (a, b) => getChatSortValue(b) - getChatSortValue(a)
       );
-      return { chats: nextChats };
+      return { chats: dedupeChats(nextChats, state.selectedChatId) };
     });
   },
   setHasMoreChats: (hasMore) => set({ hasMoreChats: hasMore }),

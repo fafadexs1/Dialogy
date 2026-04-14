@@ -57,6 +57,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { getTeams } from '@/actions/teams';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
+import { isMarketingMessage, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
@@ -541,11 +542,6 @@ interface ChatListItemProps {
   onPrefetch?: (chatId: string) => void;
 }
 
-
-const isMarketingMessage = (message: Message) => {
-  const meta = message.metadata as any;
-  return Boolean(meta?.isMarketing || meta?.event === 'marketing_auto_close');
-};
 
 const getDraftPreviewText = (draft: string): string => {
   if (!draft) return '';
@@ -1288,7 +1284,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const visibleMessages = showMarketing
         ? chat.messages
         : chat.messages.filter(m => !isMarketingMessage(m));
-      if (!showMarketing && visibleMessages.length === 0) {
+      if (
+        !showMarketing &&
+        visibleMessages.length === 0 &&
+        !shouldKeepMarketingOnlyChatVisible(chat, selectedChat?.id)
+      ) {
         return false;
       }
 
@@ -1324,7 +1324,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
     },
-    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap]
+    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap, selectedChat?.id]
   );
 
   const filteredChats = useMemo(() => {

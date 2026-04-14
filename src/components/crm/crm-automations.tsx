@@ -894,7 +894,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                 <SelectValue placeholder="Selecione o estagio" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {orderedStages.map(s => <SelectItem key={s.id} value={s.value}>{s.label}</SelectItem>)}
+                                                {STAGES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     )}

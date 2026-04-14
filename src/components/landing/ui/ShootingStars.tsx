@@ -39,7 +39,7 @@ export const ShootingStars = ({
     const rectRef = useRef<SVGRectElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const requestRef = useRef<number | null>(null);
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         const createStar = () => {

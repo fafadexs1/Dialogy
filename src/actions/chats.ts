@@ -18,6 +18,7 @@ import { reportServerError } from '@/lib/observability/errors';
 import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-config';
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
+import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -957,7 +958,13 @@ async function fetchChats({
     );
     const endTime = performance.now();
     console.log(`[PERF] fetchChats took ${(endTime - startTime).toFixed(2)}ms for limit ${limit}`);
-    return rows as ChatRow[];
+    return dedupeActiveWhatsappChatsByIdentity({
+        chats: rows as ChatRow[],
+        getId: (chat) => chat.id,
+        getStatus: (chat) => chat.status,
+        getPhoneOrJid: (chat) => chat.contact_phone_number_jid,
+        preserveChatId: includeChatId,
+    });
 }
 
 export const getInitialChatsData = withDebug(
@@ -1906,7 +1913,12 @@ async function fetchChatsDelta({
     );
     const endTime = performance.now();
     console.log(`[PERF] fetchChatsDelta took ${(endTime - startTime).toFixed(2)}ms, ${rows.length} changed chats since ${since}`);
-    return rows as ChatRow[];
+    return dedupeActiveWhatsappChatsByIdentity({
+        chats: rows as ChatRow[],
+        getId: (chat) => chat.id,
+        getStatus: (chat) => chat.status,
+        getPhoneOrJid: (chat) => chat.contact_phone_number_jid,
+    });
 }
 
 type AgentRow = { id: string; full_name: string; avatar_url?: string | null };

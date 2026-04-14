@@ -4,7 +4,11 @@ import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentTemplate
 import { isSGPPayload, adaptSGPPayload, normalizeAgentListPayload, AgentSendPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
-import { findOrCreateWhatsappContact } from '@/lib/whatsapp/contact-identity';
+import {
+    findOrCreateWhatsappContact,
+    findWhatsappChatByIdentity,
+    lockWhatsappIdentityTransaction,
+} from '@/lib/whatsapp/contact-identity';
 
 interface MediaFilePayload {
     base64: string;
@@ -21,6 +25,9 @@ interface MediaFilePayload {
 async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: string): Promise<string> {
     const client = await db.connect();
     try {
+        await client.query('BEGIN');
+        await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: phoneNumber });
+
         const resolvedContact = await findOrCreateWhatsappContact(client, {
             workspaceId,
             phoneOrJid: phoneNumber,
@@ -28,31 +35,30 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
         });
         const contactId = resolvedContact.contact.id;
 
-        // 2. Look for an existing active chat
-        const chatRes = await client.query(
-            `SELECT id FROM chats WHERE contact_id = $1 AND workspace_id = $2 AND status IN ('gerais', 'atendimentos') LIMIT 1`,
-            [contactId, workspaceId]
-        );
+        // 2. Prefer the most recent active chat across all equivalent identities
+        const activeChat = await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: phoneNumber,
+            statuses: ['gerais', 'atendimentos'],
+            preferOpen: true,
+        });
 
-        if ((chatRes.rowCount ?? 0) > 0) {
-            return chatRes.rows[0].id;
+        if (activeChat?.id) {
+            await client.query('COMMIT');
+            return activeChat.id;
         }
 
         // 3. If there is no active chat, prefer reusing the latest closed chat.
         // This avoids resurrecting contacts into the queue due outbound system sends.
-        const closedChatRes = await client.query(
-            `SELECT id
-             FROM chats
-             WHERE contact_id = $1
-               AND workspace_id = $2
-               AND status = 'encerrados'
-             ORDER BY closed_at DESC NULLS LAST, created_at DESC
-             LIMIT 1`,
-            [contactId, workspaceId]
-        );
+        const closedChat = await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: phoneNumber,
+            statuses: ['encerrados'],
+        });
 
-        if ((closedChatRes.rowCount ?? 0) > 0) {
-            return closedChatRes.rows[0].id;
+        if (closedChat?.id) {
+            await client.query('COMMIT');
+            return closedChat.id;
         }
 
         // 4. Create new chat
@@ -72,8 +78,12 @@ async function findOrCreateChatByPhoneNumber(phoneNumber: string, workspaceId: s
             throw new Error(`Failed to create a new chat for contact ${contactId}.`);
         }
 
+        await client.query('COMMIT');
         return newChatRes.rows[0].id;
 
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
     } finally {
         client.release();
     }

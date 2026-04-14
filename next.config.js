@@ -1,10 +1,10 @@
 
-
 const enableWebpackOverrides = process.env.NODE_ENV === 'production';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  trailingSlash: false,
   serverExternalPackages: ['genkit', '@genkit-ai/core', 'handlebars'],
   experimental: {
     serverActions: {

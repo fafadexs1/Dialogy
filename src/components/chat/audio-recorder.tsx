@@ -21,7 +21,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const recordingInterval = useRef<NodeJS.Timeout | null>(null);
+  const recordingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);

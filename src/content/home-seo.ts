@@ -1,14 +1,17 @@
-export const HOME_SEO_TITLE = 'CRM para WhatsApp e atendimento omnichannel com IA';
+export const HOME_SEO_TITLE = 'Chatbot para WhatsApp, CRM e Atendimento Omnichannel com IA';
 
 export const HOME_SEO_DESCRIPTION =
-    'CRM para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.';
+    'Chatbot inteligente para WhatsApp com CRM, inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte.';
 
 export const HOME_SEO_KEYWORDS = [
+    'chatbot para WhatsApp',
+    'chatbot inteligente',
     'CRM para WhatsApp',
     'atendimento omnichannel',
     'inbox omnichannel',
     'automacao de atendimento',
     'IA para atendimento',
+    'IA conversacional',
     'software de atendimento ao cliente',
     'WhatsApp para vendas',
     'gestao de leads no WhatsApp',

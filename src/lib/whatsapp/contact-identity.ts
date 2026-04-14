@@ -1,4 +1,5 @@
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
+const WHATSAPP_ALT_JID_SUFFIX = '@c.us';
 const BRAZIL_COUNTRY_CODE = '55';
 const BRAZIL_AREA_CODE_LENGTH = 2;
 
@@ -17,6 +18,22 @@ function extractDigits(value?: string | null): string {
         .trim()
         .replace(/@.*$/, '')
         .replace(/\D/g, '');
+}
+
+function isResolvableWhatsappIdentity(value?: string | null): boolean {
+    const rawValue = String(value ?? '').trim().toLowerCase();
+    if (!rawValue) return false;
+    if (rawValue.includes(':')) return false;
+
+    if (
+        rawValue.includes('@') &&
+        !rawValue.endsWith(WHATSAPP_STANDARD_JID_SUFFIX) &&
+        !rawValue.endsWith(WHATSAPP_ALT_JID_SUFFIX)
+    ) {
+        return false;
+    }
+
+    return extractDigits(rawValue).length >= 8;
 }
 
 function getBrazilianSubscriberDigits(digits: string): string | null {
@@ -59,6 +76,10 @@ function buildAlternateBrazilianDigits(digits: string): string | null {
 }
 
 export function normalizeWhatsappPhoneNumber(value?: string | null): string | null {
+    if (!isResolvableWhatsappIdentity(value)) {
+        return null;
+    }
+
     const digits = extractDigits(value);
     if (!digits) return null;
 
@@ -100,6 +121,190 @@ export function buildWhatsappLookupJids(value?: string | null): string[] {
     }
 
     return [...lookupJids];
+}
+
+function resolveCanonicalContactPhone(
+    contact: { phone?: string | null } | null | undefined,
+    normalizedPhone: string
+): string | null {
+    const existingPhoneDigits = extractDigits(contact?.phone);
+
+    if (!existingPhoneDigits) {
+        return normalizedPhone;
+    }
+
+    if (existingPhoneDigits === normalizedPhone) {
+        return null;
+    }
+
+    const normalizedExistingPhone = normalizeWhatsappPhoneNumber(existingPhoneDigits);
+    if (normalizedExistingPhone === normalizedPhone) {
+        return normalizedPhone;
+    }
+
+    return null;
+}
+
+export async function findWhatsappChatByIdentity(
+    client: QueryableClient,
+    params: {
+        workspaceId: string;
+        phoneOrJid: string;
+        statuses?: string[] | null;
+        preferOpen?: boolean;
+    }
+) {
+    const { workspaceId, phoneOrJid, statuses, preferOpen = false } = params;
+    const normalizedJid = normalizeWhatsappJid(phoneOrJid);
+    const lookupJids = buildWhatsappLookupJids(phoneOrJid);
+
+    if (!normalizedJid || lookupJids.length === 0) {
+        return null;
+    }
+
+    const statusFilter = statuses && statuses.length > 0 ? statuses : null;
+
+    const chatRes = await client.query(
+        `SELECT
+            ch.*,
+            c.phone_number_jid AS contact_phone_number_jid,
+            GREATEST(
+                COALESCE(lm.created_at, ch.created_at),
+                COALESCE(ch.updated_at, ch.created_at),
+                COALESCE(ch.assigned_at, ch.created_at),
+                COALESCE(ch.closed_at, ch.created_at),
+                ch.created_at
+            ) AS chat_activity_at
+         FROM chats ch
+         JOIN contacts c
+           ON c.id = ch.contact_id
+          AND c.workspace_id = ch.workspace_id
+         LEFT JOIN LATERAL (
+            SELECT m.created_at
+            FROM messages m
+            WHERE m.chat_id = ch.id
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT 1
+         ) lm ON TRUE
+         WHERE ch.workspace_id = $1
+           AND c.phone_number_jid = ANY($2::text[])
+           AND ($3::text[] IS NULL OR ch.status::text = ANY($3::text[]))
+         ORDER BY
+            CASE
+                WHEN $4::boolean AND ch.status::text = 'atendimentos' THEN 0
+                WHEN $4::boolean AND ch.status::text = 'gerais' THEN 1
+                WHEN $4::boolean THEN 2
+                ELSE 0
+            END,
+            CASE
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') AND c.phone_number_jid = $5 THEN 0
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') THEN 1
+                WHEN c.phone_number_jid = $5 THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') AND ch.agent_id IS NOT NULL THEN 0
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') THEN 1
+                ELSE 0
+            END,
+            CASE
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') THEN ch.created_at
+                ELSE NULL
+            END ASC NULLS LAST,
+            CASE
+                WHEN $4::boolean AND ch.status::text IN ('gerais', 'atendimentos') THEN ch.id::text
+                ELSE NULL
+            END ASC NULLS LAST,
+            GREATEST(
+                COALESCE(lm.created_at, ch.created_at),
+                COALESCE(ch.updated_at, ch.created_at),
+                COALESCE(ch.assigned_at, ch.created_at),
+                COALESCE(ch.closed_at, ch.created_at),
+                ch.created_at
+            ) DESC,
+            ch.created_at DESC
+         LIMIT 1`,
+        [workspaceId, lookupJids, statusFilter, preferOpen, normalizedJid]
+    );
+
+    return chatRes.rows[0] ?? null;
+}
+
+export async function resolveCanonicalWhatsappChatIdByIdentity(
+    client: QueryableClient,
+    params: {
+        workspaceId: string;
+        phoneOrJid?: string | null;
+        currentChatId?: string | null;
+    }
+): Promise<string | null> {
+    const normalizedJid = normalizeWhatsappJid(params.phoneOrJid);
+    if (!normalizedJid) {
+        return params.currentChatId ?? null;
+    }
+
+    const activeChat = await findWhatsappChatByIdentity(client, {
+        workspaceId: params.workspaceId,
+        phoneOrJid: normalizedJid,
+        statuses: ['gerais', 'atendimentos'],
+        preferOpen: true,
+    });
+
+    if (activeChat?.id) {
+        return activeChat.id;
+    }
+
+    return params.currentChatId ?? null;
+}
+
+export async function resolveCanonicalWhatsappChatId(
+    client: QueryableClient,
+    chatId: string
+): Promise<string | null> {
+    const chatRes = await client.query(
+        `SELECT
+            ch.id,
+            ch.workspace_id,
+            c.phone_number_jid
+         FROM chats ch
+         JOIN contacts c
+           ON c.id = ch.contact_id
+          AND c.workspace_id = ch.workspace_id
+         WHERE ch.id = $1
+         LIMIT 1`,
+        [chatId]
+    );
+
+    if ((chatRes.rowCount ?? 0) === 0) {
+        return null;
+    }
+
+    const chatRow = chatRes.rows[0];
+    return resolveCanonicalWhatsappChatIdByIdentity(client, {
+        workspaceId: chatRow.workspace_id,
+        phoneOrJid: chatRow.phone_number_jid,
+        currentChatId: chatRow.id,
+    });
+}
+
+export async function lockWhatsappIdentityTransaction(
+    client: QueryableClient,
+    params: {
+        workspaceId: string;
+        phoneOrJid: string;
+    }
+): Promise<string | null> {
+    const normalizedPhone = normalizeWhatsappPhoneNumber(params.phoneOrJid);
+    if (!normalizedPhone) {
+        return null;
+    }
+
+    await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+        [params.workspaceId, normalizedPhone]
+    );
+
+    return normalizedPhone;
 }
 
 async function selectPreferredWhatsappContact(
@@ -148,33 +353,57 @@ async function alignContactToNormalizedJid(
     normalizedJid: string,
     normalizedPhone: string
 ) {
-    if (!contact?.id || !normalizedJid || contact.phone_number_jid === normalizedJid) {
+    if (!contact?.id || !normalizedJid) {
         return contact;
     }
 
-    const conflictRes = await client.query(
-        `SELECT 1
-         FROM contacts
-         WHERE workspace_id = $1
-           AND phone_number_jid = $2
-           AND id <> $3
-         LIMIT 1`,
-        [workspaceId, normalizedJid, contact.id]
-    );
+    const canonicalPhone = resolveCanonicalContactPhone(contact, normalizedPhone);
+    const needsJidUpdate = contact.phone_number_jid !== normalizedJid;
+    const needsPhoneUpdate = Boolean(canonicalPhone && String(contact.phone ?? '').trim() !== canonicalPhone);
 
-    if ((conflictRes.rowCount ?? 0) > 0) {
+    if (!needsJidUpdate && !needsPhoneUpdate) {
         return contact;
+    }
+
+    if (needsJidUpdate) {
+        const conflictRes = await client.query(
+            `SELECT 1
+             FROM contacts
+             WHERE workspace_id = $1
+               AND phone_number_jid = $2
+               AND id <> $3
+             LIMIT 1`,
+            [workspaceId, normalizedJid, contact.id]
+        );
+
+        if ((conflictRes.rowCount ?? 0) > 0) {
+            if (!needsPhoneUpdate) {
+                return contact;
+            }
+
+            const phoneOnlyRes = await client.query(
+                `UPDATE contacts
+                 SET phone = $1,
+                     updated_at = timezone('utc', now())
+                 WHERE id = $2
+                   AND workspace_id = $3
+                 RETURNING *`,
+                [canonicalPhone, contact.id, workspaceId]
+            );
+
+            return phoneOnlyRes.rows[0] ?? contact;
+        }
     }
 
     const updatedContactRes = await client.query(
         `UPDATE contacts
          SET phone_number_jid = $1,
-             phone = COALESCE(NULLIF(phone, ''), $2),
+             phone = COALESCE($2, phone),
              updated_at = timezone('utc', now())
          WHERE id = $3
            AND workspace_id = $4
          RETURNING *`,
-        [normalizedJid, normalizedPhone, contact.id, workspaceId]
+        [normalizedJid, canonicalPhone, contact.id, workspaceId]
     );
 
     return updatedContactRes.rows[0] ?? contact;

@@ -20,7 +20,11 @@ import {
     getEvolutionApiConfig,
     resolveEvolutionInstance,
 } from '@/lib/whatsapp/evolution-config';
-import { findOrCreateWhatsappContact } from '@/lib/whatsapp/contact-identity';
+import {
+    findOrCreateWhatsappContact,
+    findWhatsappChatByIdentity,
+    lockWhatsappIdentityTransaction,
+} from '@/lib/whatsapp/contact-identity';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -496,7 +500,7 @@ async function scheduleQueueAutoClose(
     if (!autoCloseMs || autoCloseMs <= 0) return;
     const anchor = Number.isFinite(lastIncomingAt.getTime()) ? lastIncomingAt : new Date();
 
-    setTimeout(async () => {
+    const timerHandle = setTimeout(async () => {
         const client = await db.connect();
         try {
             await client.query('BEGIN');
@@ -569,7 +573,9 @@ async function scheduleQueueAutoClose(
         } finally {
             client.release();
         }
-    }, autoCloseMs).unref?.();
+    }, autoCloseMs);
+
+    (timerHandle as unknown as { unref?: () => void }).unref?.();
 }
 
 import { logAction } from '@/lib/observability/logger';
@@ -1243,6 +1249,8 @@ async function handleMessagesUpsert(payload: any) {
             throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
         }
 
+        await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: contactJid });
+
         const resolvedContact = await findOrCreateWhatsappContact(client, {
             workspaceId,
             phoneOrJid: contactJid,
@@ -1257,16 +1265,22 @@ async function handleMessagesUpsert(payload: any) {
         // contactData is guaranteed to be non-null here because of the check above
         if (!contactData) throw new Error("Contact data is null despite rowCount > 0");
 
-        let chatRes = await client.query(
-            `SELECT * FROM chats WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`, [workspaceId, contactData.id]
-        );
-
         let chat: Chat = {} as Chat;
         let latestChatStatus: Chat['status'] | null = null;
         let requiresNewChat = false;
+        const activeChat = await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: contactJid,
+            statuses: ['gerais', 'atendimentos'],
+            preferOpen: true,
+        });
+        const recentChat = activeChat || await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: contactJid,
+            statuses: ['encerrados'],
+        });
 
-        if ((chatRes.rowCount ?? 0) > 0) {
-            const recentChat = chatRes.rows[0];
+        if (recentChat) {
             latestChatStatus = recentChat.status as Chat['status'];
             if (recentChat.status === 'gerais' || recentChat.status === 'atendimentos') {
                 chat = recentChat;

@@ -1109,7 +1109,7 @@ export default function CustomerChatLayout({
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let isPolling = true;
     let errorCount = 0;
 

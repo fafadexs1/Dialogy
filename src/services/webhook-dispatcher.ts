@@ -2,6 +2,10 @@
 
 import { db } from '@/lib/db';
 import type { Message, Chat, Contact } from '@/lib/types';
+import {
+    resolveCanonicalWhatsappChatId,
+    resolveCanonicalWhatsappChatIdByIdentity,
+} from '@/lib/whatsapp/contact-identity';
 
 const WEBHOOK_TIMEOUT_MS = Number(process.env.WEBHOOK_TIMEOUT_MS ?? 8000);
 const FAILED_MESSAGE_STATUSES = new Set(['FAILED', 'ERROR']);
@@ -157,6 +161,8 @@ export async function dispatchMessageToWebhooksById(
     messageId: string,
     instanceName?: string | null
 ) {
+    const resolvedChatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
+
     const chatRes = await db.query(
         `SELECT 
             c.id,
@@ -173,11 +179,11 @@ export async function dispatchMessageToWebhooksById(
          JOIN contacts ct ON ct.id = c.contact_id
          LEFT JOIN users u ON u.id = c.agent_id
          WHERE c.id = $1`,
-        [chatId]
+        [resolvedChatId]
     );
 
     if (chatRes.rowCount === 0) {
-        console.error(`[WEBHOOK_DISPATCHER] Chat ${chatId} not found.`);
+        console.error(`[WEBHOOK_DISPATCHER] Chat ${resolvedChatId} not found.`);
         return;
     }
 
@@ -217,7 +223,7 @@ export async function dispatchMessageToWebhooksById(
     const resolvedInstance = instanceName || messageRow.instance_name || 'N/A';
 
     const chat: Chat = {
-        id: chatRow.id,
+        id: resolvedChatId,
         workspace_id: chatRow.workspace_id,
         status: chatRow.status,
         contact: {
@@ -236,7 +242,7 @@ export async function dispatchMessageToWebhooksById(
 
     const message: Message = {
         id: messageRow.id,
-        chat_id: chatRow.id,
+        chat_id: resolvedChatId,
         workspace_id: chatRow.workspace_id,
         content: messageRow.content || '',
         type: messageRow.type,
@@ -260,7 +266,14 @@ export async function dispatchMessageToWebhooks(
     instanceName: string
 ) {
     try {
-        console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${chat.id}, mensagem ${message.id}`);
+        const conversationId =
+            (await resolveCanonicalWhatsappChatIdByIdentity(db, {
+                workspaceId: chat.workspace_id,
+                phoneOrJid: chat.contact?.phone_number_jid,
+                currentChatId: chat.id,
+            })) || chat.id;
+
+        console.log(`[WEBHOOK_DISPATCHER] Iniciando despacho para chat ${conversationId}, mensagem ${message.id}`);
 
         const normalizedStatus = (message.api_message_status || '').toUpperCase();
         if (FAILED_MESSAGE_STATUSES.has(normalizedStatus)) {
@@ -316,7 +329,7 @@ export async function dispatchMessageToWebhooks(
                 name: workspaceName,
             },
             conversation: {
-                id: chat.id,
+                id: conversationId,
                 status: chat.status,
                 channel: instanceType === 'telegram' ? 'Telegram' : 'WhatsApp',
                 instance_name: instanceName || 'N/A',

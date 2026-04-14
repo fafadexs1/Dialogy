@@ -1,9 +1,9 @@
 # Task: Implement Optimistic UI for Chat
 
 - [x] Analyze existing frontend chat architecture <!-- id: 0 -->
-    - [x] Locate `MessageInput` component <!-- id: 1 -->
-    - [x] Locate Chat Store/State management <!-- id: 2 -->
-    - [x] Locate `MessageItem` component <!-- id: 3 -->
+    - [x] Create Playwright SEO audit script (`tests/seo-audit.spec.ts`) (Converted to Browser Subagent Audit)
+- [x] Attempt to start the development server
+- [/] Run Browser SEO audit (Crawl localhost)
 - [x] Implement Optimistic Logic in `MessageInput` <!-- id: 4 -->
     - [x] Generate UUID v4 <!-- id: 5 -->
     - [x] Add message to store immediately <!-- id: 6 -->

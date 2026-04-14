@@ -7,6 +7,7 @@ import {
   HOME_SEO_TITLE,
 } from '@/content/home-seo';
 import { buildPageMetadata } from '@/lib/seo/metadata';
+import { seoStore } from '@/services/seo-store';
 import { JsonLd, getBreadcrumbSchema, getFaqSchema, getSoftwareApplicationSchema } from '@/lib/seo/schema';
 
 export async function generateMetadata() {
@@ -30,11 +31,18 @@ export default async function Page() {
   ]);
   const faqSchema = getFaqSchema(HOME_FAQ_ITEMS);
 
+  const entry = await seoStore.getByPath('/');
+  const hasStoredJsonLd = !!entry?.jsonLd;
+
   return (
     <>
-      <JsonLd id="dialogy-home-software-application" data={softwareSchema} />
-      <JsonLd id="dialogy-home-breadcrumb" data={breadcrumbSchema} />
-      <JsonLd id="dialogy-home-faq" data={faqSchema} />
+      {!hasStoredJsonLd && (
+        <>
+          <JsonLd id="dialogy-home-software-application" data={softwareSchema} />
+          <JsonLd id="dialogy-home-breadcrumb" data={breadcrumbSchema} />
+          <JsonLd id="dialogy-home-faq" data={faqSchema} />
+        </>
+      )}
       <StoredSeoJsonLd pathname="/" />
       <LandingPage />
     </>

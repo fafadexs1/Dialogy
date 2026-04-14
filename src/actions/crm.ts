@@ -11,11 +11,18 @@ import {
     getPipelineStagesForWorkspace,
 } from '@/lib/crm-pipeline-server';
 import {
+    resolveWhatsappJidForContactSave,
+    shouldKeepCurrentWhatsappJidOnUpdate,
+} from '@/lib/crm-contact-identity';
+import {
     PIPELINE_STAGE_CATEGORY,
     normalizePipelineStageValue,
     type PipelineStage,
 } from '@/lib/crm-pipeline';
-import { normalizeWhatsappJid as normalizeWhatsappContactJid } from '@/lib/whatsapp/contact-identity';
+import {
+    buildWhatsappLookupJids,
+    normalizeWhatsappJid as normalizeWhatsappContactJid,
+} from '@/lib/whatsapp/contact-identity';
 
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     const res = await db.query(`
@@ -208,6 +215,7 @@ export const saveContactAction = withDebug(
             owner_id: ownerId || null,
             avatar_url: formData.get('avatar_url') as string || null,
         };
+        const phoneLookupJids = buildWhatsappLookupJids(formData.get('phone_number_jid') as string | null);
 
         const tagIds = formData.getAll('tags') as string[];
 
@@ -228,27 +236,74 @@ export const saveContactAction = withDebug(
             const duplicatePhoneError = 'Ja existe um contato com este WhatsApp neste workspace.';
 
             if (id) { // Update
-                const duplicateRes = await client.query(
-                    `SELECT 1
+                const currentContactRes = await client.query(
+                    `SELECT phone_number_jid
                      FROM contacts
-                     WHERE workspace_id = $1
-                       AND phone_number_jid = $2
-                       AND id <> $3
+                     WHERE id = $1
+                       AND workspace_id = $2
                      LIMIT 1`,
-                    [workspaceId, data.phone_number_jid, id]
+                    [id, workspaceId]
                 );
-                if ((duplicateRes.rowCount || 0) > 0) {
+                if ((currentContactRes.rowCount || 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: 'Contato nao encontrado.' };
+                }
+
+                const currentPhoneNumberJid = currentContactRes.rows[0]?.phone_number_jid ?? null;
+                const hasPhoneLookup = phoneLookupJids.length > 0;
+                let hasEquivalentConflict = false;
+
+                if (hasPhoneLookup) {
+                    const duplicateRes = await client.query(
+                        `SELECT phone_number_jid
+                         FROM contacts
+                         WHERE workspace_id = $1
+                           AND phone_number_jid = ANY($2::text[])
+                           AND id <> $3
+                         LIMIT 1`,
+                        [workspaceId, phoneLookupJids, id]
+                    );
+
+                    hasEquivalentConflict = (duplicateRes.rowCount || 0) > 0;
+                }
+
+                if (
+                    hasEquivalentConflict &&
+                    !shouldKeepCurrentWhatsappJidOnUpdate(currentPhoneNumberJid, data.phone_number_jid)
+                ) {
                     await client.query('ROLLBACK');
                     return { success: false, error: duplicatePhoneError };
                 }
+
+                const persistedPhoneNumberJid = resolveWhatsappJidForContactSave({
+                    currentJid: currentPhoneNumberJid,
+                    nextJid: data.phone_number_jid,
+                    hasEquivalentConflict,
+                });
 
                 await client.query(
                     `UPDATE contacts 
                  SET name = $1, email = $2, phone_number_jid = $3, address = $4, owner_id = $5, avatar_url = $6
                  WHERE id = $7 AND workspace_id = $8`,
-                    [data.name, data.email, data.phone_number_jid, data.address, data.owner_id, data.avatar_url, id, workspaceId]
+                    [data.name, data.email, persistedPhoneNumberJid, data.address, data.owner_id, data.avatar_url, id, workspaceId]
                 );
             } else { // Create
+                if (phoneLookupJids.length > 0) {
+                    const duplicateRes = await client.query(
+                        `SELECT 1
+                         FROM contacts
+                         WHERE workspace_id = $1
+                           AND phone_number_jid = ANY($2::text[])
+                         LIMIT 1`,
+                        [workspaceId, phoneLookupJids]
+                    );
+
+                    if ((duplicateRes.rowCount || 0) > 0) {
+                        await client.query('ROLLBACK');
+                        return { success: false, error: duplicatePhoneError };
+                    }
+                }
+
                 const res = await client.query(
                     `INSERT INTO contacts (workspace_id, name, email, phone_number_jid, address, owner_id, avatar_url) 
                  VALUES ($1, $2, $3, $4, $5, $6, $7)

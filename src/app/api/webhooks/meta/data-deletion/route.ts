@@ -7,8 +7,8 @@ export async function POST(req: NextRequest) {
     const requestId = randomUUID();
     const receivedAt = Date.now();
     try {
-        const formData = await req.formData();
-        const signedRequest = formData.get('signed_request') as string;
+        const body = await req.text();
+        const signedRequest = new URLSearchParams(body).get('signed_request') || '';
 
         if (!signedRequest) {
             await logAction({

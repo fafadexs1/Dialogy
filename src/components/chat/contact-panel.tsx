@@ -22,6 +22,7 @@ import {
     MessageSquarePlus,
     BarChart3,
     Hash,
+    ArrowRight,
     ArrowRightLeft,
     Copy,
     ExternalLink,
@@ -41,7 +42,8 @@ import {
     ChevronDown,
     ChevronUp,
     Wrench,
-    FileText
+    FileText,
+    Plus,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -78,6 +80,12 @@ import LeadScoreBadge from '../crm/lead-score-badge';
 import { CopyProtocolButton } from './copy-protocol-button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getChatContactDisplayValue, getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
+import {
+    createSGPServiceOrder,
+    fetchSGPContactPanelData,
+    generateSGPInvoicePix,
+} from '@/plugins/sgp/actions';
+import type { SGPContactPanelContract, SGPContactPanelData, SGPContactPanelInvoice } from '@/plugins/sgp/types';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -226,7 +234,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         Omit<TelegramBotInstance, 'status'>
     >>([]);
     const [selectedInstance, setSelectedInstance] = useState('');
-    const [message, setMessage] = useState('OlÃƒÆ’Ã‚Â¡! Podemos retomar nossa conversa por aqui?');
+    const [message, setMessage] = useState('Olá! Podemos retomar nossa conversa por aqui?');
     const [phone, setPhone] = useState('');
     const [isLoadingInstances, setIsLoadingInstances] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -330,11 +338,11 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
             return;
         }
         if (!phone) {
-            toast({ title: 'Contato sem nÃƒÆ’Ã‚Âºmero vÃƒÆ’Ã‚Â¡lido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
+            toast({ title: 'Contato sem número válido', description: 'Adicione um telefone ao contato antes de reiniciar a conversa.', variant: 'destructive' });
             return;
         }
         if (!selectedInstance) {
-            toast({ title: 'Escolha uma instÃƒÆ’Ã‚Â¢ncia', description: 'Selecione a instÃƒÆ’Ã‚Â¢ncia de envio para continuar.', variant: 'destructive' });
+            toast({ title: 'Escolha uma instância', description: 'Selecione a instância de envio para continuar.', variant: 'destructive' });
             return;
         }
 
@@ -374,7 +382,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         });
 
         if (result.success) {
-            toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerÃƒÆ’Ã‚Â¡ na sua lista.' });
+            toast({ title: 'Nova conversa iniciada', description: 'A conversa reaberta aparecerá na sua lista.' });
             setIsOpen(false);
             onSuccess();
             setTemplateVariables({});
@@ -399,15 +407,15 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                 <DialogHeader>
                     <DialogTitle>Reabrir atendimento</DialogTitle>
                     <DialogDescription className="text-muted-foreground">
-                        Inicie um novo tÃƒÆ’Ã‚Â³pico com este contato sem perder o histÃƒÆ’Ã‚Â³rico.
+                        Inicie um novo tópico com este contato sem perder o histórico.
                     </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                        <Label>InstÃƒÆ’Ã‚Â¢ncia</Label>
+                        <Label>Instância</Label>
                         <Select value={selectedInstance} onValueChange={setSelectedInstance} disabled={isLoadingInstances || instances.length === 0}>
                             <SelectTrigger className="bg-muted/50 border-input text-foreground">
-                                <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instÃƒÆ’Ã‚Â¢ncia'} />
+                                <SelectValue placeholder={isLoadingInstances ? 'Carregando...' : 'Selecione a instância'} />
                             </SelectTrigger>
                             <SelectContent>
                                 {isLoadingInstances && <div className="p-3 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>}
@@ -458,10 +466,10 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
 
                             {variableKeys.length > 0 && (
                                 <div className="space-y-3 [&_label]:!text-muted-foreground">
-                                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">VariÃƒÆ’Ã‚Â¡veis do Template</Label>
+                                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
                                     {variableKeys.map((key) => (
                                         <div key={key} className="space-y-1">
-                                            <Label htmlFor={`var-${key}`} className="text-xs text-slate-600 dark:text-zinc-200">VariÃƒÆ’Ã‚Â¡vel {`{{${key}}}`}</Label>
+                                            <Label htmlFor={`var-${key}`} className="text-xs text-slate-600 dark:text-zinc-200">Variável {`{{${key}}}`}</Label>
                                             <Input
                                                 id={`var-${key}`}
                                                 className="bg-muted/50 border-input h-8 text-sm"
@@ -503,7 +511,7 @@ function CopyButton({ value, label }: { value: string, label?: string }) {
     const handleCopy = () => {
         navigator.clipboard.writeText(value);
         setCopied(true);
-        toast({ title: label ? `${label} copiado!` : "Copiado para a ÃƒÆ’Ã‚Â¡rea de transferÃƒÆ’Ã‚Âªncia" });
+        toast({ title: label ? `${label} copiado!` : "Copiado para a área de transferência" });
         setTimeout(() => setCopied(false), 2000);
     };
 
@@ -517,6 +525,113 @@ function CopyButton({ value, label }: { value: string, label?: string }) {
             {copied ? <CheckSquare className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
         </Button>
     );
+}
+
+function formatSgpCurrency(value: number) {
+    return value.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+    });
+}
+
+function formatSgpDate(value?: string | null) {
+    if (!value) {
+        return null;
+    }
+
+    const normalizedValue = String(value).includes('T') ? String(value) : `${value}T00:00:00`;
+    const date = new Date(normalizedValue);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return date.toLocaleDateString('pt-BR');
+}
+
+function formatSgpConnectionDetails(contract: SGPContactPanelContract) {
+    if (contract.connectionStatus === 'online' && contract.connectedAt) {
+        return `Conectado desde ${formatSgpDate(contract.connectedAt)}`;
+    }
+
+    if (contract.disconnectedAt) {
+        return `Ultima desconexao em ${formatSgpDate(contract.disconnectedAt)}`;
+    }
+
+    if (contract.contractDate) {
+        return `Contrato desde ${formatSgpDate(contract.contractDate)}`;
+    }
+
+    return contract.reason || 'Sem historico recente';
+}
+
+function findNestedStringValue(source: unknown, acceptedKeys: string[]): string | null {
+    if (!source || typeof source !== 'object') {
+        return null;
+    }
+
+    if (Array.isArray(source)) {
+        for (const item of source) {
+            const nestedValue = findNestedStringValue(item, acceptedKeys);
+            if (nestedValue) {
+                return nestedValue;
+            }
+        }
+
+        return null;
+    }
+
+    for (const [key, value] of Object.entries(source)) {
+        const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+        if (acceptedKeys.includes(normalizedKey) && typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+
+        const nestedValue = findNestedStringValue(value, acceptedKeys);
+        if (nestedValue) {
+            return nestedValue;
+        }
+    }
+
+    return null;
+}
+
+function extractSgpPixCode(payload: unknown, raw?: string | null) {
+    const pixCode = findNestedStringValue(payload, [
+        'codigopix',
+        'codigocopiaecola',
+        'copiaecola',
+        'pixcopiacola',
+        'pixcode',
+        'qrcode',
+    ]);
+
+    if (pixCode) {
+        return pixCode;
+    }
+
+    if (raw && !raw.startsWith('{') && !raw.startsWith('[') && !raw.startsWith('http')) {
+        return raw.trim();
+    }
+
+    return null;
+}
+
+function extractSgpPixLink(payload: unknown, raw?: string | null) {
+    const link = findNestedStringValue(payload, [
+        'link',
+        'linkcobranca',
+        'url',
+    ]);
+
+    if (link) {
+        return link;
+    }
+
+    if (raw && /^https?:\/\//i.test(raw.trim())) {
+        return raw.trim();
+    }
+
+    return null;
 }
 
 
@@ -541,7 +656,15 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [protocolSelectorOpen, setProtocolSelectorOpen] = useState(false);
     const [switchingProtocol, setSwitchingProtocol] = useState<string | null>(null);
     const [isSgpActive, setIsSgpActive] = useState(false);
-    const [expandedContractId, setExpandedContractId] = useState<string | null>('1');
+    const [expandedContractId, setExpandedContractId] = useState<string | null>(null);
+    const [sgpData, setSgpData] = useState<SGPContactPanelData | null>(null);
+    const [sgpLoading, setSgpLoading] = useState(false);
+    const [sgpError, setSgpError] = useState<string | null>(null);
+    const [sgpPixLoadingInvoiceId, setSgpPixLoadingInvoiceId] = useState<string | null>(null);
+    const [sgpOrderContract, setSgpOrderContract] = useState<SGPContactPanelContract | null>(null);
+    const [sgpOrderNotes, setSgpOrderNotes] = useState('');
+    const [isSgpOrderDialogOpen, setIsSgpOrderDialogOpen] = useState(false);
+    const [isSubmittingSgpOrder, setIsSubmittingSgpOrder] = useState(false);
 
     const handleContactSave = useCallback((updatedContact?: Contact | null) => {
         // If we received an updated contact, update it directly in the store
@@ -567,6 +690,52 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             });
         }
     }, [currentUser?.activeWorkspaceId]);
+
+    useEffect(() => {
+        if (!isSgpActive || !chat?.id) {
+            setSgpData(null);
+            setSgpError(null);
+            setSgpLoading(false);
+            setExpandedContractId(null);
+            return;
+        }
+
+        let cancelled = false;
+        setSgpLoading(true);
+        setSgpError(null);
+
+        fetchSGPContactPanelData(chat.id)
+            .then((res) => {
+                if (cancelled) {
+                    return;
+                }
+
+                if (!res.success || !res.data) {
+                    setSgpData(null);
+                    setSgpError(res.error || 'Falha ao carregar dados do SGP.');
+                    setExpandedContractId(null);
+                    return;
+                }
+
+                setSgpData(res.data);
+                setExpandedContractId((currentValue) => {
+                    if (currentValue && res.data?.contracts.some((contract) => contract.id === currentValue)) {
+                        return currentValue;
+                    }
+
+                    return res.data?.contracts[0]?.id || null;
+                });
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setSgpLoading(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isSgpActive, chat?.id]);
 
     // Fetch deals for the contact
     useEffect(() => {
@@ -597,6 +766,11 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     const openDeals = useMemo(() => deals.filter(d => d.won === null || d.won === undefined), [deals]);
     const totalOpenValue = useMemo(() => openDeals.reduce((s, d) => s + d.value, 0), [openDeals]);
+    const sgpContracts = sgpData?.contracts || [];
+    const sgpInvoices = sgpData?.invoices || [];
+    const sgpOverdueInvoices = sgpData?.overdueInvoices || 0;
+    const sgpOnlineContracts = sgpData?.onlineContracts || 0;
+    const hasSgpDebt = sgpOverdueInvoices > 0;
 
     const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -636,6 +810,71 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             setSwitchingProtocol(null);
         }
     }, [chat?.workspace_id]);
+
+    const handleGenerateSgpPix = useCallback(async (invoice: SGPContactPanelInvoice) => {
+        if (invoice.pixCode) {
+            await navigator.clipboard.writeText(invoice.pixCode);
+            toast({ title: 'Codigo PIX copiado!' });
+            return;
+        }
+
+        setSgpPixLoadingInvoiceId(invoice.id);
+        try {
+            const result = await generateSGPInvoicePix(invoice.id, invoice.contractId);
+            if (!result.success) {
+                toast({ title: 'Erro ao gerar PIX', description: result.error, variant: 'destructive' });
+                return;
+            }
+
+            const pixCode = extractSgpPixCode(result.payload, result.raw);
+            if (pixCode) {
+                await navigator.clipboard.writeText(pixCode);
+                toast({ title: 'PIX copiado!', description: 'O codigo PIX foi copiado para a area de transferencia.' });
+                return;
+            }
+
+            const pixLink = extractSgpPixLink(result.payload, result.raw);
+            if (pixLink) {
+                window.open(pixLink, '_blank');
+                toast({ title: 'PIX aberto', description: 'O link de cobranca foi aberto em outra aba.' });
+                return;
+            }
+
+            toast({ title: 'PIX gerado', description: 'A resposta do SGP foi recebida, mas sem codigo copiavel.' });
+        } finally {
+            setSgpPixLoadingInvoiceId(null);
+        }
+    }, []);
+
+    const handleOpenSgpOrderDialog = useCallback((contract: SGPContactPanelContract) => {
+        setSgpOrderContract(contract);
+        setSgpOrderNotes('');
+        setIsSgpOrderDialogOpen(true);
+    }, []);
+
+    const handleCreateSgpOrder = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!chat?.id || !sgpOrderContract) {
+            return;
+        }
+
+        setIsSubmittingSgpOrder(true);
+        try {
+            const result = await createSGPServiceOrder(chat.id, sgpOrderContract.id, sgpOrderNotes);
+            if (!result.success) {
+                toast({ title: 'Erro ao criar chamado no SGP', description: result.error, variant: 'destructive' });
+                return;
+            }
+
+            const protocol = result.apiResponse?.protocolo || result.apiResponse?.id || sgpOrderContract.id;
+            toast({ title: 'Chamado criado no SGP', description: `Protocolo: ${protocol}` });
+            setIsSgpOrderDialogOpen(false);
+            setSgpOrderNotes('');
+        } finally {
+            setIsSubmittingSgpOrder(false);
+        }
+    }, [chat?.id, sgpOrderContract, sgpOrderNotes]);
 
 
     if (!chat) {
@@ -696,7 +935,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             {/* Header */}
             <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200/80 bg-white/90 px-3 pb-2 pt-3 backdrop-blur-md dark:border-white/5 dark:bg-black">
                 {/* Quick Actions Bar - Icon only */}
-                <div className="flex items-center gap-1 justify-end">
+                <div className="flex flex-wrap items-center gap-1 justify-end min-w-0">
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -709,7 +948,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent><p>RelatÃƒÆ’Ã‚Â³rios</p></TooltipContent>
+                            <TooltipContent><p>Relatórios</p></TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                     <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
@@ -741,8 +980,8 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             </div>
 
             <ScrollArea className="flex-1 custom-scrollbar">
-                <div className="p-4 space-y-4 pb-24">
-                    {/* Profile Section ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â always visible above tabs */}
+                <div className="overflow-x-hidden p-3.5 space-y-3.5 pb-24 sm:p-4 sm:space-y-4">
+                    {/* Profile section always visible above tabs */}
                     <div className="relative">
                         <div className={cn(
                             "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700 dark:opacity-10",
@@ -756,27 +995,27 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             transition={{ type: "spring", damping: 20 }}
-                            className="flex flex-col items-center text-center relative"
+                            className="relative flex w-full flex-col items-center text-center overflow-hidden"
                         >
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
                                 <div className="absolute -inset-2 rounded-full bg-gradient-to-tr from-blue-100/80 to-transparent opacity-0 blur transition duration-500 group-hover:opacity-100 dark:from-transparent dark:group-hover:opacity-0"></div>
                                 <div className="rounded-full border border-slate-200/80 bg-white p-1 shadow-lg backdrop-blur-md dark:border-white/5 dark:bg-black">
-                                    <Avatar className="relative h-20 w-20 shrink-0 rounded-full border-2 border-slate-200/80 shadow-2xl dark:border-white/10">
+                                    <Avatar className="relative h-16 w-16 shrink-0 rounded-full border-2 border-slate-200/80 shadow-2xl sm:h-20 sm:w-20 dark:border-white/10">
                                         <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
-                                        <AvatarFallback className="bg-slate-100 text-2xl font-bold text-slate-700 dark:bg-zinc-900 dark:text-zinc-300">
+                                        <AvatarFallback className="bg-slate-100 text-xl font-bold text-slate-700 sm:text-2xl dark:bg-zinc-900 dark:text-zinc-300">
                                             {contact.name.charAt(0)}
                                         </AvatarFallback>
                                     </Avatar>
                                 </div>
 
-                                <div className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-lg transition-transform group-hover:scale-110 dark:border-white/5 dark:bg-black">
+                                <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-lg transition-transform group-hover:scale-110 sm:h-8 sm:w-8 dark:border-white/5 dark:bg-black">
                                     {resolvedPlatform === 'instagram' ? (
-                                        <Globe className="h-4 w-4 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
+                                        <Globe className="h-3.5 w-3.5 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)] sm:h-4 sm:w-4" />
                                     ) : resolvedPlatform === 'messenger' ? (
-                                        <Globe className="h-4 w-4 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                                        <Globe className="h-3.5 w-3.5 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)] sm:h-4 sm:w-4" />
                                     ) : (
                                         <Smartphone className={cn(
-                                            "h-4 w-4",
+                                            "h-3.5 w-3.5 sm:h-4 sm:w-4",
                                             resolvedPlatform === 'telegram'
                                                 ? "text-sky-500 drop-shadow-[0_0_8px_rgba(14,165,233,0.5)]"
                                                 : "text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
@@ -785,22 +1024,25 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 </div>
                             </div>
 
-                            <div className="mt-4 space-y-2">
-                                <div className="flex items-center justify-center gap-2">
-                                    <h2 className="font-black text-xl tracking-tight text-foreground">{contact.name}</h2>
-                                    <LeadScoreBadge score={contact.lead_score} size="sm" />
+                            <div className="mt-3 w-full px-4 space-y-1.5 sm:mt-4 sm:px-6 sm:space-y-2">
+                                <div className="flex w-full min-w-0 flex-col items-center gap-1.5 px-1">
+                                    <h2 className="w-full max-w-full text-center font-black text-base leading-tight tracking-tight text-foreground break-words [overflow-wrap:anywhere] sm:text-lg" title={contact.name}>
+                                        {contact.name}
+                                    </h2>
+                                    <LeadScoreBadge score={contact.lead_score} size="sm" className="shrink-0" />
                                 </div>
-                                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                <div className="flex w-full flex-wrap items-center justify-center gap-1.5">
                                     {chat.tag && chat.color && (
                                         <div
                                             style={{ backgroundColor: `${chat.color}20`, color: chat.color, borderColor: `${chat.color}40` }}
-                                            className="px-2.5 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-tighter flex items-center gap-1"
+                                            className="flex min-w-0 max-w-[120px] items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-tighter sm:text-[10px]"
+                                            title={chat.tag}
                                         >
-                                            <div className="h-1 w-1 rounded-full animate-pulse" style={{ backgroundColor: chat.color }} />
-                                            {chat.tag}
+                                            <div className="h-1 w-1 rounded-full animate-pulse shrink-0" style={{ backgroundColor: chat.color }} />
+                                            <span className="truncate">{chat.tag}</span>
                                         </div>
                                     )}
-                                    <div className="rounded-full border border-border bg-background px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400">
+                                    <div className="min-w-0 max-w-[120px] truncate rounded-full border border-border bg-background px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground sm:text-[10px] dark:border-white/10 dark:bg-black dark:text-zinc-400" title={instanceTypeDisplay}>
                                         {instanceTypeDisplay}
                                     </div>
                                     <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
@@ -825,222 +1067,201 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     </div>
 
                     {/* ==== TABBED CONTENT ==== */}
-                    <Tabs defaultValue="info" className="w-full">
+                    <Tabs defaultValue="info" className="w-full min-w-0">
                         <TabsList className={cn("grid h-8 w-full rounded-xl border border-border bg-muted/40 dark:border-white/10 dark:bg-[#07080b]", isSgpActive ? "grid-cols-3" : "grid-cols-2")}>
-                            <TabsTrigger value="info" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">Info</TabsTrigger>
-                            <TabsTrigger value="crm" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
+                            <TabsTrigger value="info" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">Info</TabsTrigger>
+                            <TabsTrigger value="crm" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
                                 CRM
                                 {openDeals.length > 0 && (
                                     <span className="ml-1.5 h-4 px-1.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded flex items-center">{openDeals.length}</span>
                                 )}
                             </TabsTrigger>
                             {isSgpActive && (
-                                <TabsTrigger value="sgp" className="h-7 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
+                                <TabsTrigger value="sgp" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
                                     SGP
                                 </TabsTrigger>
                             )}
                         </TabsList>
 
-                        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ INFO TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
-                        <TabsContent value="info" className="mt-4 space-y-5">
-                            {/* Contact Details ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â compact rows */}
+                        {/* INFO TAB */}
+                        <TabsContent value="info" className="mt-3 space-y-4 overflow-x-hidden overflow-y-hidden animate-in fade-in slide-in-from-bottom-2 duration-500 sm:mt-4 sm:space-y-5">
+                            {/* Contact data cards */}
                             <div className="space-y-2">
-                                {/* Phone */}
-                                <div className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                    <div className={cn(
-                                        "h-7 w-7 rounded-lg flex items-center justify-center shrink-0",
-                                        resolvedPlatform === 'telegram'
-                                            ? "bg-sky-500/10 border border-sky-500/20"
-                                            : resolvedPlatform === 'instagram'
-                                                ? "bg-pink-500/10 border border-pink-500/20"
-                                                : resolvedPlatform === 'messenger'
-                                                    ? "bg-blue-500/10 border border-blue-500/20"
-                                                    : "bg-green-500/10 border border-green-500/20"
-                                    )}>
-                                        <Smartphone className={cn(
-                                            "h-3.5 w-3.5",
-                                            resolvedPlatform === 'telegram'
-                                                ? "text-sky-400"
-                                                : resolvedPlatform === 'instagram'
-                                                    ? "text-pink-400"
-                                                    : resolvedPlatform === 'messenger'
-                                                        ? "text-blue-400"
-                                                        : "text-green-400"
-                                        )} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">{contactChannelLabel}</span>
-                                        <span className="block truncate text-[13px] font-bold tabular-nums text-slate-900 dark:text-zinc-100">
-                                            {(contact.phone_number_jid || contact.phone || 'Sem nÃƒÆ’Ã‚Âºmero').replace(/@.*$/, '')}
-                                        </span>
-                                    </div>
-                                    <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
-                                </div>
-
-                                {/* Email */}
-                                <div className="group flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                    <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
-                                        <Mail className="h-3.5 w-3.5 text-blue-400" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">Email</span>
-                                        <span className="block truncate text-[13px] font-bold text-slate-900 dark:text-zinc-100">{contact.email || 'Não informado'}</span>
-                                    </div>
-                                    {contact.email && <CopyButton value={contact.email} label="Email" />}
-                                </div>
-
-                                {/* Protocol */}
-                                <div className="group flex items-center gap-3 rounded-xl border border-dashed border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 [&_span:first-child]:!text-muted-foreground/70 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                    <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shrink-0">
-                                        <Hash className="h-3.5 w-3.5 text-purple-400" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">Protocolo</span>
-                                        <span className="block truncate text-[12px] font-mono font-bold tracking-tighter text-purple-300" title={currentProtocol}>
-                                            {currentProtocol}
-                                        </span>
-                                    </div>
-                                    <Popover open={protocolSelectorOpen} onOpenChange={setProtocolSelectorOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                type="button"
-                                                className="relative z-10 h-6 w-6 rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
-                                                title="Ver todos os protocolos"
-                                            >
-                                                <History className="h-3.5 w-3.5" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent align="end" className="w-[340px] border-border bg-popover p-2 shadow-xl">
-                                            <div className="px-2 py-1.5">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Protocolos do contato</p>
+                                {/* Phone Card */}
+                                <div className="group relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-sm transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
+                                    <div className="flex min-w-0 items-start gap-2.5">
+                                        <div className={cn(
+                                            "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border sm:h-8 sm:w-8",
+                                            contact.phone_number_jid?.includes('@g.us')
+                                                ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                        )}>
+                                            {contact.phone_number_jid?.includes('@g.us') ? <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="block truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">{contactChannelLabel}</span>
+                                                <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
                                             </div>
-                                            <div className="max-h-[260px] overflow-y-auto pr-1 space-y-1">
-                                                {protocolHistoryLoading ? (
-                                                    <div className="flex items-center justify-center py-6 text-muted-foreground">
-                                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                                    </div>
-                                                ) : protocolHistory.length === 0 ? (
-                                                    <p className="px-2 py-4 text-xs text-muted-foreground">Nenhum protocolo encontrado.</p>
-                                                ) : (
-                                                    protocolHistory.map((entry) => (
-                                                        <button
-                                                            key={entry.chatId}
-                                                            type="button"
-                                                            onClick={() => handleSelectProtocol(entry.protocol)}
-                                                            disabled={switchingProtocol === entry.protocol}
-                                                            className={cn(
-                                                                "w-full rounded-lg border px-2 py-2 text-left transition-colors",
-                                                                entry.protocol === currentProtocol
-                                                                    ? "border-purple-500/40 bg-purple-500/10"
-                                                                    : "border-border bg-background hover:bg-muted/50"
-                                                            )}
-                                                        >
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <span className="truncate text-[11px] font-mono font-semibold text-purple-300">{entry.protocol}</span>
-                                                                {switchingProtocol === entry.protocol ? (
-                                                                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                                            <span className="mt-0.5 block break-all text-[12px] font-semibold leading-tight tabular-nums text-slate-900 sm:text-[13px] dark:text-zinc-100">
+                                                {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Email Card */}
+                                <div className="group relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-sm transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
+                                    <div className="flex min-w-0 items-start gap-2.5">
+                                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-blue-500/20 bg-blue-500/10 sm:h-8 sm:w-8">
+                                            <Mail className="h-3.5 w-3.5 text-blue-400 sm:h-4 sm:w-4" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="block truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Email</span>
+                                                {contact.email && <CopyButton value={contact.email} label="Email" />}
+                                            </div>
+                                            <span className="mt-0.5 block break-all text-[12px] font-semibold leading-tight text-slate-900 sm:text-[13px] dark:text-zinc-100">{contact.email || 'Não informado'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Protocol Card */}
+                                <div className="group relative overflow-hidden rounded-xl border border-dashed border-slate-200/80 bg-white/90 p-2.5 shadow-sm transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
+                                    <div className="flex min-w-0 items-start gap-2.5">
+                                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-purple-500/20 bg-purple-500/10 sm:h-8 sm:w-8">
+                                            <Hash className="h-3.5 w-3.5 text-purple-400 sm:h-4 sm:w-4" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="block truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Protocolo</span>
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <Popover open={protocolSelectorOpen} onOpenChange={setProtocolSelectorOpen}>
+                                                        <PopoverTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                type="button"
+                                                                className="h-5 w-5 rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-6 sm:w-6 dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                                                                title="Ver histórico"
+                                                            >
+                                                                <History className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                                                            </Button>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent align="end" className="w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] border-border bg-popover p-2 shadow-xl">
+                                                            <div className="px-2 py-1.5">
+                                                                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-muted-foreground sm:text-[10px]">Histórico de Protocolos</p>
+                                                            </div>
+                                                            <div className="max-h-[200px] overflow-y-auto space-y-1">
+                                                                {protocolHistoryLoading ? (
+                                                                    <div className="flex items-center justify-center py-4 text-muted-foreground">
+                                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                                    </div>
+                                                                ) : protocolHistory.length === 0 ? (
+                                                                    <p className="px-2 py-3 text-xs text-muted-foreground">Nenhum histórico encontrado.</p>
                                                                 ) : (
-                                                                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                                                                        {new Date(entry.createdAt).toLocaleDateString('pt-BR')}
-                                                                    </span>
+                                                                    protocolHistory.map((entry) => (
+                                                                        <button
+                                                                            key={entry.chatId}
+                                                                            type="button"
+                                                                            onClick={() => handleSelectProtocol(entry.protocol)}
+                                                                            className={cn(
+                                                                                "w-full rounded-lg border px-2 py-1.5 text-left transition-colors",
+                                                                                entry.protocol === currentProtocol ? "border-purple-500/40 bg-purple-500/10" : "border-border hover:bg-muted/50"
+                                                                            )}
+                                                                        >
+                                                                            <span className="block truncate text-[10px] font-mono font-semibold text-purple-300 sm:text-[11px]">{entry.protocol}</span>
+                                                                            <span className="block text-[9px] text-muted-foreground">{new Date(entry.createdAt).toLocaleDateString()}</span>
+                                                                        </button>
+                                                                    ))
                                                                 )}
                                                             </div>
-                                                            {entry.lastMessageContent && (
-                                                                <p className="mt-1 line-clamp-1 text-[10px] text-muted-foreground">
-                                                                    {entry.lastMessageContent}
-                                                                </p>
-                                                            )}
-                                                        </button>
-                                                    ))
-                                                )}
+                                                        </PopoverContent>
+                                                    </Popover>
+                                                    <CopyProtocolButton protocol={currentProtocol} />
+                                                </div>
                                             </div>
-                                        </PopoverContent>
-                                    </Popover>
-                                    <CopyProtocolButton protocol={currentProtocol} />
-                                </div>
-
-                                {/* SGP Quick Summary */}
-                                {isSgpActive && (
-                                    <div className="group flex cursor-pointer items-center justify-between rounded-xl border border-red-500/30 bg-red-500/5 p-2.5 transition-all hover:bg-red-500/10 dark:border-red-500/20" onClick={() => {
-                                        const tabsList = document.querySelector('[role="tablist"]');
-                                        if (tabsList) {
-                                            const sgpTab = tabsList.querySelector('[value="sgp"]');
-                                            if (sgpTab) (sgpTab as HTMLElement).click();
-                                        }
-                                    }}>
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/20 text-red-500 border border-red-500/30 shrink-0">
-                                                <AlertTriangle className="h-3.5 w-3.5" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <span className="block text-[10px] font-black uppercase tracking-widest text-red-500/80">
-                                                    SGP • Inadimplente
-                                                </span>
-                                                <span className="block truncate text-[12px] font-bold text-red-600 dark:text-red-400">
-                                                    1 online, 1 fatura vencida
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="flex h-5 w-5 items-center justify-center rounded-md bg-red-500/10 text-red-500 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-red-500/20 shrink-0">
-                                            <ArrowRightLeft className="h-3 w-3" />
+                                            <span className="mt-0.5 block break-words text-[10.5px] font-mono font-semibold leading-[1.3] tracking-tight text-purple-300 sm:text-[11.5px]">
+                                                {currentProtocol}
+                                            </span>
                                         </div>
                                     </div>
-                                )}
+                                </div>
                             </div>
 
-                            {/* Custom Fields Summary */}
-                            {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]') && (
+                            {/* SGP Quick Summary */}
+                            {isSgpActive && (
                                 <div className="space-y-2">
-                                    <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Dados de Lead</h4>
-                                    <div className="flex items-center justify-between rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0">
-                                                <LayoutGrid className="h-4 w-4" />
+                                    <h4 className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Resumo Conexão</h4>
+                                    <div
+                                        className={cn(
+                                            "group flex min-w-0 cursor-pointer items-center justify-between rounded-xl border p-2.5 transition-all",
+                                            hasSgpDebt
+                                                ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10"
+                                                : "border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10"
+                                        )}
+                                        onClick={() => {
+                                            const tabsList = document.querySelector('[role="tablist"]');
+                                            if (tabsList) {
+                                                const sgpTab = tabsList.querySelector('[value="sgp"]');
+                                                if (sgpTab) (sgpTab as HTMLElement).click();
+                                            }
+                                        }}
+                                    >
+                                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                                            <div className={cn(
+                                                "flex h-7 w-7 items-center justify-center rounded-lg shrink-0 border sm:h-8 sm:w-8",
+                                                hasSgpDebt ? "bg-red-500/20 text-red-500 border-red-500/30" : "bg-emerald-500/20 text-emerald-500 border-emerald-500/30"
+                                            )}>
+                                                {sgpLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin sm:h-4 sm:w-4" /> : hasSgpDebt ? <AlertTriangle className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <CheckSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
                                             </div>
-                                            <div className="flex-1">
-                                                <p className="text-[13px] font-bold text-foreground">Perfil enriquecido</p>
-                                                <p className="text-[11px] text-muted-foreground">
-                                                    {customFields.filter(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]').length} campos preenchidos
-                                                </p>
+                                            <div className="flex-1 min-w-0">
+                                                <span className={cn("block break-words text-[9px] font-black uppercase tracking-[0.18em] leading-tight sm:text-[10px]", hasSgpDebt ? "text-red-500/80" : "text-emerald-500/80")}>
+                                                    {sgpLoading ? 'SGP • Carregando' : sgpError ? 'SGP • Erro' : hasSgpDebt ? 'SGP • Inadimplente' : 'SGP • Em dia'}
+                                                </span>
+                                                <span className={cn("mt-0.5 block break-words text-[11px] font-semibold leading-tight sm:text-[12px]", hasSgpDebt ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                                    {sgpLoading ? 'Consultando...' : sgpError ? sgpError : `${sgpOnlineContracts} ON, ${sgpOverdueInvoices} PEND`}
+                                                </span>
                                             </div>
                                         </div>
+                                        <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/30 transition-transform group-hover:translate-x-0.5" />
                                     </div>
                                 </div>
                             )}
 
-                            {/* Agent */}
-                            <div className="space-y-2 [&_h4]:text-muted-foreground">
-                                <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Agente Responsável</h4>
-                                <div className="relative rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-white/5 dark:bg-[#07080b]">
+                            {/* Agent Info */}
+                            <div className="space-y-2">
+                                <h4 className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Responsável</h4>
+                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-2.5 dark:border-white/5 dark:bg-[#07080b] sm:p-3">
                                     {agent && agent.id !== 'unknown' ? (
-                                        <div className="flex items-center gap-3 min-w-0">
+                                        <div className="flex items-center gap-2.5 min-w-0">
                                             <div className="relative shrink-0">
-                                                <Avatar className="h-8 w-8 rounded-lg border border-border shadow-lg">
+                                                <Avatar className="h-7 w-7 rounded-lg border border-border shadow-lg sm:h-8 sm:w-8">
                                                     <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
                                                     <AvatarFallback className="bg-zinc-900 text-zinc-300 font-black text-xs">{agent.name.charAt(0)}</AvatarFallback>
                                                 </Avatar>
                                                 <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black" />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                    <p className="truncate text-sm font-bold text-foreground">{agent.name}</p>
-                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                                <div className="flex min-w-0 items-center justify-between gap-2 overflow-hidden">
+                                                    <p className="truncate text-[13px] font-semibold leading-tight text-foreground sm:text-sm" title={agent.name}>{agent.name}</p>
+                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-black px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
                                                 </div>
                                                 {chat.assigned_at && (
-                                                    <p className="mt-0.5 text-[11px] text-muted-foreground">Desde {new Date(chat.assigned_at).toLocaleDateString()}</p>
+                                                    <p className="mt-0.5 truncate text-[9px] text-muted-foreground sm:text-[10px]" title={new Date(chat.assigned_at).toLocaleDateString()}>
+                                                        Assumido em {new Date(chat.assigned_at).toLocaleDateString()}
+                                                    </p>
                                                 )}
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30">
-                                                <UserCheck className="h-4 w-4 text-muted-foreground/50" />
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                            <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-dashed border-border bg-slate-50 dark:bg-zinc-900 shrink-0 sm:h-8 sm:w-8">
+                                                <UserCheck className="h-3.5 w-3.5 text-muted-foreground/40 sm:h-4 sm:w-4" />
                                             </div>
-                                            <div className="flex-1">
-                                                <p className="text-sm font-bold text-foreground">Sem agente</p>
-                                                <p className="text-[11px] text-muted-foreground">Fila de espera</p>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-[13px] font-semibold text-foreground sm:text-sm">Sem agente</p>
+                                                <p className="text-[9px] text-muted-foreground sm:text-[10px]">Aguardando atendimento</p>
                                             </div>
                                             <TransferChatDialog chat={chat} currentUser={currentUser} onTransferSuccess={onTransferSuccess} disabled={chat.status === 'encerrados'} />
                                         </div>
@@ -1048,142 +1269,403 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 </div>
                             </div>
 
-                            {/* Quick Actions */}
-                            <div className="grid grid-cols-2 gap-2">
+                            {/* Quick Stats Grid */}
+                            <div className="grid grid-cols-1 gap-2 min-[340px]:grid-cols-2">
                                 <Card
-                                    className="cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:border-blue-500/30 hover:bg-blue-500/5 [&_span]:!text-muted-foreground dark:border-white/5 dark:bg-[#07080b]"
+                                    className="cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:bg-blue-500/5 dark:border-white/5 dark:bg-[#07080b]"
                                     onClick={() => setIsStatsOpen(true)}
                                 >
-                                    <CardContent className="p-3 flex items-center gap-2">
-                                        <div className="h-7 w-7 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20 shrink-0">
-                                            <BarChart3 className="h-3.5 w-3.5" />
+                                    <CardContent className="flex min-w-0 items-center gap-2 p-2.5 sm:p-3">
+                                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                                            <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                         </div>
-                                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">Stats</span>
+                                        <span className="truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[10px] dark:text-zinc-400">Stats</span>
                                     </CardContent>
                                 </Card>
-
                                 <Link href="/crm" className="block">
-                                    <Card className="h-full cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:border-purple-500/30 hover:bg-purple-500/5 [&_span]:!text-muted-foreground dark:border-white/5 dark:bg-[#07080b]">
-                                        <CardContent className="p-3 flex items-center gap-2">
-                                            <div className="h-7 w-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
-                                                <LayoutGrid className="h-3.5 w-3.5" />
+                                    <Card className="h-full cursor-pointer overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-none transition-all hover:bg-purple-500/5 dark:border-white/5 dark:bg-[#07080b]">
+                                        <CardContent className="flex min-w-0 items-center gap-2 p-2.5 sm:p-3">
+                                            <div className="flex h-7 w-7 rounded-lg bg-purple-500/10 items-center justify-center text-purple-400 border border-purple-500/20 shrink-0">
+                                                <LayoutGrid className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                             </div>
-                                            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">CRM</span>
+                                            <span className="truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[10px] dark:text-zinc-400">CRM</span>
                                         </CardContent>
                                     </Card>
                                 </Link>
                             </div>
+
+                            {/* Timeline Toggle */}
+                            <div className="space-y-2">
+                                <h4 className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Atividade</h4>
+                                <div className="rounded-xl border border-slate-200/80 bg-white/90 dark:border-white/5 dark:bg-[#07080b]">
+                                    {!showTimeline ? (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="w-full h-10 text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 hover:text-foreground sm:text-[10px]"
+                                            onClick={() => setShowTimeline(true)}
+                                        >
+                                            Ver Histórico Completo
+                                        </Button>
+                                    ) : contactId ? (
+                                        <div className="p-2">
+                                            <ContactTimeline contactId={contactId} compact maxItems={5} />
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
                         </TabsContent>
 
-                        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ CRM TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
-                        <TabsContent value="crm" className="mt-4 space-y-5">
-                            {/* Custom Fields */}
+                        {/* CRM TAB */}
+                        <TabsContent value="crm" className="mt-4 space-y-5 overflow-x-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            {/* Deals Card Section */}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between px-1">
+                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Negócios em Aberto</h4>
+                                    {totalOpenValue > 0 && <span className="text-xs font-black text-emerald-500 tabular-nums">{formatBRL(totalOpenValue)}</span>}
+                                </div>
+
+                                {dealsLoading ? (
+                                    <div className="flex items-center justify-center py-6">
+                                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/30" />
+                                    </div>
+                                ) : openDeals.length > 0 ? (
+                                    <div className="space-y-2">
+                                        {openDeals.map(deal => (
+                                            <div key={deal.id} className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 p-3 shadow-sm hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
+                                                <div className="flex items-start gap-3">
+                                                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 text-emerald-400 shrink-0">
+                                                        <DollarSign className="h-4 w-4" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <h5 className="truncate text-[13px] font-bold text-foreground">{deal.title}</h5>
+                                                            <span className="shrink-0 text-[13px] font-black text-emerald-500 tabular-nums">{formatBRL(deal.value)}</span>
+                                                        </div>
+                                                        <div className="mt-1.5 flex items-center gap-1.5">
+                                                            <Badge className="h-4 border-emerald-500/20 bg-emerald-500/10 px-1.5 text-[9px] font-bold text-emerald-500 uppercase">{deal.stage}</Badge>
+                                                            <span className="text-[10px] font-medium text-muted-foreground">{deal.probability}% Prob.</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200/80 p-8 text-center bg-slate-50/50 dark:border-white/5 dark:bg-white/5/30">
+                                        <DollarSign className="h-6 w-6 text-muted-foreground/20 mb-2" />
+                                        <p className="text-[11px] font-medium text-muted-foreground">Nenhum negócio ativo encontrado.</p>
+                                    </div>
+                                )}
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full h-9 rounded-xl border-slate-200 bg-white text-[11px] font-bold uppercase tracking-widest text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 dark:border-white/10 dark:bg-black"
+                                    onClick={() => setDealFormOpen(true)}
+                                >
+                                    <Plus className="h-3.5 w-3.5 mr-2" />
+                                    Novo Negócio
+                                </Button>
+                            </div>
+
+                            {/* Additional Info / Custom Fields */}
                             {customFields.length > 0 && customFields.some(f => contact.custom_fields?.[f.id] && contact.custom_fields?.[f.id] !== '[]') && (
-                                <div className="space-y-2">
-                                    <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">Campos Adicionais</h4>
-                                    <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-3">
+                                    <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Dados Estruturados</h4>
+                                    <div className="grid grid-cols-1 gap-2">
                                         {customFields.map(field => {
                                             const value = contact.custom_fields?.[field.id];
                                             if (!value || value === '[]') return null;
 
                                             let displayValue: React.ReactNode = value;
-
                                             if (field.type === 'select') {
                                                 const option = field.options?.find(opt => opt.value === value);
                                                 displayValue = option ? option.label : value;
-                                            } else if (field.type === 'file') {
-                                                try {
-                                                    const parsed = JSON.parse(value);
-                                                    if (Array.isArray(parsed)) {
-                                                        if (parsed.length === 0) return null;
-                                                        displayValue = `${parsed.length} anexo${parsed.length > 1 ? 's' : ''}`;
-                                                    }
-                                                } catch (e) {
-                                                    // Handle legacy single URL string
-                                                    if (typeof value === 'string' && value.startsWith('http')) {
-                                                        displayValue = '1 anexo';
-                                                    }
-                                                }
                                             }
 
                                             return (
-                                                <div key={field.id} className="flex flex-col gap-0.5 rounded-xl border border-slate-200/80 bg-white/90 p-2 [&_span:first-child]:!text-muted-foreground/70 [&_span:last-child]:!text-foreground dark:border-white/5 dark:bg-[#07080b]">
-                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">{field.label}</span>
-                                                    <span className="truncate text-[13px] font-bold text-slate-900 dark:text-zinc-200">{displayValue}</span>
+                                                <div key={field.id} className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 p-3 shadow-sm dark:border-white/5 dark:bg-[#07080b]">
+                                                    <span className="block truncate text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-500">{field.label}</span>
+                                                    <span className="mt-1 block break-words text-[13px] font-bold text-slate-900 dark:text-zinc-100">{displayValue}</span>
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 </div>
                             )}
-
-                            {/* Deals */}
-                            <div className="space-y-2 [&_h4]:!text-muted-foreground [&_p]:!text-muted-foreground">
-                                <div className="flex items-center justify-between px-1">
-                                    <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Negócios</h4>
-                                    {totalOpenValue > 0 && (
-                                        <span className="text-[12px] font-bold text-emerald-400 tabular-nums">{formatBRL(totalOpenValue)}</span>
-                                    )}
-                                </div>
-
-                                {dealsLoading ? (
-                                    <div className="flex justify-center py-4">
-                                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                                    </div>
-                                ) : openDeals.length > 0 ? (
-                                    <div className="space-y-1.5">
-                                        {openDeals.map(deal => (
-                                            <div key={deal.id} className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                                <div className="h-7 w-7 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
-                                                    <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <span className="block truncate text-[13px] font-bold text-foreground">{deal.title}</span>
-                                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                                        <Badge className="h-4 border-border bg-muted px-1.5 text-[10px] font-bold text-muted-foreground">{deal.stage}</Badge>
-                                                        <span className="text-[10px] text-muted-foreground">{deal.probability}%</span>
-                                                    </div>
-                                                </div>
-                                                <span className="text-[13px] font-black text-emerald-400 tabular-nums shrink-0">{formatBRL(deal.value)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum negócio em aberto.</p>
-                                )}
-
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 w-full gap-1.5 rounded-lg border border-slate-200/80 bg-white/90 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-all hover:border-emerald-500/20 hover:bg-emerald-500/5 hover:text-emerald-500 dark:border-white/5 dark:bg-[#07080b] dark:hover:text-emerald-400"
-                                    onClick={() => setDealFormOpen(true)}
-                                >
-                                    <DollarSign className="h-3 w-3" />
-                                    Novo Negócio
-                                </Button>
-                            </div>
-
-                            {/* Timeline */}
-                            <div className="space-y-2 [&_h4]:!text-muted-foreground">
-                                <h4 className="px-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Timeline</h4>
-                                {!showTimeline ? (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 w-full rounded-lg border border-slate-200/80 bg-white/90 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-all hover:bg-slate-100 hover:text-foreground dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5"
-                                        onClick={() => setShowTimeline(true)}
-                                    >
-                                        Carregar Timeline
-                                    </Button>
-                                ) : contactId ? (
-                                    <ContactTimeline contactId={contactId} compact maxItems={8} />
-                                ) : null}
-                            </div>
                         </TabsContent>
 
                         {/* ▬▬ SGP TAB ▬▬ */}
                         {isSgpActive && (
-                            <TabsContent value="sgp" className="mt-4 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            <TabsContent value="sgp" className="mt-4 space-y-5 overflow-x-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                {sgpLoading ? (
+                                    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-4 text-sm text-muted-foreground dark:border-white/5 dark:bg-[#07080b]">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span className="min-w-0 break-words">Carregando dados do SGP pelo CPF configurado na integracao.</span>
+                                    </div>
+                                ) : sgpError ? (
+                                    <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4 dark:border-red-500/20">
+                                        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 text-red-500 shrink-0">
+                                            <AlertTriangle className="h-4 w-4" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <h4 className="truncate text-[13px] font-bold text-red-600 dark:text-red-400">Nao foi possivel consultar o SGP</h4>
+                                            <p className="mt-1 break-all text-[11px] text-red-500/80">{sgpError}</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div
+                                            className={cn(
+                                                "flex min-w-0 flex-col gap-3 rounded-xl border p-3",
+                                                hasSgpDebt
+                                                    ? "border-red-500/30 bg-red-500/10 dark:bg-red-500/5"
+                                                    : "border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/5"
+                                            )}
+                                        >
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <div
+                                                    className={cn(
+                                                        "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
+                                                        hasSgpDebt ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                                                    )}
+                                                >
+                                                    {hasSgpDebt ? <AlertTriangle className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <h4 className={cn("break-words text-[13px] font-bold", hasSgpDebt ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                                        {hasSgpDebt ? 'Cliente com pendencia financeira' : 'Cliente sem pendencia financeira'}
+                                                    </h4>
+                                                    <p className={cn("break-words text-[11px] font-medium", hasSgpDebt ? "text-red-500/80" : "text-emerald-600/80 dark:text-emerald-400/80")}>
+                                                        {sgpData?.customerName || contact.name} {'\u2022'} {sgpOnlineContracts} contrato{sgpOnlineContracts === 1 ? '' : 's'} online
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="min-w-0 text-left">
+                                                <span className={cn("block text-[12px] font-black tabular-nums", hasSgpDebt ? "text-red-500" : "text-emerald-500")}>
+                                                    {sgpOverdueInvoices} vencida{sgpOverdueInvoices === 1 ? '' : 's'}
+                                                </span>
+                                                {sgpData?.cpfCnpj && (
+                                                    <span className="block truncate text-[10px] uppercase tracking-widest text-muted-foreground" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
+                                                        CPF/CNPJ {sgpData.cpfCnpj}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between px-1">
+                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">
+                                                    Contratos ({sgpContracts.length})
+                                                </h4>
+                                            </div>
+
+                                            {sgpContracts.length > 0 ? (
+                                                sgpContracts.map((contract) => {
+                                                    const isExpanded = expandedContractId === contract.id;
+                                                    const isOnline = contract.connectionStatus === 'online';
+                                                    const isOffline = contract.connectionStatus === 'offline';
+
+                                                    return (
+                                                        <div
+                                                            key={contract.id}
+                                                            className={cn(
+                                                                "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
+                                                                isExpanded
+                                                                    ? isOnline
+                                                                        ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/20"
+                                                                        : "border-slate-300 bg-slate-50 ring-1 ring-slate-200 dark:border-white/10 dark:bg-white/5/50"
+                                                                    : isOnline
+                                                                        ? "cursor-pointer hover:border-emerald-500/30 hover:bg-emerald-500/5"
+                                                                        : "cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5"
+                                                            )}
+                                                        >
+                                                            <div
+                                                                className={cn(
+                                                                    "absolute left-0 top-0 h-full w-1",
+                                                                    isOnline ? "bg-emerald-500/50" : isOffline ? "bg-slate-300 dark:bg-slate-700" : "bg-amber-400/60"
+                                                                )}
+                                                            />
+                                                            <div
+                                                                className="flex min-w-0 items-start justify-between p-3"
+                                                                onClick={() => setExpandedContractId(isExpanded ? null : contract.id)}
+                                                            >
+                                                                <div className="flex w-full min-w-0 gap-2">
+                                                                    <div
+                                                                        className={cn(
+                                                                            "flex h-8 w-8 items-center justify-center rounded-lg border shrink-0",
+                                                                            isOnline
+                                                                                ? "border-emerald-500/20 bg-emerald-500/10"
+                                                                                : isOffline
+                                                                                    ? "border-slate-200 bg-slate-100 dark:border-zinc-700 dark:bg-zinc-800"
+                                                                                    : "border-amber-500/20 bg-amber-500/10"
+                                                                        )}
+                                                                    >
+                                                                        <Router className={cn("h-4 w-4", isOnline ? "text-emerald-500" : isOffline ? "text-slate-400" : "text-amber-500")} />
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                                            <h5 className="min-w-0 flex-1 break-words text-[13px] font-bold leading-tight text-slate-800 dark:text-slate-200">
+                                                                                {contract.planDescription}
+                                                                            </h5>
+                                                                            <span
+                                                                                className={cn(
+                                                                                    "flex h-4 shrink-0 items-center gap-1 rounded-full px-1.5 text-[9px] font-bold uppercase",
+                                                                                    isOnline
+                                                                                        ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+                                                                                        : isOffline
+                                                                                            ? "border border-slate-300 bg-slate-100 text-slate-500 dark:border-zinc-700 dark:bg-zinc-800"
+                                                                                            : "border border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                                                                )}
+                                                                            >
+                                                                                <div className={cn("h-1.5 w-1.5 rounded-full", isOnline ? "bg-emerald-500 animate-pulse" : isOffline ? "bg-slate-400" : "bg-amber-500")} />
+                                                                                {contract.statusLabel}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={contract.detailsLabel}>{contract.detailsLabel}</p>
+                                                                        <div className="mt-1 flex items-start gap-1 text-[9.5px] leading-tight text-muted-foreground/80">
+                                                                            <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                                                                            <span className="line-clamp-2 break-words">{contract.addressLabel}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="shrink-0 pt-1 text-slate-400">
+                                                                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {isExpanded && (
+                                                                <div className="animate-in slide-in-from-top-1 px-3 pb-3 duration-200">
+                                                                    <div className="grid grid-cols-1 gap-2 border-t border-slate-200/50 pt-2 dark:border-white/10">
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Contrato</span>
+                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.id}</span>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Servico</span>
+                                                                            <span className="break-words text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.serviceType || 'Nao informado'}</span>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Login</span>
+                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.login || 'Nao informado'}</span>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Serial</span>
+                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.serial || 'Nao informado'}</span>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IP</span>
+                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.ip || 'Nao informado'}</span>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex flex-col gap-0.5">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">MAC</span>
+                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.mac || 'Nao informado'}</span>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="mt-2 flex min-w-0 items-start gap-1 text-[10px] font-medium text-muted-foreground">
+                                                                        <Clock className={cn("h-3 w-3", isOnline ? "text-emerald-500/70" : "text-slate-400")} />
+                                                                        <span className="min-w-0 break-words">{formatSgpConnectionDetails(contract)}</span>
+                                                                    </div>
+
+                                                                    <div className="mt-3 flex gap-2">
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="h-7 flex-1 border-slate-200 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-800 dark:text-slate-300 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400"
+                                                                            title="Abrir Chamado Tecnico"
+                                                                            onClick={(event) => {
+                                                                                event.stopPropagation();
+                                                                                handleOpenSgpOrderDialog(contract);
+                                                                            }}
+                                                                        >
+                                                                            <Wrench className="mr-1.5 h-3 w-3 text-emerald-500" /> Abrir Chamado
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum contrato retornado pelo SGP.</p>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between px-1">
+                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Faturas</h4>
+                                                <span className={cn("text-[12px] font-bold tabular-nums", hasSgpDebt ? "text-red-500" : "text-emerald-500")}>
+                                                    {sgpOverdueInvoices} vencida{sgpOverdueInvoices === 1 ? '' : 's'}
+                                                </span>
+                                            </div>
+
+                                            {sgpInvoices.length > 0 ? (
+                                                sgpInvoices.map((invoice) => {
+                                                    const canGeneratePix = Boolean(invoice.pixCode || invoice.contractId);
+
+                                                    return (
+                                                        <div
+                                                            key={invoice.id}
+                                                            className={cn(
+                                                                "group flex flex-col rounded-xl border p-2 transition-all",
+                                                                invoice.isOverdue
+                                                                    ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10 dark:border-red-500/20"
+                                                                    : "border-slate-200/80 bg-white/90 hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5"
+                                                            )}
+                                                        >
+                                                            <div className="flex min-w-0 items-start justify-between gap-3">
+                                                                <div className="flex min-w-0 items-center gap-3">
+                                                                    <div
+                                                                        className={cn(
+                                                                            "flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm shrink-0",
+                                                                            invoice.isOverdue
+                                                                                ? "border-red-200 bg-white text-red-500 dark:border-red-900/50 dark:bg-black/50"
+                                                                                : "border-slate-200 bg-slate-100 text-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-emerald-400"
+                                                                        )}
+                                                                    >
+                                                                        <Receipt className="h-4 w-4" />
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <span className={cn("block text-[13px] font-bold", invoice.isOverdue ? "text-red-600 dark:text-red-400" : "text-slate-800 dark:text-slate-200")}>
+                                                                            {formatSgpCurrency(invoice.correctedAmount || invoice.amount)}
+                                                                        </span>
+                                                                        <span className={cn("block text-[10px] font-semibold uppercase tracking-widest", invoice.isOverdue ? "text-red-500/80" : "text-slate-500")}>
+                                                                            Venc.: {formatSgpDate(invoice.dueDate) || 'Sem data'}
+                                                                        </span>
+                                                                        <span className="mt-1 block truncate text-[10px] text-muted-foreground" title={`Status: ${invoice.status} ${invoice.daysLate > 0 ? `• ${invoice.daysLate} dia(s) atraso` : ''}`}>
+                                                                            Status: {invoice.status} {invoice.daysLate > 0 ? `• ${invoice.daysLate} dia(s) atraso` : ''}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    variant={invoice.isOverdue ? "ghost" : "outline"}
+                                                                    size="sm"
+                                                                    className={cn(
+                                                                        "h-7 text-[10px] font-bold uppercase tracking-wider",
+                                                                        invoice.isOverdue
+                                                                            ? "border border-red-200 bg-white text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:bg-black dark:hover:bg-red-900/60"
+                                                                            : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                                                                    )}
+                                                                    disabled={!canGeneratePix || sgpPixLoadingInvoiceId === invoice.id}
+                                                                    onClick={() => handleGenerateSgpPix(invoice)}
+                                                                >
+                                                                    {sgpPixLoadingInvoiceId === invoice.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'PIX'}
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhuma fatura retornada pelo SGP.</p>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
+                                {false && (
+                                    <>
                                 {/* OVERALL STATUS */}
                                 <div className="flex items-center justify-between p-3 rounded-xl border border-red-500/30 bg-red-500/10 dark:bg-red-500/5">
                                     <div className="flex items-center gap-3">
@@ -1367,11 +1849,84 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         </div>
                                     </div>
                                 </div>
+                                    </>
+                                )}
                             </TabsContent>
                         )}
                     </Tabs>
                 </div>
             </ScrollArea>
+            <Dialog
+                open={isSgpOrderDialogOpen}
+                onOpenChange={(open) => {
+                    if (!isSubmittingSgpOrder) {
+                        setIsSgpOrderDialogOpen(open);
+                    }
+
+                    if (!open && !isSubmittingSgpOrder) {
+                        setSgpOrderContract(null);
+                        setSgpOrderNotes('');
+                    }
+                }}
+            >
+                <DialogContent className="border-border bg-popover text-foreground">
+                    <DialogHeader>
+                        <DialogTitle>Abrir chamado no SGP</DialogTitle>
+                        <DialogDescription>
+                            {sgpOrderContract
+                                ? `Contrato ${sgpOrderContract.id} - ${sgpOrderContract.planDescription}`
+                                : 'Selecione um contrato para abrir o chamado.'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handleCreateSgpOrder} className="space-y-4">
+                        {sgpOrderContract && (
+                            <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                <p className="text-sm font-semibold text-foreground">{sgpOrderContract.planDescription}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{sgpOrderContract.addressLabel}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Status: {sgpOrderContract.statusLabel} • Contrato {sgpOrderContract.id}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <Label htmlFor="sgp-order-notes">Descricao do chamado</Label>
+                            <Textarea
+                                id="sgp-order-notes"
+                                value={sgpOrderNotes}
+                                onChange={(event) => setSgpOrderNotes(event.target.value)}
+                                rows={5}
+                                placeholder="Descreva o motivo do atendimento para envio ao SGP."
+                                className="border-input bg-muted/50 text-foreground"
+                                required
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                O texto acima sera enviado como conteudo do chamado na URA do SGP.
+                            </p>
+                        </div>
+
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                    setIsSgpOrderDialogOpen(false);
+                                    setSgpOrderContract(null);
+                                    setSgpOrderNotes('');
+                                }}
+                                disabled={isSubmittingSgpOrder}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button type="submit" disabled={isSubmittingSgpOrder || !sgpOrderNotes.trim()}>
+                                {isSubmittingSgpOrder && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Criar Chamado
+                            </Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
             <ContactStatisticsDialog
                 isOpen={isStatsOpen}
                 setIsOpen={setIsStatsOpen}

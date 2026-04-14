@@ -1,0 +1,409 @@
+PROMPT DEFINITIVO - COMERCIAL 3D DIALOGY
+Tema: do caos operacional ao alivio total
+Estilo visual: animacao 3D estilo Pixar, cinematografica, expressiva, calor humano corporativo
+Formato: roteiro completo com personagens fixos, continuidade total entre cenas, prompts separados de imagem e video
+Regra global de audio: SEM MUSICA em todas as cenas. Somente dialogos, respiracao, notificacoes, teclado, passos, cadeira, celular vibrando e ambiente de escritorio.
+
+==================================================
+ETAPA 1 - CRIACAO DOS PERSONAGENS
+==================================================
+
+Nome do personagem:
+Ana Ribeiro
+
+Descricao completa (SEMPRE repetir essa descricao em TODAS as cenas):
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 34 anos, aparencia de gerente de atendimento experiente, rosto oval levemente alongado, testa media, sobrancelhas cheias e bem desenhadas em arco suave, olhos castanho-escuros grandes e muito expressivos, com brilho umido sutil nos cantos para reforcar emocao, nariz delicado com ponta arredondada, labios medios com contorno definido, macas do rosto suaves, pele morena clara com textura realista muito limpa e acabamento cinematografico, cabelo castanho-escuro liso com leve ondulacao nas pontas, preso em rabo de cavalo baixo organizado com alguns fios soltos naturais perto da orelha e da testa, expressao facial padrao inteligente e acolhedora com leve tensao profissional no olhar, microexpressoes de responsabilidade e cansaco contido, roupa corporativa moderna composta por blazer azul-petroleo de tecido encorpado fosco, blusa bege de viscose acetinada, calca de alfaiataria grafite, tenis branco minimalista para reforcar praticidade, relogio discreto prateado no pulso esquerdo, postura ereta mas humana, ombros ligeiramente tensionados quando pressionada, linguagem corporal objetiva, lider natural, gestos precisos com as maos, estilo visual corporativo contemporaneo, elegante sem rigidez, personalidade visual de alguem que segura a operacao nas costas e quer ordem sem perder empatia.)
+
+Nome do personagem:
+Leo Martins
+
+Descricao completa (SEMPRE repetir essa descricao em TODAS as cenas):
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, homem brasileiro de 27 anos, aparencia de atendente comercial agil e carismatico, rosto arredondado com maxilar suave, testa um pouco larga, sobrancelhas escuras retas com leve elevacao nas pontas, olhos castanho-claros grandes e vivos, pupilas brilhantes, nariz reto curto, sorriso facil com dentes discretamente aparentes, pele clara quente com leve rubor natural no rosto, cabelo castanho medio curto nas laterais e volume baguncado controlado no topo com textura macia realista, barba muito curta sombreada, expressao facial padrao curiosa e bem-humorada, mas facilmente vira preocupacao quando a demanda explode, roupa casual corporativa composta por camisa verde-oliva de algodao premium com mangas dobradas ate o antebraco, camiseta off-white por baixo, calca chino bege escuro, tenis cinza claro limpo, pulseira preta simples no pulso direito, linguagem corporal dinamica, um pouco acelerada, inclina o tronco para frente quando esta tentando resolver algo, usa muito as maos ao falar, estilo visual moderno, acessivel e comercial, personalidade visual de alguem talentoso, rapido, mas que sofre quando o processo esta desorganizado.)
+
+Nome do personagem:
+Sofia Mendes
+
+Descricao completa (SEMPRE repetir essa descricao em TODAS as cenas):
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 38 anos, aparencia de empresaria e cliente exigente, rosto em formato de coracao, queixo delicado, testa um pouco ampla, olhos castanho-avelas grandes com delineado sutil, sobrancelhas finas e elegantes, nariz fino e levemente arrebitado, labios volumosos com acabamento natural, pele oliva clara com textura sofisticada e uniforme, cabelo preto longo e ondulado com brilho intenso, repartido de lado e caindo sobre um dos ombros, expressao facial padrao confiante, inteligente e direta, alternando entre frustracao contida e alivio quando percebe competencia, roupa refinada casual-chic composta por camisa de seda terracota, blazer areia de caimento leve, calca creme de cintura alta, sapato baixo nude elegante, brincos dourados pequenos, unhas discretas bem cuidadas, linguagem corporal firme e segura, cruza os bracos quando perde paciencia, inclina a cabeca ao avaliar respostas, estilo visual premium e empreendedor, personalidade visual de alguem que valoriza rapidez, clareza e profissionalismo no atendimento.)
+
+==================================================
+ETAPA 2 - ESTRUTURA DAS CENAS
+==================================================
+
+TITULO DO FILME CURTO:
+"Uma tela so"
+
+DURACAO SUGERIDA:
+45 a 60 segundos
+
+ARCO EMOCIONAL:
+Inicio: caos, ruido, atraso, ansiedade
+Meio: descoberta, clareza, reorganizacao
+Final: alivio, confianca, controle, desejo de aderir
+
+AMBIENTE BASE DO UNIVERSO VISUAL:
+Escritorio contemporaneo de empresa em crescimento, planta semiaberta, mesas de madeira clara, divisorias baixas em vidro, cadeiras ergonomicas cinza, luz natural entrando por uma janela lateral ampla, luminarias lineares quentes no teto, monitores ultrawide, celulares vibrando, post-its, garrafa de agua, cafe esquecido, plantas discretas, atmosfera real de empresa que vende e atende por conversa. No inicio, o espaco parece funcional, mas emocionalmente sobrecarregado. A partir da descoberta da Dialogy, o mesmo ambiente se transforma gradualmente, sem trocar de local, apenas mudando organizacao visual, luz, postura corporal e ritmo.
+
+PALETA DE COR:
+Antes da solucao: cinzas frios, azuis apagados, vermelhos de alerta, reflexos mais duros
+Depois da solucao: verdes controlados, neutros limpos, pele mais viva, reflexos mais suaves, monitores organizados
+
+==================================================
+CENA 1 - O CAOS TEM ROSTO
+==================================================
+
+Funcao dramatica:
+Estabelecer o universo visual, o problema e a tensao emocional. Esta cena define todo o tom do filme.
+
+PROMPT DE IMAGEM - CENA 1
+
+Ambiente completo:
+Escritorio moderno de atendimento e vendas no inicio da manha, luz natural lateral fria entrando por uma janela grande a esquerda, luminarias de teto ainda acesas, mesas organizadas fisicamente mas digitalmente caoticas, tres monitores exibindo conversas espalhadas, notificacoes vermelhas pipocando, um celular vibrando em cima da mesa, uma caneca de cafe quase cheia e esquecida, post-its desalinhados, reflexos suaves no vidro ao fundo, profundidade de campo cinematografica com fundo levemente desfocado, atmosfera de pressao real, sensacao de segundos importantes escapando.
+
+Personagens presentes:
+Ana Ribeiro
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 34 anos, aparencia de gerente de atendimento experiente, rosto oval levemente alongado, testa media, sobrancelhas cheias e bem desenhadas em arco suave, olhos castanho-escuros grandes e muito expressivos, com brilho umido sutil nos cantos para reforcar emocao, nariz delicado com ponta arredondada, labios medios com contorno definido, macas do rosto suaves, pele morena clara com textura realista muito limpa e acabamento cinematografico, cabelo castanho-escuro liso com leve ondulacao nas pontas, preso em rabo de cavalo baixo organizado com alguns fios soltos naturais perto da orelha e da testa, expressao facial padrao inteligente e acolhedora com leve tensao profissional no olhar, microexpressoes de responsabilidade e cansaco contido, roupa corporativa moderna composta por blazer azul-petroleo de tecido encorpado fosco, blusa bege de viscose acetinada, calca de alfaiataria grafite, tenis branco minimalista para reforcar praticidade, relogio discreto prateado no pulso esquerdo, postura ereta mas humana, ombros ligeiramente tensionados quando pressionada, linguagem corporal objetiva, lider natural, gestos precisos com as maos, estilo visual corporativo contemporaneo, elegante sem rigidez, personalidade visual de alguem que segura a operacao nas costas e quer ordem sem perder empatia.)
+
+Leo Martins
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, homem brasileiro de 27 anos, aparencia de atendente comercial agil e carismatico, rosto arredondado com maxilar suave, testa um pouco larga, sobrancelhas escuras retas com leve elevacao nas pontas, olhos castanho-claros grandes e vivos, pupilas brilhantes, nariz reto curto, sorriso facil com dentes discretamente aparentes, pele clara quente com leve rubor natural no rosto, cabelo castanho medio curto nas laterais e volume baguncado controlado no topo com textura macia realista, barba muito curta sombreada, expressao facial padrao curiosa e bem-humorada, mas facilmente vira preocupacao quando a demanda explode, roupa casual corporativa composta por camisa verde-oliva de algodao premium com mangas dobradas ate o antebraco, camiseta off-white por baixo, calca chino bege escuro, tenis cinza claro limpo, pulseira preta simples no pulso direito, linguagem corporal dinamica, um pouco acelerada, inclina o tronco para frente quando esta tentando resolver algo, usa muito as maos ao falar, estilo visual moderno, acessivel e comercial, personalidade visual de alguem talentoso, rapido, mas que sofre quando o processo esta desorganizado.)
+
+Sofia Mendes
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 38 anos, aparencia de empresaria e cliente exigente, rosto em formato de coracao, queixo delicado, testa um pouco ampla, olhos castanho-avelas grandes com delineado sutil, sobrancelhas finas e elegantes, nariz fino e levemente arrebitado, labios volumosos com acabamento natural, pele oliva clara com textura sofisticada e uniforme, cabelo preto longo e ondulado com brilho intenso, repartido de lado e caindo sobre um dos ombros, expressao facial padrao confiante, inteligente e direta, alternando entre frustracao contida e alivio quando percebe competencia, roupa refinada casual-chic composta por camisa de seda terracota, blazer areia de caimento leve, calca creme de cintura alta, sapato baixo nude elegante, brincos dourados pequenos, unhas discretas bem cuidadas, linguagem corporal firme e segura, cruza os bracos quando perde paciencia, inclina a cabeca ao avaliar respostas, estilo visual premium e empreendedor, personalidade visual de alguem que valoriza rapidez, clareza e profissionalismo no atendimento.)
+
+Acao acontecendo:
+Ana olha para um monitor com varias conversas abertas ao mesmo tempo. Leo alterna entre celular, navegador e outra aba de mensagem, respirando rapido. Em um pequeno quadro de notificacao na tela, aparecem contatos vindos de WhatsApp, Instagram, Facebook Messenger e Mercado Livre chegando em paralelo. Sofia aparece em um recorte de tela de celular em seu proprio escritorio, olhando para o celular com sobrancelhas tensas, esperando resposta.
+
+Emocao da cena:
+Ansiedade operacional, microfrustracao, urgencia silenciosa, sensacao de que a empresa esta sempre atrasada meio passo.
+
+Iluminacao:
+Key light lateral fria vinda da janela, fill light de estudio suave para manter leitura dos rostos, pequenos reflexos nos olhos, contrastes moderados, highlights controlados nos monitores.
+
+Profundidade de campo:
+Curta a media, com foco nitido em Ana no primeiro plano e Leo em segundo plano legivel, fundo suavemente desfocado.
+
+Lente:
+35mm cinematografica
+
+Angulo de camera:
+Plano medio levemente baixo, com composicao diagonal que enfatiza movimento e tensao
+
+Qualidade:
+Ultra detalhado, render 3D estilo Pixar, alta definicao, acabamento cinematografico premium, texturas refinadas, expressividade facial elevada.
+
+PROMPT DE VIDEO - CENA 1
+
+Movimento de camera:
+Comecar com dolly-in lento a partir do corredor do escritorio em direcao a mesa de Ana. Nos ultimos segundos, pequeno pan para revelar Leo do lado e cut rapido para Sofia em seu escritorio olhando o celular.
+
+Acao detalhada:
+0s a 2s: celular vibra, notificacoes surgem, Ana gira a cadeira com olhar cansado e atento.
+2s a 5s: Leo tenta responder uma conversa, para no meio, troca de aba, volta para o celular, morde o labio inferior.
+5s a 8s: close rapido nas telas mostrando mensagens de canais diferentes chegando separadas.
+8s a 11s: Sofia olha para a tela do celular, expira pelo nariz, cruza os bracos e perde a paciencia.
+
+Expressoes faciais dinamicas:
+Ana: olhos correndo de um canto ao outro da tela, testa franzida, respiracao curta.
+Leo: sorriso desaparece, olhos arregalam, queixo trava por um segundo.
+Sofia: olhar firme, sobrancelha sobe com desaprovacao, labios se comprimem.
+
+Interacoes:
+Ana tenta coordenar Leo sem levantar a voz.
+Leo procura o historico do cliente e nao encontra rapido.
+Sofia toca a tela, sobe a conversa e nao ve continuidade.
+
+Timing da cena:
+Ritmo crescente, cortes curtos, mas sem histeria. O objetivo e gerar identificacao imediata.
+
+Dialogos exatos:
+Ana: "Leo, essa cliente ja falou com a gente ontem ou hoje?"
+Leo: "Eu to procurando... veio no Instagram, depois no WhatsApp... pera, sumiu daqui."
+Sofia: "Oi? Alguem consegue me responder?"
+
+Quem esta em silencio:
+Ninguem em silencio absoluto. O ambiente respira com notificacoes e pequenos sons de teclado.
+
+Acoes simultaneas:
+Enquanto Ana fala, ela clica em abas diferentes.
+Enquanto Leo responde, ele desliza o dedo no celular e tambem olha o monitor.
+Enquanto Sofia fala, ela segura o celular com uma mao e bate levemente os dedos da outra no braco.
+
+Regra de audio:
+Sem musica. Apenas dialogos, vibracao do celular, clique de mouse, notificacoes secas e ar-condicionado ambiente.
+
+==================================================
+CENA 2 - A DESCOBERTA DA CLAREZA
+==================================================
+
+Funcao dramatica:
+Continuar exatamente de onde a cena anterior parou e introduzir a descoberta da Dialogy como resposta concreta ao caos.
+
+PROMPT DE IMAGEM - CENA 2
+
+Atualizacao do cenario:
+Mesmo escritorio, mesma mesa, mesma luz base, mas agora a camera se aproxima do monitor principal de Ana. A tela mostra uma interface unificada e limpa representando a Dialogy, com canais organizados no mesmo inbox. O ambiente ainda esta em tensao, porem ha um primeiro ponto de ordem visual surgindo. Um reflexo verde suave do monitor aparece de forma discreta no rosto de Ana e Leo, sugerindo alivio inicial.
+
+Personagens presentes:
+Ana Ribeiro
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 34 anos, aparencia de gerente de atendimento experiente, rosto oval levemente alongado, testa media, sobrancelhas cheias e bem desenhadas em arco suave, olhos castanho-escuros grandes e muito expressivos, com brilho umido sutil nos cantos para reforcar emocao, nariz delicado com ponta arredondada, labios medios com contorno definido, macas do rosto suaves, pele morena clara com textura realista muito limpa e acabamento cinematografico, cabelo castanho-escuro liso com leve ondulacao nas pontas, preso em rabo de cavalo baixo organizado com alguns fios soltos naturais perto da orelha e da testa, expressao facial padrao inteligente e acolhedora com leve tensao profissional no olhar, microexpressoes de responsabilidade e cansaco contido, roupa corporativa moderna composta por blazer azul-petroleo de tecido encorpado fosco, blusa bege de viscose acetinada, calca de alfaiataria grafite, tenis branco minimalista para reforcar praticidade, relogio discreto prateado no pulso esquerdo, postura ereta mas humana, ombros ligeiramente tensionados quando pressionada, linguagem corporal objetiva, lider natural, gestos precisos com as maos, estilo visual corporativo contemporaneo, elegante sem rigidez, personalidade visual de alguem que segura a operacao nas costas e quer ordem sem perder empatia.)
+
+Leo Martins
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, homem brasileiro de 27 anos, aparencia de atendente comercial agil e carismatico, rosto arredondado com maxilar suave, testa um pouco larga, sobrancelhas escuras retas com leve elevacao nas pontas, olhos castanho-claros grandes e vivos, pupilas brilhantes, nariz reto curto, sorriso facil com dentes discretamente aparentes, pele clara quente com leve rubor natural no rosto, cabelo castanho medio curto nas laterais e volume baguncado controlado no topo com textura macia realista, barba muito curta sombreada, expressao facial padrao curiosa e bem-humorada, mas facilmente vira preocupacao quando a demanda explode, roupa casual corporativa composta por camisa verde-oliva de algodao premium com mangas dobradas ate o antebraco, camiseta off-white por baixo, calca chino bege escuro, tenis cinza claro limpo, pulseira preta simples no pulso direito, linguagem corporal dinamica, um pouco acelerada, inclina o tronco para frente quando esta tentando resolver algo, usa muito as maos ao falar, estilo visual moderno, acessivel e comercial, personalidade visual de alguem talentoso, rapido, mas que sofre quando o processo esta desorganizado.)
+
+Sofia Mendes
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 38 anos, aparencia de empresaria e cliente exigente, rosto em formato de coracao, queixo delicado, testa um pouco ampla, olhos castanho-avelas grandes com delineado sutil, sobrancelhas finas e elegantes, nariz fino e levemente arrebitado, labios volumosos com acabamento natural, pele oliva clara com textura sofisticada e uniforme, cabelo preto longo e ondulado com brilho intenso, repartido de lado e caindo sobre um dos ombros, expressao facial padrao confiante, inteligente e direta, alternando entre frustracao contida e alivio quando percebe competencia, roupa refinada casual-chic composta por camisa de seda terracota, blazer areia de caimento leve, calca creme de cintura alta, sapato baixo nude elegante, brincos dourados pequenos, unhas discretas bem cuidadas, linguagem corporal firme e segura, cruza os bracos quando perde paciencia, inclina a cabeca ao avaliar respostas, estilo visual premium e empreendedor, personalidade visual de alguem que valoriza rapidez, clareza e profissionalismo no atendimento.)
+
+Acao atual:
+Ana encontra a conversa de Sofia centralizada em um inbox unico, com historico visivel e identificacao dos canais. Leo aponta para a tela e percebe que o contato passou por mais de um canal sem se perder. Sofia ainda esta esperando, mas agora a resposta esta prestes a sair com contexto real.
+
+Emocao dominante:
+Descoberta, respiracao voltando ao normal, clareza emergindo.
+
+Camera e composicao:
+Over-the-shoulder atras de Ana, enquadrando o monitor em foco e o perfil dela em primeiro plano. Leo entra pela direita, aproximando o rosto da tela. Pequeno insert do nome de Sofia e dos canais integrados no mesmo contexto. Composicao elegante, organizada e intencional.
+
+Iluminacao:
+Ainda coerente com a cena anterior, mas com reflexos mais suaves e calor leve no rebatedor para sugerir virada emocional.
+
+Profundidade de campo:
+Foco nitido na interface e nos olhos de Ana, fundo desfocado.
+
+Lente:
+50mm para intimidade e leitura emocional
+
+Qualidade:
+Render 3D estilo Pixar, nitidez premium, interface limpa, expressao facial cinematografica, realismo emocional.
+
+PROMPT DE VIDEO - CENA 2
+
+Movimento de camera:
+Continuacao direta da cena 1. Corte no exato momento em que Ana olha para a tela. Push-in suave no monitor, depois leve arco lateral para incluir Leo no enquadramento.
+
+Acao detalhada:
+11s a 14s: Ana abre o inbox unificado da Dialogy e encontra Sofia em um unico fluxo.
+14s a 17s: Leo inclina o corpo para perto da tela e acompanha o historico do cliente.
+17s a 20s: a tela mostra, sem exagero, a organizacao de canais como WhatsApp, Instagram Direct, Facebook Messenger e Mercado Livre chegando em um mesmo lugar, com contexto claro e proxima acao visivel.
+20s a 23s: Ana relaxa os ombros pela primeira vez.
+
+Expressoes faciais dinamicas:
+Ana: testa descrispa, olhos firmam o foco, canto da boca sobe quase imperceptivelmente.
+Leo: olhos brilham, respira fundo, expressao muda de confusao para entendimento.
+Sofia: ainda impaciente, mas para de tocar a tela por um segundo quando ve que a resposta esta chegando.
+
+Interacoes:
+Ana usa a Dialogy para localizar o historico de Sofia.
+Leo acompanha e entende que nao precisa mais cacar conversas em canais separados.
+
+Timing da cena:
+Mais controlado que a cena 1. O ritmo desacelera para dar sensacao de clareza.
+
+Dialogos exatos:
+Ana: "Achei. Ela veio do Instagram, voltou no WhatsApp e o historico ta inteiro aqui."
+Leo: "Agora sim. Ta tudo na mesma tela."
+Sofia: [em silencio, apenas observa a notificacao de digitando]
+
+Quem esta em silencio:
+Sofia permanece em silencio nesta cena.
+
+Acoes simultaneas:
+Enquanto Ana fala, ela percorre o historico com o mouse.
+Enquanto Leo fala, ele aponta para a tela e endireita a postura.
+Enquanto Sofia fica em silencio, ela descruza os bracos e volta a olhar o celular com expectativa.
+
+Regra de audio:
+Sem musica. Som de notificacao discreta, rolagem, clique de mouse, respiracao mais calma.
+
+==================================================
+CENA 3 - A OPERACAO RESPIRA
+==================================================
+
+Funcao dramatica:
+Mostrar a transformacao pratica da operacao com a Dialogy, tornando visiveis os beneficios reais: inbox unificado, CRM, contexto, distribuicao e IA assistida.
+
+PROMPT DE IMAGEM - CENA 3
+
+Atualizacao do cenario:
+Mesmo escritorio, agora visualmente mais organizado sem mudar de lugar. A luz parece mais equilibrada, a mesa continua realista, mas o caos digital desapareceu. O monitor principal exibe a Dialogy com conversa ativa, historico, anotacoes internas, fila organizada e sugestao de resposta assistida por IA. Um pequeno quadro lateral mostra a conversa pronta para seguir. O ambiente transmite fluidez.
+
+Personagens presentes:
+Ana Ribeiro
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 34 anos, aparencia de gerente de atendimento experiente, rosto oval levemente alongado, testa media, sobrancelhas cheias e bem desenhadas em arco suave, olhos castanho-escuros grandes e muito expressivos, com brilho umido sutil nos cantos para reforcar emocao, nariz delicado com ponta arredondada, labios medios com contorno definido, macas do rosto suaves, pele morena clara com textura realista muito limpa e acabamento cinematografico, cabelo castanho-escuro liso com leve ondulacao nas pontas, preso em rabo de cavalo baixo organizado com alguns fios soltos naturais perto da orelha e da testa, expressao facial padrao inteligente e acolhedora com leve tensao profissional no olhar, microexpressoes de responsabilidade e cansaco contido, roupa corporativa moderna composta por blazer azul-petroleo de tecido encorpado fosco, blusa bege de viscose acetinada, calca de alfaiataria grafite, tenis branco minimalista para reforcar praticidade, relogio discreto prateado no pulso esquerdo, postura ereta mas humana, ombros ligeiramente tensionados quando pressionada, linguagem corporal objetiva, lider natural, gestos precisos com as maos, estilo visual corporativo contemporaneo, elegante sem rigidez, personalidade visual de alguem que segura a operacao nas costas e quer ordem sem perder empatia.)
+
+Leo Martins
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, homem brasileiro de 27 anos, aparencia de atendente comercial agil e carismatico, rosto arredondado com maxilar suave, testa um pouco larga, sobrancelhas escuras retas com leve elevacao nas pontas, olhos castanho-claros grandes e vivos, pupilas brilhantes, nariz reto curto, sorriso facil com dentes discretamente aparentes, pele clara quente com leve rubor natural no rosto, cabelo castanho medio curto nas laterais e volume baguncado controlado no topo com textura macia realista, barba muito curta sombreada, expressao facial padrao curiosa e bem-humorada, mas facilmente vira preocupacao quando a demanda explode, roupa casual corporativa composta por camisa verde-oliva de algodao premium com mangas dobradas ate o antebraco, camiseta off-white por baixo, calca chino bege escuro, tenis cinza claro limpo, pulseira preta simples no pulso direito, linguagem corporal dinamica, um pouco acelerada, inclina o tronco para frente quando esta tentando resolver algo, usa muito as maos ao falar, estilo visual moderno, acessivel e comercial, personalidade visual de alguem talentoso, rapido, mas que sofre quando o processo esta desorganizado.)
+
+Sofia Mendes
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 38 anos, aparencia de empresaria e cliente exigente, rosto em formato de coracao, queixo delicado, testa um pouco ampla, olhos castanho-avelas grandes com delineado sutil, sobrancelhas finas e elegantes, nariz fino e levemente arrebitado, labios volumosos com acabamento natural, pele oliva clara com textura sofisticada e uniforme, cabelo preto longo e ondulado com brilho intenso, repartido de lado e caindo sobre um dos ombros, expressao facial padrao confiante, inteligente e direta, alternando entre frustracao contida e alivio quando percebe competencia, roupa refinada casual-chic composta por camisa de seda terracota, blazer areia de caimento leve, calca creme de cintura alta, sapato baixo nude elegante, brincos dourados pequenos, unhas discretas bem cuidadas, linguagem corporal firme e segura, cruza os bracos quando perde paciencia, inclina a cabeca ao avaliar respostas, estilo visual premium e empreendedor, personalidade visual de alguem que valoriza rapidez, clareza e profissionalismo no atendimento.)
+
+Acao atual:
+Ana distribui a conversa para Leo com contexto completo. Leo le a sugestao de resposta, ajusta o texto com naturalidade e responde com seguranca. Sofia recebe uma mensagem clara e objetiva. A interface mostra discretamente elementos de organizacao como historico, etiquetas, notas internas e fila, alem de apoio de IA, sem parecer tela tecnica demais.
+
+Emocao dominante:
+Confianca operacional, alivio pratico, controle recuperado.
+
+Camera e composicao:
+Plano medio com camera em semi-circulo em torno de Ana e Leo, terminando em close no rosto de Sofia lendo a resposta. A composicao precisa parecer mais aberta e respiravel do que nas cenas anteriores.
+
+Iluminacao:
+Mais quente e equilibrada, sem perder continuidade. Highlights suaves nos olhos e na borda dos rostos.
+
+Profundidade de campo:
+Media, para manter personagens e tela legiveis.
+
+Lente:
+40mm cinematografica
+
+Qualidade:
+Alta definicao, animacao 3D estilo Pixar, refinamento de tecidos, pele, cabelo, vidro e monitor.
+
+PROMPT DE VIDEO - CENA 3
+
+Movimento de camera:
+Arco suave ao redor da mesa, seguido de close controlado na interface e match cut para o celular de Sofia recebendo a resposta.
+
+Acao detalhada:
+23s a 27s: Ana encaminha a conversa com contexto para Leo.
+27s a 31s: Leo le uma sugestao assistida, ajusta uma frase e envia a resposta.
+31s a 35s: a tela mostra historico, contexto do contato e organizacao da operacao em um unico fluxo.
+35s a 39s: Sofia le a mensagem, descrispa o rosto e senta com mais calma.
+
+Expressoes faciais dinamicas:
+Ana: alivio sereno, olhar de quem voltou a liderar a situacao.
+Leo: confianca retomada, sobrancelhas relaxadas, sorriso pequeno e profissional.
+Sofia: tensao some dos labios, olhos suavizam, ombros descem.
+
+Interacoes:
+Ana e Leo trabalham em sintonia.
+Sofia sente que esta falando com uma empresa organizada, nao com um atendimento perdido.
+
+Timing da cena:
+Ritmo fluido, elegante, mais maduro. Esta e a cena da transformacao.
+
+Dialogos exatos:
+Ana: "Passando pra voce com todo o contexto."
+Leo: "Perfeito. Vou responder agora."
+Leo: "Oi, Sofia. Vi seu historico aqui. A gente consegue te atender sem voce repetir tudo."
+Sofia: "Agora ficou facil."
+
+Quem esta em silencio:
+Ninguem em silencio completo. Todos participam da virada.
+
+Acoes simultaneas:
+Enquanto Ana fala, ela arrasta a conversa para o responsavel certo.
+Enquanto Leo fala, ele revisa a sugestao de resposta e clica em enviar.
+Enquanto Sofia fala, ela relaxa a postura e olha de novo para a tela com interesse genuino.
+
+Regra de audio:
+Sem musica. Som de teclado mais ritmado, notificacao de mensagem enviada, cadeira se ajustando, toque sutil do celular de Sofia.
+
+==================================================
+CENA 4 - UMA TELA SO, UMA EMPRESA MELHOR
+==================================================
+
+Funcao dramatica:
+Entregar a recompensa emocional e fechar o comercial com mensagem clara de valor da Dialogy.
+
+PROMPT DE IMAGEM - CENA 4
+
+Atualizacao do cenario:
+Mesmo escritorio, final da mesma manha. Tudo ainda real e corporativo, mas agora o ambiente tem ordem visual e energia humana positiva. No monitor principal, a Dialogy aparece como centro da operacao com inbox unificado e organizacao clara. Em um segundo plano desfocado, outros colegas trabalham em paz. Na tela, de forma elegante e discreta, entram os conceitos-chave: usuarios ilimitados, 7 dias gratis, preco por volume de chats. Sofia agora aparece em seu proprio ambiente com expressao satisfeita, segurando o celular e abrindo um leve sorriso.
+
+Personagens presentes:
+Ana Ribeiro
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 34 anos, aparencia de gerente de atendimento experiente, rosto oval levemente alongado, testa media, sobrancelhas cheias e bem desenhadas em arco suave, olhos castanho-escuros grandes e muito expressivos, com brilho umido sutil nos cantos para reforcar emocao, nariz delicado com ponta arredondada, labios medios com contorno definido, macas do rosto suaves, pele morena clara com textura realista muito limpa e acabamento cinematografico, cabelo castanho-escuro liso com leve ondulacao nas pontas, preso em rabo de cavalo baixo organizado com alguns fios soltos naturais perto da orelha e da testa, expressao facial padrao inteligente e acolhedora com leve tensao profissional no olhar, microexpressoes de responsabilidade e cansaco contido, roupa corporativa moderna composta por blazer azul-petroleo de tecido encorpado fosco, blusa bege de viscose acetinada, calca de alfaiataria grafite, tenis branco minimalista para reforcar praticidade, relogio discreto prateado no pulso esquerdo, postura ereta mas humana, ombros ligeiramente tensionados quando pressionada, linguagem corporal objetiva, lider natural, gestos precisos com as maos, estilo visual corporativo contemporaneo, elegante sem rigidez, personalidade visual de alguem que segura a operacao nas costas e quer ordem sem perder empatia.)
+
+Leo Martins
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, homem brasileiro de 27 anos, aparencia de atendente comercial agil e carismatico, rosto arredondado com maxilar suave, testa um pouco larga, sobrancelhas escuras retas com leve elevacao nas pontas, olhos castanho-claros grandes e vivos, pupilas brilhantes, nariz reto curto, sorriso facil com dentes discretamente aparentes, pele clara quente com leve rubor natural no rosto, cabelo castanho medio curto nas laterais e volume baguncado controlado no topo com textura macia realista, barba muito curta sombreada, expressao facial padrao curiosa e bem-humorada, mas facilmente vira preocupacao quando a demanda explode, roupa casual corporativa composta por camisa verde-oliva de algodao premium com mangas dobradas ate o antebraco, camiseta off-white por baixo, calca chino bege escuro, tenis cinza claro limpo, pulseira preta simples no pulso direito, linguagem corporal dinamica, um pouco acelerada, inclina o tronco para frente quando esta tentando resolver algo, usa muito as maos ao falar, estilo visual moderno, acessivel e comercial, personalidade visual de alguem talentoso, rapido, mas que sofre quando o processo esta desorganizado.)
+
+Sofia Mendes
+(Personagem 3D estilo Pixar, fundo branco, iluminacao suave de estudio, mulher brasileira de 38 anos, aparencia de empresaria e cliente exigente, rosto em formato de coracao, queixo delicado, testa um pouco ampla, olhos castanho-avelas grandes com delineado sutil, sobrancelhas finas e elegantes, nariz fino e levemente arrebitado, labios volumosos com acabamento natural, pele oliva clara com textura sofisticada e uniforme, cabelo preto longo e ondulado com brilho intenso, repartido de lado e caindo sobre um dos ombros, expressao facial padrao confiante, inteligente e direta, alternando entre frustracao contida e alivio quando percebe competencia, roupa refinada casual-chic composta por camisa de seda terracota, blazer areia de caimento leve, calca creme de cintura alta, sapato baixo nude elegante, brincos dourados pequenos, unhas discretas bem cuidadas, linguagem corporal firme e segura, cruza os bracos quando perde paciencia, inclina a cabeca ao avaliar respostas, estilo visual premium e empreendedor, personalidade visual de alguem que valoriza rapidez, clareza e profissionalismo no atendimento.)
+
+Acao atual:
+Ana e Leo se entreolham com leve cumplicidade profissional. Sofia recebe a ultima confirmacao da conversa e se sente atendida com competencia. Surge a mensagem final do comercial com foco em centralizar atendimento, vendas e follow-up em uma tela so.
+
+Emocao dominante:
+Alivio, maturidade operacional, confianca, satisfacao.
+
+Camera e composicao:
+Comecar em plano americano de Ana e Leo de frente para o monitor, terminar em close de Sofia sorrindo de lado e depois cartela final com a interface da Dialogy ao centro.
+
+Iluminacao:
+Continuidade perfeita com a cena 3, agora com clima mais caloroso e refinado.
+
+Profundidade de campo:
+Media no escritorio, curta no close final de Sofia.
+
+Lente:
+50mm no escritorio e 85mm no close final de Sofia
+
+Qualidade:
+Ultra premium, cinematografico, expressividade facial maximizada, acabamento comercial de alto nivel.
+
+PROMPT DE VIDEO - CENA 4
+
+Movimento de camera:
+Travelling curto lateral mostrando a fluidez do time, depois slow push-in no rosto de Sofia, encerrando com corte limpo para a cartela final da marca.
+
+Acao detalhada:
+39s a 43s: Ana observa a fila organizada na Dialogy e sorri com alivio discreto.
+43s a 47s: Leo fecha uma conversa e parte para a proxima com naturalidade, sem correria.
+47s a 52s: Sofia recebe a resposta final, sorri e apoia o celular sobre a mesa, agora confiante.
+52s a 60s: cartela final com interface elegante, nome Dialogy e mensagem central do comercial.
+
+Expressoes faciais dinamicas:
+Ana: alivio profissional, olhos calmos, queixo solto.
+Leo: energia sob controle, postura aberta, sorriso leve.
+Sofia: satisfacao genuina, respiracao solta, olhar de confianca recuperada.
+
+Interacoes:
+Ana e Leo nao precisam falar muito; a ordem agora e visivel.
+Sofia percebe que foi atendida por uma empresa estruturada.
+
+Timing da cena:
+Encerramento com respiracao, sem pressa, sem excesso de informacao.
+
+Dialogos exatos:
+Sofia: "Era isso que eu precisava."
+Ana: "Quando tudo se conecta, o atendimento muda."
+Leo: "E a operacao anda."
+
+Texto final na tela:
+"Dialogy"
+"Centralize atendimento, vendas e follow-up em uma tela so."
+"Usuarios ilimitados. 7 dias gratis. Preco por volume de chats."
+
+Quem esta em silencio:
+Nos 3 segundos finais, todos ficam em silencio para a cartela final respirar.
+
+Acoes simultaneas:
+Enquanto Ana fala, ela observa a tela com a fila organizada.
+Enquanto Leo fala, ele fecha uma conversa e abre outra com naturalidade.
+Enquanto Sofia fala, ela baixa o celular e relaxa os ombros.
+
+Regra de audio:
+Sem musica. Apenas voz, clique suave, ambiencia leve de escritorio e silencio limpo na cartela final.
+
+==================================================
+OBSERVACOES DE DIRECAO
+==================================================
+
+1. Nao quebrar continuidade entre as cenas. Tudo acontece no mesmo universo, no mesmo dia, no mesmo escritorio, com evolucao emocional progressiva.
+2. O contraste principal deve ser visual e corporal:
+- antes da Dialogy: troncos inclinados, sobrancelhas tensas, telas desorganizadas, cortes mais secos
+- depois da Dialogy: postura aberta, respiracao ampla, composicao limpa, interface centralizada
+3. Sempre priorizar microacoes:
+- dedos hesitando no teclado
+- olhos buscando contexto
+- labios comprimindo antes da resposta
+- ombros descendo no momento de alivio
+4. Nao transformar a Dialogy em algo magico. Ela deve parecer uma solucao real, profissional e concreta para centralizar operacao.
+5. Em qualquer geracao derivada, manter estes fatos centrais:
+- Dialogy centraliza atendimento, vendas e follow-up
+- Dialogy conecta canais em um inbox unificado
+- Dialogy trabalha com CRM, organizacao operacional e IA assistida
+- Dialogy destaca usuarios ilimitados, 7 dias gratis e preco por volume de chats
+- o comercial deve parecer vida real corporativa, nao fantasia
+
+==================================================
+FIM
+==================================================

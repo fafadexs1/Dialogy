@@ -32,8 +32,11 @@ import { enqueueJob, shouldEnqueueJob } from '@/lib/queue';
 import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
 import { buildTelegramChatJid, parseTelegramChatId, sendTelegramTextMessage } from '@/services/telegram/bot-api';
 import {
+    findWhatsappChatByIdentity,
     findOrCreateWhatsappContact,
+    lockWhatsappIdentityTransaction,
     normalizeWhatsappPhoneNumber as normalizeWhatsappPhoneIdentity,
+    resolveCanonicalWhatsappChatId,
 } from '@/lib/whatsapp/contact-identity';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
@@ -391,6 +394,7 @@ async function internalSendMessage(
 
     try {
         await client.query('BEGIN');
+        chatId = (await resolveCanonicalWhatsappChatId(client, chatId)) || chatId;
 
         // Carrega info básica do chat para atribuição de agente (independente do canal)
         const chatInfoRes = await client.query(`
@@ -750,6 +754,7 @@ async function internalSendMedia(
 
     try {
         await client.query('BEGIN');
+        chatId = (await resolveCanonicalWhatsappChatId(client, chatId)) || chatId;
 
         // 1. Initial checks (read-only, fast)
         const chatInfoRes = await client.query(`
@@ -1299,6 +1304,7 @@ export async function sendAutomatedMessageAction(
     instanceName?: string,
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
+    chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     const shouldAutoCloseMarketing = !!metadata?.isMarketing;
     const marketingSentAt = shouldAutoCloseMarketing ? new Date() : null;
@@ -1499,6 +1505,7 @@ export async function sendAutomatedMediaAction(
     instanceName?: string,
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string }> {
+    chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
     const baseMetadata = metadata ?? {};
     // Meta first
     const client = await db.connect();
@@ -1574,6 +1581,7 @@ export const sendAgentTemplateAction = withDebug(
         const client = await db.connect();
         try {
             await client.query('BEGIN');
+            await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid });
 
             const whatsappContact = await findOrCreateWhatsappContact(client, {
                 workspaceId,
@@ -1585,28 +1593,40 @@ export const sendAgentTemplateAction = withDebug(
             const fullJid = whatsappContact.normalizedJid;
             const contactId = whatsappContact.contact.id;
 
-            // 2. Find or create the chat
-            let chatRes = await client.query(
-                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
-                [workspaceId, contactId]
-            );
             let chatId;
-            if (chatRes.rowCount && chatRes.rowCount > 0) {
-                chatId = chatRes.rows[0].id;
+            const activeChat = await findWhatsappChatByIdentity(client, {
+                workspaceId,
+                phoneOrJid: numberid,
+                statuses: ['gerais', 'atendimentos'],
+                preferOpen: true,
+            });
+
+            if (activeChat?.id) {
+                chatId = activeChat.id;
             } else {
-                const newChatId = randomUUID();
-                const protocol = buildChatProtocol(newChatId);
-                // For system agents, avoid setting agent_id (FK to users) to prevent constraint violations.
-                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
-                if (!chatLimitStatus.allowed) {
-                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                const closedChat = await findWhatsappChatByIdentity(client, {
+                    workspaceId,
+                    phoneOrJid: numberid,
+                    statuses: ['encerrados'],
+                });
+
+                if (closedChat?.id) {
+                    chatId = closedChat.id;
+                } else {
+                    const newChatId = randomUUID();
+                    const protocol = buildChatProtocol(newChatId);
+                    // For system agents, avoid setting agent_id (FK to users) to prevent constraint violations.
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
+                    const newChatRes = await client.query(
+                        `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4) RETURNING id`,
+                        [newChatId, workspaceId, contactId, protocol]
+                    );
+                    chatId = newChatRes.rows[0].id;
                 }
-                const newChatRes = await client.query(
-                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4) RETURNING id`,
-                    [newChatId, workspaceId, contactId, protocol]
-                );
-                chatId = newChatRes.rows[0].id;
             }
 
             // 3. Get API Config
@@ -1704,7 +1724,9 @@ export const sendAgentListAction = withDebug(
         try {
             await client.query('BEGIN');
 
-            let chatId = providedChatId;
+            let chatId = providedChatId
+                ? ((await resolveCanonicalWhatsappChatId(client, providedChatId)) || providedChatId)
+                : providedChatId;
             let fullJid: string;
 
             if (chatId) {
@@ -1726,6 +1748,8 @@ export const sendAgentListAction = withDebug(
                     throw new Error('Chat nao possui contato WhatsApp valido.');
                 }
             } else {
+                await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid! });
+
                 const whatsappContact = await findOrCreateWhatsappContact(client, {
                     workspaceId,
                     phoneOrJid: numberid!,
@@ -1736,33 +1760,40 @@ export const sendAgentListAction = withDebug(
                 const contactId = whatsappContact.contact.id;
                 fullJid = whatsappContact.normalizedJid;
 
-                const chatRes = await client.query(
-                    `SELECT id
-                     FROM chats
-                     WHERE workspace_id = $1
-                       AND contact_id = $2
-                       AND status IN ('gerais', 'atendimentos')
-                     LIMIT 1`,
-                    [workspaceId, contactId]
-                );
+                const activeChat = await findWhatsappChatByIdentity(client, {
+                    workspaceId,
+                    phoneOrJid: numberid!,
+                    statuses: ['gerais', 'atendimentos'],
+                    preferOpen: true,
+                });
 
-                if ((chatRes.rowCount ?? 0) > 0) {
-                    chatId = chatRes.rows[0].id;
+                if (activeChat?.id) {
+                    chatId = activeChat.id;
                 } else {
-                    const newChatId = randomUUID();
-                    const protocol = buildChatProtocol(newChatId);
-                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-                    const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
-                    if (!chatLimitStatus.allowed) {
-                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    const closedChat = await findWhatsappChatByIdentity(client, {
+                        workspaceId,
+                        phoneOrJid: numberid!,
+                        statuses: ['encerrados'],
+                    });
+
+                    if (closedChat?.id) {
+                        chatId = closedChat.id;
+                    } else {
+                        const newChatId = randomUUID();
+                        const protocol = buildChatProtocol(newChatId);
+                        const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                        const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                        if (!chatLimitStatus.allowed) {
+                            throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                        }
+                        const newChatRes = await client.query(
+                            `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
+                             VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
+                             RETURNING id`,
+                            [newChatId, workspaceId, contactId, protocol]
+                        );
+                        chatId = newChatRes.rows[0].id;
                     }
-                    const newChatRes = await client.query(
-                        `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
-                         VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
-                         RETURNING id`,
-                        [newChatId, workspaceId, contactId, protocol]
-                    );
-                    chatId = newChatRes.rows[0].id;
                 }
             }
 
@@ -1905,6 +1936,8 @@ export const startNewConversation = withDebug(
                     contactId = contactRes.rows[0].id;
                 }
             } else {
+                await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: phoneNumber });
+
                 const whatsappContact = await findOrCreateWhatsappContact(client, {
                     workspaceId,
                     phoneOrJid: phoneNumber,
@@ -1916,13 +1949,16 @@ export const startNewConversation = withDebug(
             }
 
             // 2. Find or create the chat
-            let chatRes = await client.query(
-                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos')`,
-                [workspaceId, contactId]
-            );
             let chatId;
-            if (chatRes.rowCount && chatRes.rowCount > 0) {
-                chatId = chatRes.rows[0].id;
+            const activeChat = await findWhatsappChatByIdentity(client, {
+                workspaceId,
+                phoneOrJid: phoneNumber,
+                statuses: ['gerais', 'atendimentos'],
+                preferOpen: true,
+            });
+
+            if (activeChat?.id) {
+                chatId = activeChat.id;
             } else {
                 const newChatId = randomUUID();
                 const protocol = buildChatProtocol(newChatId);
