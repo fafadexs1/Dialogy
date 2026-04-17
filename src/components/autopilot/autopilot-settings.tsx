@@ -2,7 +2,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, Save, Settings2, MessageSquare } from 'lucide-react';
@@ -53,167 +53,166 @@ export function AutopilotSettings({
     workspace
 }: AutopilotSettingsProps) {
     return (
-        <div className="space-y-6">
-            <Card className="p-6">
-                <div className="flex items-center gap-4 mb-6">
-                    <div className="p-3 bg-primary/10 rounded-xl">
-                        <Settings2 className="h-6 w-6 text-primary" />
+        <div className="space-y-6 max-w-4xl mx-auto">
+            <Card className="border-0 shadow-sm bg-white overflow-hidden">
+                <CardHeader className="border-b bg-slate-50/50 py-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-900 rounded-lg text-white">
+                            <Settings2 className="h-4 w-4" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-lg">Configurações Gerais</CardTitle>
+                            <CardDescription>Identidade e comportamento principal do agente.</CardDescription>
+                        </div>
                     </div>
-                    <div>
-                        <h2 className="text-xl font-semibold">Configurações Gerais</h2>
-                        <p className="text-sm text-muted-foreground">Personalize a identidade e o comportamento.</p>
-                    </div>
-                </div>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
+                    <div className="grid gap-6 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label className="text-sm font-bold text-slate-900">Nome do Agente</Label>
+                            <Input
+                                value={agentName}
+                                onChange={(e) => setAgentName(e.target.value)}
+                                placeholder="Ex: Consultor de Vendas"
+                                className="rounded-xl border-slate-200"
+                            />
+                        </div>
 
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <Label>Nome do Agente</Label>
-                        <Input
-                            value={agentName}
-                            onChange={(e) => setAgentName(e.target.value)}
-                            placeholder="Ex: Consultor de Vendas"
-                        />
+                        <div className="space-y-2">
+                            <Label className="text-sm font-bold text-slate-900">Modelo de IA</Label>
+                            <Select value={aiModel} onValueChange={setAiModel}>
+                                <SelectTrigger className="rounded-xl border-slate-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="rounded-xl">
+                                    <SelectItem value="googleai/gemini-2.0-flash" className="rounded-lg">
+                                        <div className="flex flex-col">
+                                            <span className="font-bold">Gemini 2.0 Flash</span>
+                                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Equilibrado (Recomendado)</span>
+                                        </div>
+                                    </SelectItem>
+                                    <SelectItem value="googleai/gemini-1.5-pro" className="rounded-lg">
+                                        <div className="flex flex-col">
+                                            <span className="font-bold">Gemini 1.5 Pro</span>
+                                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Alta capacidade</span>
+                                        </div>
+                                    </SelectItem>
+                                    <SelectItem value="googleai/gemini-3-flash-preview" className="rounded-lg">
+                                        <div className="flex flex-col">
+                                            <span className="font-bold">Gemini 3 Flash</span>
+                                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Experimental</span>
+                                        </div>
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
                     <div className="space-y-2">
-                        <Label>Modelo de IA</Label>
-                        <Select value={aiModel} onValueChange={setAiModel}>
-                            <SelectTrigger>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="googleai/gemini-3-flash-preview">
-                                    <div className="flex flex-col">
-                                        <span className="font-medium">Gemini 3 Flash (Preview)</span>
-                                        <span className="text-xs text-muted-foreground">Nova geracao, baixa latencia</span>
-                                    </div>
-                                </SelectItem>
-                                <SelectItem value="googleai/gemini-2.0-flash">
-                                    <div className="flex flex-col">
-                                        <span className="font-medium">Gemini 2.0 Flash</span>
-                                        <span className="text-xs text-muted-foreground">Mais rápido e eficiente (Recomendado)</span>
-                                    </div>
-                                </SelectItem>
-                                <SelectItem value="googleai/gemini-1.5-pro">
-                                    <div className="flex flex-col">
-                                        <span className="font-medium">Gemini 1.5 Pro</span>
-                                        <span className="text-xs text-muted-foreground">Maior capacidade de raciocínio</span>
-                                    </div>
-                                </SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label>Definição do Agente (Persona)</Label>
+                        <Label className="text-sm font-bold text-slate-900">Persona do Agente (Prompt de Sistema)</Label>
                         <Textarea
                             value={knowledgeBase}
                             onChange={(e) => setKnowledgeBase(e.target.value)}
-                            placeholder="Descreva quem é este agente, seu tom de voz e objetivo principal..."
-                            className="min-h-[100px]"
+                            placeholder="Descreva quem é este agente, seu tom de voz e como deve agir..."
+                            className="min-h-[120px] rounded-xl border-slate-200 resize-none"
                         />
-                        <p className="text-xs text-muted-foreground">
-                            Esta definição será usada como o prompt principal do sistema.
+                        <p className="text-[11px] text-slate-500 italic">
+                            Esta definição será usada como o núcleo da inteligência deste agente.
                         </p>
                     </div>
 
                     <div className="space-y-2">
-                        <Label>Chave da API Gemini (Integração)</Label>
+                        <Label className="text-sm font-bold text-slate-900">Chave Gemini (Personalizada)</Label>
                         <Input
                             type="password"
                             value={geminiApiKey}
                             onChange={(e) => setGeminiApiKey && setGeminiApiKey(e.target.value)}
-                            placeholder="Chave definida em Integrações"
+                            placeholder="Deixe vazio para usar a chave global"
+                            className="rounded-xl border-slate-200"
                         />
-                        <p className="text-xs text-muted-foreground">
-                            Esta chave é sincronizada com a página de Integrações. Deixe em branco para usar a configuração global do servidor, se houver.
-                        </p>
                     </div>
 
-                    <div className="pt-4 border-t">
-                        <div className="flex items-center justify-between">
+                    <div className="grid gap-4 pt-4 border-t">
+                        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             <div className="space-y-0.5">
-                                <Label className="text-base">Agente Ativo</Label>
-                                <p className="text-sm text-muted-foreground">Quando desativado, o agente não responderá a mensagens.</p>
+                                <Label className="text-sm font-bold text-slate-900">Status do Agente</Label>
+                                <p className="text-xs text-slate-500">Pausar interrompe todas as respostas da IA.</p>
                             </div>
                             <Switch checked={isActive} onCheckedChange={setIsActive} />
                         </div>
-                    </div>
 
-                    <div className="pt-4 border-t">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             <div className="space-y-0.5">
-                                <Label className="text-base">Agente Privado</Label>
-                                <p className="text-sm text-muted-foreground">Se ativado, apenas você poderá ver e usar este agente.</p>
+                                <Label className="text-sm font-bold text-slate-900">Privacidade</Label>
+                                <p className="text-xs text-slate-500">Agentes privados são visíveis apenas para você.</p>
                             </div>
                             <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
                         </div>
-                    </div>
 
-                    <div className="pt-4 border-t">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             <div className="space-y-0.5">
-                                <Label className="text-base">Agente Principal</Label>
-                                <p className="text-sm text-muted-foreground">O agente padrão será usado se nenhum outro for específico para o usuário.</p>
+                                <Label className="text-sm font-bold text-slate-900">Agente Principal</Label>
+                                <p className="text-xs text-slate-500">O padrão será usado se nenhum outro for especificado.</p>
                             </div>
                             <Switch
                                 checked={isPrimary}
-                                onCheckedChange={(checked) => {
-                                    if (checked) onSetPrimary();
-                                }}
-                                disabled={isPrimary} // Cannot unset primary directly, another must take its place or be set
+                                onCheckedChange={(checked) => checked && onSetPrimary()}
+                                disabled={isPrimary}
                             />
                         </div>
                     </div>
-                </div>
+                </CardContent>
             </Card>
 
-            <Card className="p-6">
-                <div className="flex items-center gap-4 mb-6">
-                    <div className="p-3 bg-blue-500/10 rounded-xl">
-                        <MessageSquare className="h-6 w-6 text-blue-500" />
+            <Card className="border-0 shadow-sm bg-white overflow-hidden">
+                <CardHeader className="border-b bg-slate-50/50 py-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-600 rounded-lg text-white">
+                            <MessageSquare className="h-4 w-4" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-lg">Mensagens Globais</CardTitle>
+                            <CardDescription>Configuradas no nível do Workspace.</CardDescription>
+                        </div>
                     </div>
-                    <div>
-                        <h2 className="text-xl font-semibold">Mensagens Globais</h2>
-                        <p className="text-sm text-muted-foreground">Definidas nas configurações do workspace.</p>
+                </CardHeader>
+                <CardContent className="p-6">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Encerramento</Label>
+                            <p className="text-sm text-slate-700 italic">"{workspace?.closeMessageTemplate || 'Não definida'}"</p>
+                        </div>
+                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                            <Label className="text-[10px] uppercase font-bold text-slate-400">Transferência</Label>
+                            <p className="text-sm text-slate-700 italic">"{workspace?.transferTeamMessageTemplate || 'Não definida'}"</p>
+                        </div>
                     </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                    <div className="p-4 bg-muted/30 rounded-lg border space-y-2">
-                        <Label className="text-muted-foreground text-xs uppercase font-bold tracking-wider">Encerramento</Label>
-                        <p className="text-sm italic text-foreground/80">"{workspace?.closeMessageTemplate || 'Não definida'}"</p>
+                    <div className="mt-4 flex justify-end">
+                        <Link href="/settings/workspace" className="text-xs font-bold text-teal-600 hover:underline">
+                            Editar Mensagens do Workspace &rarr;
+                        </Link>
                     </div>
-                    <div className="p-4 bg-muted/30 rounded-lg border space-y-2">
-                        <Label className="text-muted-foreground text-xs uppercase font-bold tracking-wider">Transferência</Label>
-                        <p className="text-sm italic text-foreground/80">"{workspace?.transferTeamMessageTemplate || 'Não definida'}"</p>
-                    </div>
-                </div>
-                <div className="mt-4 flex justify-end">
-                    <Link href="/settings/workspace" className="text-sm font-medium text-primary hover:underline flex items-center gap-1">
-                        Editar mensagens <span aria-hidden="true">&rarr;</span>
-                    </Link>
-                </div>
+                </CardContent>
             </Card>
 
-            <div className="flex justify-end gap-3 pt-4">
-                <Button onClick={onSave} disabled={isSaving} className="min-w-[120px] shadow-md">
-                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    Salvar Alterações
-                </Button>
-            </div>
-
-            <Card className="p-6 border-red-200 bg-red-50/50 dark:bg-red-950/10">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h3 className="text-lg font-semibold text-red-600 dark:text-red-400">Zona de Perigo</h3>
-                        <p className="text-sm text-muted-foreground">Excluir este agente removerá todas as suas configurações e regras.</p>
+            <Card className="border-red-100 bg-red-50/30 overflow-hidden">
+                <CardContent className="p-6">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="text-center sm:text-left">
+                            <h3 className="text-base font-bold text-red-700 flex items-center justify-center sm:justify-start gap-2">
+                                Zona de Perigo
+                            </h3>
+                            <p className="text-xs text-red-600/80">
+                                A remoção do agente é permanente e apaga todo o conhecimento indexado.
+                            </p>
+                        </div>
+                        <Button variant="destructive" onClick={onDelete} className="rounded-full px-8 shadow-sm">
+                            Excluir Este Agente
+                        </Button>
                     </div>
-                    <Button variant="destructive" onClick={onDelete}>
-                        Excluir Agente
-                    </Button>
-                </div>
+                </CardContent>
             </Card>
         </div>
     );
 }
+

@@ -1,411 +1,328 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import type { AutopilotConfig, AutopilotUsageLog, KnowledgeBaseDocument, NexusFlowInstance, Workspace } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import type { AutopilotConfig, Workspace } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import {
     getAutopilotConfig,
-    saveAutopilotConfig,
-    deleteAutopilotRule,
-    toggleAutopilotRule,
-    getAutopilotUsageLogs,
     createAutopilotAgent,
-    deleteAutopilotAgent,
-    setPrimaryAutopilotAgent
 } from '@/actions/autopilot';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { cn } from '@/lib/utils';
+import {
+    Loader2,
+    Bot,
+    Plus,
+    ShieldCheck,
+    Globe2,
+    Lock,
+    Sparkles,
+    ArrowRight,
+    BrainCircuit,
+    Power,
+} from 'lucide-react';
 
-// UI Components
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Loader2, LayoutDashboard, Database, Zap, Settings2 } from 'lucide-react';
+type AgentVisibilityMode = 'public' | 'private';
 
-// Sub-components
-import { AutopilotHeader } from '@/components/autopilot/autopilot-header';
-import { AutopilotStats } from '@/components/autopilot/autopilot-stats';
-import { AutopilotKnowledge } from '@/components/autopilot/autopilot-knowledge';
-import { AutopilotRules } from '@/components/autopilot/autopilot-rules';
-import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
-import { AutomationForm } from '@/components/autopilot/automation-form';
+const DEFAULT_MODEL = 'googleai/gemini-2.0-flash';
+
+function getModelLabel(model?: string | null) {
+    switch (model) {
+        case 'googleai/gemini-3-flash-preview':
+            return 'Gemini 3 Flash';
+        case 'googleai/gemini-1.5-pro':
+            return 'Gemini 1.5 Pro';
+        case 'googleai/gemini-2.0-flash':
+        default:
+            return 'Gemini 2.0 Flash';
+    }
+}
 
 export default function AutopilotPage() {
+    const router = useRouter();
     const { toast } = useToast();
     const user = useCurrentUser();
 
-    // State
     const [loading, setLoading] = useState(true);
-    const [config, setConfig] = useState<AutopilotConfig | null>(null);
-    const [instances, setInstances] = useState<NexusFlowInstance[]>([]);
-    const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
     const [agents, setAgents] = useState<AutopilotConfig[]>([]);
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
-    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-    const [hasGlobalKey, setHasGlobalKey] = useState(false);
 
-    // Form/Edit States
-    const [agentName, setAgentName] = useState('');
-    const [aiModel, setAiModel] = useState('googleai/gemini-2.0-flash');
-    const [isActive, setIsActive] = useState(false);
-    const [isPrivate, setIsPrivate] = useState(false);
-    const [isPrimary, setIsPrimary] = useState(false);
-    const [geminiApiKey, setGeminiApiKey] = useState('');
-    const [knowledgeBase, setKnowledgeBase] = useState('');
-    const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
+    const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+    const [newAgentName, setNewAgentName] = useState('');
+    const [newAgentVisibility, setNewAgentVisibility] = useState<AgentVisibilityMode>('public');
 
-    // UI States
-    const [isSaving, setIsSaving] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
-    const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
-    const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
-
-    const estimateTokens = useCallback((content: string) => {
-        const normalized = content?.trim() || '';
-        if (normalized.length === 0) return 0;
-        return Math.max(1, Math.ceil(normalized.length / 4));
-    }, []);
-
-    const fetchData = useCallback(async (preferredAgentId?: string) => {
+    const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
 
         setLoading(true);
         try {
-            const data = await getAutopilotConfig(user.activeWorkspaceId, preferredAgentId || selectedAgentId || undefined);
+            const data = await getAutopilotConfig(user.activeWorkspaceId);
 
             if (data.error) {
-                toast({ title: "Erro ao carregar", description: data.error, variant: 'destructive' });
+                toast({ title: 'Erro ao carregar', description: data.error, variant: 'destructive' });
                 return;
             }
 
             setAgents(data.agents || []);
-            setConfig(data.config);
-            setInstances(data.rules || []);
             setWorkspace(data.workspace || null);
-            setHasGlobalKey(!!data.hasGlobalKey);
-
-            if (data.config) {
-                setSelectedAgentId(data.config.id);
-                setAgentName(data.config.name || '');
-                setAiModel(data.config.ai_model || 'googleai/gemini-2.0-flash');
-                setIsActive(Boolean(data.config.is_active));
-                setIsPrivate(Boolean(data.config.is_private));
-                setIsPrimary(Boolean(data.config.is_primary));
-                setGeminiApiKey(data.config.gemini_api_key || '');
-                setKnowledgeBase(data.config.knowledge_base || '');
-                setKnowledgeDocuments(data.config.knowledge_base_documents || []);
-
-                // Fetch stats separately to not block UI
-                getAutopilotUsageLogs(data.config.id).then(logsData => {
-                    setUsageLogs(logsData.logs || []);
-                });
-            } else {
-                // No config / No agents
-                setSelectedAgentId(null);
-                setAgentName('');
-                setUsageLogs([]);
-            }
         } finally {
             setLoading(false);
         }
-    }, [user?.activeWorkspaceId, selectedAgentId, toast]);
+    }, [toast, user?.activeWorkspaceId]);
 
-    // Initial Load
     useEffect(() => {
         if (user?.activeWorkspaceId) {
             fetchData();
         }
-    }, [user?.activeWorkspaceId, fetchData]);
+    }, [fetchData, user?.activeWorkspaceId]);
 
-    // --- Actions ---
+    const headerStats = useMemo(() => {
+        const activeAgents = agents.filter((agent) => agent.is_active).length;
+        const privateAgents = agents.filter((agent) => agent.is_private).length;
+
+        return [
+            { label: 'Agentes', value: String(agents.length).padStart(2, '0') },
+            { label: 'Ativos', value: String(activeAgents).padStart(2, '0') },
+            { label: 'Privados', value: String(privateAgents).padStart(2, '0') },
+        ];
+    }, [agents]);
+
+    const openCreateDialog = useCallback(() => {
+        setNewAgentName(`Agente ${agents.length + 1}`);
+        setNewAgentVisibility('public');
+        setIsCreateDialogOpen(true);
+    }, [agents.length]);
 
     const handleCreateAgent = async () => {
         if (!user?.activeWorkspaceId) return;
-        const nextName = `Agente ${agents.length + 1}`;
-        const result = await createAutopilotAgent(user.activeWorkspaceId, nextName);
-        if (result.success && result.id) {
-            toast({ title: 'Agente criado!', description: 'Configure o novo agente.' });
-            fetchData(result.id);
-        } else {
-            toast({ title: 'Erro ao criar', description: result.error, variant: 'destructive' });
-        }
-    };
 
-    const handleDeleteAgent = async () => {
-        if (!config || !confirm('Tem certeza? Isso apagará este agente e todas as suas automações. Esta ação não pode ser desfeita.')) return;
-
-        const result = await deleteAutopilotAgent(config.id);
-        if (result.success) {
-            toast({ title: 'Agente excluído' });
-            // Select another agent or reset
-            const remaining = agents.filter(a => a.id !== config.id);
-            if (remaining.length > 0) {
-                fetchData(remaining[0].id);
-            } else {
-                // Determine no agents left state
-                setConfig(null);
-                setAgents([]);
-                setSelectedAgentId(null);
-            }
-        } else {
-            toast({ title: 'Erro ao excluir', description: result.error, variant: 'destructive' });
-        }
-    };
-
-    const handleAgentSelect = (id: string) => {
-        fetchData(id);
-    };
-
-    const handleSetPrimary = async () => {
-        if (!config || !user?.activeWorkspaceId) return;
-        const result = await setPrimaryAutopilotAgent(config.id);
-        if (result.success) {
-            toast({ title: 'Agente definido como principal' });
-            fetchData(config.id);
-        } else {
-            toast({ title: 'Erro ao definir principal', description: result.error, variant: 'destructive' });
-        }
-    };
-
-    const handleSaveConfig = async () => {
-        if (!config || !user?.activeWorkspaceId) return;
-        setIsSaving(true);
-
+        setIsCreatingAgent(true);
         try {
-            const formData = new FormData();
-            formData.append('workspaceId', user.activeWorkspaceId);
-            formData.append('configId', config.id);
-            formData.append('agentName', agentName);
-            formData.append('aiModel', aiModel);
-            formData.append('geminiApiKey', geminiApiKey);
-            formData.append('isActive', isActive ? 'on' : 'off');
-            formData.append('isPrivate', isPrivate ? 'on' : 'off');
-            formData.append('knowledgeBase', knowledgeBase);
-            // Re-serialize documents
-            formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
+            const result = await createAutopilotAgent(
+                user.activeWorkspaceId,
+                newAgentName.trim() || `Agente ${agents.length + 1}`,
+                newAgentVisibility === 'private'
+            );
 
-            // We need to adapt the saveAutopilotConfig to accept FormData or object
-            // The existing action takes FormData.
-            const result = await saveAutopilotConfig({ success: false }, formData);
-
-            if (result.success) {
-                toast({ title: 'Configurações Salvas!' });
-                fetchData(config.id);
-            } else {
-                toast({ title: 'Erro ao salvar', description: result.error, variant: 'destructive' });
-            }
-        } catch (e: any) {
-            toast({ title: 'Erro inesperado', description: e.message, variant: 'destructive' });
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    // --- Knowledge Actions ---
-
-    const handleKnowledgeUpload = async (files: FileList | null) => {
-        if (!files || files.length === 0) return;
-        setIsUploading(true);
-        try {
-            const additions: KnowledgeBaseDocument[] = [];
-            for (const file of Array.from(files)) {
-                const text = (await file.text()).trim();
-                additions.push({
-                    id: globalThis.crypto?.randomUUID?.() || `${file.name}-${Date.now()}`,
-                    name: file.name,
-                    content: text,
-                    tokens: estimateTokens(text),
+            if (result.success && result.id) {
+                toast({
+                    title: 'Agente criado',
+                    description: 'Redirecionando para configuração...',
                 });
+                setIsCreateDialogOpen(false);
+                router.push(`/autopilot/${result.id}`);
+            } else {
+                toast({ title: 'Erro ao criar', description: result.error, variant: 'destructive' });
             }
-            setKnowledgeDocuments(prev => [...prev, ...additions]);
-            toast({ title: 'Arquivos carregados', description: 'Não esqueça de salvar as alterações.' });
-        } catch (error) {
-            toast({ title: 'Falha ao ler arquivos', variant: 'destructive' });
         } finally {
-            setIsUploading(false);
+            setIsCreatingAgent(false);
         }
     };
 
-    const handleAddManualDoc = () => {
-        const newDoc: KnowledgeBaseDocument = {
-            id: globalThis.crypto?.randomUUID?.() || `manual-${Date.now()}`,
-            name: `Nota ${(knowledgeDocuments.length + 1).toString().padStart(2, '0')}`,
-            content: '',
-            tokens: 0,
-
-        };
-        setKnowledgeDocuments(prev => [...prev, newDoc]);
-    };
-
-    const handleUpdateDoc = (id: string, content: string) => {
-        setKnowledgeDocuments(prev => prev.map(doc => doc.id === id ? { ...doc, content, tokens: estimateTokens(content) } : doc));
-    };
-
-    const handleUpdateDocName = (id: string, name: string) => {
-        setKnowledgeDocuments(prev => prev.map(doc => doc.id === id ? { ...doc, name } : doc));
-    };
-
-    const handleRemoveDoc = (id: string) => {
-        setKnowledgeDocuments(prev => prev.filter(doc => doc.id !== id));
-    };
-
-    // --- Rules Actions ---
-
-    const handleToggleRule = async (id: string, enabled: boolean) => {
-        const result = await toggleAutopilotRule(id, enabled);
-        if (result.success) {
-            setInstances(prev => prev.map(r => r.id === id ? { ...r, enabled } : r));
-            toast({ title: enabled ? 'Regra ativada' : 'Regra desativada' });
-        }
-    };
-
-    const handleDeleteRule = async (id: string) => {
-        if (!confirm('Excluir esta regra permanentemente?')) return;
-        const result = await deleteAutopilotRule(id);
-        if (result.success) {
-            setInstances(prev => prev.filter(r => r.id !== id));
-            toast({ title: 'Regra removida' });
-        }
-    };
-
-    // --- Render ---
-
-    if (loading && !config) {
-        return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
+    if (loading && agents.length === 0) {
+        return (
+            <div className="flex h-full items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
     }
 
     return (
-        <div className="flex flex-col h-full bg-muted/5">
-            <AutopilotHeader
-                agents={agents}
-                selectedAgentId={selectedAgentId}
-                onAgentSelect={handleAgentSelect}
-                onCreateAgent={handleCreateAgent}
-            />
-
-            <main className="flex-1 overflow-hidden p-4 sm:p-6">
-                {!config ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
-                        <div className="h-24 w-24 rounded-full bg-blue-500/10 flex items-center justify-center mb-6">
-                            <Zap className="h-12 w-12 text-blue-500" />
+        <div className="flex h-full flex-col bg-slate-50/50">
+            <section className="bg-white border-b">
+                <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
+                    <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="max-w-3xl space-y-4">
+                            <div className="inline-flex items-center gap-2 rounded-full bg-teal-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-teal-700 border border-teal-100">
+                                <Sparkles className="h-3 w-3" />
+                                Dialogy Autopilot
+                            </div>
+                            <div className="space-y-2">
+                                <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">
+                                    Seus Agentes de IA
+                                </h1>
+                                <p className="text-lg text-slate-500 leading-relaxed">
+                                    Gerencie e configure agentes inteligentes para automatizar seu atendimento. 
+                                    Cada agente pode ter sua própria base de conhecimento e habilidades únicas.
+                                </p>
+                            </div>
+                            <Button onClick={openCreateDialog} size="lg" className="rounded-full gap-2 px-8 shadow-sm">
+                                <Plus className="h-5 w-5" />
+                                Novo Agente
+                            </Button>
                         </div>
-                        <h2 className="text-2xl font-bold mb-2">Vamos criar seu primeiro Agente?</h2>
-                        <p className="text-muted-foreground mb-6">Você ainda não tem um copiloto configurado. Clique no botão acima ou abaixo para começar.</p>
-                        <button onClick={handleCreateAgent} className="px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium shadow-lg hover:shadow-xl transition-all">
-                            Criar Agente Agora
-                        </button>
+
+                        <div className="flex gap-4">
+                            {headerStats.map((stat) => (
+                                <div key={stat.label} className="bg-slate-100/50 rounded-2xl p-4 min-w-[120px] border border-slate-200/50">
+                                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                        {stat.label}
+                                    </div>
+                                    <div className="mt-1 text-2xl font-bold text-slate-900">{stat.value}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <main className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col px-4 py-8 sm:px-6 lg:px-8">
+                {agents.length > 0 ? (
+                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                        {agents.map((agent) => (
+                            <Card
+                                key={agent.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => router.push(`/autopilot/${agent.id}`)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        router.push(`/autopilot/${agent.id}`);
+                                    }
+                                }}
+                                className="group relative overflow-hidden border-slate-200 bg-white hover:border-teal-400 hover:shadow-xl hover:shadow-teal-900/5 transition-all duration-300 cursor-pointer rounded-2xl"
+                            >
+                                <CardContent className="p-6 space-y-6">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white group-hover:bg-teal-600 transition-colors">
+                                            <BrainCircuit className="h-6 w-6" />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {agent.is_primary && (
+                                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]">
+                                                    Principal
+                                                </Badge>
+                                            )}
+                                            <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 text-[10px]">
+                                                {agent.is_private ? <Lock className="h-3 w-3 mr-1" /> : <Globe2 className="h-3 w-3 mr-1" />}
+                                                {agent.is_private ? 'Privado' : 'Público'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <h3 className="text-xl font-bold text-slate-900 group-hover:text-teal-700 transition-colors">
+                                            {agent.name}
+                                        </h3>
+                                        <p className="text-sm text-slate-500 font-medium">
+                                            {getModelLabel(agent.ai_model)}
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                                            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Status</div>
+                                            <div className="mt-1 flex items-center gap-1.5 font-bold text-sm">
+                                                <div className={cn("h-2 w-2 rounded-full", agent.is_active ? "bg-emerald-500" : "bg-slate-300")} />
+                                                {agent.is_active ? 'ATIVO' : 'PAUSADO'}
+                                            </div>
+                                        </div>
+                                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                                            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Documentos</div>
+                                            <div className="mt-1 font-bold text-sm">
+                                                {agent.knowledge_base_documents?.length || 0} docs
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-2 flex items-center justify-between text-xs font-bold text-slate-400">
+                                        <span>Última alteração recente</span>
+                                        <span className="flex items-center gap-1 text-teal-600 group-hover:translate-x-1 transition-transform">
+                                            Configurar <ArrowRight className="h-4 w-4" />
+                                        </span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
                     </div>
                 ) : (
-                    <Tabs defaultValue="overview" className="h-full flex flex-col">
-                        <div className="flex-shrink-0 mb-6">
-                            <TabsList className="grid w-full grid-cols-4 max-w-2xl bg-muted/50 p-1">
-                                <TabsTrigger value="overview" className="gap-2"><LayoutDashboard className="h-4 w-4" /> Visão Geral</TabsTrigger>
-                                <TabsTrigger value="knowledge" className="gap-2"><Database className="h-4 w-4" /> Conhecimento</TabsTrigger>
-                                <TabsTrigger value="rules" className="gap-2"><Zap className="h-4 w-4" /> Habilidades</TabsTrigger>
-                                <TabsTrigger value="settings" className="gap-2"><Settings2 className="h-4 w-4" /> Ajustes</TabsTrigger>
-                            </TabsList>
+                    <div className="flex flex-col items-center justify-center py-20 px-6 text-center bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                        <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                            <Bot className="h-10 w-10 text-slate-300" />
                         </div>
-
-                        <div className="flex-1 overflow-y-auto pr-2 min-h-0">
-                            <TabsContent value="overview" className="mt-0 space-y-6">
-                                <AutopilotStats usageLogs={usageLogs} loading={loading} />
-                                {/* Quick Toggle for convenience */}
-                                <div className="flex items-center justify-between p-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl text-white shadow-lg">
-                                    <div>
-                                        <h3 className="text-xl font-bold mb-1">Status do Agente</h3>
-                                        <p className="opacity-90">{isActive ? 'O agente está operando normalmente.' : 'O agente está pausado e não responderá.'}</p>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            setIsActive(!isActive);
-                                            // Trigger save immediately for UX or require "Save" button?
-                                            // Let's rely on global save for simplicity, but update UI
-                                            toast({ title: 'Alteração pendente. Clique em Salvar na aba Ajustes para persistir.', variant: 'default' });
-                                        }}
-                                        className={`px-4 py-2 rounded-lg font-semibold transition-colors ${isActive ? 'bg-white text-blue-600' : 'bg-black/30 text-white hover:bg-black/40'}`}
-                                    >
-                                        {isActive ? 'Ativado' : 'Desativado'}
-                                    </button>
-                                </div>
-                            </TabsContent>
-
-                            <TabsContent value="knowledge" className="mt-0 h-full">
-                                <AutopilotKnowledge
-                                    documents={knowledgeDocuments}
-                                    onUpload={handleKnowledgeUpload}
-                                    onRemove={handleRemoveDoc}
-                                    onUpdateContent={handleUpdateDoc}
-                                    onUpdateName={handleUpdateDocName}
-                                    onAddManual={handleAddManualDoc}
-                                    isUploading={isUploading}
-                                />
-                                <div className="fixed bottom-6 right-6 z-50">
-                                    <button
-                                        onClick={handleSaveConfig}
-                                        disabled={isSaving}
-                                        className="h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-2xl flex items-center justify-center hover:scale-105 transition-transform"
-                                        title="Salvar Alterações"
-                                    >
-                                        {isSaving ? <Loader2 className="h-6 w-6 animate-spin" /> : <Database className="h-6 w-6" />}
-                                    </button>
-                                </div>
-                            </TabsContent>
-
-                            <TabsContent value="rules" className="mt-0 pb-20">
-                                <AutopilotRules
-                                    rules={instances}
-                                    onAdd={() => {
-                                        setEditingRule(null);
-                                        setIsRuleModalOpen(true);
-                                    }}
-                                    onEdit={(rule) => {
-                                        setEditingRule(rule);
-                                        setIsRuleModalOpen(true);
-                                    }}
-                                    onDelete={handleDeleteRule}
-                                    onToggle={handleToggleRule}
-                                />
-                            </TabsContent>
-
-                            <TabsContent value="settings" className="mt-0 pb-10">
-                                <AutopilotSettings
-                                    agentName={agentName}
-                                    setAgentName={setAgentName}
-                                    aiModel={aiModel}
-                                    setAiModel={setAiModel}
-                                    knowledgeBase={knowledgeBase}
-                                    setKnowledgeBase={setKnowledgeBase}
-                                    isActive={isActive}
-                                    setIsActive={setIsActive}
-                                    isPrivate={isPrivate}
-                                    setIsPrivate={setIsPrivate}
-                                    isPrimary={isPrimary}
-                                    onSetPrimary={handleSetPrimary}
-                                    geminiApiKey={geminiApiKey}
-                                    setGeminiApiKey={setGeminiApiKey}
-                                    hasGlobalKey={hasGlobalKey}
-                                    onSave={handleSaveConfig}
-                                    isSaving={isSaving}
-                                    onDelete={handleDeleteAgent}
-                                    workspace={workspace}
-                                />
-                            </TabsContent>
-                        </div>
-                    </Tabs>
+                        <h2 className="text-2xl font-bold text-slate-900 mb-2">Nenhum agente criado</h2>
+                        <p className="text-slate-500 max-w-sm mb-8">
+                            Comece criando seu primeiro agente inteligente para automatizar seu workflow.
+                        </p>
+                        <Button onClick={openCreateDialog} size="lg" className="rounded-full px-10">
+                            Criar Primeiro Agente
+                        </Button>
+                    </div>
                 )}
             </main>
 
-            <Dialog open={isRuleModalOpen} onOpenChange={setIsRuleModalOpen}>
-                <DialogContent className="max-w-2xl h-[85vh] p-0 gap-0">
-                    {config && (
-                        <AutomationForm
-                            configId={config.id}
-                            instance={editingRule}
-                            onClose={() => setIsRuleModalOpen(false)}
-                            onSuccess={() => {
-                                setIsRuleModalOpen(false);
-                                fetchData(config.id); // Refresh rules list
-                            }}
-                        />
-                    )}
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <DialogContent className="sm:max-w-[425px] rounded-3xl p-0 overflow-hidden border-0 shadow-2xl">
+                    <DialogHeader className="p-6 bg-slate-900 text-white">
+                        <DialogTitle className="text-xl font-bold">Novo Agente</DialogTitle>
+                        <DialogDescription className="text-slate-400">
+                            Configure o nome e a visibilidade básica.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="p-6 space-y-6">
+                        <div className="space-y-2">
+                            <Label htmlFor="new-agent-name" className="text-slate-900 font-bold">Nome do Agente</Label>
+                            <Input
+                                id="new-agent-name"
+                                value={newAgentName}
+                                onChange={(e) => setNewAgentName(e.target.value)}
+                                placeholder="Ex: Atendimento Comercial"
+                                className="rounded-xl border-slate-200 h-11"
+                            />
+                        </div>
+
+                        <div className="space-y-3">
+                            <Label className="text-slate-900 font-bold">Visibilidade</Label>
+                            <RadioGroup
+                                value={newAgentVisibility}
+                                onValueChange={(v) => setNewAgentVisibility(v as AgentVisibilityMode)}
+                                className="grid gap-4"
+                            >
+                                <Label className="flex items-center gap-4 rounded-xl border border-slate-200 p-4 cursor-pointer hover:bg-slate-50 transition-colors [&:has(button[data-state=checked])]:border-teal-500 [&:has(button[data-state=checked])]:bg-teal-50/30">
+                                    <RadioGroupItem value="public" id="public" />
+                                    <div className="space-y-0.5">
+                                        <div className="font-bold text-slate-900">Público</div>
+                                        <div className="text-xs text-slate-500">Visível para todos no workspace</div>
+                                    </div>
+                                </Label>
+                                <Label className="flex items-center gap-4 rounded-xl border border-slate-200 p-4 cursor-pointer hover:bg-slate-50 transition-colors [&:has(button[data-state=checked])]:border-teal-500 [&:has(button[data-state=checked])]:bg-teal-50/30">
+                                    <RadioGroupItem value="private" id="private" />
+                                    <div className="space-y-0.5">
+                                        <div className="font-bold text-slate-900">Privado</div>
+                                        <div className="text-xs text-slate-500">Apenas você pode ver e usar</div>
+                                    </div>
+                                </Label>
+                            </RadioGroup>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="p-6 border-t bg-slate-50">
+                        <Button variant="ghost" onClick={() => setIsCreateDialogOpen(false)} className="rounded-full">
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleCreateAgent} disabled={isCreatingAgent} className="rounded-full px-8">
+                            {isCreatingAgent ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                            Criar Agente
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

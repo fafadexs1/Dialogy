@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 
 const rootDir = process.cwd();
 const srcDir = path.join(rootDir, 'src');
+const serverOnlyStubPath = path.join(rootDir, 'scripts', 'server-only-stub.js');
 
 function resolveSourceAlias(importPath) {
   const basePath = path.join(srcDir, importPath.slice(2));
@@ -47,6 +48,10 @@ await build({
     {
       name: 'resolve-path-alias',
       setup(buildContext) {
+        buildContext.onResolve({ filter: /^server-only$/ }, () => ({
+          path: serverOnlyStubPath,
+        }));
+
         buildContext.onResolve({ filter: /^@\// }, (args) => ({
           path: resolveSourceAlias(args.path),
         }));

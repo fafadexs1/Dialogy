@@ -11,6 +11,8 @@
     "start": "next start -p 9045",
     "worker": "tsx src/worker.ts",
     "worker:ai": "tsx src/worker-ai.ts",
+    "dev:worker": "tsx --watch src/worker.ts",
+    "dev:worker:ai": "tsx --watch src/worker-ai.ts",
     "worker:build": "node scripts/build-worker.mjs",
     "worker:ai:build": "node scripts/build-worker-ai.mjs",
     "docker:release": "powershell -ExecutionPolicy Bypass -File scripts/docker-release.ps1",
