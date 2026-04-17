@@ -1,5 +1,3 @@
-import 'server-only';
-
 type LogActionInput = {
   workspaceId?: string | null;
   userId?: string | null;

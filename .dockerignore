@@ -1,4 +1,3 @@
-Dockerfile
 # dependencies
 node_modules
 .pnp
@@ -47,6 +46,26 @@ ffmpeg-2026-*
 .temp_ag_kit
 .genkit
 .gemini
+.idx
+.vscode
+
+# repository-only directories
+tests
+docs
+delivery-app
+
+# local artifacts
+*.bak
+*.log
+errors.txt
+lint_log.txt
+s3_error.txt
+temp_*
+test-*.ts
+test-out.json
+typecheck_log.txt
+webhook_debug.log
+[Provide the ABSOLUTE, FULL path to the file being modified]
 
 # git
 .git

@@ -1,5 +1,5 @@
 import { withDebug } from '@/lib/observability/logger';
-import { fetchEvolutionAPI } from '@/actions/evolution-api';
+import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 
 interface TemplateComponent {
     type: string;

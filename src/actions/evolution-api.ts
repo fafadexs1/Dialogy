@@ -6,8 +6,8 @@ import { revalidatePath } from 'next/cache';
 import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig, EvolutionInstanceSettings } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
-import { resilientFetch } from '@/lib/http/resilient-fetch';
 import { buildEvolutionWebhookUrl, getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
+import { resilientFetch } from '@/lib/http/resilient-fetch';
 import {
     buildTelegramWebhookUrl,
     deleteTelegramWebhook,

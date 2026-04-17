@@ -1,14 +1,15 @@
-import 'server-only';
-
 import { db } from '@/lib/db';
 import { logAction } from '@/lib/observability/logger';
+import { executeMarketingAutoClose, executeQueueAutoClose } from '@/services/chat/auto-close';
 import { dispatchMessageToWebhooksById } from '@/services/webhook-dispatcher';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import type {
+  MarketingAutoClosePayload,
   QueueJobRecord,
   QueueJobType,
+  QueueAutoClosePayload,
   WhatsappSendPayload,
   WebhookOutboundPayload,
   AnalyticsEventPayload,
@@ -67,6 +68,32 @@ const HANDLERS: Record<QueueJobType, QueueHandler> = {
     }
     await dispatchMessageToWebhooksById(payload.chatId, payload.messageId, payload.instanceName);
   },
+  queue_auto_close: async (job) => {
+    const payload = job.payload as QueueAutoClosePayload;
+    if (!payload?.chatId || !payload?.workspaceId || !payload?.lastIncomingAt) {
+      throw new Error('Invalid queue_auto_close payload.');
+    }
+
+    await executeQueueAutoClose({
+      chatId: payload.chatId,
+      workspaceId: payload.workspaceId,
+      lastIncomingAt: new Date(payload.lastIncomingAt),
+      autoCloseMs: payload.autoCloseMs,
+    });
+  },
+  marketing_auto_close: async (job) => {
+    const payload = job.payload as MarketingAutoClosePayload;
+    if (!payload?.chatId || !payload?.workspaceId || !payload?.marketingSentAt) {
+      throw new Error('Invalid marketing_auto_close payload.');
+    }
+
+    await executeMarketingAutoClose({
+      chatId: payload.chatId,
+      workspaceId: payload.workspaceId,
+      marketingSentAt: new Date(payload.marketingSentAt),
+      autoCloseMs: payload.autoCloseMs,
+    });
+  },
   analytics_event: async (job) => {
     const payload = job.payload as AnalyticsEventPayload;
     await logAction({
@@ -109,4 +136,28 @@ export async function handleQueueJob(job: QueueJobRecord): Promise<void> {
     throw new Error(`No handler registered for job type ${job.type}`);
   }
   await handler(job);
+}
+
+export async function handleQueueJobFailure(job: QueueJobRecord, error: unknown): Promise<void> {
+  if (job.type !== 'whatsapp_send') {
+    return;
+  }
+
+  const payload = job.payload as WhatsappSendPayload;
+  if (!payload?.messageId) {
+    return;
+  }
+
+  await db.query(
+    `UPDATE messages
+     SET api_message_status = $1,
+         updated_at = NOW()
+     WHERE id = $2`,
+    ['FAILED', payload.messageId]
+  );
+
+  console.error(
+    `[QUEUE] whatsapp_send failed for message ${payload.messageId}:`,
+    error instanceof Error ? error.message : error
+  );
 }

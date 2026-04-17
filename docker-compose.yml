@@ -1,13 +1,51 @@
-version: '3'
-
 services:
-  app:
-    container_name: dialogy-app
+  dialogy:
+    image: ${DIALOGY_IMAGE_REPO:-fafadexs/dialogy}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
     build:
-      context: .
-      dockerfile: Dockerfile
-    restart: always
-    ports:
-      - 9045:9045
+      context: ./
+      dockerfile: ./Dockerfile
+      target: runner
+    restart: unless-stopped
+    init: true
     env_file:
       - .env
+    environment:
+      NODE_ENV: production
+      PORT: 9045
+      QUEUE_MODE: enqueue
+      QUEUE_ENABLED_JOBS: whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close
+    ports:
+      - "9045:9045"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:9045/api/build-id').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      timeout: 5s
+      interval: 30s
+      retries: 5
+      start_period: 40s
+    stop_grace_period: 30s
+
+  worker:
+    image: ${DIALOGY_WORKER_IMAGE_REPO:-fafadexs/dialogy-worker}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
+    build:
+      context: ./
+      dockerfile: ./Dockerfile
+      target: worker-runner
+    restart: unless-stopped
+    init: true
+    depends_on:
+      dialogy:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      QUEUE_MODE: enqueue
+      QUEUE_ENABLED_JOBS: whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close
+      WORKER_ID: dialogy-worker
+    stop_grace_period: 30s

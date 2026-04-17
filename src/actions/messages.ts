@@ -28,7 +28,7 @@ import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
-import { enqueueJob, shouldEnqueueJob } from '@/lib/queue';
+import { enqueueJob, enqueueMarketingAutoClose, shouldEnqueueJob } from '@/lib/queue';
 import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
 import { buildTelegramChatJid, parseTelegramChatId, sendTelegramTextMessage } from '@/services/telegram/bot-api';
 import {
@@ -176,6 +176,29 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
         }
     }, autoCloseMs);
     (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+}
+
+async function scheduleMarketingAutoCloseAsync(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
+    if (!autoCloseMs || autoCloseMs <= 0) return;
+
+    if (!shouldEnqueueJob('marketing_auto_close')) {
+        await scheduleMarketingAutoClose(chatId, workspaceId, marketingSentAt, autoCloseMs);
+        return;
+    }
+
+    const anchor = Number.isFinite(marketingSentAt.getTime()) ? marketingSentAt : new Date();
+    await enqueueMarketingAutoClose(
+        {
+            chatId,
+            workspaceId,
+            marketingSentAt: anchor.toISOString(),
+            autoCloseMs,
+        },
+        {
+            runAt: new Date(anchor.getTime() + autoCloseMs),
+            maxAttempts: 1,
+        }
+    );
 }
 
 async function cleanupTempMedia(file: MediaFilePayload) {
@@ -1371,7 +1394,7 @@ export async function sendAutomatedMessageAction(
             }
             if (workspaceIdForAutoClose && marketingSentAt) {
                 const autoCloseMs = await getMarketingAutoCloseMs(workspaceIdForAutoClose);
-                await scheduleMarketingAutoClose(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs);
+                await scheduleMarketingAutoCloseAsync(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs);
             }
         } catch (err) {
             console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
@@ -1679,7 +1702,7 @@ export const sendAgentTemplateAction = withDebug(
             if (metadata?.isMarketing) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_TEMPLATE_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
@@ -1858,7 +1881,7 @@ export const sendAgentListAction = withDebug(
             if (metadata?.isMarketing && chatId) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_LIST_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }

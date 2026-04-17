@@ -1,5 +1,3 @@
-import 'server-only';
-
 type BreakerConfig = {
   enabled?: boolean;
   failureThreshold?: number;

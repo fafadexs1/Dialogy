@@ -1,8 +1,8 @@
 
 'use server';
 
-import { fetchEvolutionAPI } from "@/actions/evolution-api";
 import type { EvolutionApiConfig } from "@/lib/types";
+import { fetchEvolutionAPI } from "@/lib/whatsapp/evolution-api-client";
 
 /**
  * Sends a text message using the Evolution API.

@@ -1,6 +1,8 @@
 export type QueueJobType =
   | 'whatsapp_send'
   | 'webhook_outbound'
+  | 'queue_auto_close'
+  | 'marketing_auto_close'
   | 'analytics_event'
   | 'notification_send'
   | 'ai_task';
@@ -35,6 +37,20 @@ export type AnalyticsEventPayload = {
   payload?: Record<string, unknown>;
 };
 
+export type QueueAutoClosePayload = {
+  chatId: string;
+  workspaceId: string;
+  lastIncomingAt: string;
+  autoCloseMs: number;
+};
+
+export type MarketingAutoClosePayload = {
+  chatId: string;
+  workspaceId: string;
+  marketingSentAt: string;
+  autoCloseMs: number;
+};
+
 export type NotificationPayload = {
   workspaceId?: string;
   userId?: string;
@@ -51,6 +67,8 @@ export type AiTaskPayload = {
 export type QueueJobPayload =
   | WhatsappSendPayload
   | WebhookOutboundPayload
+  | QueueAutoClosePayload
+  | MarketingAutoClosePayload
   | AnalyticsEventPayload
   | NotificationPayload
   | AiTaskPayload;

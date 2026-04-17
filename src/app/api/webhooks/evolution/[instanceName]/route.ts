@@ -8,7 +8,7 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
-import { enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
+import { enqueueQueueAutoClose, enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
@@ -576,6 +576,34 @@ async function scheduleQueueAutoClose(
     }, autoCloseMs);
 
     (timerHandle as unknown as { unref?: () => void }).unref?.();
+}
+
+async function scheduleQueueAutoCloseAsync(
+    chatId: string,
+    workspaceId: string,
+    lastIncomingAt: Date,
+    autoCloseMs: number
+) {
+    if (!autoCloseMs || autoCloseMs <= 0) return;
+
+    if (!shouldEnqueueJob('queue_auto_close')) {
+        await scheduleQueueAutoClose(chatId, workspaceId, lastIncomingAt, autoCloseMs);
+        return;
+    }
+
+    const anchor = Number.isFinite(lastIncomingAt.getTime()) ? lastIncomingAt : new Date();
+    await enqueueQueueAutoClose(
+        {
+            chatId,
+            workspaceId,
+            lastIncomingAt: anchor.toISOString(),
+            autoCloseMs,
+        },
+        {
+            runAt: new Date(anchor.getTime() + autoCloseMs),
+            maxAttempts: 1,
+        }
+    );
 }
 
 import { logAction } from '@/lib/observability/logger';
@@ -1530,7 +1558,7 @@ async function handleMessagesUpsert(payload: any) {
                     if (!autoCloseMs || autoCloseMs <= 0) return;
                     const rawCreatedAt = (savedMessage as any)?.created_at || (savedMessage as any)?.createdAt;
                     const anchor = rawCreatedAt ? new Date(rawCreatedAt) : new Date();
-                    await scheduleQueueAutoClose(savedChat.id, workspaceId as string, anchor, autoCloseMs);
+                    await scheduleQueueAutoCloseAsync(savedChat.id, workspaceId as string, anchor, autoCloseMs);
                 })());
             }
 
