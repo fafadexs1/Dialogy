@@ -27,6 +27,24 @@ function Get-NextTag {
     throw "Formato de tag nao suportado: '$Tag'. Use algo como 'PBE-5.2' ou 'v12'."
 }
 
+function Get-EnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+        [Parameter(Mandatory = $true)]
+        [string]$Key
+    )
+
+    $pattern = "(?m)^(${Key}=)(.+)\s*$"
+    $match = [regex]::Match($Content, $pattern)
+
+    if (!$match.Success) {
+        throw "A chave ${Key} nao foi encontrada em $envPath"
+    }
+
+    return $match.Groups[2].Value.Trim()
+}
+
 function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -54,8 +72,11 @@ if (!$match.Success) {
     throw "A chave DIALOGY_IMAGE_TAG nao foi encontrada em $envPath"
 }
 
+$dialogyRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_IMAGE_REPO"
+$workerRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_WORKER_IMAGE_REPO"
 $currentTag = $match.Groups[2].Value.Trim()
 $nextTag = Get-NextTag -Tag $currentTag
+
 $updatedContent = [regex]::Replace(
     $originalContent,
     $tagPattern,
@@ -63,17 +84,24 @@ $updatedContent = [regex]::Replace(
     1
 )
 
-Write-Host "Tag atual : $currentTag"
-Write-Host "Nova tag  : $nextTag"
+$dialogyImage = "${dialogyRepo}:${nextTag}"
+$workerImage = "${workerRepo}:${nextTag}"
+
+Write-Host "Tag atual     : $currentTag"
+Write-Host "Nova tag      : $nextTag"
+Write-Host "Imagem dialogy: $dialogyImage"
+Write-Host "Imagem worker : $workerImage"
 
 Set-Content -LiteralPath $envPath -Value $updatedContent -Encoding UTF8
 
 try {
     if ($SkipDocker) {
-        Write-Host "Modo dry-run: .env atualizado sem executar docker compose."
+        Write-Host "Modo dry-run: .env atualizado sem executar build/push."
     } else {
-        Invoke-CheckedCommand -Command @("docker", "compose", "build")
-        Invoke-CheckedCommand -Command @("docker", "compose", "push")
+        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
+        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
+        Invoke-CheckedCommand -Command @("docker", "push", $dialogyImage)
+        Invoke-CheckedCommand -Command @("docker", "push", $workerImage)
         Write-Host "Release concluido com sucesso."
     }
 } catch {

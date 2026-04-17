@@ -1,10 +1,6 @@
 services:
   dialogy:
     image: ${DIALOGY_IMAGE_REPO:-fafadexs/dialogy}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
-    build:
-      context: ./
-      dockerfile: ./Dockerfile
-      target: runner
     restart: unless-stopped
     init: true
     env_file:
@@ -32,10 +28,6 @@ services:
 
   worker:
     image: ${DIALOGY_WORKER_IMAGE_REPO:-fafadexs/dialogy-worker}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
-    build:
-      context: ./
-      dockerfile: ./Dockerfile
-      target: worker-runner
     restart: unless-stopped
     init: true
     depends_on:
