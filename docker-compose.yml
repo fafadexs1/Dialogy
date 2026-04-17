@@ -1,4 +1,4 @@
-x-app-environment: &app-environment
+﻿x-app-environment: &app-environment
   NODE_ENV: ${NODE_ENV:-production}
   PORT: ${PORT:-9045}
   QUEUE_MODE: ${QUEUE_MODE:-enqueue}
@@ -69,7 +69,7 @@ x-worker-environment: &worker-environment
 
 services:
   dialogy:
-    image: fafadexs/dialogy:PBE-5.4
+    image: fafadexs/dialogy:PBE-5.5
     restart: unless-stopped
     init: true
     environment:
@@ -91,7 +91,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.4
+    image: fafadexs/dialogy-worker:PBE-5.5
     restart: unless-stopped
     init: true
     depends_on:

@@ -48,31 +48,43 @@ function getDialogyQueue() {
   return globalThis.__dialogyBullQueue;
 }
 
+function toSafeJobIdPart(value: unknown) {
+  return String(value).replaceAll(':', '_');
+}
+
 function getJobId(type: QueueJobType, payload: QueueJobPayload) {
   switch (type) {
     case 'whatsapp_send':
-      return `whatsapp_send:${(payload as WhatsappSendPayload).messageId}`;
+      return `whatsapp_send__${toSafeJobIdPart((payload as WhatsappSendPayload).messageId)}`;
     case 'webhook_outbound':
-      return `webhook_outbound:${(payload as WebhookOutboundPayload).messageId}`;
+      return `webhook_outbound__${toSafeJobIdPart((payload as WebhookOutboundPayload).messageId)}`;
     case 'queue_auto_close': {
       const typedPayload = payload as QueueAutoClosePayload;
-      return `queue_auto_close:${typedPayload.chatId}:${typedPayload.lastIncomingAt}`;
+      return `queue_auto_close__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
+        typedPayload.lastIncomingAt
+      )}`;
     }
     case 'marketing_auto_close': {
       const typedPayload = payload as MarketingAutoClosePayload;
-      return `marketing_auto_close:${typedPayload.chatId}:${typedPayload.marketingSentAt}`;
+      return `marketing_auto_close__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
+        typedPayload.marketingSentAt
+      )}`;
     }
     case 'analytics_event': {
       const typedPayload = payload as AnalyticsEventPayload;
-      return `analytics_event:${typedPayload.workspaceId || 'global'}:${typedPayload.name}:${Date.now()}`;
+      return `analytics_event__${toSafeJobIdPart(typedPayload.workspaceId || 'global')}__${toSafeJobIdPart(
+        typedPayload.name
+      )}__${Date.now()}`;
     }
     case 'notification_send': {
       const typedPayload = payload as NotificationPayload;
-      return `notification_send:${typedPayload.userId || 'anon'}:${Date.now()}`;
+      return `notification_send__${toSafeJobIdPart(typedPayload.userId || 'anon')}__${Date.now()}`;
     }
     case 'ai_task': {
       const typedPayload = payload as AiTaskPayload;
-      return `ai_task:${typedPayload.workspaceId || 'global'}:${typedPayload.task}:${Date.now()}`;
+      return `ai_task__${toSafeJobIdPart(typedPayload.workspaceId || 'global')}__${toSafeJobIdPart(
+        typedPayload.task
+      )}__${Date.now()}`;
     }
     default:
       return undefined;
