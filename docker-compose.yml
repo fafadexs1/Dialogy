@@ -1,6 +1,6 @@
 services:
   dialogy:
-    image: ${DIALOGY_IMAGE_REPO:-fafadexs/dialogy}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
+    image: fafadexs/dialogy:PBE-5.3
     restart: unless-stopped
     init: true
     env_file:
@@ -27,7 +27,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: ${DIALOGY_WORKER_IMAGE_REPO:-fafadexs/dialogy-worker}:${DIALOGY_IMAGE_TAG:-PBE-5.2}
+    image: fafadexs/dialogy-worker:PBE-5.3
     restart: unless-stopped
     init: true
     depends_on:
