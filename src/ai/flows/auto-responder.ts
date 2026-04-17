@@ -44,6 +44,16 @@ const KnowledgeDocumentSchema = z.object({
   summary: z.string().optional(),
 });
 
+const ResolvedCaseSchema = z.object({
+  summary: z.string(),
+  problem: z.string(),
+  resolution: z.string(),
+  outcome: z.string(),
+  closeReasonLabel: z.string().optional().nullable(),
+  keywords: z.array(z.string()).optional(),
+  similarity: z.number().optional(),
+});
+
 const AgentResponseInputSchema = z.object({
   chatId: z.string().describe("The unique identifier for the current chat."),
   customerMessage: z
@@ -57,6 +67,10 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Relevant past messages retrieved from vector search (RAG).'),
+  resolvedCases: z
+    .array(ResolvedCaseSchema)
+    .optional()
+    .describe('Resolved support cases retrieved from operational memory.'),
   rules: z.array(AutomationRuleSchema).describe('A list of active automation rules to evaluate against.'),
   knowledgeBase: z
     .string()

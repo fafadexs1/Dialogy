@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { getQueueProducerConnection } from './connection';
 import {
+  DIALOGY_AI_QUEUE_NAME,
   DIALOGY_QUEUE_NAME,
   DIALOGY_QUEUE_PREFIX,
   getQueueBackoffBaseMs,
@@ -8,6 +9,9 @@ import {
   shouldEnqueueJobType,
 } from './config';
 import type {
+  AiAutopilotProcessPayload,
+  AiCaseMemoryRefreshPayload,
+  AiDocumentIngestPayload,
   AiTaskPayload,
   AnalyticsEventPayload,
   MarketingAutoClosePayload,
@@ -30,12 +34,29 @@ const QUEUE_DISABLED_MESSAGE = 'Queue system disabled.';
 
 declare global {
   // eslint-disable-next-line no-var
-  var __dialogyBullQueue: Queue | undefined;
+  var __dialogyBullQueues: Map<string, Queue> | undefined;
 }
 
-function getDialogyQueue() {
-  if (!globalThis.__dialogyBullQueue) {
-    globalThis.__dialogyBullQueue = new Queue(DIALOGY_QUEUE_NAME, {
+function isAiQueueJob(type: QueueJobType) {
+  return type === 'ai_document_ingest' || type === 'ai_autopilot_process' || type === 'ai_case_memory_refresh';
+}
+
+function getQueueName(type: QueueJobType) {
+  return isAiQueueJob(type) ? DIALOGY_AI_QUEUE_NAME : DIALOGY_QUEUE_NAME;
+}
+
+function getDialogyQueue(type: QueueJobType) {
+  if (!globalThis.__dialogyBullQueues) {
+    globalThis.__dialogyBullQueues = new Map();
+  }
+
+  const queueName = getQueueName(type);
+  const existingQueue = globalThis.__dialogyBullQueues.get(queueName);
+  if (existingQueue) {
+    return existingQueue;
+  }
+
+  const queue = new Queue(queueName, {
       connection: getQueueProducerConnection(),
       prefix: DIALOGY_QUEUE_PREFIX,
       defaultJobOptions: {
@@ -43,9 +64,9 @@ function getDialogyQueue() {
         removeOnFail: 5000,
       },
     });
-  }
 
-  return globalThis.__dialogyBullQueue;
+  globalThis.__dialogyBullQueues.set(queueName, queue);
+  return queue;
 }
 
 function toSafeJobIdPart(value: unknown) {
@@ -68,6 +89,20 @@ function getJobId(type: QueueJobType, payload: QueueJobPayload) {
       const typedPayload = payload as MarketingAutoClosePayload;
       return `marketing_auto_close__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
         typedPayload.marketingSentAt
+      )}`;
+    }
+    case 'ai_document_ingest': {
+      const typedPayload = payload as AiDocumentIngestPayload;
+      return `ai_document_ingest__${toSafeJobIdPart(typedPayload.documentId)}`;
+    }
+    case 'ai_autopilot_process': {
+      const typedPayload = payload as AiAutopilotProcessPayload;
+      return `ai_autopilot_process__${toSafeJobIdPart(typedPayload.messageId)}`;
+    }
+    case 'ai_case_memory_refresh': {
+      const typedPayload = payload as AiCaseMemoryRefreshPayload;
+      return `ai_case_memory_refresh__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
+        typedPayload.closedAt || 'pending'
       )}`;
     }
     case 'analytics_event': {
@@ -95,6 +130,19 @@ export function shouldEnqueueJob(type: QueueJobType): boolean {
   return shouldEnqueueJobType(type);
 }
 
+function getDefaultMaxAttemptsForType(type: QueueJobType) {
+  switch (type) {
+    case 'whatsapp_send':
+      return 1;
+    case 'ai_document_ingest':
+    case 'ai_autopilot_process':
+    case 'ai_case_memory_refresh':
+      return 3;
+    default:
+      return 5;
+  }
+}
+
 export async function enqueueJob(
   type: QueueJobType,
   payload: QueueJobPayload,
@@ -106,9 +154,9 @@ export async function enqueueJob(
 
   const runAt = options?.runAt;
   const delay = runAt ? Math.max(runAt.getTime() - Date.now(), 0) : 0;
-  const attempts = getQueueMaxAttempts(options?.maxAttempts);
+  const attempts = getQueueMaxAttempts(options?.maxAttempts ?? getDefaultMaxAttemptsForType(type));
 
-  const job = await getDialogyQueue().add(type, payload, {
+  const job = await getDialogyQueue(type).add(type, payload, {
     jobId: getJobId(type, payload),
     delay,
     priority: options?.priority,
@@ -138,6 +186,24 @@ export async function enqueueMarketingAutoClose(payload: MarketingAutoClosePaylo
   return enqueueJob('marketing_auto_close', payload, options);
 }
 
+export async function enqueueAiDocumentIngest(payload: AiDocumentIngestPayload, options?: EnqueueOptions) {
+  return enqueueJob('ai_document_ingest', payload, options);
+}
+
+export async function enqueueAiAutopilotProcess(
+  payload: AiAutopilotProcessPayload,
+  options?: EnqueueOptions
+) {
+  return enqueueJob('ai_autopilot_process', payload, options);
+}
+
+export async function enqueueAiCaseMemoryRefresh(
+  payload: AiCaseMemoryRefreshPayload,
+  options?: EnqueueOptions
+) {
+  return enqueueJob('ai_case_memory_refresh', payload, options);
+}
+
 export async function enqueueAnalyticsEvent(payload: AnalyticsEventPayload, options?: EnqueueOptions) {
   return enqueueJob('analytics_event', payload, options);
 }
@@ -164,7 +230,7 @@ export async function processQueueOnce() {
     };
   }
 
-  const counts = await getDialogyQueue().getJobCounts(
+  const counts = await getDialogyQueue('whatsapp_send').getJobCounts(
     'wait',
     'active',
     'completed',

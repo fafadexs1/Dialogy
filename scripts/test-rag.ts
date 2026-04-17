@@ -1,76 +1,91 @@
-
-import { db } from '../src/lib/db';
-import { generateEmbedding } from '../src/lib/embeddings';
-import { VectorStore } from '../src/lib/vector-store';
 import { randomUUID } from 'crypto';
+import { generateDocumentPassageEmbedding, generateDocumentQueryEmbedding } from '../src/lib/embeddings';
+import { VectorStore } from '../src/lib/vector-store';
 
 async function main() {
     try {
         console.log('--- Starting RAG Verification ---');
 
-        const testContent = "This is a test document for RAG verification.";
+        const workspaceId = randomUUID();
+        const testContent = 'Procedimento de cancelamento: validar titularidade, registrar motivo e confirmar prazo de estorno.';
         const testDocId = randomUUID();
 
-        // 1. Generate Embedding
-        console.log('1. Generating Document Embedding...');
-        const vector = await generateEmbedding(testContent, 'doc');
+        console.log('1. Generating document passage embedding...');
+        const vector = await generateDocumentPassageEmbedding(testContent);
         console.log(`   - Generated vector of length: ${vector.length}`);
 
         if (vector.length === 0) {
             throw new Error('Vector generation failed (empty vector).');
         }
 
-        // 2. Store Embedding
-        console.log(`2. Storing Embedding for Doc ID: ${testDocId}...`);
-        await VectorStore.addDocumentEmbedding(testDocId, testContent, vector);
+        console.log(`2. Storing document embedding for doc ${testDocId}...`);
+        await VectorStore.addDocumentEmbedding({
+            documentId: testDocId,
+            workspaceId,
+            documentName: 'Procedimento de cancelamento',
+            content: testContent,
+            vector,
+            metadata: { source: 'script-test' },
+        });
         console.log('   - Stored successfully.');
 
-        // 3. Search Similarity
-        console.log('3. Searching for similar content...');
-        const searchVector = await generateEmbedding("verification document", 'doc');
-        const results = await VectorStore.searchSimilarDocuments(searchVector, 5);
+        console.log('3. Searching similar documents...');
+        const searchVector = await generateDocumentQueryEmbedding('como cancelar e pedir estorno');
+        const results = await VectorStore.searchSimilarDocuments({
+            vector: searchVector,
+            workspaceId,
+            limit: 5,
+            minSimilarity: 0,
+        });
 
         console.log(`   - Found ${results.length} results.`);
         results.forEach((r, i) => {
-            console.log(`     ${i + 1}. [${r.similarity.toFixed(4)}] ${r.content.substring(0, 50)}...`);
+            console.log(`     ${i + 1}. [${r.similarity.toFixed(4)}] ${r.content.substring(0, 80)}...`);
         });
 
-        const match = results.find(r => r.document_id === testDocId);
+        const match = results.find((r) => r.document_id === testDocId);
         if (match) {
-            console.log('✅ SUCCESS: Created document was found in search results.');
+            console.log('SUCCESS: created document was found in search results.');
         } else {
-            console.log('❌ FAILURE: Created document was NOT found in search results.');
+            console.log('FAILURE: created document was NOT found in search results.');
         }
 
-        // 4. Test Chat Embedding
-        console.log('\n4. Testing Chat Embedding...');
-        const chatContent = "Hello agent, help me with pricing.";
-        const chatVector = await generateEmbedding(chatContent, 'chat');
-        console.log(`   - Generated chat vector length: ${chatVector.length} (Expected 384)`);
+        console.log('\n4. Upserting case memory...');
+        const chatId = randomUUID();
+        const caseText = [
+            'Resumo: cliente pediu cancelamento de compra duplicada.',
+            'Problema: compra em duplicidade no cartao.',
+            'Resolucao: confirmar identidade, abrir solicitacao e orientar prazo de estorno.',
+            'Resultado: caso encerrado com estorno solicitado.',
+        ].join('\n');
+        const caseVector = await generateDocumentPassageEmbedding(caseText);
 
-        if (chatVector.length > 0) {
-            const chatId = randomUUID();
-            const messageId = randomUUID();
-            await VectorStore.addMessageEmbedding(messageId, chatId, chatContent, 'user', chatVector);
-            console.log('   - Stored chat embedding.');
+        await VectorStore.upsertCaseMemory({
+            chatId,
+            workspaceId,
+            summary: 'Cancelamento de compra duplicada com estorno',
+            problem: 'Compra em duplicidade no cartao',
+            resolution: 'Validar identidade e abrir solicitacao de estorno',
+            outcome: 'Estorno solicitado e cliente orientado',
+            keywords: ['cancelamento', 'estorno', 'compra duplicada'],
+            searchableContent: caseText,
+            vector: caseVector,
+            metadata: { source: 'script-test' },
+        });
 
-            const searchChatVector = await generateEmbedding("help pricing", 'chat');
-            const chatResults = await VectorStore.searchSimilarMessages(searchChatVector, undefined, 5);
-            console.log(`   - Found ${chatResults.length} chat results.`);
-            chatResults.forEach((r, i) => {
-                console.log(`     ${i + 1}. [${r.similarity.toFixed(4)}] ${r.content.substring(0, 50)}...`);
-            });
+        const caseResults = await VectorStore.searchSimilarCaseMemories({
+            vector: searchVector,
+            workspaceId,
+            limit: 5,
+            minSimilarity: 0,
+        });
 
-            const chatMatch = chatResults.find(r => r.message_id === messageId);
-            if (chatMatch) {
-                console.log('✅ SUCCESS: Created chat message was found in search results.');
-            } else {
-                console.log('❌ FAILURE: Created chat message was NOT found in search results.');
-            }
-        }
-
+        console.log(`   - Found ${caseResults.length} case memories.`);
+        caseResults.forEach((r, i) => {
+            console.log(`     ${i + 1}. [${r.similarity.toFixed(4)}] ${r.summary}`);
+        });
     } catch (error) {
-        console.error('❌ Error during RAG verification:', error);
+        console.error('Error during RAG verification:', error);
     } finally {
         process.exit(0);
     }

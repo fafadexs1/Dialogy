@@ -8,13 +8,18 @@ import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
-import { enqueueQueueAutoClose, enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
+import {
+    enqueueAiAutopilotProcess,
+    enqueueAiCaseMemoryRefresh,
+    enqueueQueueAutoClose,
+    enqueueWebhookOutbound,
+    shouldEnqueueJob
+} from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
-import { generateEmbedding } from '@/lib/embeddings';
-import { VectorStore } from '@/lib/vector-store';
+import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import {
     AmbiguousEvolutionInstanceError,
     getEvolutionApiConfig,
@@ -540,7 +545,8 @@ async function scheduleQueueAutoClose(
                  SET status = 'encerrados', closed_at = NOW()
                  WHERE id = $1
                    AND status = 'gerais'
-                   AND agent_id IS NULL`,
+                   AND agent_id IS NULL
+                 RETURNING closed_at`,
                 [chatId]
             );
 
@@ -567,6 +573,28 @@ async function scheduleQueueAutoClose(
             );
 
             await client.query('COMMIT');
+
+            const closedAt = closeRes.rows[0]?.closed_at
+                ? new Date(closeRes.rows[0].closed_at).toISOString()
+                : null;
+
+            try {
+                if (shouldEnqueueJob('ai_case_memory_refresh')) {
+                    await enqueueAiCaseMemoryRefresh({
+                        workspaceId,
+                        chatId,
+                        closedAt,
+                    });
+                } else {
+                    await refreshCaseMemoryForChat({
+                        workspaceId,
+                        chatId,
+                        closedAt,
+                    });
+                }
+            } catch (caseMemoryError) {
+                console.error('[QUEUE_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
+            }
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
@@ -1564,34 +1592,19 @@ async function handleMessagesUpsert(payload: any) {
 
             if (savedChat.is_autopilot_active) {
                 console.log(`[WEBHOOK_MSG_UPSERT] Enqueueing Autopilot for chat ${savedChat.id}`);
-                postTransactionTasks.push(
-                    processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName)
-                );
+                const autopilotTask = shouldEnqueueJob('ai_autopilot_process')
+                    ? enqueueAiAutopilotProcess({
+                        workspaceId: savedChat.workspace_id,
+                        chatId: savedChat.id,
+                        messageId: savedMessage.id,
+                        lastMessageContent: content,
+                        instanceName,
+                    })
+                    : processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName);
+                postTransactionTasks.push(autopilotTask);
             } else {
                 console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${savedChat.id}`);
             }
-
-            // --- RAG INGESTION (INBOUND) ---
-            if (dbMessageType === 'text' && content) {
-                postTransactionTasks.push((async () => {
-                    try {
-                        console.log(`[RAG] Embedding inbound message: ${savedMessage?.id} (user)`);
-                        const vector = await generateEmbedding(content, 'chat');
-                        if (vector.length > 0 && savedMessage) {
-                            await VectorStore.addMessageEmbedding(
-                                savedMessage.id,
-                                savedChat!.id,
-                                content,
-                                'user',
-                                vector
-                            );
-                        }
-                    } catch (ragError) {
-                        console.error(`[RAG] Failed to embed inbound message:`, ragError);
-                    }
-                })());
-            }
-            // --- END RAG ---
         }
 
         await Promise.all(postTransactionTasks).catch(err => {

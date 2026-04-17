@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
+import { enqueueAiAutopilotProcess, enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { getTelegramInstanceByWebhookKey } from '@/services/telegram/instance-store';
@@ -453,14 +454,32 @@ export async function POST(
 
   if (savedChat && savedMessage) {
     try {
-      await dispatchMessageToWebhooks(savedChat, savedMessage, instance.instance_name);
+      if (shouldEnqueueJob('webhook_outbound')) {
+        await enqueueWebhookOutbound({
+          chatId: savedChat.id,
+          messageId: savedMessage.id,
+          instanceName: instance.instance_name,
+        });
+      } else {
+        await dispatchMessageToWebhooks(savedChat, savedMessage, instance.instance_name);
+      }
     } catch (error) {
       console.error('[TELEGRAM_WEBHOOK] Falha ao despachar webhook de saida:', error);
     }
 
     if (savedChat.is_autopilot_active) {
       try {
-        await processAutopilotForChat(instance.workspace_id, savedChat, savedMessage.content, instance.instance_name);
+        if (shouldEnqueueJob('ai_autopilot_process')) {
+          await enqueueAiAutopilotProcess({
+            workspaceId: instance.workspace_id,
+            chatId: savedChat.id,
+            messageId: savedMessage.id,
+            lastMessageContent: savedMessage.content,
+            instanceName: instance.instance_name,
+          });
+        } else {
+          await processAutopilotForChat(instance.workspace_id, savedChat, savedMessage.content, instance.instance_name);
+        }
       } catch (error) {
         console.error('[TELEGRAM_WEBHOOK] Falha ao disparar autopilot:', error);
       }

@@ -1,7 +1,28 @@
 import { db } from '@/lib/db';
+import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 
 const DEFAULT_QUEUE_AUTO_CLOSE_MS = 0;
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
+
+async function enqueueCaseMemoryRefreshAfterClose(params: {
+  workspaceId: string;
+  chatId: string;
+  closedAt: string | null;
+  logPrefix: string;
+}) {
+  const { workspaceId, chatId, closedAt, logPrefix } = params;
+
+  if (!shouldEnqueueJob('ai_case_memory_refresh')) {
+    console.warn(`${logPrefix} Refresh de memoria de caso ignorado: fila ai_case_memory_refresh desabilitada.`);
+    return;
+  }
+
+  await enqueueAiCaseMemoryRefresh({
+    workspaceId,
+    chatId,
+    closedAt,
+  });
+}
 
 export async function getQueueAutoCloseMs(workspaceId: string): Promise<number> {
   try {
@@ -76,7 +97,8 @@ export async function executeQueueAutoClose(params: {
        SET status = 'encerrados', closed_at = NOW()
        WHERE id = $1
          AND status = 'gerais'
-         AND agent_id IS NULL`,
+         AND agent_id IS NULL
+       RETURNING closed_at`,
       [chatId]
     );
 
@@ -103,6 +125,21 @@ export async function executeQueueAutoClose(params: {
     );
 
     await client.query('COMMIT');
+
+    const closedAt = closeRes.rows[0]?.closed_at
+      ? new Date(closeRes.rows[0].closed_at).toISOString()
+      : null;
+
+    try {
+      await enqueueCaseMemoryRefreshAfterClose({
+        workspaceId,
+        chatId,
+        closedAt,
+        logPrefix: '[QUEUE_AUTO_CLOSE]',
+      });
+    } catch (caseMemoryError) {
+      console.error('[QUEUE_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
+    }
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
@@ -178,10 +215,11 @@ export async function executeMarketingAutoClose(params: {
       return;
     }
 
-    await client.query(
+    const closeRes = await client.query(
       `UPDATE chats
        SET status = 'encerrados', closed_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING closed_at`,
       [chatId]
     );
 
@@ -207,6 +245,21 @@ export async function executeMarketingAutoClose(params: {
     );
 
     await client.query('COMMIT');
+
+    const closedAt = closeRes.rows[0]?.closed_at
+      ? new Date(closeRes.rows[0].closed_at).toISOString()
+      : null;
+
+    try {
+      await enqueueCaseMemoryRefreshAfterClose({
+        workspaceId,
+        chatId,
+        closedAt,
+        logPrefix: '[MARKETING_AUTO_CLOSE]',
+      });
+    } catch (caseMemoryError) {
+      console.error('[MARKETING_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
+    }
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', error);

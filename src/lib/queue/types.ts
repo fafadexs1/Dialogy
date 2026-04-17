@@ -3,6 +3,9 @@ export type QueueJobType =
   | 'webhook_outbound'
   | 'queue_auto_close'
   | 'marketing_auto_close'
+  | 'ai_document_ingest'
+  | 'ai_autopilot_process'
+  | 'ai_case_memory_refresh'
   | 'analytics_event'
   | 'notification_send'
   | 'ai_task';
@@ -58,6 +61,29 @@ export type NotificationPayload = {
   payload: Record<string, unknown>;
 };
 
+export type AiDocumentIngestPayload = {
+  workspaceId: string;
+  autopilotConfigId?: string | null;
+  documentId: string;
+  documentName: string;
+  content: string;
+};
+
+export type AiAutopilotProcessPayload = {
+  workspaceId: string;
+  chatId: string;
+  messageId: string;
+  lastMessageContent: string;
+  instanceName: string;
+};
+
+export type AiCaseMemoryRefreshPayload = {
+  workspaceId: string;
+  chatId: string;
+  closedAt?: string | null;
+  force?: boolean;
+};
+
 export type AiTaskPayload = {
   workspaceId?: string;
   task: string;
@@ -69,6 +95,9 @@ export type QueueJobPayload =
   | WebhookOutboundPayload
   | QueueAutoClosePayload
   | MarketingAutoClosePayload
+  | AiDocumentIngestPayload
+  | AiAutopilotProcessPayload
+  | AiCaseMemoryRefreshPayload
   | AnalyticsEventPayload
   | NotificationPayload
   | AiTaskPayload;

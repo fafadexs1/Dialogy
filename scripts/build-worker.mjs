@@ -8,16 +8,23 @@ const srcDir = path.join(rootDir, 'src');
 function resolveSourceAlias(importPath) {
   const basePath = path.join(srcDir, importPath.slice(2));
   const candidates = [
-    basePath,
     `${basePath}.ts`,
     `${basePath}.tsx`,
     `${basePath}.js`,
     path.join(basePath, 'index.ts'),
     path.join(basePath, 'index.tsx'),
     path.join(basePath, 'index.js'),
+    basePath,
   ];
 
-  const resolved = candidates.find((candidate) => fs.existsSync(candidate));
+  const resolved = candidates.find((candidate) => {
+    if (!fs.existsSync(candidate)) {
+      return false;
+    }
+
+    const stat = fs.statSync(candidate);
+    return stat.isFile();
+  });
   if (!resolved) {
     throw new Error(`Alias nao resolvido para '${importPath}'`);
   }

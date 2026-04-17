@@ -1,88 +1,292 @@
 import { db } from './db';
 
-interface DocumentEmbeddingMatch {
+export interface DocumentEmbeddingMatch {
     id: string;
     content: string;
     similarity: number;
     document_id: string;
+    document_name: string | null;
+    workspace_id: string | null;
+    autopilot_config_id: string | null;
+    metadata: Record<string, unknown> | null;
 }
 
-interface MessageEmbeddingMatch {
+export interface CaseMemoryMatch {
     id: string;
-    content: string;
-    similarity: number;
-    message_id: string;
     chat_id: string;
-    role: string;
-    created_at: string;
+    workspace_id: string;
+    autopilot_config_id: string | null;
+    summary: string;
+    problem: string | null;
+    resolution: string | null;
+    outcome: string | null;
+    close_reason_label: string | null;
+    keywords: string[];
+    similarity: number;
+    metadata: Record<string, unknown> | null;
+}
+
+type AddDocumentEmbeddingInput = {
+    documentId: string;
+    workspaceId: string;
+    autopilotConfigId?: string | null;
+    documentName: string;
+    content: string;
+    vector: number[];
+    metadata?: Record<string, unknown>;
+};
+
+type SearchSimilarDocumentsInput = {
+    vector: number[];
+    workspaceId: string;
+    autopilotConfigId?: string | null;
+    limit?: number;
+    minSimilarity?: number;
+    excludeIds?: string[];
+};
+
+type UpsertCaseMemoryInput = {
+    chatId: string;
+    workspaceId: string;
+    contactId?: string | null;
+    autopilotConfigId?: string | null;
+    summary: string;
+    problem?: string | null;
+    resolution?: string | null;
+    outcome?: string | null;
+    closeReasonTagId?: string | null;
+    closeReasonLabel?: string | null;
+    keywords?: string[];
+    searchableContent: string;
+    vector: number[];
+    metadata?: Record<string, unknown>;
+};
+
+type SearchSimilarCaseMemoriesInput = {
+    vector: number[];
+    workspaceId: string;
+    autopilotConfigId?: string | null;
+    limit?: number;
+    minSimilarity?: number;
+    excludeChatId?: string | null;
+    excludeIds?: string[];
+};
+
+function toVectorString(vector: number[]) {
+    return `[${vector.join(',')}]`;
 }
 
 export const VectorStore = {
-    /**
-     * Add a document embedding to the database.
-     */
-    async addDocumentEmbedding(documentId: string, content: string, vector: number[]) {
-        // Format vector as string for pgvector: '[1.0, 2.0, ...]'
-        const vectorStr = `[${vector.join(',')}]`;
+    async deleteDocumentEmbeddings(documentId: string) {
+        await db.query(`DELETE FROM embeddings_documents WHERE document_id = $1`, [documentId]);
+    },
+
+    async addDocumentEmbedding(input: AddDocumentEmbeddingInput) {
+        const vectorStr = toVectorString(input.vector);
 
         await db.query(
-            `INSERT INTO embeddings_documents (content, vector, document_id) VALUES ($1, $2, $3)`,
-            [content, vectorStr, documentId]
+            `INSERT INTO embeddings_documents (
+                content,
+                vector,
+                document_id,
+                workspace_id,
+                autopilot_config_id,
+                document_name,
+                metadata
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+                input.content,
+                vectorStr,
+                input.documentId,
+                input.workspaceId,
+                input.autopilotConfigId ?? null,
+                input.documentName,
+                JSON.stringify(input.metadata ?? {}),
+            ]
         );
     },
 
-    /**
-     * Add a message embedding to the database.
-     */
-    async addMessageEmbedding(messageId: string, chatId: string, content: string, role: string, vector: number[]) {
-        const vectorStr = `[${vector.join(',')}]`;
+    async searchSimilarDocuments(input: SearchSimilarDocumentsInput): Promise<DocumentEmbeddingMatch[]> {
+        const vectorStr = toVectorString(input.vector);
+        const limit = input.limit ?? 5;
+        const minSimilarity = input.minSimilarity ?? 0;
+        const excludeIds = input.excludeIds ?? [];
 
-        await db.query(
-            `INSERT INTO embeddings_messages (content, vector, message_id, chat_id, role) VALUES ($1, $2, $3, $4, $5)`,
-            [content, vectorStr, messageId, chatId, role]
-        );
-    },
+        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity];
+        let autopilotFilter = '';
+        let excludeFilter = '';
 
-    /**
-     * Search for similar documents using cosine similarity.
-     */
-    async searchSimilarDocuments(vector: number[], limit: number = 5): Promise<DocumentEmbeddingMatch[]> {
-        const vectorStr = `[${vector.join(',')}]`;
-
-        // 1 - (vector <=> query) gives cosine similarity (1 is identical, -1 opposite)
-        // <=> is cosine distance (0 is identical, 2 opposite). 
-        // Usually we want distance minimal. Order by distance ASC.
-        const { rows } = await db.query(
-            `SELECT id, content, document_id, 1 - (vector <=> $1) as similarity
-             FROM embeddings_documents
-             ORDER BY vector <=> $1 ASC
-             LIMIT $2`,
-            [vectorStr, limit]
-        );
-
-        return rows;
-    },
-
-    /**
-     * Search for similar messages, optionally filtering by chat_id.
-     */
-    async searchSimilarMessages(vector: number[], chatId?: string, limit: number = 10): Promise<MessageEmbeddingMatch[]> {
-        const vectorStr = `[${vector.join(',')}]`;
-
-        let query = `
-            SELECT id, content, message_id, chat_id, role, created_at, 1 - (vector <=> $1) as similarity
-            FROM embeddings_messages
-        `;
-        const params: any[] = [vectorStr, limit];
-
-        if (chatId) {
-            query += ` WHERE chat_id = $3`;
-            params.push(chatId);
+        if (input.autopilotConfigId) {
+            params.push(input.autopilotConfigId);
+            autopilotFilter = `AND autopilot_config_id = $${params.length}`;
         }
 
-        query += ` ORDER BY vector <=> $1 ASC LIMIT $2`;
+        if (excludeIds.length > 0) {
+            params.push(excludeIds);
+            excludeFilter = `AND id <> ALL($${params.length}::uuid[])`;
+        }
 
-        const { rows } = await db.query(query, params);
+        const { rows } = await db.query(
+            `SELECT
+                id,
+                content,
+                document_id,
+                document_name,
+                workspace_id,
+                autopilot_config_id,
+                metadata,
+                1 - (vector <=> $1) AS similarity
+             FROM embeddings_documents
+             WHERE workspace_id = $2
+               ${autopilotFilter}
+               ${excludeFilter}
+               AND 1 - (vector <=> $1) >= $4
+             ORDER BY vector <=> $1 ASC
+             LIMIT $3`,
+            params
+        );
+
         return rows;
-    }
+    },
+
+    async upsertCaseMemory(input: UpsertCaseMemoryInput) {
+        const vectorStr = toVectorString(input.vector);
+
+        await db.query(
+            `INSERT INTO chat_case_memories (
+                chat_id,
+                workspace_id,
+                contact_id,
+                autopilot_config_id,
+                searchable_content,
+                summary,
+                problem,
+                resolution,
+                outcome,
+                close_reason_tag_id,
+                close_reason_label,
+                keywords,
+                metadata,
+                vector,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+             ON CONFLICT (chat_id) DO UPDATE
+             SET
+                workspace_id = EXCLUDED.workspace_id,
+                contact_id = EXCLUDED.contact_id,
+                autopilot_config_id = EXCLUDED.autopilot_config_id,
+                searchable_content = EXCLUDED.searchable_content,
+                summary = EXCLUDED.summary,
+                problem = EXCLUDED.problem,
+                resolution = EXCLUDED.resolution,
+                outcome = EXCLUDED.outcome,
+                close_reason_tag_id = EXCLUDED.close_reason_tag_id,
+                close_reason_label = EXCLUDED.close_reason_label,
+                keywords = EXCLUDED.keywords,
+                metadata = EXCLUDED.metadata,
+                vector = EXCLUDED.vector,
+                updated_at = NOW()`,
+            [
+                input.chatId,
+                input.workspaceId,
+                input.contactId ?? null,
+                input.autopilotConfigId ?? null,
+                input.searchableContent,
+                input.summary,
+                input.problem ?? null,
+                input.resolution ?? null,
+                input.outcome ?? null,
+                input.closeReasonTagId ?? null,
+                input.closeReasonLabel ?? null,
+                input.keywords ?? [],
+                JSON.stringify(input.metadata ?? {}),
+                vectorStr,
+            ]
+        );
+    },
+
+    async deleteCaseMemoryByChatId(chatId: string) {
+        await db.query(`DELETE FROM chat_case_memories WHERE chat_id = $1`, [chatId]);
+    },
+
+    async searchSimilarCaseMemories(input: SearchSimilarCaseMemoriesInput): Promise<CaseMemoryMatch[]> {
+        const vectorStr = toVectorString(input.vector);
+        const limit = input.limit ?? 5;
+        const minSimilarity = input.minSimilarity ?? 0;
+        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity];
+        const filters: string[] = [];
+
+        if (input.autopilotConfigId) {
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        if (input.excludeChatId) {
+            params.push(input.excludeChatId);
+            filters.push(`chat_id <> $${params.length}`);
+        }
+
+        if ((input.excludeIds ?? []).length > 0) {
+            params.push(input.excludeIds);
+            filters.push(`id <> ALL($${params.length}::uuid[])`);
+        }
+
+        const dynamicWhere = filters.length > 0 ? `AND ${filters.join(' AND ')}` : '';
+        const { rows } = await db.query(
+            `SELECT
+                id,
+                chat_id,
+                workspace_id,
+                autopilot_config_id,
+                summary,
+                problem,
+                resolution,
+                outcome,
+                close_reason_label,
+                keywords,
+                metadata,
+                1 - (vector <=> $1) AS similarity
+             FROM chat_case_memories
+             WHERE workspace_id = $2
+               ${dynamicWhere}
+               AND 1 - (vector <=> $1) >= $4
+             ORDER BY vector <=> $1 ASC
+             LIMIT $3`,
+            params
+        );
+
+        return rows;
+    },
+
+    async getCaseMemoryByChatId(chatId: string) {
+        const { rows } = await db.query(
+            `SELECT
+                id,
+                chat_id,
+                workspace_id,
+                autopilot_config_id,
+                summary,
+                problem,
+                resolution,
+                outcome,
+                close_reason_label,
+                keywords,
+                metadata
+             FROM chat_case_memories
+             WHERE chat_id = $1
+             LIMIT 1`,
+            [chatId]
+        );
+
+        return rows[0] ?? null;
+    },
+
+    // Legacy helpers retained while the old flow is being phased out.
+    async addMessageEmbedding(_messageId: string, _chatId: string, _content: string, _role: string, _vector: number[]) {
+        console.warn('[VectorStore] addMessageEmbedding is deprecated and ignored.');
+    },
+
+    async searchSimilarMessages(_vector: number[], _chatId?: string, _limit: number = 10) {
+        return [];
+    },
 };

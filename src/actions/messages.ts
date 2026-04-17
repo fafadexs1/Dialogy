@@ -7,8 +7,6 @@ import type { MessageMetadata, Message } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
-import { generateEmbedding } from '@/lib/embeddings';
-import { VectorStore } from '@/lib/vector-store';
 
 // Importando as novas funções de serviço
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
@@ -28,9 +26,15 @@ import { withDebug } from '@/lib/observability/logger';
 import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
-import { enqueueJob, enqueueMarketingAutoClose, shouldEnqueueJob } from '@/lib/queue';
+import {
+    enqueueAiCaseMemoryRefresh,
+    enqueueJob,
+    enqueueMarketingAutoClose,
+    shouldEnqueueJob
+} from '@/lib/queue';
 import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
 import { buildTelegramChatJid, parseTelegramChatId, sendTelegramTextMessage } from '@/services/telegram/bot-api';
+import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import {
     findWhatsappChatByIdentity,
     findOrCreateWhatsappContact,
@@ -141,10 +145,11 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
                 return;
             }
 
-            await client.query(
+            const closeRes = await client.query(
                 `UPDATE chats 
                  SET status = 'encerrados', closed_at = NOW()
-                 WHERE id = $1`,
+                 WHERE id = $1
+                 RETURNING closed_at`,
                 [chatId]
             );
 
@@ -168,6 +173,28 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
             );
 
             await client.query('COMMIT');
+
+            const closedAt = closeRes.rows[0]?.closed_at
+                ? new Date(closeRes.rows[0].closed_at).toISOString()
+                : null;
+
+            try {
+                if (shouldEnqueueJob('ai_case_memory_refresh')) {
+                    await enqueueAiCaseMemoryRefresh({
+                        workspaceId,
+                        chatId,
+                        closedAt,
+                    });
+                } else {
+                    await refreshCaseMemoryForChat({
+                        workspaceId,
+                        chatId,
+                        closedAt,
+                    });
+                }
+            } catch (caseMemoryError) {
+                console.error('[MARKETING_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
+            }
         } catch (err) {
             await client.query('ROLLBACK');
             console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', err);
@@ -544,33 +571,6 @@ async function internalSendMessage(
     // Executa fora do fluxo principal de resposta
     (async () => {
         if (!persistedMessage || !backgroundTaskData?.messageId) return;
-
-        // --- RAG INGESTION (ASYNC) ---
-        try {
-            // Only embed text content for now (we could caption images later)
-            if ((persistedMessage.type === 'text' || persistedMessage.type === 'system') && persistedMessage.content) {
-                const role = persistedMessage.type === 'system' ? 'system' : 'agent';
-                console.log(`[RAG] Embedding outbound message: ${persistedMessage.id} (${role})`);
-
-                // Use apiContent if available (cleaner), else raw content
-                const textToEmbed = backgroundTaskData.apiContent || persistedMessage.content;
-                const vector = await generateEmbedding(textToEmbed, 'chat');
-
-                if (vector.length > 0) {
-                    await VectorStore.addMessageEmbedding(
-                        persistedMessage.id,
-                        persistedMessage.chat_id,
-                        textToEmbed,
-                        role,
-                        vector
-                    );
-                    console.log(`[RAG] Message embedded successfully.`);
-                }
-            }
-        } catch (ragError) {
-            console.error(`[RAG] Failed to embed outbound message ${persistedMessage.id}:`, ragError);
-        }
-        // --- END RAG ---
 
         try {
             const { chatInfo, instanceName, remoteJid, apiContent, template, messageId } = backgroundTaskData;

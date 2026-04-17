@@ -2,7 +2,7 @@
   NODE_ENV: ${NODE_ENV:-production}
   PORT: ${PORT:-9045}
   QUEUE_MODE: ${QUEUE_MODE:-enqueue}
-  QUEUE_ENABLED_JOBS: ${QUEUE_ENABLED_JOBS:-whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close}
+  QUEUE_ENABLED_JOBS: ${QUEUE_ENABLED_JOBS:-whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close,ai_document_ingest,ai_autopilot_process,ai_case_memory_refresh}
   NEXTAUTH_URL: ${NEXTAUTH_URL}
   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
   NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
@@ -53,8 +53,10 @@
   REDIS_PASSWORD: ${REDIS_PASSWORD}
   BULLMQ_PREFIX: ${BULLMQ_PREFIX:-}
   QUEUE_WORKER_CONCURRENCY: ${QUEUE_WORKER_CONCURRENCY:-}
+  AI_QUEUE_WORKER_CONCURRENCY: ${AI_QUEUE_WORKER_CONCURRENCY:-}
   QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-}
   QUEUE_BACKOFF_BASE_MS: ${QUEUE_BACKOFF_BASE_MS:-}
+  AI_PREWARM_MODELS: ${AI_PREWARM_MODELS:-true}
   PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-}
   PRESENCE_RECENT_ACTIVITY_SECONDS: ${PRESENCE_RECENT_ACTIVITY_SECONDS:-}
   PRESENCE_HEARTBEAT_MS: ${PRESENCE_HEARTBEAT_MS:-}
@@ -66,6 +68,10 @@
 x-worker-environment: &worker-environment
   <<: *app-environment
   WORKER_ID: ${WORKER_ID:-dialogy-worker}
+
+x-worker-ai-environment: &worker-ai-environment
+  <<: *app-environment
+  AI_WORKER_ID: ${AI_WORKER_ID:-dialogy-worker-ai}
 
 services:
   dialogy:
@@ -99,4 +105,15 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-environment
+    stop_grace_period: 30s
+
+  worker-ai:
+    image: fafadexs/dialogy-worker-ai:PBE-5.5
+    restart: unless-stopped
+    init: true
+    depends_on:
+      dialogy:
+        condition: service_healthy
+    environment:
+      <<: *worker-ai-environment
     stop_grace_period: 30s

@@ -68,7 +68,9 @@ function Update-ComposeImages {
         [Parameter(Mandatory = $true)]
         [string]$DialogyImage,
         [Parameter(Mandatory = $true)]
-        [string]$WorkerImage
+        [string]$WorkerImage,
+        [Parameter(Mandatory = $true)]
+        [string]$WorkerAiImage
     )
 
     $updatedLines = New-Object System.Collections.Generic.List[string]
@@ -76,6 +78,7 @@ function Update-ComposeImages {
     $currentService = $null
     $dialogyUpdated = $false
     $workerUpdated = $false
+    $workerAiUpdated = $false
 
     foreach ($line in $Lines) {
         if ($line -match '^services:\s*$') {
@@ -103,6 +106,12 @@ function Update-ComposeImages {
             continue
         }
 
+        if ($inServices -and $currentService -eq 'worker-ai' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerAiImage")
+            $workerAiUpdated = $true
+            continue
+        }
+
         $updatedLines.Add($line)
     }
 
@@ -112,6 +121,10 @@ function Update-ComposeImages {
 
     if (!$workerUpdated) {
         throw "Nao foi possivel localizar a linha image do servico 'worker' em $composePath"
+    }
+
+    if (!$workerAiUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'worker-ai' em $composePath"
     }
 
     return $updatedLines
@@ -138,6 +151,7 @@ if (!$match.Success) {
 
 $dialogyRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_IMAGE_REPO"
 $workerRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_WORKER_IMAGE_REPO"
+$workerAiRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_WORKER_AI_IMAGE_REPO"
 $currentTag = $match.Groups[2].Value.Trim()
 $nextTag = Get-NextTag -Tag $currentTag
 
@@ -150,14 +164,16 @@ $updatedContent = [regex]::Replace(
 
 $dialogyImage = "${dialogyRepo}:${nextTag}"
 $workerImage = "${workerRepo}:${nextTag}"
+$workerAiImage = "${workerAiRepo}:${nextTag}"
 
 Write-Host "Tag atual     : $currentTag"
 Write-Host "Nova tag      : $nextTag"
 Write-Host "Imagem dialogy: $dialogyImage"
 Write-Host "Imagem worker : $workerImage"
+Write-Host "Imagem worker-ai : $workerAiImage"
 
 Set-Content -LiteralPath $envPath -Value $updatedContent -Encoding UTF8
-Update-ComposeImages -Lines $originalComposeLines -DialogyImage $dialogyImage -WorkerImage $workerImage |
+Update-ComposeImages -Lines $originalComposeLines -DialogyImage $dialogyImage -WorkerImage $workerImage -WorkerAiImage $workerAiImage |
     Set-Content -LiteralPath $composePath -Encoding UTF8
 
 try {
@@ -166,8 +182,10 @@ try {
     } else {
         Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
         Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
+        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "worker-ai-runner", "-t", $workerAiImage, ".")
         Invoke-CheckedCommand -Command @("docker", "push", $dialogyImage)
         Invoke-CheckedCommand -Command @("docker", "push", $workerImage)
+        Invoke-CheckedCommand -Command @("docker", "push", $workerAiImage)
         Write-Host "Release concluido com sucesso."
     }
 } catch {

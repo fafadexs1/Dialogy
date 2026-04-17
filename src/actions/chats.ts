@@ -19,6 +19,8 @@ import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-con
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
 import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
+import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
+import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -394,11 +396,13 @@ export const closeChatAction = withDebug(
                 status = 'encerrados',
                 closed_at = clock_timestamp(),
                 close_reason_tag_id = $1,
-                tag = $2,
-                color = $3
-             WHERE id = $4`,
+                close_notes = $2,
+                tag = $3,
+                color = $4
+             WHERE id = $5`,
                 [
                     reasonTagId,
+                    notes,
                     tagInfo.label ?? current_tag ?? '',
                     tagInfo.color ?? current_color ?? '',
                     chatId
@@ -432,6 +436,29 @@ export const closeChatAction = withDebug(
             ]);
 
             await client.query('COMMIT');
+
+            try {
+                const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);
+                const closedAt = closedAtRes.rows[0]?.closed_at
+                    ? new Date(closedAtRes.rows[0].closed_at).toISOString()
+                    : null;
+
+                if (shouldEnqueueJob('ai_case_memory_refresh')) {
+                    await enqueueAiCaseMemoryRefresh({
+                        workspaceId: workspace_id,
+                        chatId,
+                        closedAt,
+                    });
+                } else {
+                    await refreshCaseMemoryForChat({
+                        workspaceId: workspace_id,
+                        chatId,
+                        closedAt,
+                    });
+                }
+            } catch (caseMemoryError) {
+                console.error('[CLOSE_CHAT] Falha ao atualizar memoria de caso:', caseMemoryError);
+            }
 
             if (closeTemplate && sendCloseMessage) {
                 try {

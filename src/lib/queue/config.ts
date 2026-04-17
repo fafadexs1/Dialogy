@@ -1,6 +1,7 @@
 import type { QueueJobType } from './types';
 
 export const DIALOGY_QUEUE_NAME = 'dialogy';
+export const DIALOGY_AI_QUEUE_NAME = 'dialogy-ai';
 export const DIALOGY_QUEUE_PREFIX = process.env.BULLMQ_PREFIX?.trim() || 'dialogy';
 
 const QUEUE_MODE = (process.env.QUEUE_MODE || 'inline').trim().toLowerCase();
@@ -32,6 +33,11 @@ export function shouldEnqueueJobType(type: QueueJobType) {
 export function getQueueWorkerConcurrency() {
   const raw = Number.parseInt(process.env.QUEUE_WORKER_CONCURRENCY || '', 10);
   return Number.isFinite(raw) && raw > 0 ? raw : 5;
+}
+
+export function getAiQueueWorkerConcurrency() {
+  const raw = Number.parseInt(process.env.AI_QUEUE_WORKER_CONCURRENCY || '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 2;
 }
 
 export function getQueueMaxAttempts(defaultValue = 5) {

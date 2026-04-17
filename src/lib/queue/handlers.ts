@@ -19,11 +19,82 @@ import type {
 
 type QueueHandler = (job: QueueJobRecord) => Promise<void>;
 
-const HANDLERS: Record<QueueJobType, QueueHandler> = {
+const FINAL_MESSAGE_STATUSES = new Set(['SENT', 'DELIVERY_ACK', 'READ', 'PLAYED', 'DELETED']);
+
+const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   whatsapp_send: async (job) => {
     const payload = job.payload as WhatsappSendPayload;
     if (!payload?.messageId || !payload.instanceName || !payload.number) {
       throw new Error('Invalid whatsapp_send payload.');
+    }
+
+    if (job.attempts > 0) {
+      const messageRes = await db.query(
+        `SELECT api_message_status, message_id_from_api
+         FROM messages
+         WHERE id = $1
+         LIMIT 1`,
+        [payload.messageId]
+      );
+
+      if ((messageRes.rowCount ?? 0) > 0) {
+        const row = messageRes.rows[0];
+        const currentStatus = String(row.api_message_status || '').toUpperCase();
+        const currentApiMessageId = row.message_id_from_api;
+
+        if (!currentApiMessageId && !FINAL_MESSAGE_STATUSES.has(currentStatus)) {
+          await db.query(
+            `UPDATE messages
+             SET api_message_status = 'FAILED'
+             WHERE id = $1`,
+            [payload.messageId]
+          );
+        }
+      }
+
+      console.warn(
+        `[QUEUE] Skipping whatsapp_send retry for ${payload.messageId}. Blind retries are disabled to avoid duplicate sends.`
+      );
+      return;
+    }
+
+    const lockRes = await db.query(
+      `UPDATE messages
+       SET api_message_status = 'SENDING'
+       WHERE id = $1
+         AND message_id_from_api IS NULL
+         AND COALESCE(api_message_status, 'PENDING') IN ('PENDING', 'FAILED')
+       RETURNING id`,
+      [payload.messageId]
+    );
+
+    if ((lockRes.rowCount ?? 0) === 0) {
+      const messageRes = await db.query(
+        `SELECT api_message_status, message_id_from_api
+         FROM messages
+         WHERE id = $1
+         LIMIT 1`,
+        [payload.messageId]
+      );
+
+      if ((messageRes.rowCount ?? 0) === 0) {
+        throw new Error(`Message ${payload.messageId} not found.`);
+      }
+
+      const row = messageRes.rows[0];
+      const currentStatus = String(row.api_message_status || '').toUpperCase();
+      const currentApiMessageId = row.message_id_from_api;
+
+      if (currentApiMessageId || FINAL_MESSAGE_STATUSES.has(currentStatus) || currentStatus === 'SENDING') {
+        console.log(
+          `[QUEUE] Skipping whatsapp_send for ${payload.messageId}. status=${currentStatus || 'NULL'} apiMessageId=${currentApiMessageId || 'NULL'}`
+        );
+        return;
+      }
+
+      throw new Error(
+        `Message ${payload.messageId} is not eligible for whatsapp_send. status=${currentStatus || 'NULL'}`
+      );
     }
 
     const apiConfig = await getEvolutionApiConfig(payload.instanceName, { workspaceId: payload.workspaceId });
@@ -55,8 +126,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler> = {
       `UPDATE messages
        SET message_id_from_api = $1,
            api_message_status = $2,
-           instance_name = COALESCE(instance_name, $3),
-           updated_at = NOW()
+           instance_name = COALESCE(instance_name, $3)
        WHERE id = $4`,
       [messageIdFromApi, 'SENT', payload.instanceName, payload.messageId]
     );
@@ -128,6 +198,9 @@ const HANDLERS: Record<QueueJobType, QueueHandler> = {
       },
     });
   },
+  ai_document_ingest: undefined,
+  ai_autopilot_process: undefined,
+  ai_case_memory_refresh: undefined,
 };
 
 export async function handleQueueJob(job: QueueJobRecord): Promise<void> {
@@ -148,10 +221,32 @@ export async function handleQueueJobFailure(job: QueueJobRecord, error: unknown)
     return;
   }
 
+  const messageRes = await db.query(
+    `SELECT api_message_status, message_id_from_api
+     FROM messages
+     WHERE id = $1
+     LIMIT 1`,
+    [payload.messageId]
+  );
+
+  if ((messageRes.rowCount ?? 0) === 0) {
+    return;
+  }
+
+  const row = messageRes.rows[0];
+  const currentStatus = String(row.api_message_status || '').toUpperCase();
+  const currentApiMessageId = row.message_id_from_api;
+
+  if (currentApiMessageId || FINAL_MESSAGE_STATUSES.has(currentStatus) || currentStatus === 'SENDING') {
+    console.warn(
+      `[QUEUE] Not marking whatsapp_send as FAILED for ${payload.messageId}. status=${currentStatus || 'NULL'} apiMessageId=${currentApiMessageId || 'NULL'}`
+    );
+    return;
+  }
+
   await db.query(
     `UPDATE messages
-     SET api_message_status = $1,
-         updated_at = NOW()
+     SET api_message_status = $1
      WHERE id = $2`,
     ['FAILED', payload.messageId]
   );

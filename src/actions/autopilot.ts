@@ -512,9 +512,8 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
     }
 }
 
-import { generateEmbedding } from '@/lib/embeddings';
-import { defaultSplitter } from '@/lib/text-splitter';
-import { VectorStore } from '@/lib/vector-store';
+import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
+import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 
 export async function addDocumentToKnowledgeBase(
     workspaceId: string,
@@ -562,32 +561,34 @@ export async function addDocumentToKnowledgeBase(
             tokens: 0 // We could estimate tokens here if needed
         };
 
-        // --- RAG INGESTION START ---
-        try {
-            console.log(`[RAG] Processing document: ${title} (${content.length} chars)`);
-            const chunks = await defaultSplitter.splitText(content);
-            console.log(`[RAG] Created ${chunks.length} chunks. Generating embeddings...`);
-
-            for (const chunk of chunks) {
-                const vector = await generateEmbedding(chunk, 'doc');
-                if (vector.length > 0) {
-                    await VectorStore.addDocumentEmbedding(docId, chunk, vector);
-                }
-            }
-            console.log(`[RAG] Successfully embedded document: ${docId}`);
-        } catch (ragError) {
-            console.error('[RAG] Failed to ingest document:', ragError);
-            // We continue to save the doc metadata even if embedding fails, 
-            // but we might want to warn the user. For now, we log.
-        }
-        // --- RAG INGESTION END ---
-
         const updatedDocs = [...currentDocs, newDoc];
 
         await db.query(
             'UPDATE autopilot_configs SET knowledge_base_documents = $1, updated_at = NOW() WHERE id = $2',
             [JSON.stringify(updatedDocs), config.id]
         );
+
+        try {
+            if (shouldEnqueueJob('ai_document_ingest')) {
+                await enqueueAiDocumentIngest({
+                    workspaceId,
+                    autopilotConfigId: config.id,
+                    documentId: docId,
+                    documentName: title,
+                    content,
+                });
+            } else {
+                await ingestKnowledgeBaseDocument({
+                    workspaceId,
+                    autopilotConfigId: config.id,
+                    documentId: docId,
+                    documentName: title,
+                    content,
+                });
+            }
+        } catch (ragError) {
+            console.error('[RAG] Failed to enqueue document ingestion:', ragError);
+        }
 
         revalidatePath('/autopilot');
         return { success: true };
