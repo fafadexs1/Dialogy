@@ -1540,7 +1540,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           />
           {/* Quick Filter Chips */}
-          <div className="grid min-w-0 grid-cols-[76px_72px_1px_minmax(78px,1fr)_minmax(102px,1.22fr)] items-center gap-1 pt-2">
+          <div className="grid min-w-0 grid-cols-[76px_72px_1px_minmax(78px,1fr)_minmax(102px,1.22fr)] items-center gap-1 pt-3.5">
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
               className={cn(

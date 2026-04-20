@@ -2,10 +2,10 @@
   position: relative;
   width: 100%;
   min-width: 0;
-  padding: 4px 8px;
+  padding: 0;
   isolation: isolate;
   overflow: visible;
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
 .wrapper::before,
@@ -16,34 +16,35 @@
   pointer-events: none;
   border-radius: 999px;
   mix-blend-mode: screen;
+  opacity: 0.58;
 }
 
 .wrapper::before {
-  top: 2px;
-  left: 12px;
-  width: 112px;
-  height: 56px;
+  top: 6px;
+  left: 6px;
+  width: 72px;
+  height: 34px;
   background: radial-gradient(
     circle at center,
-    rgba(16, 185, 129, 0.32) 0%,
-    rgba(16, 185, 129, 0.12) 38%,
-    rgba(16, 185, 129, 0) 74%
+    rgba(16, 185, 129, 0.24) 0%,
+    rgba(16, 185, 129, 0.09) 42%,
+    rgba(16, 185, 129, 0) 76%
   );
-  filter: blur(14px);
+  filter: blur(13px);
 }
 
 .wrapper::after {
-  right: 8px;
-  bottom: 0;
-  width: 108px;
-  height: 54px;
+  right: 4px;
+  bottom: 2px;
+  width: 68px;
+  height: 30px;
   background: radial-gradient(
     circle at center,
-    rgba(96, 86, 255, 0.34) 0%,
-    rgba(96, 86, 255, 0.12) 38%,
+    rgba(96, 86, 255, 0.24) 0%,
+    rgba(96, 86, 255, 0.09) 42%,
     rgba(96, 86, 255, 0) 76%
   );
-  filter: blur(15px);
+  filter: blur(13px);
 }
 
 .wrapper * {
@@ -51,22 +52,7 @@
 }
 
 .grid {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 1;
-  width: 205%;
-  height: 180px;
-  transform: translate(-50%, -50%);
-  background-image:
-    linear-gradient(to right, rgba(15, 15, 16, 0.9) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(15, 15, 16, 0.9) 1px, transparent 1px);
-  background-size: 1rem 1rem;
-  background-position: center center;
-  filter: blur(1px);
-  opacity: 0.26;
-  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 58%, transparent 82%);
-  pointer-events: none;
+  display: none;
 }
 
 .frame {
@@ -112,14 +98,14 @@
 .main::after {
   content: "";
   position: absolute;
-  inset: -6px -10px;
+  inset: -3px -5px;
   z-index: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background:
-    radial-gradient(58% 90% at 7% 50%, rgba(16, 185, 129, 0.18), transparent 58%),
-    radial-gradient(58% 90% at 93% 50%, rgba(82, 72, 255, 0.18), transparent 58%);
-  filter: blur(8px);
-  opacity: 0.28;
+    radial-gradient(54% 82% at 7% 50%, rgba(16, 185, 129, 0.11), transparent 58%),
+    radial-gradient(54% 82% at 93% 50%, rgba(82, 72, 255, 0.11), transparent 58%);
+  filter: blur(6px);
+  opacity: 0.4;
   pointer-events: none;
 }
 
@@ -138,14 +124,7 @@
 }
 
 .glow {
-  position: absolute;
-  inset: -18px -20px;
-  z-index: 0;
-  overflow: hidden;
-  border-radius: 20px;
-  filter: blur(26px);
-  opacity: 0.34;
-  pointer-events: none;
+  display: none;
 }
 
 .input {
@@ -419,6 +398,120 @@
   pointer-events: none;
 }
 
+:global(.inbox-light) .input {
+  background:
+    linear-gradient(180deg, rgba(250, 255, 253, 0.98), rgba(240, 248, 244, 0.98));
+  color: #0f172a;
+}
+
+:global(.inbox-light) .input::placeholder {
+  color: #64748b;
+}
+
+:global(.inbox-light) .wrapper::before {
+  background: radial-gradient(
+    circle at center,
+    rgba(52, 211, 153, 0.14) 0%,
+    rgba(52, 211, 153, 0.05) 44%,
+    rgba(52, 211, 153, 0) 78%
+  );
+  opacity: 0.42;
+}
+
+:global(.inbox-light) .wrapper::after {
+  background: radial-gradient(
+    circle at center,
+    rgba(96, 165, 250, 0.14) 0%,
+    rgba(96, 165, 250, 0.05) 44%,
+    rgba(96, 165, 250, 0) 78%
+  );
+  opacity: 0.42;
+}
+
+:global(.inbox-light) .main::before {
+  background: linear-gradient(
+    90deg,
+    rgba(16, 185, 129, 0.48) 0%,
+    rgba(16, 185, 129, 0.28) 15%,
+    rgba(255, 255, 255, 0.32) 38%,
+    rgba(255, 255, 255, 0.32) 62%,
+    rgba(96, 165, 250, 0.28) 85%,
+    rgba(96, 165, 250, 0.48) 100%
+  );
+}
+
+:global(.inbox-light) .main::after {
+  background:
+    radial-gradient(54% 82% at 7% 50%, rgba(16, 185, 129, 0.06), transparent 58%),
+    radial-gradient(54% 82% at 93% 50%, rgba(96, 165, 250, 0.06), transparent 58%);
+  opacity: 0.28;
+}
+
+:global(.inbox-light) .pinkMask {
+  background: #6ee7b7;
+  opacity: 0.28;
+}
+
+:global(.inbox-light) .white::before {
+  background-image: conic-gradient(
+    rgba(0, 0, 0, 0) 0%,
+    rgba(191, 219, 254, 0.55),
+    rgba(0, 0, 0, 0) 10%,
+    rgba(0, 0, 0, 0) 50%,
+    rgba(167, 243, 208, 0.6),
+    rgba(0, 0, 0, 0) 60%
+  );
+  filter: brightness(1.02);
+}
+
+:global(.inbox-light) .border::before {
+  background-image: conic-gradient(
+    rgba(255, 255, 255, 0),
+    rgba(96, 165, 250, 0.34) 7%,
+    rgba(255, 255, 255, 0) 18%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(16, 185, 129, 0.34) 61%,
+    rgba(255, 255, 255, 0) 70%
+  );
+  filter: brightness(1);
+}
+
+:global(.inbox-light) .darkBorderBg::before {
+  background-image: conic-gradient(
+    rgba(255, 255, 255, 0),
+    rgba(96, 165, 250, 0.24),
+    rgba(255, 255, 255, 0) 12%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(16, 185, 129, 0.24),
+    rgba(255, 255, 255, 0) 62%
+  );
+}
+
+:global(.inbox-light) .filterTrigger {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: linear-gradient(180deg, #ffffff, #eef4ff 55%, #e3ecff);
+  color: #475569;
+  box-shadow:
+    0 6px 18px rgba(148, 163, 184, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+:global(.inbox-light) .filterTrigger:hover {
+  color: #0f172a;
+}
+
+:global(.inbox-light) .filterBorder::before {
+  filter: brightness(1.1);
+  background-image: conic-gradient(
+    rgba(0, 0, 0, 0),
+    rgba(148, 163, 184, 0.5),
+    rgba(0, 0, 0, 0) 50%,
+    rgba(0, 0, 0, 0) 50%,
+    rgba(148, 163, 184, 0.5),
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
 @keyframes rotate {
   100% {
     transform: translate(-50%, -50%) rotate(450deg);
@@ -427,21 +520,19 @@
 
 @media (max-width: 640px) {
   .wrapper {
-    padding: 3px 6px;
+    padding: 0;
   }
 
   .wrapper::before {
-    left: 8px;
-    width: 92px;
-    height: 46px;
-    filter: blur(12px);
+    width: 58px;
+    height: 28px;
+    filter: blur(10px);
   }
 
   .wrapper::after {
-    right: 6px;
-    width: 86px;
-    height: 44px;
-    filter: blur(12px);
+    width: 54px;
+    height: 26px;
+    filter: blur(10px);
   }
 
   .input {
